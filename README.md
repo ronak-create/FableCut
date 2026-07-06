@@ -1,0 +1,141 @@
+# FableCut
+
+**A browser video editor that AI agents can drive.**
+
+FableCut is a Premiere-style non-linear video editor that runs entirely in your
+browser — and exposes its whole timeline as one JSON document. Edit it by hand,
+from the UI, or let an AI agent (Claude Code, Claude Desktop, or anything that
+speaks MCP/REST) cut your video for you while you watch the timeline update
+live.
+
+Zero npm dependencies. One `node server.js`. That's it.
+
+![FableCut editor](docs/screenshot.png)
+
+## Why it's interesting
+
+Most "AI video" tools hide the edit behind an API. FableCut flips that: the
+**project file is the interface**. `project.json` describes media, clips,
+tracks, effects, keyframes and transitions — any process that can write JSON
+can edit video, and the open browser UI hot-reloads within ~150 ms via
+server-sent events. A human and an agent can work on the same timeline at the
+same time.
+
+## Features
+
+**Editing**
+- 4 video tracks + 3 audio tracks, drag/trim/split/snap, undo/redo
+- Beat & cue markers (tap <kbd>M</kbd> on the beat during playback) with edge snapping
+- Real decoded audio waveforms on clips
+- Canvas aspect presets (16:9, 9:16 reels, 4:5, 1:1) + safe-area guides
+
+**Look**
+- 12 one-click filter presets (cinematic, teal-orange, noir, vintage, cyberpunk…)
+- Full grade controls: brightness/contrast/saturation/hue, **temperature & tint**,
+  blur, grayscale/sepia/invert, **vignette**
+- Blend modes (screen, multiply, overlay…), fit modes (contain/cover/stretch),
+  per-edge cropping, corner radius, flip H/V
+- **Chroma key** (green screen) with tolerance/softness + spill suppression
+- **AI background removal** (person cut-out, in-browser via MediaPipe)
+
+**Motion**
+- Keyframe animation on ~20 properties with easing
+- 15 transitions: fades, slides, wipes (4 directions), zoom, iris, spin, blur, whip-pan
+- Per-clip speed control (0.25×–4×, audio pitch-correct mix on export)
+
+**Text**
+- Kinetic captions: typewriter, word-pop, word-slide, karaoke
+- Font editor: system fonts, drop-in custom fonts (`library/fonts/`), and **any
+  Google Font by name** — loaded automatically
+- Gradient fills, outline, background pills, letter-spacing, line-height,
+  weights, italic, uppercase, alignment, soft shadows
+
+**Animated SVG clips**
+- A first-class `svg` clip kind: CSS-`@keyframes`-animated SVGs render
+  **frame-accurately** in preview and export (the compositor freezes the
+  animation at any time). Agents can author their own vector overlays —
+  lower-thirds, confetti, sparkles — as plain `.svg` files. Starters included.
+
+**Asset library**
+- `library/` folders surface as tabs in the UI: **Elements** (overlay art),
+  **Sound FX**, **SVG** — drop files in, the open editor refreshes live
+
+**Export**
+- Fast export: browser renders every frame + an offline audio mix, ffmpeg
+  encodes a frame-accurate CRF-18 MP4 (keeps rendering if you switch tabs)
+- Realtime MediaRecorder fallback when ffmpeg isn't available
+
+## Quick start
+
+```bash
+git clone https://github.com/ronak-create/FableCut.git
+cd FableCut
+node server.js        # → http://localhost:7777
+```
+
+Requirements: **Node 18+** and a Chromium-based browser. **ffmpeg on PATH** is
+optional but recommended (fast export + upload remuxing). AI background
+removal fetches its model from a CDN on first use.
+
+Drop media into the window (or `./media/`), drag clips onto the timeline, edit,
+export.
+
+## Driving it with an AI agent
+
+Everything an agent needs is in **[CLAUDE.md](CLAUDE.md)** — the complete
+schema, semantics and recipes. Point any capable model at that file and it can
+operate the editor end to end.
+
+Three equivalent control surfaces:
+
+1. **MCP** (best for Claude Code / Claude Desktop) — register the bundled
+   zero-dependency MCP server once:
+   ```bash
+   claude mcp add -s user fablecut -- node "<path-to>/fablecut/mcp-server.js"
+   ```
+   Tools: `fablecut_status` (auto-starts the editor), `fablecut_docs`,
+   `fablecut_get_project`, `fablecut_set_project`, `fablecut_import_media`.
+2. **The file** — read `project.json`, modify, bump `revision`, write. The UI
+   live-reloads.
+3. **REST** — `GET/PUT /api/project`, `POST /api/upload`, `GET /api/library`,
+   SSE at `/api/events`. See CLAUDE.md for the full list.
+
+Example: ask Claude Code *"cut these six clips to the beat markers, add a
+teal-orange grade, put a word-pop caption on top and a whoosh on every cut"* —
+and watch the timeline rebuild itself.
+
+## Project layout
+
+```
+server.js        zero-dependency HTTP server: static hosting, REST API, SSE,
+                 ffmpeg export pipeline
+app.js           the editor: timeline UI, compositor, keyframes, text engine,
+                 SVG rasterizer, chroma key, exporters
+index.html       single-page UI
+style.css        dark editor theme
+mcp-server.js    stdio MCP server exposing the editor to AI agents
+CLAUDE.md        the agent manual (schema + recipes) — also served by fablecut_docs
+project.json     your timeline (created on first run; gitignored)
+media/           project footage (gitignored)
+library/         default assets: elements/ sfx/ svg/ fonts/
+exports/         finished renders (gitignored)
+```
+
+## Authoring animated SVG overlays
+
+SVGs animate with plain CSS `@keyframes`. One convention: never hardcode
+`animation-delay` — set `--d: 0.4s` instead, and the compositor drives time by
+pausing all animations and rebasing their delays. Full rules + a skeleton in
+[CLAUDE.md](CLAUDE.md#authoring-animated-svgs-the-svg-clip-kind); working
+examples in [`library/svg/`](library/svg/).
+
+## Notes
+
+- The `library/sfx`, `library/elements` and `library/fonts` folders are yours
+  to fill (they're gitignored) — mind the licenses of assets you add.
+- Export runs in the browser because the compositor *is* the browser; agents
+  ask you to click Export (or render directly with ffmpeg from `media/`).
+
+## License
+
+[MIT](LICENSE)

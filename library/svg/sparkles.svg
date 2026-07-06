@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="450" viewBox="0 0 800 450">
+  <!-- FableCut animated SVG · loops · twinkling sparkles overlay -->
+  <style>
+    .sp { transform-box: fill-box; transform-origin: center; animation: tw 1.6s ease-in-out infinite; }
+    @keyframes tw {
+      0%, 100% { transform: scale(0.2) rotate(0deg); opacity: 0; }
+      50%      { transform: scale(1) rotate(90deg);  opacity: 1; }
+    }
+  </style>
+  <g fill="#fff8d8">
+    <path class="sp" style="--d:0s"    d="M120 90 l10 26 26 10 -26 10 -10 26 -10 -26 -26 -10 26 -10z"/>
+    <path class="sp" style="--d:0.35s" d="M640 70 l8 20 20 8 -20 8 -8 20 -8 -20 -20 -8 20 -8z"/>
+    <path class="sp" style="--d:0.7s"  d="M420 180 l12 30 30 12 -30 12 -12 30 -12 -30 -30 -12 30 -12z"/>
+    <path class="sp" style="--d:1.05s" d="M200 320 l8 20 20 8 -20 8 -8 20 -8 -20 -20 -8 20 -8z"/>
+    <path class="sp" style="--d:1.3s"  d="M660 330 l10 24 24 10 -24 10 -10 24 -10 -24 -24 -10 24 -10z"/>
+  </g>
+</svg>

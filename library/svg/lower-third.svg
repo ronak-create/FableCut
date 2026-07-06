@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
+  <!-- FableCut animated SVG · one-shot (~1.2s in) · lower-third bar.
+       Put your name/role with FableCut TEXT clips on top of this. -->
+  <style>
+    .bar  { animation: slide 0.7s cubic-bezier(.2,.9,.25,1) both; }
+    .rule { animation: grow 0.6s cubic-bezier(.2,.9,.25,1) both; transform-origin: left center; }
+    .dot  { transform-box: fill-box; transform-origin: center; animation: pop 0.45s cubic-bezier(.34,1.56,.64,1) both; }
+    @keyframes slide { from { transform: translateX(-110%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    @keyframes grow  { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+    @keyframes pop   { from { transform: scale(0); } to { transform: scale(1); } }
+  </style>
+  <g>
+    <rect class="bar" style="--d:0s" x="60" y="540" width="520" height="86" rx="14" fill="#101018" opacity="0.85"/>
+    <rect class="rule" style="--d:0.35s" x="60" y="632" width="520" height="6" rx="3" fill="#7b6cff"/>
+    <circle class="dot" style="--d:0.55s" cx="96" cy="583" r="14" fill="#7b6cff"/>
+  </g>
+</svg>

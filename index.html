@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FableCut — Video Editor</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app" id="app">
+
+  <!-- ══════════ TOP BAR ══════════ -->
+  <header class="topbar">
+    <div class="logo"><span class="logo-mark">▶</span> Fable<b>Cut</b></div>
+    <div class="topbar-center" id="projectName">Untitled Project</div>
+    <div class="topbar-right">
+      <button class="btn ghost" id="btnHelp" title="Keyboard shortcuts">?</button>
+      <button class="btn primary" id="btnExport">⬇ Export</button>
+    </div>
+  </header>
+
+  <!-- ══════════ UPPER PANELS ══════════ -->
+  <div class="upper">
+
+    <!-- Media bin -->
+    <aside class="panel bin">
+      <div class="panel-head">
+        <span>Assets</span>
+        <span class="panel-head-actions">
+          <button class="btn tiny" id="btnTitle" title="Add a title card at the playhead">+ Title</button>
+          <button class="btn tiny accent" id="btnImport">+ Import</button>
+        </span>
+      </div>
+      <div class="bin-tabs" id="binTabs">
+        <button data-tab="project" class="on" title="Media used by this project">Project</button>
+        <button data-tab="elements" title="Overlay art from library/elements">Elements</button>
+        <button data-tab="sfx" title="Sound effects from library/sfx">Sound FX</button>
+        <button data-tab="svg" title="Vector animations from library/svg">SVG</button>
+      </div>
+      <input type="file" id="fileInput" multiple accept="video/*,audio/*,image/*" hidden>
+      <div class="bin-list" id="binList">
+        <div class="bin-empty" id="binEmpty">
+          <div class="bin-empty-icon">🎬</div>
+          <p>Drop video, audio or images here<br>or click <b>+ Import</b></p>
+          <p class="hint">Then drag media onto the timeline below.</p>
+        </div>
+      </div>
+      <div class="bin-list hidden" id="libList"></div>
+    </aside>
+
+    <!-- Program monitor -->
+    <section class="panel monitor">
+      <div class="panel-head"><span>Program Monitor</span>
+        <span class="panel-head-actions">
+          <select id="aspectSel" class="head-select" title="Canvas aspect preset"></select>
+          <button class="btn tiny toggle" id="btnGuides" title="Toggle safe-area guides">▦ Safe</button>
+          <span class="dim" id="monitorRes">1280 × 720 · 30fps</span>
+        </span>
+      </div>
+      <div class="monitor-stage" id="monitorStage">
+        <canvas id="preview" width="1280" height="720"></canvas>
+        <div id="safeOverlay" class="hidden">
+          <div class="sa-action"></div>
+          <div class="sa-title"></div>
+          <div class="sa-ui-bottom"></div>
+          <div class="sa-ui-right"></div>
+        </div>
+      </div>
+      <div class="transport">
+        <span class="timecode" id="tcCurrent">00:00:00</span>
+        <div class="transport-btns">
+          <button class="btn icon" id="btnHome" title="Go to start (Home)">⏮</button>
+          <button class="btn icon" id="btnBack" title="Back 1 frame (←)">◀︎</button>
+          <button class="btn icon big" id="btnPlay" title="Play / Pause (Space)">▶</button>
+          <button class="btn icon" id="btnFwd" title="Forward 1 frame (→)">▶︎</button>
+          <button class="btn icon" id="btnEnd" title="Go to end (End)">⏭</button>
+        </div>
+        <span class="timecode dim" id="tcTotal">00:00:00</span>
+      </div>
+    </section>
+
+    <!-- Inspector -->
+    <aside class="panel inspector">
+      <div class="panel-head"><span>Inspector</span></div>
+      <div class="inspector-body" id="inspector">
+        <div class="inspector-empty">Select a clip to edit its<br>transform, effects &amp; audio.</div>
+      </div>
+    </aside>
+  </div>
+
+  <!-- ══════════ TIMELINE ══════════ -->
+  <section class="panel timeline-panel">
+    <div class="timeline-toolbar">
+      <button class="btn tiny" id="btnSplit" title="Split at playhead (S)">✂ Split</button>
+      <button class="btn tiny" id="btnDelete" title="Delete selected (Del)">🗑 Delete</button>
+      <button class="btn tiny toggle on" id="btnSnap" title="Toggle snapping (N)">🧲 Snap</button>
+      <span class="flex-spacer"></span>
+      <span class="dim tiny-label">Zoom</span>
+      <input type="range" id="zoomSlider" min="8" max="300" value="60">
+    </div>
+    <div class="timeline">
+      <div class="track-headers" id="trackHeaders"></div>
+      <div class="timeline-scroll" id="timelineScroll">
+        <canvas class="ruler" id="ruler"></canvas>
+        <div class="tracks-content" id="tracksContent">
+          <div class="tracks" id="tracks"></div>
+          <div class="playhead" id="playhead"><div class="playhead-cap"></div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<!-- ══════════ EXPORT SETUP ══════════ -->
+<div class="overlay hidden" id="exportSetup">
+  <div class="dialog">
+    <h2>Export</h2>
+    <label class="engine-opt">
+      <input type="radio" name="engine" id="engineFast">
+      <span><b>Fast (ffmpeg)</b><br><span class="dim" id="engineFastNote">Frame-accurate ffmpeg encode. Keeps rendering if you switch tabs.</span></span>
+    </label>
+    <label class="engine-opt">
+      <input type="radio" name="engine" id="engineRealtime">
+      <span><b>Realtime (in-browser)</b><br><span class="dim">Plays the timeline once and records it. Keep the tab focused.</span></span>
+    </label>
+    <div class="dialog-actions">
+      <button class="btn" id="btnCancelSetup">Cancel</button>
+      <button class="btn primary" id="btnStartExport">Export</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ EXPORT OVERLAY ══════════ -->
+<div class="overlay hidden" id="exportOverlay">
+  <div class="dialog">
+    <h2 id="exportTitle">Exporting…</h2>
+    <p class="dim" id="exportNote">Rendering your sequence in real time. Keep this tab focused.</p>
+    <div class="progress"><div class="progress-fill" id="exportProgress"></div></div>
+    <div class="dialog-actions"><button class="btn" id="btnCancelExport">Cancel</button></div>
+  </div>
+</div>
+
+<!-- ══════════ HELP OVERLAY ══════════ -->
+<div class="overlay hidden" id="helpOverlay">
+  <div class="dialog help">
+    <h2>Keyboard shortcuts</h2>
+    <table class="keys">
+      <tr><td><kbd>Space</kbd></td><td>Play / pause</td></tr>
+      <tr><td><kbd>S</kbd></td><td>Split clip(s) at playhead</td></tr>
+      <tr><td><kbd>Del</kbd></td><td>Delete selected clip</td></tr>
+      <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>Step 1 frame (⇧ = 1 second)</td></tr>
+      <tr><td><kbd>[</kbd> / <kbd>]</kbd></td><td>Trim selected clip's in / out to playhead</td></tr>
+      <tr><td><kbd>Home</kbd> / <kbd>End</kbd></td><td>Jump to start / end</td></tr>
+      <tr><td><kbd>M</kbd></td><td>Add / remove marker at playhead (tap on the beat while playing)</td></tr>
+      <tr><td><kbd>N</kbd></td><td>Toggle snapping</td></tr>
+      <tr><td><kbd>+</kbd> / <kbd>-</kbd></td><td>Zoom timeline</td></tr>
+      <tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>⇧</kbd>+<kbd>Z</kbd></td><td>Undo / redo</td></tr>
+      <tr><td><kbd>Ctrl</kbd>+wheel</td><td>Zoom timeline at cursor</td></tr>
+    </table>
+    <div class="dialog-actions"><button class="btn primary" id="btnCloseHelp">Close</button></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="app.js"></script>
+</body>
+</html>

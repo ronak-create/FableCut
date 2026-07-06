@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="120" viewBox="0 0 600 120">
+  <!-- FableCut animated SVG · one-shot (~0.8s) · hand-drawn underline swoosh.
+       Place under a title text clip; tint via the clip's hue slider. -->
+  <style>
+    .stroke {
+      stroke-dasharray: 640; stroke-dashoffset: 640;
+      animation: draw 0.8s cubic-bezier(.3,.8,.3,1) both;
+    }
+    @keyframes draw { to { stroke-dashoffset: 0; } }
+  </style>
+  <path class="stroke" style="--d:0s" d="M20 70 C 180 40, 420 40, 580 62" fill="none"
+        stroke="#ffd166" stroke-width="14" stroke-linecap="round"/>
+  <path class="stroke" style="--d:0.18s" d="M60 96 C 220 74, 380 74, 540 90" fill="none"
+        stroke="#ffd166" stroke-width="9" stroke-linecap="round" opacity="0.7"/>
+</svg>

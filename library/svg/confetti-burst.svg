@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="800" viewBox="0 0 800 800">
+  <!-- FableCut animated SVG · one-shot (~1.8s) · confetti explosion from center -->
+  <style>
+    .c { transform-box: fill-box; transform-origin: center; animation: fly 1.6s cubic-bezier(.15,.7,.4,1) both; }
+    @keyframes fly {
+      0%   { transform: translate(0,0) rotate(0turn) scale(0.4); opacity: 1; }
+      70%  { opacity: 1; }
+      100% { transform: translate(var(--tx,0px), var(--ty,-300px)) rotate(2turn) scale(1); opacity: 0; }
+    }
+  </style>
+  <g>
+    <rect class="c" style="--d:0s;    --tx:-260px; --ty:-200px" x="392" y="392" width="18" height="26" fill="#ff5d73"/>
+    <rect class="c" style="--d:0.04s; --tx:230px;  --ty:-260px" x="392" y="392" width="16" height="24" fill="#ffd166"/>
+    <rect class="c" style="--d:0.08s; --tx:-140px; --ty:-320px" x="392" y="392" width="14" height="22" fill="#6ee7b7"/>
+    <rect class="c" style="--d:0.02s; --tx:300px;  --ty:-120px" x="392" y="392" width="18" height="18" fill="#7b6cff"/>
+    <rect class="c" style="--d:0.06s; --tx:-320px; --ty:-60px"  x="392" y="392" width="16" height="20" fill="#4f8cff"/>
+    <circle class="c" style="--d:0.03s; --tx:120px;  --ty:-340px" cx="400" cy="400" r="10" fill="#ff9f43"/>
+    <circle class="c" style="--d:0.07s; --tx:-60px;  --ty:-380px" cx="400" cy="400" r="8"  fill="#ff5d73"/>
+    <circle class="c" style="--d:0.05s; --tx:260px;  --ty:60px"   cx="400" cy="400" r="9"  fill="#6ee7b7"/>
+    <rect class="c" style="--d:0.09s; --tx:-230px; --ty:120px"  x="392" y="392" width="14" height="14" fill="#ffd166"/>
+    <rect class="c" style="--d:0.01s; --tx:60px;   --ty:200px"  x="392" y="392" width="16" height="22" fill="#7b6cff"/>
+  </g>
+</svg>

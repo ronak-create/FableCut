@@ -1,0 +1,24 @@
+# Runtime user data — recreated automatically
+project.json
+media/*
+!media/.gitkeep
+exports/*
+!exports/.gitkeep
+
+# Drop-in asset folders (bring your own; check licenses before committing)
+library/sfx/*
+!library/sfx/.gitkeep
+library/elements/*
+!library/elements/.gitkeep
+library/fonts/*
+!library/fonts/.gitkeep
+
+# Local scratch / notes
+out/
+SUGGESTIONS.md
+
+# Misc
+node_modules/
+*.log
+.DS_Store
+Thumbs.db
