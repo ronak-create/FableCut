@@ -16,8 +16,9 @@ latest release only.
 
 Report privately through GitHub's
 [private vulnerability reporting](https://github.com/ronak-create/FableCut/security/advisories/new)
-(Security → Advisories → *Report a vulnerability*), or contact the maintainer
-[@ronak-create](https://github.com/ronak-create) directly.
+(Security → Advisories → *Report a vulnerability*). If that form is ever
+unavailable, open a public issue that says only "security report — need a
+private contact" (no details) and the maintainer will provide a channel.
 
 Please include:
 
