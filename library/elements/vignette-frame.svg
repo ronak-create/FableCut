@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
+  <!-- FableCut element · cinematic letterbox bars + soft frame · fit:"stretch" -->
+  <defs>
+    <linearGradient id="soft" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#000" stop-opacity="0.55"/>
+      <stop offset="12%" stop-color="#000" stop-opacity="0"/>
+      <stop offset="88%" stop-color="#000" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#000" stop-opacity="0.55"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="76" fill="#000"/>
+  <rect y="644" width="1280" height="76" fill="#000"/>
+  <rect width="1280" height="720" fill="url(#soft)"/>
+</svg>

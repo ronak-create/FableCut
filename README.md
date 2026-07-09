@@ -174,8 +174,12 @@ examples in [`library/svg/`](library/svg/).
 
 ## Notes
 
-- The `library/sfx`, `library/elements` and `library/fonts` folders are yours
-  to fill (they're gitignored) — mind the licenses of assets you add.
+- The repo ships with **20 Google Fonts** (`library/fonts/`, OFL — see
+  `LICENSES.md` there) and a set of self-authored SVG overlays and animated
+  elements (`library/elements/`, `library/svg/`, MIT like the rest of the repo).
+- `library/sfx/` is yours to fill (gitignored): sound-effect sites typically
+  don't allow redistributing their files in a public repo, so FableCut doesn't —
+  `library/sfx/README.md` lists good free sources.
 - Export runs in the browser because the compositor *is* the browser; agents
   ask you to click Export (or render directly with ffmpeg from `media/`).
 

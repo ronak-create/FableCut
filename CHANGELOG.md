@@ -5,6 +5,15 @@ All notable changes to FableCut are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- The default asset library now ships with the repo where licensing allows:
+  20 Google Fonts in `library/fonts/` (OFL, listed in `LICENSES.md`) and the
+  self-authored overlay SVGs in `library/elements/`. `library/sfx/` stays
+  local-only (SFX-site licenses generally prohibit redistribution) — its new
+  README points to good free sources.
+
 ## [1.3.0] - 2026-07-09
 
 ### Added

@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
+  <!-- FableCut element · drifting bokeh (loops ~8s) · blend:"screen", fit:"cover" -->
+  <style>
+    .b { animation: drift 8s ease-in-out infinite alternate; }
+    @keyframes drift {
+      from { transform: translate(0, 0); }
+      to   { transform: translate(60px, -50px); }
+    }
+  </style>
+  <g fill="#ffffff">
+    <circle class="b" style="--d:0s"    cx="140" cy="560" r="70" opacity="0.16"/>
+    <circle class="b" style="--d:-1.5s" cx="380" cy="180" r="45" opacity="0.12"/>
+    <circle class="b" style="--d:-3s"   cx="720" cy="500" r="95" opacity="0.10"/>
+    <circle class="b" style="--d:-4.5s" cx="980" cy="150" r="55" opacity="0.15"/>
+    <circle class="b" style="--d:-6s"   cx="1160" cy="420" r="80" opacity="0.11"/>
+    <circle class="b" style="--d:-2s"   cx="560" cy="640" r="38" opacity="0.18"/>
+    <circle class="b" style="--d:-5s"   cx="860" cy="300" r="28" opacity="0.20"/>
+  </g>
+</svg>

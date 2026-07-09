@@ -5,13 +5,11 @@ media/*
 exports/*
 !exports/.gitkeep
 
-# Drop-in asset folders (bring your own; check licenses before committing)
+# Sound FX are local-only (their source licenses may not allow redistribution).
+# fonts/ (Google Fonts, OFL) and elements/ (self-authored SVGs) ship with the repo.
 library/sfx/*
 !library/sfx/.gitkeep
-library/elements/*
-!library/elements/.gitkeep
-library/fonts/*
-!library/fonts/.gitkeep
+!library/sfx/README.md
 
 # Local scratch / notes
 out/

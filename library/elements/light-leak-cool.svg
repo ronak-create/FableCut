@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
+  <!-- FableCut element · cool light leak · use with blend:"screen", fit:"cover", opacity ~0.7 -->
+  <defs>
+    <radialGradient id="a" cx="80%" cy="15%" r="60%">
+      <stop offset="0%" stop-color="#7cc7ff" stop-opacity="0.85"/>
+      <stop offset="50%" stop-color="#4f8cff" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#3355ff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="b" cx="10%" cy="90%" r="55%">
+      <stop offset="0%" stop-color="#b39dff" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#7b6cff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1280" height="720" fill="url(#a)"/>
+  <rect width="1280" height="720" fill="url(#b)"/>
+</svg>

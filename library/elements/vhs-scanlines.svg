@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
+  <!-- FableCut element · VHS scanlines + edge tint · blend:"overlay" or "soft-light",
+       fit:"stretch", opacity ~0.5. Pair with rgbSplit + grain props for full VHS. -->
+  <defs>
+    <pattern id="lines" width="4" height="4" patternUnits="userSpaceOnUse">
+      <rect width="4" height="2" fill="#000000" opacity="0.55"/>
+      <rect y="2" width="4" height="2" fill="#ffffff" opacity="0.05"/>
+    </pattern>
+    <linearGradient id="edge" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#00ffc8" stop-opacity="0.14"/>
+      <stop offset="8%" stop-color="#00ffc8" stop-opacity="0"/>
+      <stop offset="92%" stop-color="#ff00a8" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#ff00a8" stop-opacity="0.14"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="720" fill="url(#lines)"/>
+  <rect width="1280" height="720" fill="url(#edge)"/>
+</svg>
