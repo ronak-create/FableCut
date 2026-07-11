@@ -40,18 +40,21 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
-html { scroll-behavior: smooth; }
+html { scroll-behavior: smooth; background: var(--bg); }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
 
 body {
   font-family: var(--sans);
-  background: var(--bg);
+  background: transparent;
   color: var(--text);
   line-height: 1.62;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   overflow-x: hidden;
 }
+
+/* content sits above the fixed background layers */
+.nav, .hero, main, .marquee, .footer { position: relative; z-index: 1; }
 
 a { color: inherit; text-decoration: none; }
 code { font-family: var(--mono); font-size: 0.9em; }
@@ -250,3 +253,110 @@ h3 { font-family: var(--sans); font-size: 1.08rem; font-weight: 650; letter-spac
   .ruler .playhead { animation: none; display: none; }
   .btn, .cell { transition: none; }
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   BACKGROUND + INTERACTION SYSTEM
+   Concept: the page is color-graded and effected like a FableCut edit.
+   Every layer is a real product feature - grain, vignette, RGB split.
+   ═══════════════════════════════════════════════════════════════ */
+
+.fx { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+
+/* 1. Aurora: slow-drifting brand wash (purple, blue, a touch of gold) */
+.fx-aurora {
+  position: absolute; inset: -25%;
+  background:
+    radial-gradient(38% 42% at 78% 12%, rgba(90, 110, 235, 0.16), transparent 70%),
+    radial-gradient(34% 38% at 16% 4%, rgba(123, 108, 255, 0.15), transparent 70%),
+    radial-gradient(30% 34% at 60% 88%, rgba(255, 206, 92, 0.06), transparent 72%);
+  filter: blur(24px);
+  animation: drift 26s ease-in-out infinite alternate;
+}
+@keyframes drift {
+  from { transform: translate3d(-2%, -1%, 0) scale(1); }
+  to   { transform: translate3d(3%, 2%, 0) scale(1.08); }
+}
+
+/* 2. Fine technical grid, tied to the timeline ruler aesthetic */
+.fx-grid {
+  position: absolute; inset: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.022) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.022) 1px, transparent 1px);
+  background-size: 46px 46px;
+  mask-image: radial-gradient(100% 80% at 50% 0%, #000 40%, transparent 92%);
+  -webkit-mask-image: radial-gradient(100% 80% at 50% 0%, #000 40%, transparent 92%);
+}
+
+/* 3. Cursor spotlight - follows the pointer (vars set in main.js via rAF) */
+.fx-spot {
+  position: absolute; inset: 0;
+  background: radial-gradient(460px circle at var(--mx, 50%) var(--my, -20%), rgba(123, 108, 255, 0.09), transparent 62%);
+  transition: opacity 0.4s ease;
+}
+
+/* 4. Film grain - a real FableCut effect, here as a procedural noise overlay */
+.fx-grain {
+  position: absolute; top: -120%; left: -120%; width: 340%; height: 340%;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  opacity: 0.05;
+  mix-blend-mode: overlay;
+  animation: grain 6s steps(6) infinite;
+}
+@keyframes grain {
+  0%   { transform: translate(0, 0); }
+  20%  { transform: translate(-6%, 4%); }
+  40%  { transform: translate(4%, -7%); }
+  60%  { transform: translate(-5%, 6%); }
+  80%  { transform: translate(6%, 3%); }
+  100% { transform: translate(0, 0); }
+}
+
+/* 5. Cinematic vignette - the edges fall off like a graded frame */
+.fx-vignette {
+  position: absolute; inset: 0;
+  background: radial-gradient(130% 120% at 50% 30%, transparent 58%, rgba(0, 0, 0, 0.55) 100%);
+}
+
+/* ── RGB-split settle on the hero headline (echoes props.rgbSplit) ── */
+.h-rgb { animation: rgbsettle 0.9s var(--ease) 0.1s both; }
+@keyframes rgbsettle {
+  0%   { text-shadow: 3px 0 rgba(255, 60, 90, 0.55), -3px 0 rgba(60, 160, 255, 0.55); opacity: 0; }
+  60%  { opacity: 1; }
+  100% { text-shadow: 0 0 transparent, 0 0 transparent; opacity: 1; }
+}
+
+/* ── Magnetic + glow primary button ── */
+.btn-primary { position: relative; will-change: transform; }
+
+/* ── Spotlight-border bento cards (vars set per-card in main.js) ── */
+.cell { position: relative; overflow: hidden; }
+.cell::before {
+  content: ""; position: absolute; inset: 0; border-radius: inherit;
+  padding: 1px; opacity: 0; transition: opacity 0.3s ease;
+  background: radial-gradient(240px circle at var(--cx, 50%) var(--cy, 50%), rgba(140, 130, 255, 0.7), transparent 60%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+}
+.cell:hover::before { opacity: 1; }
+
+/* ── Kinetic marquee: the product's own look-words, in motion ── */
+.marquee { overflow: hidden; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 20px 0; background: rgba(255, 255, 255, 0.015); }
+.marquee-track { display: inline-flex; align-items: center; gap: 30px; white-space: nowrap; animation: scroll-x 34s linear infinite; will-change: transform; }
+.marquee-track span { font-family: var(--display); font-size: 1.35rem; letter-spacing: -0.01em; color: var(--text-dim); }
+.marquee-track i { color: var(--gold); font-size: 0.6rem; font-style: normal; }
+@keyframes scroll-x { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+
+/* hero editor screenshot: gentle mouse tilt (var set in main.js) */
+.hero-shot { perspective: 1200px; }
+.hero-shot .window { transform: rotateY(var(--ty, 0deg)) rotateX(var(--tx, 0deg)); transition: transform 0.25s var(--ease); will-change: transform; }
+
+@media (prefers-reduced-motion: reduce) {
+  .fx-aurora, .fx-grain, .marquee-track { animation: none; }
+  .fx-grain { opacity: 0.04; }
+  .h-rgb { animation: none; }
+  .fx-spot { display: none; }
+  .hero-shot .window { transform: none !important; }
+  .cell::before { transition: none; }
+}
+

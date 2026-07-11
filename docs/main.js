@@ -89,4 +89,55 @@
         metaEl.textContent = "See the releases page for the newest version.";
       });
   }
+
+  /* ── Pointer-driven effects (spotlight, hero tilt, card spotlight) ──
+     All coalesced into one rAF and skipped entirely under reduced motion
+     or on touch/coarse pointers. */
+  var coarse = window.matchMedia("(pointer: coarse)").matches;
+  if (!reduce && !coarse) {
+    var root = document.documentElement;
+    var spot = document.getElementById("fxSpot");
+    var shot = document.querySelector(".hero-shot");
+    var win = shot ? shot.querySelector(".window") : null;
+    var cells = document.querySelectorAll(".cell");
+    var px = 0, py = 0, queued = false;
+
+    var apply = function () {
+      queued = false;
+      if (spot) { spot.style.setProperty("--mx", px + "px"); spot.style.setProperty("--my", py + "px"); }
+      if (win) {
+        var r = shot.getBoundingClientRect();
+        if (r.bottom > 0 && r.top < window.innerHeight) {
+          var cx = (px - (r.left + r.width / 2)) / r.width;
+          var cy = (py - (r.top + r.height / 2)) / r.height;
+          win.style.setProperty("--ty", (cx * 5).toFixed(2) + "deg");
+          win.style.setProperty("--tx", (-cy * 4).toFixed(2) + "deg");
+        }
+      }
+    };
+    window.addEventListener("pointermove", function (e) {
+      px = e.clientX; py = e.clientY;
+      if (!queued) { queued = true; requestAnimationFrame(apply); }
+    }, { passive: true });
+
+    /* per-card spotlight border follows the cursor within each cell */
+    cells.forEach(function (cell) {
+      cell.addEventListener("pointermove", function (e) {
+        var r = cell.getBoundingClientRect();
+        cell.style.setProperty("--cx", (e.clientX - r.left) + "px");
+        cell.style.setProperty("--cy", (e.clientY - r.top) + "px");
+      });
+    });
+
+    /* magnetic pull on the primary CTAs */
+    document.querySelectorAll(".btn-primary").forEach(function (btn) {
+      btn.addEventListener("pointermove", function (e) {
+        var r = btn.getBoundingClientRect();
+        var mx = (e.clientX - (r.left + r.width / 2)) / r.width;
+        var my = (e.clientY - (r.top + r.height / 2)) / r.height;
+        btn.style.transform = "translate(" + (mx * 6).toFixed(1) + "px," + (my * 6).toFixed(1) + "px)";
+      });
+      btn.addEventListener("pointerleave", function () { btn.style.transform = ""; });
+    });
+  }
 })();

@@ -21,6 +21,17 @@
 
 <a class="skip" href="#main">Skip to content</a>
 
+<!-- ── Background: the page is graded like a FableCut edit ──
+     aurora wash + fine grid + film grain + vignette + a cursor spotlight.
+     All fixed, non-interactive, and disabled under reduced motion. -->
+<div class="fx" aria-hidden="true">
+  <div class="fx-aurora"></div>
+  <div class="fx-grid"></div>
+  <div class="fx-spot" id="fxSpot"></div>
+  <div class="fx-grain"></div>
+  <div class="fx-vignette"></div>
+</div>
+
 <!-- ── Nav ── -->
 <header class="nav" id="nav">
   <div class="nav-inner">
@@ -54,7 +65,7 @@
   <div class="hero-glow" aria-hidden="true"></div>
   <div class="hero-inner">
     <div class="hero-copy reveal">
-      <h1>The browser video editor<br><span class="grad">AI agents can drive.</span></h1>
+      <h1 class="h-rgb">The browser video editor<br><span class="grad">AI agents can drive.</span></h1>
       <p class="lede">A Premiere-style editor whose whole timeline is one JSON file. Any agent that writes JSON can edit video.</p>
       <div class="cta-row">
         <a class="btn btn-primary" href="https://github.com/ronak-create/FableCut" rel="noopener">Get it on GitHub</a>
@@ -166,8 +177,16 @@
   </div>
 </section>
 
+<!-- ── Kinetic marquee: the product's own look, in motion (one per page) ── -->
+<div class="marquee" aria-hidden="true">
+  <div class="marquee-track">
+    <span>teal-orange</span><i>&#9670;</i><span>speed ramp</span><i>&#9670;</i><span>chroma key</span><i>&#9670;</i><span>film grain</span><i>&#9670;</i><span>whip-pan</span><i>&#9670;</i><span>noir</span><i>&#9670;</i><span>RGB split</span><i>&#9670;</i><span>glitch</span><i>&#9670;</i><span>neon glow</span><i>&#9670;</i><span>adjustment layers</span><i>&#9670;</i><span>keyframes</span><i>&#9670;</i><span>cinematic</span><i>&#9670;</i>
+    <span>teal-orange</span><i>&#9670;</i><span>speed ramp</span><i>&#9670;</i><span>chroma key</span><i>&#9670;</i><span>film grain</span><i>&#9670;</i><span>whip-pan</span><i>&#9670;</i><span>noir</span><i>&#9670;</i><span>RGB split</span><i>&#9670;</i><span>glitch</span><i>&#9670;</i><span>neon glow</span><i>&#9670;</i><span>adjustment layers</span><i>&#9670;</i><span>keyframes</span><i>&#9670;</i><span>cinematic</span><i>&#9670;</i>
+  </div>
+</div>
+
 <!-- ── Features bento ── -->
-<section class="section line-top features" id="features">
+<section class="section features" id="features">
   <div class="wrap">
     <div class="head reveal">
       <span class="tick"></span>
