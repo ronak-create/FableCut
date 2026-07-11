@@ -32,9 +32,17 @@ released, we're happy to credit you unless you prefer to remain anonymous.
 ## Scope & threat model
 
 FableCut is designed to run **locally** — `node server.js` binds an unauthenticated
-HTTP server on `localhost:7777` intended for a single trusted user on their own
-machine. It is **not** hardened for exposure to untrusted networks or multi-tenant
-use. Relevant considerations if you deploy it beyond localhost:
+HTTP server intended for a single trusted user on their own machine. Since
+**v1.3.1** the server defends that boundary by default:
+
+- It binds **127.0.0.1 only**. Exposing it on a LAN is an explicit opt-in
+  (`HOST=0.0.0.0`, with allowed clients listed in `FABLECUT_ALLOWED_HOSTS`).
+- Requests are validated against a **Host-header allowlist** (anti
+  DNS-rebinding) and an **Origin allowlist** (anti cross-origin writes from
+  malicious web pages).
+- The static server refuses dot-files/dot-directories (`.git/` etc.).
+
+It remains **not** hardened for untrusted networks or multi-tenant use:
 
 - The REST API (`/api/*`) has no authentication — anyone who can reach the port
   can read and overwrite `project.json` and upload files into `media/`.

@@ -451,7 +451,7 @@ async function handle(msg) {
         result: {
           protocolVersion: params?.protocolVersion || "2025-06-18",
           capabilities: { tools: {} },
-          serverInfo: { name: "fablecut", version: "1.3.0" },
+          serverInfo: { name: "fablecut", version: "1.3.1" },
         },
       });
     }

@@ -28,6 +28,30 @@ const LIBRARY_DIR = path.join(ROOT, "library");
 const LIBRARY_SUBDIRS = ["sfx", "elements", "svg", "fonts"];
 const PROJECT_FILE = path.join(ROOT, "project.json");
 const PORT = process.env.PORT || 7777;
+const HOST = process.env.HOST || "127.0.0.1";
+
+/* Requests must come from the local machine (or an explicitly allowed host).
+   The Host check stops DNS rebinding; the Origin check stops malicious web
+   pages firing blind cross-origin writes at the API. Opt into LAN use with
+   HOST=0.0.0.0 and FABLECUT_ALLOWED_HOSTS=192.168.1.20,mybox.local */
+const ALLOWED_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1", HOST.toLowerCase()]);
+for (const h of (process.env.FABLECUT_ALLOWED_HOSTS || "").split(","))
+  if (h.trim()) ALLOWED_HOSTS.add(h.trim().toLowerCase());
+
+function hostAllowed(value) {
+  if (!value) return false;
+  // strip a :port suffix, but not the colons inside a bare IPv6 address
+  const host = value.replace(/^(\[[^\]]*\]|[^:]+)(:\d+)?$/, "$1").toLowerCase();
+  return ALLOWED_HOSTS.has(host);
+}
+function requestAllowed(req) {
+  if (!hostAllowed(req.headers.host)) return false;
+  const origin = req.headers.origin;
+  if (origin) {
+    try { return hostAllowed(new URL(origin).host); } catch { return false; }
+  }
+  return true;
+}
 
 /* ffmpeg powers optional niceties (faststart remux on upload, fast export).
    Everything else works without it. */
@@ -181,8 +205,14 @@ function serveFile(req, res, filePath) {
 
 /* ── Server ── */
 const server = http.createServer(async (req, res) => {
+  if (!requestAllowed(req)) {
+    sendJSON(res, 403, { error: "forbidden: request must come from this machine (bad Host or Origin header)" });
+    return;
+  }
   const url = new URL(req.url, "http://localhost");
   const p = decodeURIComponent(url.pathname);
+  // never serve dotfiles/dot-directories (.git, .gitignore, …)
+  if (p.split(/[\\/]/).some((seg) => seg.startsWith("."))) { res.writeHead(403); res.end(); return; }
 
   /* API: project */
   if (p === "/api/project" && req.method === "GET") {
@@ -381,7 +411,7 @@ const server = http.createServer(async (req, res) => {
   /* Library assets (supports subfolders) */
   if (p.startsWith("/library/")) {
     const file = path.normalize(path.join(LIBRARY_DIR, p.slice("/library/".length)));
-    if (!file.startsWith(LIBRARY_DIR)) { res.writeHead(403); res.end(); return; }
+    if (!file.startsWith(LIBRARY_DIR + path.sep)) { res.writeHead(403); res.end(); return; }
     serveFile(req, res, file);
     return;
   }
@@ -389,12 +419,14 @@ const server = http.createServer(async (req, res) => {
   /* Static app files */
   let file = p === "/" ? "/index.html" : p;
   file = path.normalize(path.join(ROOT, file));
-  if (!file.startsWith(ROOT)) { res.writeHead(403); res.end(); return; }
+  if (!file.startsWith(ROOT + path.sep)) { res.writeHead(403); res.end(); return; }
   serveFile(req, res, file);
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, HOST, () => {
   console.log(`\n  FableCut running →  http://localhost:${PORT}\n`);
+  if (!["127.0.0.1", "localhost", "::1"].includes(HOST))
+    console.log(`  ⚠ WARNING: HOST=${HOST} exposes the editor (and its file APIs) to the network.\n`);
   console.log(`  project file : ${PROJECT_FILE}`);
   console.log(`  media folder : ${MEDIA_DIR}`);
   console.log(`  library      : ${LIBRARY_DIR} (${LIBRARY_SUBDIRS.join(", ")})`);

@@ -99,6 +99,9 @@ Requirements: **Node 18+** and a Chromium-based browser. **ffmpeg on PATH** is
 optional but recommended (fast export + upload remuxing). AI background
 removal fetches its model from a CDN on first use.
 
+The server binds **127.0.0.1 only** (v1.3.1+). To use it from another device on
+your LAN, opt in explicitly: `HOST=0.0.0.0 FABLECUT_ALLOWED_HOSTS=<your-ip> node server.js`.
+
 Drop media into the window (or `./media/`), drag clips onto the timeline, edit,
 export.
 

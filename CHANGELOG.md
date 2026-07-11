@@ -5,7 +5,26 @@ All notable changes to FableCut are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.3.1] - 2026-07-11
+
+### Security
+
+Hardening of the local server against network and drive-by attacks, prompted by
+the report in [#1](https://github.com/ronak-create/FableCut/issues/1) — thanks
+@suthakamal2.
+
+- The server now binds **127.0.0.1 only** by default (previously all
+  interfaces, reachable from the whole LAN). Deliberate LAN use is an explicit
+  opt-in: `HOST=0.0.0.0 node server.js` plus
+  `FABLECUT_ALLOWED_HOSTS=192.168.1.20,mybox.local`.
+- Every request is checked against a **Host-header allowlist**
+  (localhost/127.0.0.1/[::1] + the opt-ins above), which defeats DNS-rebinding
+  attacks, and — when the browser sends one — an **Origin allowlist**, which
+  defeats blind cross-origin writes from malicious web pages (e.g. a drive-by
+  `POST /api/upload` carried a no-preflight raw body).
+- The static file server no longer serves dot-files or dot-directories
+  (`.git/`, `.gitignore`, …), and both path-traversal guards now use
+  separator-anchored directory prefixes.
 
 ### Added
 - The default asset library now ships with the repo where licensing allows:
@@ -116,6 +135,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Three control surfaces for AI agents: **MCP server**, direct `project.json`
   editing, and a **REST API** with live-reload over server-sent events.
 
+[1.3.1]: https://github.com/ronak-create/FableCut/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/ronak-create/FableCut/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/ronak-create/FableCut/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/ronak-create/FableCut/compare/v1.0.0...v1.1.0
