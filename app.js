@@ -447,17 +447,32 @@ function ensureWave(m) {
 }
 
 /* ═══════════════════════════ MEDIA IMPORT ═══════════════════════════ */
+/* Windows often leaves File.type empty for video/audio — fall back to extension. */
+function mediaKindFromFile(file) {
+  const t = file.type || "";
+  if (t === "image/svg+xml" || t === "image/svg") return "svg";
+  if (t.startsWith("video/")) return "video";
+  if (t.startsWith("audio/")) return "audio";
+  if (t.startsWith("image/")) return "image";
+  const ext = (file.name.split(".").pop() || "").toLowerCase();
+  if (ext === "svg") return "svg";
+  if (["mp4", "mov", "webm", "mkv", "m4v", "avi", "mpg", "mpeg"].includes(ext)) return "video";
+  if (["mp3", "wav", "m4a", "aac", "ogg", "flac", "wma"].includes(ext)) return "audio";
+  if (["png", "jpg", "jpeg", "gif", "webp", "bmp", "avif"].includes(ext)) return "image";
+  return null;
+}
 async function importFiles(fileList) {
-  for (const file of fileList) {
-    const kind = file.type === "image/svg+xml" ? "svg"
-               : file.type.startsWith("video") ? "video"
-               : file.type.startsWith("audio") ? "audio"
-               : file.type.startsWith("image") ? "image" : null;
-    if (!kind) continue;
+  const files = [...fileList];
+  if (!files.length) return;
+  let added = 0, skipped = 0;
+  for (const file of files) {
+    const kind = mediaKindFromFile(file);
+    if (!kind) { skipped++; continue; }
     let src, transient = false;
     if (state.connected) {
       try {
         const res = await fetch("/api/upload?name=" + encodeURIComponent(file.name), { method: "POST", body: file });
+        if (!res.ok) throw new Error("upload " + res.status);
         src = (await res.json()).src;
       } catch { src = URL.createObjectURL(file); transient = true; }
     } else {
@@ -476,10 +491,15 @@ async function importFiles(fileList) {
         if (kind === "video") grabThumb(m).catch(() => {});
         ensureWave(m);
       }
-    } catch { continue; }
+    } catch { skipped++; continue; }
     project.media.push(m);
+    added++;
   }
   renderBin(); scheduleSave();
+  if (!added && skipped)
+    toast("Couldn't import — unsupported or unreadable file type");
+  else if (skipped)
+    toast(`Imported ${added}, skipped ${skipped}`);
 }
 
 function renderBin() {
@@ -512,6 +532,27 @@ function renderBin() {
     els.binList.appendChild(item);
   }
 }
+
+/* Open the native file dialog. Windows anchors it to the <input>'s screen
+   position — park the input under the cursor and open after the mouse
+   gesture finishes so the dialog doesn't appear then jump. */
+function openFileImport(clientX, clientY) {
+  const input = els.fileInput;
+  if (clientX != null && clientY != null) {
+    input.style.cssText =
+      `position:fixed;left:${clientX}px;top:${clientY}px;width:1px;height:1px;` +
+      `opacity:0;margin:0;padding:0;border:0;overflow:hidden;z-index:-1;`;
+  }
+  setTimeout(() => input.click(), 0);
+}
+
+/* Ctrl/Cmd+click in the Project bin opens the file importer. */
+els.binList.addEventListener("click", (e) => {
+  if (!(e.ctrlKey || e.metaKey) || e.button !== 0) return;
+  if (e.target.closest(".bin-del")) return;
+  e.preventDefault();
+  openFileImport(e.clientX, e.clientY);
+});
 
 /* ═══════════════════ ASSET LIBRARY (./library on the server) ═══════════════
    Read-only default assets in four tabs: Elements (overlay art), Sound FX,
@@ -2687,7 +2728,6 @@ function finishExport(keep) {
 }
 
 /* ═══════════════════════════ WIRING ═══════════════════════════ */
-$("btnImport").addEventListener("click", () => els.fileInput.click());
 els.fileInput.addEventListener("change", () => { importFiles(els.fileInput.files); els.fileInput.value = ""; });
 $("btnTitle").addEventListener("click", addTitle);
 $("btnAdjust").addEventListener("click", addAdjust);

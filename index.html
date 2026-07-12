@@ -30,18 +30,18 @@
       <div class="panel-head">
         <span>Assets</span>
         <span class="panel-head-actions">
-          <button class="btn tiny" id="btnTitle" title="Add a title card at the playhead">+ Title</button>
-          <button class="btn tiny" id="btnAdjust" title="Add an adjustment layer (grades everything below it)">+ Adjust</button>
-          <button class="btn tiny accent" id="btnImport">+ Import</button>
+          <button type="button" class="btn tiny" id="btnTitle" title="Add a title card at the playhead">+ Title</button>
+          <button type="button" class="btn tiny" id="btnAdjust" title="Add an adjustment layer (grades everything below it)">+ Adjust</button>
+          <label class="btn tiny accent" id="btnImport" for="fileInput" title="Import media files">+ Import</label>
         </span>
       </div>
       <div class="bin-tabs" id="binTabs">
-        <button data-tab="project" class="on" title="Media used by this project">Project</button>
-        <button data-tab="elements" title="Overlay art from library/elements">Elements</button>
-        <button data-tab="sfx" title="Sound effects from library/sfx">Sound FX</button>
-        <button data-tab="svg" title="Vector animations from library/svg">SVG</button>
+        <button type="button" data-tab="project" class="on" title="Media used by this project">Project</button>
+        <button type="button" data-tab="elements" title="Overlay art from library/elements">Elements</button>
+        <button type="button" data-tab="sfx" title="Sound effects from library/sfx">Sound FX</button>
+        <button type="button" data-tab="svg" title="Vector animations from library/svg">SVG</button>
       </div>
-      <input type="file" id="fileInput" multiple accept="video/*,audio/*,image/*" hidden>
+      <input type="file" id="fileInput" class="sr-only" multiple accept="video/*,audio/*,image/*,.mp4,.mov,.webm,.mkv,.mp3,.wav,.m4a,.png,.jpg,.jpeg,.gif,.webp,.svg">
       <div class="bin-list" id="binList">
         <div class="bin-empty" id="binEmpty">
           <div class="bin-empty-icon">🎬</div>
@@ -154,7 +154,8 @@
       <tr><td><kbd>S</kbd></td><td>Split clip(s) at playhead</td></tr>
       <tr><td><kbd>Del</kbd></td><td>Delete selected clip(s)</td></tr>
       <tr><td>Drag empty area</td><td>Marquee-select clips (drag a box around them)</td></tr>
-      <tr><td><kbd>Ctrl</kbd>+click</td><td>Add / remove a clip from the selection</td></tr>
+      <tr><td><kbd>Ctrl</kbd>+click bin</td><td>Import media files</td></tr>
+      <tr><td><kbd>Ctrl</kbd>+click clip</td><td>Add / remove a clip from the selection</td></tr>
       <tr><td><kbd>Ctrl</kbd>+<kbd>A</kbd> / <kbd>Esc</kbd></td><td>Select all clips / deselect</td></tr>
       <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>Step 1 frame (⇧ = 1 second)</td></tr>
       <tr><td><kbd>[</kbd> / <kbd>]</kbd></td><td>Trim selected clip's in / out to playhead</td></tr>
