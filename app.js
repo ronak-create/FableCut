@@ -2842,6 +2842,12 @@ function setTimelineHeight(px) {
   state.dirtyTimeline = true;
   return h;
 }
+function resetTimelineHeight() {
+  const h = setTimelineHeight(window.innerHeight * 0.32);
+  localStorage.removeItem(TL_H_KEY);
+  state.dirtyTimeline = true;
+  return h;
+}
 function clampTimelineHeight() {
   const cur = $("timelinePanel")?.getBoundingClientRect().height;
   if (cur) setTimelineHeight(cur);
@@ -2852,7 +2858,7 @@ function initPanelSplit() {
   if (!handle || !tl) return;
   const saved = parseFloat(localStorage.getItem(TL_H_KEY));
   if (saved > 0) setTimelineHeight(saved);
-  else setTimelineHeight(tl.getBoundingClientRect().height || window.innerHeight * 0.32);
+  else resetTimelineHeight();
 
   handle.addEventListener("pointerdown", (e) => {
     if (e.button !== 0) return;
@@ -2874,6 +2880,10 @@ function initPanelSplit() {
     };
     handle.addEventListener("pointermove", onMove);
     handle.addEventListener("pointerup", onUp);
+  });
+  handle.addEventListener("dblclick", (e) => {
+    e.preventDefault();
+    resetTimelineHeight();
   });
 }
 
