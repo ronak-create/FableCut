@@ -16,6 +16,14 @@ const TRACKS = [
   { id: "A2", kind: "audio", h: 42, color: "#5a9e3a" },
   { id: "A3", kind: "audio", h: 42, color: "#4a8a2f" },
 ];
+/* Three timeline density presets. L matches the original track heights (with thumbs).
+   S is compact solid-color rows; M is in between. */
+const TRACK_SIZE_PRESETS = {
+  s: { thumbs: false, h: { V4: 26, V3: 26, V2: 26, V1: 26, A1: 22, A2: 22, A3: 22 } },
+  m: { thumbs: true,  h: { V4: 36, V3: 36, V2: 44, V1: 44, A1: 32, A2: 32, A3: 32 } },
+  l: { thumbs: true,  h: { V4: 44, V3: 44, V2: 58, V1: 58, A1: 42, A2: 42, A3: 42 } },
+};
+const TRACK_SIZE_KEY = "fablecut-track-size";
 const RULER_H = 26;
 const SNAP_PX = 8;
 const MIN_DUR = 0.05;
@@ -128,6 +136,7 @@ const state = {
   time: 0, playing: false, pps: 60, snap: true,
   selId: null,           // primary selection (drives the inspector)
   selIds: new Set(),     // full multi-selection (includes selId)
+  trackSize: "l",        // s | m | l — timeline track density preset
   connected: false, exporting: false,
   rendering: false,      // fast (server/ffmpeg) export in progress
   guides: false,         // safe-area overlay on the monitor
@@ -834,7 +843,7 @@ function rebuildClips() {
     div.style.left = c.start * state.pps + "px";
     div.style.width = Math.max(8, c.duration * state.pps) + "px";
     let inner = "";
-    if (c.kind === "video") {
+    if (c.kind === "video" && trackSizeShowsThumbs()) {
       const thumb = runtime.mediaAux.get(c.mediaId)?.thumb;
       if (thumb) inner += `<div class="thumbs" style="background-image:url('${thumb}')"></div>`;
     }
@@ -2754,6 +2763,11 @@ els.btnSnap.addEventListener("click", () => {
   state.snap = !state.snap;
   els.btnSnap.classList.toggle("on", state.snap);
 });
+$("btnLayoutReset").addEventListener("click", restoreDefaultLayout);
+$("trackSizeGroup").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-track-size]");
+  if (b) setTrackSize(b.dataset.trackSize);
+});
 els.binTabs.addEventListener("click", (e) => {
   const b = e.target.closest("[data-tab]");
   if (b) setBinTab(b.dataset.tab);
@@ -2845,11 +2859,56 @@ function setTimelineHeight(px) {
   state.dirtyTimeline = true;
   return h;
 }
+/* Tall enough for the toolbar + ruler + every track row (no vertical overflow). */
+function defaultTimelineHeight() {
+  const tracksH = TRACKS.reduce((s, t) => s + t.h, 0);
+  const toolbar = document.querySelector(".timeline-toolbar");
+  const toolbarH = toolbar ? toolbar.getBoundingClientRect().height : 40;
+  return tracksH + RULER_H + toolbarH + 8;
+}
 function resetTimelineHeight() {
-  const h = setTimelineHeight(window.innerHeight * 0.32);
+  const h = setTimelineHeight(defaultTimelineHeight());
   localStorage.removeItem(TL_H_KEY);
   state.dirtyTimeline = true;
   return h;
+}
+function trackSizeShowsThumbs() {
+  return !!(TRACK_SIZE_PRESETS[state.trackSize] || TRACK_SIZE_PRESETS.l).thumbs;
+}
+function syncTrackSizeButtons() {
+  const group = $("trackSizeGroup");
+  if (!group) return;
+  for (const b of group.querySelectorAll("[data-track-size]"))
+    b.classList.toggle("on", b.dataset.trackSize === state.trackSize);
+  document.body.classList.toggle("track-size-s", state.trackSize === "s");
+  document.body.classList.toggle("track-size-m", state.trackSize === "m");
+  document.body.classList.toggle("track-size-l", state.trackSize === "l");
+}
+function applyTrackHeights() {
+  const preset = TRACK_SIZE_PRESETS[state.trackSize] || TRACK_SIZE_PRESETS.l;
+  for (const t of TRACKS) {
+    if (preset.h[t.id] != null) t.h = preset.h[t.id];
+  }
+}
+/* Switch S/M/L track density, rebuild the timeline, and grow/shrink the pane
+   so every track fits without a vertical scrollbar. */
+function setTrackSize(size, { persist = true, fitPane = true } = {}) {
+  if (!TRACK_SIZE_PRESETS[size]) size = "l";
+  state.trackSize = size;
+  applyTrackHeights();
+  if (persist) localStorage.setItem(TRACK_SIZE_KEY, size);
+  syncTrackSizeButtons();
+  buildTrackDOM();
+  state.dirtyTimeline = true;
+  rebuildClips();
+  if (fitPane) {
+    const h = setTimelineHeight(defaultTimelineHeight());
+    localStorage.setItem(TL_H_KEY, String(h));
+  }
+}
+function restoreDefaultLayout() {
+  setTrackSize("l", { persist: true, fitPane: false });
+  resetTimelineHeight();
 }
 function clampTimelineHeight() {
   const cur = $("timelinePanel")?.getBoundingClientRect().height;
@@ -2859,6 +2918,11 @@ function initPanelSplit() {
   const handle = $("splitUpperTimeline");
   const tl = $("timelinePanel");
   if (!handle || !tl) return;
+  const savedSize = localStorage.getItem(TRACK_SIZE_KEY);
+  if (TRACK_SIZE_PRESETS[savedSize]) state.trackSize = savedSize;
+  applyTrackHeights();
+  syncTrackSizeButtons();
+
   const saved = parseFloat(localStorage.getItem(TL_H_KEY));
   if (saved > 0) setTimelineHeight(saved);
   else resetTimelineHeight();
