@@ -305,6 +305,11 @@ body.track-size-s .clip.selected {
   font-size: 12px;
   border-radius: 5px;
 }
+.btn .ico {
+  display: inline-block;
+  vertical-align: -2px;
+  margin-right: 2px;
+}
 
 .btn.tiny.accent {
   border-color: var(--accent);
