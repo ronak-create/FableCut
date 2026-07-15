@@ -144,6 +144,7 @@ const state = {
   guides: false,         // safe-area overlay on the monitor
   ffmpeg: false,         // server reports ffmpeg available
   dirtyTimeline: true, gesture: false,
+  workAreaPlay: false,   // when true, play + Home/End stay inside IN/OUT
   binTab: "project",     // project | elements | sfx | svg
 };
 const runtime = {
@@ -946,10 +947,40 @@ function trimToWorkArea() {
   scheduleSave();
   renderInspector();
 }
+function hasWorkArea() {
+  return project.inPoint != null || project.outPoint != null;
+}
+/* Active work-area playback bounds. Missing IN → 0; missing OUT → project end. */
+function playRange() {
+  const start = project.inPoint != null ? project.inPoint : 0;
+  const end = project.outPoint != null ? project.outPoint : Math.max(projDur(), 0);
+  return { start, end: Math.max(end, start) };
+}
+function playLimited() {
+  return state.workAreaPlay && !state.exporting && hasWorkArea();
+}
+/* Stop time while Limit is on. Playhead past OUT = manual override → full timeline. */
+function playStopAt() {
+  if (!playLimited()) return Math.max(projDur(), 0);
+  const { end } = playRange();
+  if (state.time > end + 1e-4) return Math.max(projDur(), 0);
+  return end;
+}
+function gotoHome() {
+  setTime(playLimited() && project.inPoint != null ? project.inPoint : 0);
+}
+function gotoEnd() {
+  setTime(playLimited() && project.outPoint != null ? project.outPoint : projDur());
+}
 function syncTrimIOButton() {
-  const btn = $("btnTrimIO");
-  if (!btn) return;
-  btn.classList.toggle("hidden", project.inPoint == null && project.outPoint == null);
+  const has = hasWorkArea();
+  const trim = $("btnTrimIO");
+  const lim = $("btnWorkAreaPlay");
+  if (trim) trim.classList.toggle("hidden", !has);
+  if (lim) {
+    lim.classList.toggle("hidden", !has);
+    lim.classList.toggle("on", state.workAreaPlay);
+  }
 }
 
 /* ═══════════════════════════ TIMELINE UI ═══════════════════════════ */
@@ -1804,7 +1835,14 @@ function play() {
   if (state.playing) return;
   ensureAudio();
   runtime.audio.ctx.resume();
-  if (state.time >= projDur() - 0.01) state.time = 0;
+  if (playLimited()) {
+    const { start, end } = playRange();
+    // Parked at OUT after a limited play → restart at IN. Playhead before IN or
+    // past OUT is a manual override: leave it and play from there.
+    if (state.time >= end - 0.01 && state.time <= end + 0.02) state.time = start;
+  } else if (state.time >= projDur() - 0.01) {
+    state.time = 0;
+  }
   state.playing = true;
   els.btnPlay.textContent = "⏸";
 }
@@ -2784,7 +2822,7 @@ function loop(ts) {
   lastTs = ts;
   if (state.playing) {
     state.time += dt;
-    const end = projDur();
+    const end = playStopAt();
     if (state.time >= end) {
       state.time = end;
       if (state.exporting) finishExport(true);
@@ -3041,6 +3079,10 @@ $("btnTitle").addEventListener("click", addTitle);
 $("btnAdjust").addEventListener("click", addAdjust);
 $("btnSplit").addEventListener("click", splitAtPlayhead);
 $("btnTrimIO").addEventListener("click", trimToWorkArea);
+$("btnWorkAreaPlay").addEventListener("click", () => {
+  state.workAreaPlay = !state.workAreaPlay;
+  syncTrimIOButton();
+});
 $("btnDelete").addEventListener("click", deleteSelected);
 $("btnExport").addEventListener("click", openExportSetup);
 $("btnStartExport").addEventListener("click", startChosenExport);
@@ -3050,8 +3092,8 @@ $("btnCancelExport").addEventListener("click", () => {
   else finishExport(false);
 });
 $("btnPlay").addEventListener("click", () => state.playing ? pause() : play());
-$("btnHome").addEventListener("click", () => setTime(0));
-$("btnEnd").addEventListener("click", () => setTime(projDur()));
+$("btnHome").addEventListener("click", gotoHome);
+$("btnEnd").addEventListener("click", gotoEnd);
 $("btnBack").addEventListener("click", () => setTime(state.time - 1 / project.fps));
 $("btnFwd").addEventListener("click", () => setTime(state.time + 1 / project.fps));
 $("btnHelp").addEventListener("click", () => $("helpOverlay").classList.remove("hidden"));
@@ -3116,8 +3158,8 @@ window.addEventListener("keydown", (e) => {
   else if (k === "Delete" || k === "Backspace") deleteSelected();
   else if (k === "ArrowLeft") setTime(state.time - (e.shiftKey ? 1 : 1 / project.fps));
   else if (k === "ArrowRight") setTime(state.time + (e.shiftKey ? 1 : 1 / project.fps));
-  else if (k === "Home") setTime(0);
-  else if (k === "End") setTime(projDur());
+  else if (k === "Home") gotoHome();
+  else if (k === "End") gotoEnd();
   else if (k === "[") trimToPlayhead("in");
   else if (k === "]") trimToPlayhead("out");
   else if (k === "m" || k === "M") toggleMarker();
