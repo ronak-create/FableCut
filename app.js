@@ -840,18 +840,45 @@ function splitAtPlayhead() {
   targets = targets.filter((c) => t > c.start + MIN_DUR && t < clipEnd(c) - MIN_DUR);
   if (!targets.length) return;
   pushUndo();
+  for (const c of targets) splitClipAt(c, t);
+  scheduleSave();
+}
+/* Cut a clip at timeline time t (must fall strictly inside the clip). Leaves
+   the left piece as `c` and appends the right piece. */
+function splitClipAt(c, t) {
+  if (!(t > c.start + MIN_DUR && t < clipEnd(c) - MIN_DUR)) return null;
+  const cut = t - c.start;
+  const right = {
+    ...c, id: "c_" + uid(), props: { ...c.props },
+    start: t, in: c.in + cut * clipSpeed(c), duration: clipEnd(c) - t,
+    keyframes: shiftKF(c.keyframes, cut, clipEnd(c) - t),
+    transitionIn: undefined,
+  };
+  c.duration = cut;
+  c.keyframes = shiftKF(c.keyframes, 0, cut);
+  c.transitionOut = undefined;
+  project.clips.push(right);
+  return right;
+}
+/* Split every enabled-track clip that crosses IN and/or OUT (no head/tail removal). */
+function splitAtWorkArea() {
+  const cuts = [project.inPoint, project.outPoint].filter((t) => t != null);
+  if (!cuts.length) {
+    toast("Set an IN or OUT marker first (I / O)");
+    return;
+  }
+  const onTrack = (c) => typeof isTrackEnabled !== "function" || isTrackEnabled(c.track);
+  const targets = project.clips.filter((c) =>
+    onTrack(c) && cuts.some((t) => t > c.start + MIN_DUR && t < clipEnd(c) - MIN_DUR)
+  );
+  if (!targets.length) { toast("Nothing to split at IN/OUT"); return; }
+  pushUndo();
+  // Right-to-left so each successive cut still lands on the left-hand piece
   for (const c of targets) {
-    const cut = t - c.start;
-    const right = {
-      ...c, id: "c_" + uid(), props: { ...c.props },
-      start: t, in: c.in + cut * clipSpeed(c), duration: clipEnd(c) - t,
-      keyframes: shiftKF(c.keyframes, cut, clipEnd(c) - t),
-      transitionIn: undefined,
-    };
-    c.duration = cut;
-    c.keyframes = shiftKF(c.keyframes, 0, cut);
-    c.transitionOut = undefined;
-    project.clips.push(right);
+    const pts = cuts
+      .filter((t) => t > c.start + MIN_DUR && t < clipEnd(c) - MIN_DUR)
+      .sort((a, b) => b - a);
+    for (const t of pts) splitClipAt(c, t);
   }
   scheduleSave();
 }
@@ -3084,7 +3111,7 @@ window.addEventListener("keydown", (e) => {
   else if (k === "s" || k === "S") splitAtPlayhead();
   else if ((k === "t" || k === "T") && !e.ctrlKey && !e.metaKey && !e.altKey) {
     e.preventDefault();
-    trimToWorkArea();
+    e.shiftKey ? trimToWorkArea() : splitAtWorkArea();
   }
   else if (k === "Delete" || k === "Backspace") deleteSelected();
   else if (k === "ArrowLeft") setTime(state.time - (e.shiftKey ? 1 : 1 / project.fps));
