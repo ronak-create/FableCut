@@ -24,6 +24,8 @@ const TRACK_SIZE_PRESETS = {
   l: { thumbs: true, h: { V4: 44, V3: 44, V2: 58, V1: 58, A1: 42, A2: 42, A3: 42 } },
 };
 const TRACK_SIZE_KEY = "fablecut-track-size";
+const LAST_TRANS_KEY = { in: "fablecut-last-trans-in", out: "fablecut-last-trans-out" };
+const DEFAULT_LAST_TRANS = { type: "fade", duration: 1 };
 const RULER_H = 26;
 const SNAP_PX = 8;
 const MIN_DUR = 0.05;
@@ -892,6 +894,41 @@ function clearFocusedTransition() {
   renderInspector();
   return true;
 }
+function loadLastTransition(side) {
+  try {
+    const raw = JSON.parse(localStorage.getItem(LAST_TRANS_KEY[side]) || "null");
+    if (raw?.type && raw.type !== "none" && TRANSITIONS.includes(raw.type)) {
+      const dur = +raw.duration;
+      return { type: raw.type, duration: isFinite(dur) && dur >= MIN_TRANS_DUR ? dur : 1 };
+    }
+  } catch {}
+  return { ...DEFAULT_LAST_TRANS };
+}
+function saveLastTransition(side, tr) {
+  if (!tr?.type || tr.type === "none") return;
+  try {
+    localStorage.setItem(LAST_TRANS_KEY[side], JSON.stringify({
+      type: tr.type,
+      duration: Math.max(MIN_TRANS_DUR, +tr.duration || 1),
+    }));
+  } catch {}
+}
+function addTransitionAtPlayhead() {
+  const c = getClip(state.selId);
+  if (!c) { toast("Select a clip first"); return; }
+  const t = state.time;
+  if (t < c.start || t >= clipEnd(c)) { toast("Move playhead over the selected clip"); return; }
+  const side = (t - c.start) / c.duration < 0.5 ? "in" : "out";
+  const key = side === "in" ? "transitionIn" : "transitionOut";
+  const preset = loadLastTransition(side);
+  const dur = Math.min(Math.max(MIN_TRANS_DUR, preset.duration), c.duration);
+  pushUndo();
+  c[key] = { type: preset.type, duration: +dur.toFixed(3) };
+  saveLastTransition(side, c[key]);
+  state.dirtyTimeline = true;
+  selectClip(c.id, { transFocus: side });
+  scheduleSave();
+}
 function splitAtPlayhead() {
   const t = state.time;
   let targets = state.selIds.size ? selectedClips() : project.clips;
@@ -1371,7 +1408,10 @@ function startTransDurGesture(e, c, side) {
     window.removeEventListener("pointermove", onMove);
     window.removeEventListener("pointerup", onUp);
     state.gesture = false;
-    if (moved) scheduleSave();
+    if (moved) {
+      scheduleSave();
+      saveLastTransition(side, c[key]);
+    }
     renderInspector();
   };
   window.addEventListener("pointermove", onMove);
@@ -1907,14 +1947,18 @@ function renderInspector(lite) {
       else if (k === "duration") { c.duration = Math.max(MIN_DUR, +v || MIN_DUR); state.dirtyTimeline = true; }
       else if (k === "transIn" || k === "transOut") {
         const key = k === "transIn" ? "transitionIn" : "transitionOut";
-        const dur = Math.max(0.1, parseFloat(els.inspector.querySelector(`[data-k="${k}Dur"]`)?.value) || 1);
+        const side = k === "transIn" ? "in" : "out";
+        const dur = Math.max(MIN_TRANS_DUR, parseFloat(els.inspector.querySelector(`[data-k="${k}Dur"]`)?.value) || 1);
         c[key] = v === "none" ? undefined : { type: String(v), duration: dur };
+        if (c[key]) saveLastTransition(side, c[key]);
         state.dirtyTimeline = true;
       }
       else if (k === "transInDur" || k === "transOutDur") {
         const key = k === "transInDur" ? "transitionIn" : "transitionOut";
+        const side = k === "transInDur" ? "in" : "out";
         if (c[key]) {
-          c[key].duration = Math.max(0.1, +v || 1);
+          c[key].duration = Math.max(MIN_TRANS_DUR, +v || 1);
+          saveLastTransition(side, c[key]);
           state.dirtyTimeline = true;
         }
       }
@@ -3380,6 +3424,10 @@ window.addEventListener("keydown", (e) => {
   if (isTypingTarget(document.activeElement)) return;
   if (k === " ") { e.preventDefault(); state.playing ? pause() : play(); }
   else if (k === "s" || k === "S") splitAtPlayhead();
+  else if (e.altKey && !e.ctrlKey && !e.metaKey && (k === "t" || k === "T")) {
+    e.preventDefault();
+    addTransitionAtPlayhead();
+  }
   else if ((k === "t" || k === "T") && !e.ctrlKey && !e.metaKey && !e.altKey) {
     e.preventDefault();
     e.shiftKey ? trimToWorkArea() : splitAtWorkArea();

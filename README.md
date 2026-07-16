@@ -4,7 +4,7 @@
 
 <a href="https://trendshift.io/repositories/77702?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-77702" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/77702/daily?language=JavaScript" alt="ronak-create%2FFableCut | Trendshift" width="250" height="55"/></a>
 
-https://github.com/user-attachments/assets/2430b854-168b-4a9a-af2e-489e5efa7543
+<https://github.com/user-attachments/assets/2430b854-168b-4a9a-af2e-489e5efa7543>
 
 FableCut is a Premiere-style non-linear video editor that runs entirely in your
 browser — and exposes its whole timeline as one JSON document. Edit it by hand,
@@ -28,6 +28,7 @@ same time.
 ## Features
 
 **Editing**
+
 - 4 video tracks + 3 audio tracks, drag/trim/split/snap, undo/redo
 - **Direct manipulation on the monitor** — click a clip or title on the preview to
   move, resize (corner handles), or rotate (top handle, Shift-snap) it directly
@@ -37,6 +38,7 @@ same time.
   whole group; <kbd>Delete</kbd> removes all selected; <kbd>S</kbd> splits all
   selected at the playhead. Inspector shows an "N clips selected" banner.
 - Beat & cue markers (tap <kbd>⇧m</kbd> on the beat during playback) with edge snapping
+- Press <kbd>Alt+t</kbd> to add an in/out transition based on the playhead position over the selected clip. The last used transition is remembered as the default. Drag the overlay triangle to adjust duration; <kbd>Delete</kbd> clears the focused transition.
 - Real decoded audio waveforms on clips
 - Canvas aspect presets (16:9, 9:16 reels, 4:5, 1:1) + safe-area guides
 - Resizable workspace: drag the divider between monitor and timeline (double-click resets), plus S/M/L timeline track-density presets (S hides thumbnails for compact tracks)
@@ -44,6 +46,7 @@ same time.
 - **IN/OUT work area** — set markers with <kbd>i</kbd> and <kbd>o</kbd> (<kbd>⇧I</kbd> / <kbd>⇧O</kbd> to clear). Enabling **Limit** constrains playback to the marked range and maps <kbd>Home</kbd> / <kbd>End</kbd> to the IN and OUT positions rather than the full timeline. <kbd>t</kbd> splits clips at the markers; <kbd>⇧t</kbd> trims clips to the work (between marker in and marker out) area.
 
 **Look**
+
 - 12 one-click filter presets (cinematic, teal-orange, noir, vintage, cyberpunk…)
 - **Adjustment layers** — one clip grades everything below it, Premiere-style
 - Full grade controls: brightness/contrast/saturation/hue, **temperature & tint**,
@@ -54,6 +57,7 @@ same time.
 - **AI background removal** (person cut-out, in-browser via MediaPipe)
 
 **Motion**
+
 - Keyframe animation on ~25 properties with easing
 - **Speed ramps** — keyframe `speed` and the engine time-remaps video *and* the
   export audio mix (the fast-into-slow-mo reel move)
@@ -62,6 +66,7 @@ same time.
   whip-pan, **glitch**, **pop**
 
 **Text**
+
 - **Title styles** — one-tap cohesive looks (Impact, Elegant, Kinetic cut, Neon,
   Handwritten, and more); new titles vary the font, placement and animation
   automatically instead of defaulting to one flat style
@@ -75,12 +80,14 @@ same time.
   weights, italic, uppercase, alignment, soft shadows
 
 **Animated SVG clips**
+
 - A first-class `svg` clip kind: CSS-`@keyframes`-animated SVGs render
   **frame-accurately** in preview and export (the compositor freezes the
   animation at any time). Agents can author their own vector overlays —
   lower-thirds, confetti, sparkles — as plain `.svg` files. Starters included.
 
 **Remake a reference video**
+
 - Give it a reference edit (a reel you like) and get back an **edit blueprint**:
   shot boundaries, music beats + BPM, a loudness curve, per-shot energy, the
   drop — plus the reference's **music track extracted** into your media, ready
@@ -90,10 +97,12 @@ same time.
   `fablecut_analyze_reference` MCP tool.
 
 **Asset library**
+
 - `library/` folders surface as tabs in the UI: **Elements** (overlay art),
   **Sound FX**, **SVG** — drop files in, the open editor refreshes live
 
 **Export**
+
 - Fast export: browser renders every frame + an offline audio mix, ffmpeg
   encodes a frame-accurate CRF-18 MP4 (keeps rendering if you switch tabs)
 - Realtime MediaRecorder fallback when ffmpeg isn't available
@@ -126,9 +135,11 @@ Three equivalent control surfaces:
 
 1. **MCP** (best for Claude Code / Claude Desktop) — register the bundled
    zero-dependency MCP server once:
+
    ```bash
    claude mcp add -s user fablecut -- node "<path-to>/fablecut/mcp-server.js"
    ```
+
    Tools: `fablecut_status` (auto-starts the editor), `fablecut_docs`,
    `fablecut_get_project`, `fablecut_set_project`, `fablecut_patch_project`,
    `fablecut_import_media`, `fablecut_analyze_reference`.
