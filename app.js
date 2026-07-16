@@ -2644,21 +2644,34 @@ function drawClip(c, W, H, t) {
   ctx2d.restore();
 }
 
-/* ── Text direction (LTR / RTL) — per-line when direction is "auto". ── */
+/* ── Text direction (LTR / RTL) — per-line when direction is "auto".
+   Auto-detect uses a DOM probe + getComputedStyle; cache by line text so
+   preview/export frames don't re-resolve style every tick. ── */
 let _textDirProbe;
+const _textDirCache = new Map(); // line text → "ltr" | "rtl"
+const TEXT_DIR_CACHE_MAX = 256;
 function detectTextDirection(text) {
+  const key = (text && String(text).trim()) ? String(text) : " ";
+  const hit = _textDirCache.get(key);
+  if (hit) return hit;
   if (!_textDirProbe) {
     _textDirProbe = document.createElement("p");
     _textDirProbe.style.cssText = "position:fixed;left:-9999px;visibility:hidden;white-space:nowrap";
     document.body.appendChild(_textDirProbe);
   }
   _textDirProbe.dir = "auto";
-  _textDirProbe.textContent = (text && String(text).trim()) ? text : " ";
-  return getComputedStyle(_textDirProbe).direction === "rtl" ? "rtl" : "ltr";
+  _textDirProbe.textContent = key;
+  const dir = getComputedStyle(_textDirProbe).direction === "rtl" ? "rtl" : "ltr";
+  if (_textDirCache.size >= TEXT_DIR_CACHE_MAX) _textDirCache.clear();
+  _textDirCache.set(key, dir);
+  return dir;
 }
 function lineDirections(p, lines) {
-  const forced = p.direction === "rtl" || p.direction === "ltr" ? p.direction : null;
-  return lines.map((ln) => forced || detectTextDirection(ln));
+  if (p.direction === "rtl" || p.direction === "ltr") {
+    const forced = p.direction;
+    return lines.map(() => forced);
+  }
+  return lines.map((ln) => detectTextDirection(ln));
 }
 function revealWipeRect(cx, w, lh, y, e, rtl, pad = 6) {
   const clipW = (w + pad * 2) * e;
@@ -2679,22 +2692,40 @@ function needsContextualShaping(text) {
   return SHAPING_SCRIPT_RE.test(text);
 }
 let _graphemeSeg;
+const _graphemeCache = new Map(); // line text → string[]
+const _letterAnimCache = new Map(); // line text → {text, animate}[]
+const TEXT_SEG_CACHE_MAX = 256;
 function graphemeSegments(text) {
+  const key = String(text ?? "");
+  const hit = _graphemeCache.get(key);
+  if (hit) return hit;
+  let segs;
   if (typeof Intl !== "undefined" && Intl.Segmenter) {
     if (!_graphemeSeg) _graphemeSeg = new Intl.Segmenter(undefined, { granularity: "grapheme" });
-    return [..._graphemeSeg.segment(text)].map((s) => s.segment);
+    segs = [..._graphemeSeg.segment(key)].map((s) => s.segment);
+  } else {
+    segs = [...key];
   }
-  return [...text];
+  if (_graphemeCache.size >= TEXT_SEG_CACHE_MAX) _graphemeCache.clear();
+  _graphemeCache.set(key, segs);
+  return segs;
 }
 function letterAnimSegments(line) {
-  if (needsContextualShaping(line)) {
-    const out = [];
+  const key = String(line ?? "");
+  const hit = _letterAnimCache.get(key);
+  if (hit) return hit;
+  let segs;
+  if (needsContextualShaping(key)) {
+    segs = [];
     const re = /(\s+|[^\s]+)/g;
     let m;
-    while ((m = re.exec(line))) out.push({ text: m[0], animate: !!m[0].trim() });
-    return out;
+    while ((m = re.exec(key))) segs.push({ text: m[0], animate: !!m[0].trim() });
+  } else {
+    segs = graphemeSegments(key).map((text) => ({ text, animate: !!text.trim() }));
   }
-  return graphemeSegments(line).map((text) => ({ text, animate: !!text.trim() }));
+  if (_letterAnimCache.size >= TEXT_SEG_CACHE_MAX) _letterAnimCache.clear();
+  _letterAnimCache.set(key, segs);
+  return segs;
 }
 
 /* ── Text rendering: styling (stroke / background pill) + kinetic animations.
@@ -2850,11 +2881,12 @@ function drawText(c, p, local) {
     return;
   }
   if (anim === "typewriter") {
-    let budget = Math.floor(local / (rate / 4)); // rate/4 s per character
+    let budget = Math.floor(local / (rate / 4)); // rate/4 s per grapheme cluster
     rawLines.forEach((ln, i) => {
       const rtl = lineDirs[i] === "rtl";
-      const shown = ln.slice(0, Math.max(0, budget));
-      budget -= ln.length;
+      const graphemes = graphemeSegments(ln);
+      const shown = graphemes.slice(0, Math.max(0, budget)).join("");
+      budget -= graphemes.length;
       if (shown) {
         const shownW = ctx2d.measureText(shown).width;
         paint(shown, typewriterX(lineCx(i), lineWidths[i], shownW, rtl), y0 + i * lh, 1, rtl);
