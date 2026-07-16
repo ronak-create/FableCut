@@ -52,7 +52,7 @@ const DEFAULT_PROPS = {
   bold: true, italic: false, weight: 0, align: "center",
   letterSpacing: 0, lineHeight: 1.2, uppercase: false, textShadow: 12,
   glow: 0, glowColor: "",                      // neon glow (glowColor defaults to fill)
-  textAnim: "none", wordRate: 0.15,
+  textAnim: "none", wordRate: 0.15, direction: "auto",
   strokeWidth: 0, strokeColor: "#000000", bgColor: "#000000", bgOpacity: 0,
 };
 const ANIMATABLE = ["x", "y", "scale", "rotation", "opacity", "volume", "speed",
@@ -1753,6 +1753,7 @@ function renderInspector(lite) {
                       <input type="color" data-k="color2" value="${p.color2 || p.color}" title="Gradient bottom color">
                       <button class="btn tiny${p.color2 ? "" : " toggle on"}" data-action="grad-off" title="Disable gradient">flat</button></span>`)}
       ${sel("Align", "align", ["left", "center", "right"], p.align)}
+      ${sel("Direction", "direction", ["auto", "ltr", "rtl"], p.direction || "auto")}
     </div>
     <div class="insp-section"><h3>Font</h3>
       ${row("Family", `<select data-k="font">
@@ -2643,6 +2644,35 @@ function drawClip(c, W, H, t) {
   ctx2d.restore();
 }
 
+/* ── Text direction (LTR / RTL) — per-line when direction is "auto". ── */
+let _textDirProbe;
+function detectTextDirection(text) {
+  if (!_textDirProbe) {
+    _textDirProbe = document.createElement("p");
+    _textDirProbe.style.cssText = "position:fixed;left:-9999px;visibility:hidden;white-space:nowrap";
+    document.body.appendChild(_textDirProbe);
+  }
+  _textDirProbe.dir = "auto";
+  _textDirProbe.textContent = (text && String(text).trim()) ? text : " ";
+  return getComputedStyle(_textDirProbe).direction === "rtl" ? "rtl" : "ltr";
+}
+function lineDirections(p, lines) {
+  const forced = p.direction === "rtl" || p.direction === "ltr" ? p.direction : null;
+  return lines.map((ln) => forced || detectTextDirection(ln));
+}
+function revealWipeRect(cx, w, lh, y, e, rtl, pad = 6) {
+  const clipW = (w + pad * 2) * e;
+  const x0 = rtl ? cx + w / 2 + pad - clipW : cx - w / 2 - pad;
+  ctx2d.rect(x0, y - lh / 2, clipW, lh);
+}
+function typewriterX(cx, fullW, shownW, rtl) {
+  const dx = (fullW - shownW) / 2;
+  return rtl ? cx + dx : cx - dx;
+}
+function runOrigin(cx, totalW, rtl) {
+  return rtl ? cx + totalW / 2 : cx - totalW / 2;
+}
+
 /* ── Text rendering: styling (stroke / background pill) + kinetic animations.
    `local` is clip-local time in seconds. Word timing: word i enters at
    i * wordRate; each entrance animation lasts ~0.25 s. ── */
@@ -2666,6 +2696,7 @@ function drawText(c, p, local) {
   const align = p.align === "left" || p.align === "right" ? p.align : "center";
   const lineWidths = rawLines.map((ln) => ctx2d.measureText(ln).width);
   const blockW = Math.max(1, ...lineWidths);
+  const lineDirs = lineDirections(p, rawLines);
   // anchor x of each line's center, honoring block alignment
   const lineCx = (i) => align === "left" ? -blockW / 2 + lineWidths[i] / 2
     : align === "right" ? blockW / 2 - lineWidths[i] / 2 : 0;
@@ -2692,10 +2723,13 @@ function drawText(c, p, local) {
     g.addColorStop(1, p.color2);
     return g;
   };
-  const paint = (str, x, y, alpha = 1) => {
+  const paint = (str, x, y, alpha = 1, rtl = false) => {
     if (alpha <= 0) return;
     const keep = ctx2d.globalAlpha;
+    const prevDir = ctx2d.direction;
     ctx2d.globalAlpha = keep * clamp(alpha, 0, 1);
+    ctx2d.direction = rtl ? "rtl" : "ltr";
+    ctx2d.textAlign = "center";
     if (p.strokeWidth > 0) {
       ctx2d.shadowColor = "transparent";
       ctx2d.lineJoin = "round"; ctx2d.miterLimit = 2;
@@ -2718,67 +2752,66 @@ function drawText(c, p, local) {
       ctx2d.fillText(str, x, y);
     }
     ctx2d.shadowColor = "transparent"; ctx2d.shadowBlur = 0; ctx2d.shadowOffsetY = 0;
+    ctx2d.direction = prevDir;
     ctx2d.globalAlpha = keep;
   };
 
   if (anim === "none") {
-    ctx2d.textAlign = "center";
-    rawLines.forEach((ln, i) => paint(ln, lineCx(i), y0 + i * lh));
+    rawLines.forEach((ln, i) => paint(ln, lineCx(i), y0 + i * lh, 1, lineDirs[i] === "rtl"));
     return;
   }
-  // clip-reveal: a wipe mask sweeps each line into view, left to right
+  // clip-reveal: wipe mask sweeps each line in reading direction
   if (anim === "clip-reveal") {
-    ctx2d.textAlign = "center";
     rawLines.forEach((ln, i) => {
       if (!ln.trim()) return;
       const u = clamp((local - i * rate) / 0.5, 0, 1);
       if (u <= 0) return;
       const e = EASE["ease-out"](u), w = lineWidths[i], cx = lineCx(i), y = y0 + i * lh;
+      const rtl = lineDirs[i] === "rtl";
       ctx2d.save();
       ctx2d.beginPath();
-      ctx2d.rect(cx - w / 2 - 6, y - lh / 2, (w + 12) * e, lh);
+      revealWipeRect(cx, w, lh, y, e, rtl);
       ctx2d.clip();
-      paint(ln, cx, y);
+      paint(ln, cx, y, 1, rtl);
       ctx2d.restore();
     });
     return;
   }
   // zoom-in: text scales down into place with an opacity settle
   if (anim === "zoom-in") {
-    ctx2d.textAlign = "center";
     rawLines.forEach((ln, i) => {
       if (!ln.trim()) return;
       const u = clamp((local - i * rate) / 0.45, 0, 1);
       if (u <= 0) return;
       const e = EASE["ease-out"](u), s = 1.35 - 0.35 * e;
+      const rtl = lineDirs[i] === "rtl";
       ctx2d.save();
       ctx2d.translate(lineCx(i), y0 + i * lh);
       ctx2d.scale(s, s);
-      paint(ln, 0, 0, Math.min(1, u * 1.6));
+      paint(ln, 0, 0, Math.min(1, u * 1.6), rtl);
       ctx2d.restore();
     });
     return;
   }
   // rise-mask: each line rises from behind its own baseline (lower-third reveal)
   if (anim === "rise-mask") {
-    ctx2d.textAlign = "center";
     rawLines.forEach((ln, i) => {
       if (!ln.trim()) return;
       const u = clamp((local - i * rate) / 0.5, 0, 1);
       if (u <= 0) return;
       const e = EASE["ease-out"](u), cx = lineCx(i), y = y0 + i * lh;
+      const rtl = lineDirs[i] === "rtl";
       ctx2d.save();
       ctx2d.beginPath();
       ctx2d.rect(cx - blockW / 2 - 24, y - lh / 2, blockW + 48, lh);
       ctx2d.clip();
-      paint(ln, cx, y + (1 - e) * lh);
+      paint(ln, cx, y + (1 - e) * lh, 1, rtl);
       ctx2d.restore();
     });
     return;
   }
   // font-cut: rhythmically swap the typeface, then settle (speed cuts)
   if (anim === "font-cut") {
-    ctx2d.textAlign = "center";
     const setF = (Array.isArray(p.fontCutSet) && p.fontCutSet.length) ? p.fontCutSet : FONT_CUT_DEFAULT;
     setF.forEach(ensureFont);
     const cutDur = 0.6, interval = 0.06;
@@ -2788,32 +2821,36 @@ function drawText(c, p, local) {
     const lw = rawLines.map((ln) => ctx2d.measureText(ln).width);
     const bw = Math.max(1, ...lw);
     const lcx = (i) => align === "left" ? -bw / 2 + lw[i] / 2
-      : align === "right" ? bw / 2 - lw[i] / 2 : 0;
-    rawLines.forEach((ln, i) => { if (ln.trim()) paint(ln, lcx(i), y0 + i * lh); });
+                     : align === "right" ? bw / 2 - lw[i] / 2 : 0;
+    rawLines.forEach((ln, i) => { if (ln.trim()) paint(ln, lcx(i), y0 + i * lh, 1, lineDirs[i] === "rtl"); });
     return;
   }
   if (anim === "typewriter") {
-    ctx2d.textAlign = "center";
     let budget = Math.floor(local / (rate / 4)); // rate/4 s per character
     rawLines.forEach((ln, i) => {
+      const rtl = lineDirs[i] === "rtl";
       const shown = ln.slice(0, Math.max(0, budget));
       budget -= ln.length;
-      if (shown) paint(shown, lineCx(i) - (lineWidths[i] - ctx2d.measureText(shown).width) / 2, y0 + i * lh);
+      if (shown) {
+        const shownW = ctx2d.measureText(shown).width;
+        paint(shown, typewriterX(lineCx(i), lineWidths[i], shownW, rtl), y0 + i * lh, 1, rtl);
+      }
     });
     return;
   }
   // per-character animations (TikTok style)
   if (anim === "letter-pop" || anim === "wave") {
-    ctx2d.textAlign = "center";
     let ci = 0;
     rawLines.forEach((ln, i) => {
       const y = y0 + i * lh;
+      const rtl = lineDirs[i] === "rtl";
       const chars = [...ln];
       const widths = chars.map((ch) => ctx2d.measureText(ch).width);
       const total = widths.reduce((a, b) => a + b, 0);
-      let x = lineCx(i) - total / 2;
+      let x = runOrigin(lineCx(i), total, rtl);
       chars.forEach((ch, j) => {
-        const cx = x + widths[j] / 2;
+        const w = widths[j];
+        const cx = rtl ? x - w / 2 : x + w / 2;
         if (ch.trim()) {
           if (anim === "letter-pop") {
             const u = clamp((local - ci * rate / 3) / 0.18, 0, 1);
@@ -2822,31 +2859,32 @@ function drawText(c, p, local) {
               ctx2d.translate(cx, y);
               const s = Math.max(0.001, backOut(u));
               ctx2d.scale(s, s);
-              paint(ch, 0, 0, Math.min(1, u * 2.5));
+              paint(ch, 0, 0, Math.min(1, u * 2.5), rtl);
               ctx2d.restore();
             }
           } else { // wave: continuous per-character sine ride
-            paint(ch, cx, y + Math.sin(local * 4 + ci * 0.55) * size * 0.12);
+            paint(ch, cx, y + Math.sin(local * 4 + ci * 0.55) * size * 0.12, 1, rtl);
           }
           ci++;
         }
-        x += widths[j];
+        x += rtl ? -w : w;
       });
     });
     return;
   }
-  // word-based animations: lay words out manually, per-line, honoring alignment
-  ctx2d.textAlign = "center";
+  // word-based animations: lay words out manually, per-line, honoring alignment + direction
   const spaceW = ctx2d.measureText(" ").width;
   let wi = 0;
   rawLines.forEach((ln, i) => {
     const y = y0 + i * lh;
+    const rtl = lineDirs[i] === "rtl";
     const words = ln.split(/\s+/).filter(Boolean);
     const widths = words.map((w) => ctx2d.measureText(w).width);
     const total = widths.reduce((a, b) => a + b, 0) + spaceW * Math.max(0, words.length - 1);
-    let x = lineCx(i) - total / 2;
+    let x = runOrigin(lineCx(i), total, rtl);
     words.forEach((word, j) => {
-      const cx = x + widths[j] / 2;
+      const w = widths[j];
+      const cx = rtl ? x - w / 2 : x + w / 2;
       const u = clamp((local - wi * rate) / 0.25, 0, 1);
       if (anim === "word-pop") {
         if (u > 0) {
@@ -2854,20 +2892,20 @@ function drawText(c, p, local) {
           ctx2d.translate(cx, y);
           const s = Math.max(0.001, backOut(u));
           ctx2d.scale(s, s);
-          paint(word, 0, 0, Math.min(1, u * 2.5));
+          paint(word, 0, 0, Math.min(1, u * 2.5), rtl);
           ctx2d.restore();
         }
       } else if (anim === "word-slide") {
-        if (u > 0) paint(word, cx, y + (1 - EASE["ease-out"](u)) * size * 0.7, u);
+        if (u > 0) paint(word, cx, y + (1 - EASE["ease-out"](u)) * size * 0.7, u, rtl);
       } else if (anim === "bounce") { // continuous per-word hop
-        paint(word, cx, y - Math.abs(Math.sin(local * 3.2 + wi * 0.9)) * size * 0.18);
+        paint(word, cx, y - Math.abs(Math.sin(local * 3.2 + wi * 0.9)) * size * 0.18, 1, rtl);
       } else if (anim === "shake") { // continuous nervous jitter
         paint(word, cx + Math.sin(local * 31 + wi * 7.3) * size * 0.035,
-          y + Math.cos(local * 27 + wi * 3.1) * size * 0.035);
+                    y + Math.cos(local * 27 + wi * 3.1) * size * 0.035, 1, rtl);
       } else { // karaoke: everything visible dim, spoken words at full strength
-        paint(word, cx, y, u >= 1 ? 1 : 0.3 + u * 0.7);
+        paint(word, cx, y, u >= 1 ? 1 : 0.3 + u * 0.7, rtl);
       }
-      x += widths[j] + spaceW;
+      x += rtl ? -(w + spaceW) : (w + spaceW);
       wi++;
     });
   });

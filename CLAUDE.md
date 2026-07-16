@@ -255,6 +255,7 @@ Examples in `library/svg/`: `sparkles.svg` (loop), `lower-third.svg`,
 | `bold` / `weight` | true / 0 | `weight` (300–900) overrides `bold` when non-zero |
 | `italic` `uppercase` | false | |
 | `align` | "center" | left · center · right (multi-line block alignment) |
+| `direction` | "auto" | auto · ltr · rtl — `auto` detects per line (Hebrew/Arabic → RTL); all `textAnim` modes honor reading direction (wipe, typewriter reveal, word/letter layout) |
 | `letterSpacing` | 0 | px |
 | `lineHeight` | 1.2 | multiplier |
 | `textShadow` | 12 | soft drop shadow amount, 0 = off |
@@ -453,6 +454,10 @@ font:"Bebas Neue", textAnim:"wave"}` on a dark shot.
 **Reel caption**: text clip with `props: {textAnim:"word-pop", wordRate:0.15,
 strokeWidth:6, bgColor:"#000000", bgOpacity:0.45, fontSize:88}`. `karaoke`
 dims words until "spoken"; `typewriter` for terminal vibes.
+
+**RTL / Hebrew / Arabic caption**: omit `direction` (defaults to `"auto"`) or set
+`direction:"rtl"` explicitly; pick a font with the script's glyphs (Google Fonts
+work). Animations wipe and stagger in reading order automatically.
 
 **Branded title**: `props: {font:"Bebas Neue", weight:700, letterSpacing:6,
 uppercase:true, color:"#ffffff", color2:"#7b6cff", textShadow:20}` — any Google
