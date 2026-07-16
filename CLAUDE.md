@@ -159,6 +159,8 @@ Examples in `library/svg/`: `sparkles.svg` (loop), `lower-third.svg`,
   "revision": 7,                              // bump on every write!
   "markers": [ { "t": 2.5 }, { "t": 5.0, "label": "drop" } ],
   // ^ beat/cue markers: gold diamonds on the ruler, snap targets for clip edges.
+  "inPoint": 10.023, // in timeline marker; paired with outPoint sets the focus on the part of the timeline  
+  "outPoint": 21.500, // out timeline marker
   "media": [
     { "id": "m_abc", "name": "intro.mp4", "kind": "video",  // video|audio|image|svg
       "src": "/media/intro.mp4",             // path under ./media or ./library

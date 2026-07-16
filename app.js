@@ -20,8 +20,8 @@ const TRACKS = [
    S is compact solid-color rows; M is in between. */
 const TRACK_SIZE_PRESETS = {
   s: { thumbs: false, h: { V4: 26, V3: 26, V2: 26, V1: 26, A1: 22, A2: 22, A3: 22 } },
-  m: { thumbs: true,  h: { V4: 36, V3: 36, V2: 44, V1: 44, A1: 32, A2: 32, A3: 32 } },
-  l: { thumbs: true,  h: { V4: 44, V3: 44, V2: 58, V1: 58, A1: 42, A2: 42, A3: 42 } },
+  m: { thumbs: true, h: { V4: 36, V3: 36, V2: 44, V1: 44, A1: 32, A2: 32, A3: 32 } },
+  l: { thumbs: true, h: { V4: 44, V3: 44, V2: 58, V1: 58, A1: 42, A2: 42, A3: 42 } },
 };
 const TRACK_SIZE_KEY = "fablecut-track-size";
 const RULER_H = 26;
@@ -70,18 +70,18 @@ const BLEND_MODES = ["normal", "multiply", "screen", "overlay", "lighter", "soft
 /* Named looks. % props multiply against the clip's own value, additive props add. */
 const FILTER_PRESETS = {
   none: {},
-  cinematic:     { contrast: 112, saturation: 118, temperature: -10, vignette: 28 },
+  cinematic: { contrast: 112, saturation: 118, temperature: -10, vignette: 28 },
   "teal-orange": { contrast: 115, saturation: 125, temperature: -18, hue: -8, vignette: 22 },
-  noir:          { grayscale: 100, contrast: 128, brightness: 96, vignette: 45 },
-  vintage:       { sepia: 42, contrast: 92, brightness: 106, saturation: 88, temperature: 12, vignette: 30 },
-  faded:         { contrast: 84, brightness: 110, saturation: 82 },
-  warm:          { temperature: 28, brightness: 103, saturation: 108 },
-  cold:          { temperature: -28, saturation: 104 },
-  pop:           { saturation: 152, contrast: 116 },
-  dreamy:        { brightness: 109, saturation: 112, blur: 0.6, temperature: 8 },
-  retro:         { saturation: 130, hue: -6, contrast: 106, sepia: 15 },
-  "bw-soft":     { grayscale: 100, contrast: 95, brightness: 108 },
-  cyberpunk:     { saturation: 140, hue: 12, contrast: 118, temperature: -15, vignette: 25 },
+  noir: { grayscale: 100, contrast: 128, brightness: 96, vignette: 45 },
+  vintage: { sepia: 42, contrast: 92, brightness: 106, saturation: 88, temperature: 12, vignette: 30 },
+  faded: { contrast: 84, brightness: 110, saturation: 82 },
+  warm: { temperature: 28, brightness: 103, saturation: 108 },
+  cold: { temperature: -28, saturation: 104 },
+  pop: { saturation: 152, contrast: 116 },
+  dreamy: { brightness: 109, saturation: 112, blur: 0.6, temperature: 8 },
+  retro: { saturation: 130, hue: -6, contrast: 106, sepia: 15 },
+  "bw-soft": { grayscale: 100, contrast: 95, brightness: 108 },
+  cyberpunk: { saturation: 140, hue: 12, contrast: 118, temperature: -15, vignette: 25 },
 };
 const SYSTEM_FONTS = ["Segoe UI", "Arial", "Georgia", "Impact", "Courier New",
   "Trebuchet MS", "Verdana", "Times New Roman", "Comic Sans MS", "Consolas"];
@@ -99,15 +99,15 @@ const STYLE_RESET = {   // decorative props a style owns; reset before applying
   fontCutSet: undefined, align: "center",
 };
 const TITLE_STYLES = {
-  plain:      { label: "Plain",       place: "center",     props: { font: "Segoe UI", fontSize: 72, bold: true, color: "#ffffff", textAnim: "none" } },
-  impact:     { label: "Impact",      place: "lower",      props: { font: "Anton", fontSize: 96, bold: false, uppercase: true, color: "#ffffff", textShadow: 22, textAnim: "word-pop" } },
-  elegant:    { label: "Elegant",     place: "center",     props: { font: "Playfair Display", fontSize: 88, bold: false, color: "#ffffff", color2: "#ffd166", letterSpacing: 2, textAnim: "clip-reveal" } },
-  kinetic:    { label: "Kinetic cut", place: "center",     props: { font: "Bebas Neue", fontSize: 120, bold: false, uppercase: true, color: "#ffd166", letterSpacing: 3, textAnim: "font-cut", fontCutSet: ["Anton", "Bebas Neue", "Archivo Black", "Oswald"] } },
-  neon:       { label: "Neon",        place: "center",     props: { font: "Bebas Neue", fontSize: 104, bold: false, uppercase: true, color: "#ffffff", glow: 60, glowColor: "#22d3ee", textAnim: "wave" } },
-  handwritten:{ label: "Handwritten", place: "lower-left", props: { font: "Caveat", fontSize: 92, bold: false, color: "#ffffff", rotation: -4, textAnim: "word-slide" } },
-  serifDrop:  { label: "Serif drop",  place: "center",     props: { font: "Abril Fatface", fontSize: 96, bold: false, color: "#ffffff", textShadow: 18, textAnim: "zoom-in" } },
-  subtitle:   { label: "Subtitle",    place: "lower",      props: { font: "Roboto", fontSize: 52, bold: false, color: "#ffffff", bgColor: "#000000", bgOpacity: 0.5, textAnim: "karaoke" } },
-  boldRise:   { label: "Bold rise",   place: "lower",      props: { font: "Archivo Black", fontSize: 92, bold: false, uppercase: true, color: "#ffffff", textAnim: "rise-mask" } },
+  plain: { label: "Plain", place: "center", props: { font: "Segoe UI", fontSize: 72, bold: true, color: "#ffffff", textAnim: "none" } },
+  impact: { label: "Impact", place: "lower", props: { font: "Anton", fontSize: 96, bold: false, uppercase: true, color: "#ffffff", textShadow: 22, textAnim: "word-pop" } },
+  elegant: { label: "Elegant", place: "center", props: { font: "Playfair Display", fontSize: 88, bold: false, color: "#ffffff", color2: "#ffd166", letterSpacing: 2, textAnim: "clip-reveal" } },
+  kinetic: { label: "Kinetic cut", place: "center", props: { font: "Bebas Neue", fontSize: 120, bold: false, uppercase: true, color: "#ffd166", letterSpacing: 3, textAnim: "font-cut", fontCutSet: ["Anton", "Bebas Neue", "Archivo Black", "Oswald"] } },
+  neon: { label: "Neon", place: "center", props: { font: "Bebas Neue", fontSize: 104, bold: false, uppercase: true, color: "#ffffff", glow: 60, glowColor: "#22d3ee", textAnim: "wave" } },
+  handwritten: { label: "Handwritten", place: "lower-left", props: { font: "Caveat", fontSize: 92, bold: false, color: "#ffffff", rotation: -4, textAnim: "word-slide" } },
+  serifDrop: { label: "Serif drop", place: "center", props: { font: "Abril Fatface", fontSize: 96, bold: false, color: "#ffffff", textShadow: 18, textAnim: "zoom-in" } },
+  subtitle: { label: "Subtitle", place: "lower", props: { font: "Roboto", fontSize: 52, bold: false, color: "#ffffff", bgColor: "#000000", bgOpacity: 0.5, textAnim: "karaoke" } },
+  boldRise: { label: "Bold rise", place: "lower", props: { font: "Archivo Black", fontSize: 92, bold: false, uppercase: true, color: "#ffffff", textAnim: "rise-mask" } },
 };
 const STYLE_CYCLE = ["impact", "elegant", "kinetic", "neon", "handwritten", "serifDrop", "boldRise"];
 const AUDIO_EXT = /\.(mp3|wav|ogg|m4a|aac|flac|mpeg)$/i;
@@ -187,7 +187,7 @@ const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 function fmt(t) {
   t = Math.max(0, t);
   const m = Math.floor(t / 60), s = Math.floor(t % 60),
-        f = Math.floor((t % 1) * project.fps);
+    f = Math.floor((t % 1) * project.fps);
   const p = (n) => String(n).padStart(2, "0");
   return `${p(m)}:${p(s)}:${p(f)}`;
 }
@@ -245,7 +245,7 @@ function mediaTimeAt(c, t) {
   const idx = Math.min(e.cum.length - 1, local / e.step);
   const i0 = Math.floor(idx), frac = idx - i0;
   const v = i0 >= e.cum.length - 1 ? e.cum[e.cum.length - 1]
-          : e.cum[i0] + (e.cum[i0 + 1] - e.cum[i0]) * frac;
+    : e.cum[i0] + (e.cum[i0 + 1] - e.cum[i0]) * frac;
   return c.in + v;
 }
 let toastTimer = null;
@@ -280,14 +280,25 @@ async function connectServer() {
     els.projectName.textContent = project.name + "  ·  🟢 connected";
     listenSSE();
     fetch("/api/export/ffmpeg").then((r) => r.json())
-      .then((j) => { state.ffmpeg = !!j.available; }).catch(() => {});
+      .then((j) => { state.ffmpeg = !!j.available; }).catch(() => { });
   } catch {
     state.connected = false;
     els.projectName.textContent = project.name + "  ·  ⚪ local session";
   }
   await probeMissingMeta();
 }
+const TIMELINE_START_TIME = 0.000; // composition timeline start (seconds)
+function normalizeWorkArea(i, o, t0 = TIMELINE_START_TIME) {
+  let inPoint = (i != null && isFinite(i)) ? Math.max(t0, +i) : null;
+  let outPoint = (o != null && isFinite(o)) ? Math.max(t0, +o) : null;
+  if (inPoint != null && outPoint != null && outPoint <= inPoint) {
+    inPoint = null;
+    outPoint = null;
+  }
+  return { inPoint, outPoint };
+}
 function applyProject(data) {
+  const wa = normalizeWorkArea(data.inPoint, data.outPoint);
   Object.assign(project, {
     name: data.name || "Untitled Project",
     width: data.width || 1280, height: data.height || 720, fps: data.fps || 30,
@@ -295,8 +306,8 @@ function applyProject(data) {
     revision: data.revision || 0,
     media: data.media || [], clips: data.clips || [],
     markers: (data.markers || []).filter((m) => m && isFinite(m.t)).sort((a, b) => a.t - b.t),
-    inPoint: (data.inPoint != null && isFinite(data.inPoint)) ? +data.inPoint : null,
-    outPoint: (data.outPoint != null && isFinite(data.outPoint)) ? +data.outPoint : null,
+    inPoint: wa.inPoint,
+    outPoint: wa.outPoint,
   });
   for (const c of project.clips) {
     c.props = { ...DEFAULT_PROPS, ...(c.props || {}) };
@@ -305,7 +316,7 @@ function applyProject(data) {
     if (c.kind === "text") ensureFont(c.props.font);
   }
   // reset runtime playback elements so they rebuild against new data
-  for (const el of runtime.clipEls.values()) { try { el.pause(); el.src = ""; } catch {} }
+  for (const el of runtime.clipEls.values()) { try { el.pause(); el.src = ""; } catch { } }
   runtime.clipEls.clear(); runtime.clipGain.clear();
   els.preview.width = project.width; els.preview.height = project.height;
   els.monitorRes.textContent = `${project.width} × ${project.height} · ${project.fps}fps`;
@@ -331,7 +342,7 @@ function scheduleSave() {
         await syncFromServer(true);
         toast("Project was updated externally — your last change may need redoing.");
       }
-    } catch {}
+    } catch { }
   }, 400);
 }
 function projectJSON() {
@@ -372,28 +383,28 @@ async function syncFromServer(force) {
     }
     applyProject(data);
     await probeMissingMeta();
-  } catch {}
+  } catch { }
 }
 /* Fill in duration/size for media entries added externally without metadata */
 async function probeMissingMeta() {
   let changed = false;
   for (const m of project.media) {
     if (m.kind === "svg") {
-      if (!runtime.mediaAux.get(m.id)?.svgText) { try { await loadSvgMedia(m); changed = true; } catch {} }
+      if (!runtime.mediaAux.get(m.id)?.svgText) { try { await loadSvgMedia(m); changed = true; } catch { } }
       continue;
     }
     if (m.kind !== "image" && (m.duration == null || isNaN(m.duration))) {
-      try { Object.assign(m, await probeAV(m.src, m.kind)); changed = true; } catch {}
+      try { Object.assign(m, await probeAV(m.src, m.kind)); changed = true; } catch { }
     }
     if (m.kind === "image" && !runtime.mediaAux.get(m.id)?.img) {
       try {
         const img = await loadImage(m.src);
         runtime.mediaAux.set(m.id, { ...(runtime.mediaAux.get(m.id) || {}), img });
         m.width = img.naturalWidth; m.height = img.naturalHeight; changed = true;
-      } catch {}
+      } catch { }
     }
     if (m.kind === "video" && !runtime.mediaAux.get(m.id)?.thumb) {
-      grabThumb(m).catch(() => {});
+      grabThumb(m).catch(() => { });
     }
     ensureWave(m);
   }
@@ -506,7 +517,7 @@ async function importFiles(fileList) {
         m.width = img.naturalWidth; m.height = img.naturalHeight;
       } else {
         Object.assign(m, await probeAV(src, kind));
-        if (kind === "video") grabThumb(m).catch(() => {});
+        if (kind === "video") grabThumb(m).catch(() => { });
         ensureWave(m);
       }
     } catch { skipped++; continue; }
@@ -603,19 +614,19 @@ async function addLibraryItem(f, trackId, at) {
   const m = mediaForLibraryItem(f);
   if (!m) { toast("Unsupported file type: " + f.name); return; }
   if ((m.kind === "audio" || m.kind === "video") && (m.duration == null || isNaN(m.duration))) {
-    try { Object.assign(m, await probeAV(m.src, m.kind)); } catch {}
+    try { Object.assign(m, await probeAV(m.src, m.kind)); } catch { }
     ensureWave(m);
-    if (m.kind === "video") grabThumb(m).catch(() => {});
+    if (m.kind === "video") grabThumb(m).catch(() => { });
   }
   if (m.kind === "svg" && !runtime.mediaAux.get(m.id)?.svgText) {
-    try { await loadSvgMedia(m); } catch {}
+    try { await loadSvgMedia(m); } catch { }
   }
   if (m.kind === "image" && !runtime.mediaAux.get(m.id)?.img) {
     try {
       const img = await loadImage(m.src);
       runtime.mediaAux.set(m.id, { ...(runtime.mediaAux.get(m.id) || {}), img });
       m.width = img.naturalWidth; m.height = img.naturalHeight;
-    } catch {}
+    } catch { }
   }
   addClipFromMedia(m, trackId, at);
 }
@@ -744,7 +755,7 @@ function applyTitleStyle(clip, name, { keepTransform = false } = {}) {
     const place = st.place || "center";
     P.x = 0;
     P.y = place === "lower" ? Math.round(H * 0.30)
-        : place === "upper" ? -Math.round(H * 0.30)
+      : place === "upper" ? -Math.round(H * 0.30)
         : place === "lower-left" ? Math.round(H * 0.28) : 0;
     if (place === "lower-left") { P.x = -Math.round(W * 0.18); P.align = "left"; }
   }
@@ -1031,7 +1042,7 @@ function rebuildClips() {
     const hasWave = c.kind === "audio" && runtime.wavePeaks.get(c.mediaId) instanceof Float32Array;
     if (hasWave) inner += `<canvas class="wave"></canvas>`;
     const badge = (c.keyframes && Object.keys(c.keyframes).length ? "◆ " : "") +
-                  (c.transitionIn || c.transitionOut ? "⇄ " : "");
+      (c.transitionIn || c.transitionOut ? "⇄ " : "");
     inner += `<div class="fade"></div>
       <div class="clip-label">${badge}${c.kind === "text" ? "T · " + (c.props.text || "").split("\n")[0]
         : c.kind === "adjust" ? "FX · " + c.name : c.name}</div>
@@ -1384,16 +1395,31 @@ function toggleMarker() {
   scheduleSave();
 }
 /* Work-area IN/OUT markers (I / O). Shift+I / Shift+O clear them. */
+function workAreaTime() {
+  return Math.max(TIMELINE_START_TIME, +state.time.toFixed(3));
+}
 function setInPoint() {
-  project.inPoint = +state.time.toFixed(3);
-  if (project.outPoint != null && project.inPoint > project.outPoint) project.outPoint = null;
+  const t = workAreaTime();
+  const prevOut = project.outPoint;
+  const { inPoint, outPoint } = normalizeWorkArea(t, prevOut);
+  if (prevOut != null && inPoint == null && outPoint == null) {
+    toast(Math.abs(t - prevOut) < 1e-6 ? "IN and OUT must be at different times" : "IN must be before OUT");
+  }
+  project.inPoint = inPoint;
+  project.outPoint = outPoint;
   updateWorkArea();
   syncTrimIOButton();
   scheduleSave();
 }
 function setOutPoint() {
-  project.outPoint = +state.time.toFixed(3);
-  if (project.inPoint != null && project.outPoint < project.inPoint) project.inPoint = null;
+  const t = workAreaTime();
+  const prevIn = project.inPoint;
+  const { inPoint, outPoint } = normalizeWorkArea(prevIn, t);
+  if (prevIn != null && inPoint == null && outPoint == null) {
+    toast(Math.abs(t - prevIn) < 1e-6 ? "IN and OUT must be at different times" : "OUT must be after IN");
+  }
+  project.inPoint = inPoint;
+  project.outPoint = outPoint;
   updateWorkArea();
   syncTrimIOButton();
   scheduleSave();
@@ -1451,7 +1477,7 @@ els.timelineScroll.addEventListener("drop", (e) => {
   const track = trackAtEvent(e), at = snapTime(timeAtEvent(e), null);
   // library assets may not be probed yet — addLibraryItem fills metadata first
   if ((m.duration == null && m.kind !== "image" && m.kind !== "svg") ||
-      (m.kind === "svg" && !runtime.mediaAux.get(m.id)?.svgText))
+    (m.kind === "svg" && !runtime.mediaAux.get(m.id)?.svgText))
     addLibraryItem({ name: m.name, src: m.src }, track, at);
   else
     addClipFromMedia(m, track, at);
@@ -1707,8 +1733,8 @@ function renderInspector(lite) {
     input.addEventListener("input", () => {
       const k = input.dataset.k;
       let v = input.type === "checkbox" ? input.checked
-            : input.type === "range" || input.type === "number" ? parseFloat(input.value)
-            : input.value;
+        : input.type === "range" || input.type === "number" ? parseFloat(input.value)
+          : input.value;
       if (k === "weight") v = +v || 0;
       if (k === "font") ensureFont(String(v));
       if (k === "name") { c.name = String(v); state.dirtyTimeline = true; }
@@ -1801,9 +1827,9 @@ function getClipEl(c) {
 }
 function releaseClipEl(id) {
   const el = runtime.clipEls.get(id);
-  if (el) { try { el.pause(); el.src = ""; } catch {} runtime.clipEls.delete(id); }
+  if (el) { try { el.pause(); el.src = ""; } catch { } runtime.clipEls.delete(id); }
   const g = runtime.clipGain.get(id);
-  if (g) { try { g.disconnect(); } catch {} runtime.clipGain.delete(id); }
+  if (g) { try { g.disconnect(); } catch { } runtime.clipGain.delete(id); }
 }
 function ensureAudio() {
   if (runtime.audio) return runtime.audio;
@@ -1828,7 +1854,7 @@ function hookAudio(c, el) {
     const g = runtime.audio.ctx.createGain();
     src.connect(g); g.connect(runtime.audio.master);
     runtime.clipGain.set(c.id, g);
-  } catch {}
+  } catch { }
 }
 
 function play() {
@@ -1864,9 +1890,9 @@ function syncMedia() {
     const sp = clamp(+p.speed || 1, 0.1, 8);
     const mt = mediaTimeAt(c, t);
     if (state.playing && activeAt(c, t)) {
-      if (el.playbackRate !== sp) { try { el.playbackRate = sp; } catch {} }
-      if (el.paused) el.play().catch(() => {});
-      if (Math.abs(el.currentTime - mt) > 0.25 * sp) { try { el.currentTime = mt; } catch {} }
+      if (el.playbackRate !== sp) { try { el.playbackRate = sp; } catch { } }
+      if (el.paused) el.play().catch(() => { });
+      if (Math.abs(el.currentTime - mt) > 0.25 * sp) { try { el.currentTime = mt; } catch { } }
       const vol = clamp(p.volume, 0, 4);
       const g = runtime.clipGain.get(c.id);
       if (g) g.gain.value = vol;
@@ -1884,7 +1910,7 @@ function seekMediaWhilePaused() {
     if (!activeAt(c, t)) continue;
     const el = getClipEl(c); if (!el) continue;
     const mt = mediaTimeAt(c, t);
-    if (Math.abs(el.currentTime - mt) > 0.04) { try { el.currentTime = mt; } catch {} }
+    if (Math.abs(el.currentTime - mt) > 0.04) { try { el.currentTime = mt; } catch { } }
   }
 }
 
@@ -1946,16 +1972,16 @@ function applyTransition(p, type, k, W, H, dir) {
   switch (type) {
     case "fade": case "dissolve":
       p.opacity *= 1 - k; p.volume *= 1 - k; break;
-    case "slide-left":  p.x = (+p.x || 0) - dir * k * W; break;
+    case "slide-left": p.x = (+p.x || 0) - dir * k * W; break;
     case "slide-right": p.x = (+p.x || 0) + dir * k * W; break;
-    case "slide-up":    p.y = (+p.y || 0) - dir * k * H; break;
-    case "slide-down":  p.y = (+p.y || 0) + dir * k * H; break;
+    case "slide-up": p.y = (+p.y || 0) - dir * k * H; break;
+    case "slide-down": p.y = (+p.y || 0) + dir * k * H; break;
     case "zoom":
       p.scale = (+p.scale || 1) * (1 - 0.6 * k); p.opacity *= 1 - k; break;
     case "wipe": case "wipe-left": p._wipe = k; p._wipeDir = "left"; break;
     case "wipe-right": p._wipe = k; p._wipeDir = "right"; break;
-    case "wipe-up":    p._wipe = k; p._wipeDir = "up"; break;
-    case "wipe-down":  p._wipe = k; p._wipeDir = "down"; break;
+    case "wipe-up": p._wipe = k; p._wipeDir = "up"; break;
+    case "wipe-down": p._wipe = k; p._wipeDir = "down"; break;
     case "iris": p._iris = k; break;
     case "spin":
       p.rotation = (+p.rotation || 0) + dir * k * 200;
@@ -2049,7 +2075,7 @@ function getSvgImage(c, t) {
       aux.svgFrames.set(q, img);
       if (aux.svgFrames.size > 90) aux.svgFrames.delete(aux.svgFrames.keys().next().value);
       aux.lastImg = img;
-    }).catch(() => {}).finally(() => { aux.svgPending = null; });
+    }).catch(() => { }).finally(() => { aux.svgPending = null; });
   }
   return aux.lastImg || null; // may be one frame stale during preview
 }
@@ -2066,7 +2092,7 @@ async function prepareSvgFrame(c, t) {
     aux.svgFrames.set(q, img);
     if (aux.svgFrames.size > 90) aux.svgFrames.delete(aux.svgFrames.keys().next().value);
     aux.lastImg = img;
-  } catch {}
+  } catch { }
 }
 
 /* ═════════════ AI BACKGROUND REMOVAL (MediaPipe selfie segmentation) ════════
@@ -2115,7 +2141,7 @@ function requestMask(clipId, el, force = false) {
   bgSeg.queue = bgSeg.queue.then(async () => {
     if ((el.videoWidth || el.naturalWidth || 0) === 0) return;
     bgSeg.currentClip = clipId;
-    try { await bgSeg.seg.send({ image: el }); } catch {}
+    try { await bgSeg.seg.send({ image: el }); } catch { }
   }).finally(() => { bgSeg.pending--; });
   return bgSeg.queue;
 }
@@ -2194,7 +2220,7 @@ function drawAdjust(c, W, H, t) {
 }
 function needsPixelPass(p, c) {
   return !!(p.chromaKey || p.temperature || p.tint || p.rgbSplit > 0 ||
-            (p.bgRemove && bgSeg.masks.get(c.id)));
+    (p.bgRemove && bgSeg.masks.get(c.id)));
 }
 function hexToRgb(hex) {
   const n = parseInt(String(hex).replace("#", ""), 16) || 0;
@@ -2303,7 +2329,7 @@ function clipBounds(c, p, W, H) {
     ctx2d.save();
     const size = p.fontSize || 72, weight = +p.weight || (p.bold ? 700 : 400);
     ctx2d.font = `${p.italic ? "italic " : ""}${weight} ${size}px "${p.font || "Segoe UI"}", sans-serif`;
-    try { ctx2d.letterSpacing = `${+p.letterSpacing || 0}px`; } catch {}
+    try { ctx2d.letterSpacing = `${+p.letterSpacing || 0}px`; } catch { }
     let lines = String(p.text || "").split("\n");
     if (p.uppercase) lines = lines.map((l) => l.toUpperCase());
     const tw = Math.max(1, ...lines.map((l) => ctx2d.measureText(l).width));
@@ -2359,8 +2385,10 @@ function drawSelectionOverlay(W, H, t) {
 }
 function canvasPt(e) {
   const r = els.preview.getBoundingClientRect();
-  return { x: (e.clientX - r.left) * (els.preview.width / r.width),
-           y: (e.clientY - r.top) * (els.preview.height / r.height) };
+  return {
+    x: (e.clientX - r.left) * (els.preview.width / r.width),
+    y: (e.clientY - r.top) * (els.preview.height / r.height)
+  };
 }
 function toLocal(pt, b) {
   const dx = pt.x - b.cx, dy = pt.y - b.cy, cs = Math.cos(-b.rot), sn = Math.sin(-b.rot);
@@ -2458,7 +2486,7 @@ els.preview.addEventListener("pointermove", (e) => {
 function endCanvasDrag(e) {
   if (!canvasDrag) return;
   canvasDrag = null;
-  try { els.preview.releasePointerCapture(e.pointerId); } catch {}
+  try { els.preview.releasePointerCapture(e.pointerId); } catch { }
   if (canvasDidMove) { scheduleSave(); renderInspector(); } // no-op on a pure click
   updateCanvasCursor(e); // re-derive hover cursor at the release point
 }
@@ -2472,10 +2500,10 @@ function drawClip(c, W, H, t) {
   if (p._wipe) {
     ctx2d.beginPath();
     const k = p._wipe;
-    if (p._wipeDir === "right")     ctx2d.rect(W * k, 0, W * (1 - k), H);
-    else if (p._wipeDir === "up")   ctx2d.rect(0, 0, W, H * (1 - k));
+    if (p._wipeDir === "right") ctx2d.rect(W * k, 0, W * (1 - k), H);
+    else if (p._wipeDir === "up") ctx2d.rect(0, 0, W, H * (1 - k));
     else if (p._wipeDir === "down") ctx2d.rect(0, H * k, W, H * (1 - k));
-    else                            ctx2d.rect(0, 0, W * (1 - k), H);
+    else ctx2d.rect(0, 0, W * (1 - k), H);
     ctx2d.clip();
   }
   if (p._iris != null) {
@@ -2520,10 +2548,10 @@ function drawClip(c, W, H, t) {
     // fit → destination size
     const sc = p.scale || 1;
     let dw, dh;
-    if (p.fit === "cover")        { const f = Math.max(W / cw, H / ch) * sc; dw = cw * f; dh = ch * f; }
+    if (p.fit === "cover") { const f = Math.max(W / cw, H / ch) * sc; dw = cw * f; dh = ch * f; }
     else if (p.fit === "stretch") { dw = W * sc; dh = H * sc; }
-    else if (p.fit === "none")    { dw = cw * sc; dh = ch * sc; }
-    else                          { const f = Math.min(W / cw, H / ch) * sc; dw = cw * f; dh = ch * f; }
+    else if (p.fit === "none") { dw = cw * sc; dh = ch * sc; }
+    else { const f = Math.min(W / cw, H / ch) * sc; dw = cw * f; dh = ch * f; }
     if (p.flipH || p.flipV) ctx2d.scale(p.flipH ? -1 : 1, p.flipV ? -1 : 1);
     if (p.cornerRadius > 0) {
       ctx2d.beginPath();
@@ -2565,7 +2593,7 @@ function drawText(c, p, local) {
   const weight = +p.weight || (p.bold ? 700 : 400);
   ctx2d.font = `${p.italic ? "italic " : ""}${weight} ${size}px "${p.font || "Segoe UI"}", sans-serif`;
   ctx2d.textBaseline = "middle";
-  try { ctx2d.letterSpacing = `${+p.letterSpacing || 0}px`; } catch {}
+  try { ctx2d.letterSpacing = `${+p.letterSpacing || 0}px`; } catch { }
   ctx2d.scale(p.scale || 1, p.scale || 1);
   let rawLines = String(p.text || "").split("\n");
   if (p.uppercase) rawLines = rawLines.map((l) => l.toUpperCase());
@@ -2577,7 +2605,7 @@ function drawText(c, p, local) {
   const blockW = Math.max(1, ...lineWidths);
   // anchor x of each line's center, honoring block alignment
   const lineCx = (i) => align === "left" ? -blockW / 2 + lineWidths[i] / 2
-                     : align === "right" ? blockW / 2 - lineWidths[i] / 2 : 0;
+    : align === "right" ? blockW / 2 - lineWidths[i] / 2 : 0;
   const shadowBlur = (p.textShadow === 0 ? 0 : (+p.textShadow || 12)) * size / 100;
 
   // background pill per line (static — anchors the animated words)
@@ -2697,7 +2725,7 @@ function drawText(c, p, local) {
     const lw = rawLines.map((ln) => ctx2d.measureText(ln).width);
     const bw = Math.max(1, ...lw);
     const lcx = (i) => align === "left" ? -bw / 2 + lw[i] / 2
-                     : align === "right" ? bw / 2 - lw[i] / 2 : 0;
+      : align === "right" ? bw / 2 - lw[i] / 2 : 0;
     rawLines.forEach((ln, i) => { if (ln.trim()) paint(ln, lcx(i), y0 + i * lh); });
     return;
   }
@@ -2772,7 +2800,7 @@ function drawText(c, p, local) {
         paint(word, cx, y - Math.abs(Math.sin(local * 3.2 + wi * 0.9)) * size * 0.18);
       } else if (anim === "shake") { // continuous nervous jitter
         paint(word, cx + Math.sin(local * 31 + wi * 7.3) * size * 0.035,
-                    y + Math.cos(local * 27 + wi * 3.1) * size * 0.035);
+          y + Math.cos(local * 27 + wi * 3.1) * size * 0.035);
       } else { // karaoke: everything visible dim, spoken words at full strength
         paint(word, cx, y, u >= 1 ? 1 : 0.3 + u * 0.7);
       }
@@ -2797,10 +2825,10 @@ async function loadLibraryFonts() {
         await face.load();
         document.fonts.add(face);
         runtime.customFonts.push(family);
-      } catch {}
+      } catch { }
     }
     runtime.customFonts.sort();
-  } catch {}
+  } catch { }
 }
 function ensureFont(name) {
   if (!name || SYSTEM_FONTS.includes(name) || runtime.customFonts.includes(name)) return;
@@ -2958,7 +2986,7 @@ async function prepareFrameAssets(t) {
     if (c.kind === "svg") await prepareSvgFrame(c, t);
     if (c.props?.bgRemove && (c.kind === "video" || c.kind === "image")) {
       const el = c.kind === "video" ? getClipEl(c) : runtime.mediaAux.get(c.mediaId)?.img;
-      if (el) { try { await requestMask(c.id, el, true); } catch {} }
+      if (el) { try { await requestMask(c.id, el, true); } catch { } }
     }
   }
 }
@@ -2985,7 +3013,7 @@ async function fastExport() {
       const r = await fetch("/api/export/audio?id=" + sessId, { method: "POST", body: wav });
       if (!r.ok) throw new Error("audio upload failed");
     }
-    try { await document.fonts.ready; } catch {}
+    try { await document.fonts.ready; } catch { }
     for (let f = 0; f < frames; f++) {
       if (renderCancelled) throw new Error("cancelled");
       const t = f / fps;
@@ -3008,7 +3036,7 @@ async function fastExport() {
     a.download = decodeURIComponent(end.src.split("/").pop());
     a.click();
   } catch (e) {
-    if (sessId) fetch("/api/export/end?id=" + sessId + "&discard=1", { method: "POST" }).catch(() => {});
+    if (sessId) fetch("/api/export/end?id=" + sessId + "&discard=1", { method: "POST" }).catch(() => { });
     if (String(e.message) !== "cancelled") alert("Export failed: " + e.message);
   } finally {
     state.exporting = false; state.rendering = false;
