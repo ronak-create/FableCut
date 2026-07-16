@@ -14,6 +14,11 @@ live.
 
 Zero npm dependencies. One `node server.js`. That's it.
 
+**Recognition** — [front page of Hacker News](https://news.ycombinator.com/item?id=48845422) ·
+featured in [DEV's Top 7 posts of the week](https://dev.to/devteam/top-7-featured-dev-posts-of-the-week-815) ·
+#8 JavaScript repository of the day on [Trendshift](https://trendshift.io/repositories/77702) ·
+listed on the [official MCP registry](https://registry.modelcontextprotocol.io/v0/servers?search=fablecut)
+
 ![FableCut editor](docs/screenshot.png)
 
 ## Why it's interesting
@@ -143,6 +148,11 @@ Three equivalent control surfaces:
    Tools: `fablecut_status` (auto-starts the editor), `fablecut_docs`,
    `fablecut_get_project`, `fablecut_set_project`, `fablecut_patch_project`,
    `fablecut_import_media`, `fablecut_analyze_reference`.
+
+   FableCut is also published on the **official MCP registry** as
+   [`io.github.ronak-create/fablecut`](https://registry.modelcontextprotocol.io/v0/servers?search=fablecut)
+   — each release ships an MCPB bundle (`fablecut.mcpb`) that MCPB-capable
+   clients can install directly.
 
    The surface is **token-efficient by design**: agents patch the timeline with
    small ops (`fablecut_patch_project`) instead of round-tripping the whole
