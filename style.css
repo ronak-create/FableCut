@@ -206,7 +206,7 @@ body.track-size-s .clip .fade {
   display: none;
 }
 
-body.track-size-s .clip.c-audio::after {
+body.track-size-s .clip.c-audio .clip-body::after {
   height: 12px;
 }
 
@@ -944,11 +944,19 @@ input[type=range] {
   top: 3px;
   bottom: 3px;
   border-radius: 5px;
-  overflow: hidden;
+  overflow: visible;
   border: 1px solid #0007;
   cursor: grab;
   min-width: 8px;
   box-shadow: 0 1px 3px #0006;
+}
+
+/* rounded clip content — trans wedges sit outside this so corners stay sharp */
+.clip-body {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  overflow: hidden;
 }
 
 .clip:active {
@@ -987,6 +995,34 @@ input[type=range] {
   overflow: hidden;
   text-overflow: ellipsis;
   pointer-events: none;
+  z-index: 3;
+}
+
+/* transition wedges — SVG width from transition duration × pps (see transitionMarksHtml) */
+.clip .trans-mark {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  height: auto;
+  pointer-events: none;
+  z-index: 2;
+  overflow: hidden;
+}
+.clip .trans-mark.in {
+  left: 0;
+  border-top-left-radius: inherit;
+  border-bottom-left-radius: inherit;
+}
+.clip .trans-mark.out {
+  right: 0;
+  border-top-right-radius: inherit;
+  border-bottom-right-radius: inherit;
+}
+.clip .trans-mark polygon {
+  fill: #ffffff55;
+  stroke: #ffffffcc;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
 }
 
 .clip .fade {
@@ -994,6 +1030,7 @@ input[type=range] {
   inset: 0;
   background: linear-gradient(180deg, #ffffff1f, transparent 40%);
   pointer-events: none;
+  z-index: 0;
 }
 
 .clip .handle {
@@ -1002,7 +1039,7 @@ input[type=range] {
   bottom: 0;
   width: 8px;
   cursor: ew-resize;
-  z-index: 2;
+  z-index: 4;
 }
 
 .clip .handle.l {
@@ -1015,7 +1052,7 @@ input[type=range] {
   border-right: 3px solid #ffffff55;
 }
 
-.clip.c-video {
+.clip.c-video .clip-body {
   background: linear-gradient(180deg, #4c66ff33, #4c66ff11), #273575;
 }
 
@@ -1028,15 +1065,15 @@ input[type=range] {
   pointer-events: none;
 }
 
-.clip.c-image {
+.clip.c-image .clip-body {
   background: linear-gradient(180deg, #2dbd8533, #2dbd8511), #1d5b45;
 }
 
-.clip.c-audio {
+.clip.c-audio .clip-body {
   background: linear-gradient(180deg, #7ec24933, #7ec24911), #33531f;
 }
 
-.clip.c-audio::after {
+.clip.c-audio .clip-body::after {
   content: "";
   position: absolute;
   left: 0;
@@ -1050,7 +1087,7 @@ input[type=range] {
   pointer-events: none;
 }
 
-.clip.c-audio.has-wave::after {
+.clip.c-audio.has-wave .clip-body::after {
   display: none;
 }
 
@@ -1063,15 +1100,15 @@ input[type=range] {
   pointer-events: none;
 }
 
-.clip.c-text {
+.clip.c-text .clip-body {
   background: linear-gradient(180deg, #ff7ac833, #ff7ac811), #6b2a53;
 }
 
-.clip.c-svg {
+.clip.c-svg .clip-body {
   background: linear-gradient(180deg, #ffd16633, #ffd16611), #6b5420;
 }
 
-.clip.c-adjust {
+.clip.c-adjust .clip-body {
   background: repeating-linear-gradient(135deg, #38bdf822 0 10px, transparent 10px 20px), #155e75;
 }
 

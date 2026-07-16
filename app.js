@@ -1079,6 +1079,37 @@ function contentWidth() {
   const minSec = (els.timelineScroll.clientWidth || 800) / state.pps;
   return Math.max(projDur() + TIMELINE_PAD_SEC, minSec) * state.pps;
 }
+function clipTransitionDur(tr) {
+  if (!tr || tr.type === "none") return 0;
+  const d = +tr.duration;
+  return isFinite(d) && d > 0 ? d : 0;
+}
+function clipBorderRadius() {
+  return state.trackSize === "s" ? 2 : 5;
+}
+/* Top-edge SVG wedges — width from transition duration × pps. */
+function transitionMarksHtml(c, trackH) {
+  let html = "";
+  const clipH = Math.max(8, trackH - 6);
+  const r = clipBorderRadius();
+  const wedge = (tr, side) => {
+    const dur = clipTransitionDur(tr);
+    if (!dur) return;
+    const w = Math.max(4, Math.min(dur, c.duration) * state.pps);
+    const bot = clipH - r;
+    if (side === "in") {
+      // top edge (0,0)→(w,0); bottom vertex on left edge, y inset for corner radius
+      html += `<svg class="trans-mark in" style="width:${w}px" viewBox="0 0 ${w} ${clipH}" preserveAspectRatio="none" aria-hidden="true">` +
+        `<polygon points="0,0 ${w},0 0,${bot}"/></svg>`;
+    } else {
+      html += `<svg class="trans-mark out" style="width:${w}px" viewBox="0 0 ${w} ${clipH}" preserveAspectRatio="none" aria-hidden="true">` +
+        `<polygon points="0,0 ${w},0 ${w},${bot}"/></svg>`;
+    }
+  };
+  wedge(c.transitionIn, "in");
+  wedge(c.transitionOut, "out");
+  return html;
+}
 function rebuildClips() {
   const w = contentWidth();
   els.tracksContent.style.width = w + "px";
@@ -1093,19 +1124,20 @@ function rebuildClips() {
     div.dataset.id = c.id;
     div.style.left = c.start * state.pps + "px";
     div.style.width = Math.max(8, c.duration * state.pps) + "px";
-    let inner = "";
+    let body = "";
     if (c.kind === "video" && trackSizeShowsThumbs()) {
       const thumb = runtime.mediaAux.get(c.mediaId)?.thumb;
-      if (thumb) inner += `<div class="thumbs" style="background-image:url('${thumb}')"></div>`;
+      if (thumb) body += `<div class="thumbs" style="background-image:url('${thumb}')"></div>`;
     }
     const hasWave = c.kind === "audio" && runtime.wavePeaks.get(c.mediaId) instanceof Float32Array;
-    if (hasWave) inner += `<canvas class="wave"></canvas>`;
-    const badge = (c.keyframes && Object.keys(c.keyframes).length ? "◆ " : "") +
-      (c.transitionIn || c.transitionOut ? "⇄ " : "");
-    inner += `<div class="fade"></div>
+    if (hasWave) body += `<canvas class="wave"></canvas>`;
+    const badge = c.keyframes && Object.keys(c.keyframes).length ? "◆ " : "";
+    body += `<div class="fade"></div>
       <div class="clip-label">${badge}${c.kind === "text" ? "T · " + (c.props.text || "").split("\n")[0]
-        : c.kind === "adjust" ? "FX · " + c.name : c.name}</div>
-      <div class="handle l"></div><div class="handle r"></div>`;
+        : c.kind === "adjust" ? "FX · " + c.name : c.name}</div>`;
+    let inner = `<div class="clip-body">${body}</div>`;
+    inner += transitionMarksHtml(c, tr.h);
+    inner += `<div class="handle l"></div><div class="handle r"></div>`;
     div.innerHTML = inner;
     if (hasWave) div.classList.add("has-wave");
     row.appendChild(div);
@@ -1807,7 +1839,10 @@ function renderInspector(lite) {
       }
       else if (k === "transInDur" || k === "transOutDur") {
         const key = k === "transInDur" ? "transitionIn" : "transitionOut";
-        if (c[key]) c[key].duration = Math.max(0.1, +v || 1);
+        if (c[key]) {
+          c[key].duration = Math.max(0.1, +v || 1);
+          state.dirtyTimeline = true;
+        }
       }
       else { c.props[k] = v; if (k === "text") state.dirtyTimeline = true; }
       const valEl = els.inspector.querySelector(`[data-val="${k}"]`);
