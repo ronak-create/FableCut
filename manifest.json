@@ -1,0 +1,40 @@
+{
+  "manifest_version": "0.2",
+  "name": "fablecut",
+  "display_name": "FableCut",
+  "version": "1.6.0",
+  "description": "Zero-dependency browser video editor that AI agents can drive — JSON timeline, MCP tools, live-reloading UI.",
+  "long_description": "FableCut is a Premiere-style non-linear video editor that runs in the browser with zero npm dependencies. An AI agent edits video by patching a single project.json timeline (clips, keyframes, transitions, text animations, filters, speed ramps, adjustment layers) through MCP tools; the open editor UI live-reloads within ~150 ms and exports MP4 via ffmpeg. Includes reference-video analysis (shot cuts, beats, BPM, energy, drop) so agents can remake an edit with new footage.",
+  "author": {
+    "name": "Ronak Parmar",
+    "url": "https://github.com/ronak-create"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ronak-create/FableCut"
+  },
+  "homepage": "https://ronak-create.github.io/FableCut/",
+  "documentation": "https://github.com/ronak-create/FableCut/blob/main/CLAUDE.md",
+  "license": "MIT",
+  "keywords": ["video-editor", "nle", "timeline", "canvas", "mcp", "ai-agent", "ffmpeg"],
+  "server": {
+    "type": "node",
+    "entry_point": "mcp-server.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/mcp-server.js"]
+    }
+  },
+  "tools": [
+    { "name": "fablecut_status", "description": "Auto-start the editor server and return its URL plus a project summary" },
+    { "name": "fablecut_docs", "description": "Return the full editor manual (project.json schema, props, recipes), optionally a single section" },
+    { "name": "fablecut_get_project", "description": "Read the timeline JSON (compact mode available for token-efficient planning)" },
+    { "name": "fablecut_set_project", "description": "Replace the timeline JSON with optimistic-concurrency conflict detection" },
+    { "name": "fablecut_patch_project", "description": "Apply targeted, merge-safe ops (add/update/remove clip or media, set project fields)" },
+    { "name": "fablecut_import_media", "description": "Copy a local file into the project's media folder and register it" },
+    { "name": "fablecut_analyze_reference", "description": "Analyze a reference video into an edit blueprint: shot cuts, beats, BPM, energy curve, drop; extracts its music" }
+  ],
+  "compatibility": {
+    "runtimes": { "node": ">=18" }
+  }
+}
