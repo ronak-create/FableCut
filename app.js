@@ -2672,6 +2672,30 @@ function typewriterX(cx, fullW, shownW, rtl) {
 function runOrigin(cx, totalW, rtl) {
   return rtl ? cx + totalW / 2 : cx - totalW / 2;
 }
+// Arabic/Indic letters change shape when drawn in isolation — letter-pop/wave must
+// paint shaped clusters (whole words), not individual code points.
+const SHAPING_SCRIPT_RE = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF\u0900-\u097F\u0980-\u09FF\u0A00-\u0A7F\u0A80-\u0AFF\u0B00-\u0B7F\u0B80-\u0BFF\u0C00-\u0C7F\u0C80-\u0CFF\u0D00-\u0D7F]/;
+function needsContextualShaping(text) {
+  return SHAPING_SCRIPT_RE.test(text);
+}
+let _graphemeSeg;
+function graphemeSegments(text) {
+  if (typeof Intl !== "undefined" && Intl.Segmenter) {
+    if (!_graphemeSeg) _graphemeSeg = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+    return [..._graphemeSeg.segment(text)].map((s) => s.segment);
+  }
+  return [...text];
+}
+function letterAnimSegments(line) {
+  if (needsContextualShaping(line)) {
+    const out = [];
+    const re = /(\s+|[^\s]+)/g;
+    let m;
+    while ((m = re.exec(line))) out.push({ text: m[0], animate: !!m[0].trim() });
+    return out;
+  }
+  return graphemeSegments(line).map((text) => ({ text, animate: !!text.trim() }));
+}
 
 /* ── Text rendering: styling (stroke / background pill) + kinetic animations.
    `local` is clip-local time in seconds. Word timing: word i enters at
@@ -2838,32 +2862,34 @@ function drawText(c, p, local) {
     });
     return;
   }
-  // per-character animations (TikTok style)
+  // per-character animations (TikTok style); Arabic/Indic fall back to word clusters
   if (anim === "letter-pop" || anim === "wave") {
     let ci = 0;
     rawLines.forEach((ln, i) => {
       const y = y0 + i * lh;
       const rtl = lineDirs[i] === "rtl";
-      const chars = [...ln];
-      const widths = chars.map((ch) => ctx2d.measureText(ch).width);
+      const shaped = needsContextualShaping(ln);
+      const segs = letterAnimSegments(ln);
+      const stagger = shaped ? rate : rate / 3;
+      const widths = segs.map((s) => ctx2d.measureText(s.text).width);
       const total = widths.reduce((a, b) => a + b, 0);
       let x = runOrigin(lineCx(i), total, rtl);
-      chars.forEach((ch, j) => {
+      segs.forEach((seg, j) => {
         const w = widths[j];
         const cx = rtl ? x - w / 2 : x + w / 2;
-        if (ch.trim()) {
+        if (seg.animate) {
           if (anim === "letter-pop") {
-            const u = clamp((local - ci * rate / 3) / 0.18, 0, 1);
+            const u = clamp((local - ci * stagger) / 0.18, 0, 1);
             if (u > 0) {
               ctx2d.save();
               ctx2d.translate(cx, y);
               const s = Math.max(0.001, backOut(u));
               ctx2d.scale(s, s);
-              paint(ch, 0, 0, Math.min(1, u * 2.5), rtl);
+              paint(seg.text, 0, 0, Math.min(1, u * 2.5), rtl);
               ctx2d.restore();
             }
-          } else { // wave: continuous per-character sine ride
-            paint(ch, cx, y + Math.sin(local * 4 + ci * 0.55) * size * 0.12, 1, rtl);
+          } else { // wave: continuous per-segment sine ride
+            paint(seg.text, cx, y + Math.sin(local * 4 + ci * 0.55) * size * 0.12, 1, rtl);
           }
           ci++;
         }
