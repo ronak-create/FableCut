@@ -1100,12 +1100,15 @@ function transitionMarksHtml(c, trackH) {
     const bot = clipH - r;
     const focused = state.selId === c.id && state.transFocus === side ? " focused" : "";
     if (side === "in") {
-      // top edge (0,0)→(w,0); bottom vertex on left edge, y inset for corner radius
-      html += `<svg class="trans-mark in${focused}" style="width:${w}px" viewBox="0 0 ${w} ${clipH}" preserveAspectRatio="none" aria-hidden="true" title="Edit transition in">` +
-        `<polygon points="0,0 ${w},0 0,${bot}"/></svg>`;
+      html += `<div class="trans-mark in${focused}" style="width:${w}px" data-side="in">` +
+        `<svg viewBox="0 0 ${w} ${clipH}" preserveAspectRatio="none" aria-hidden="true">` +
+        `<polygon points="0,0 ${w},0 0,${bot}"/></svg>` +
+        `<div class="trans-dur-handle" title="Drag to adjust duration"></div></div>`;
     } else {
-      html += `<svg class="trans-mark out${focused}" style="width:${w}px" viewBox="0 0 ${w} ${clipH}" preserveAspectRatio="none" aria-hidden="true" title="Edit transition out">` +
-        `<polygon points="0,0 ${w},0 ${w},${bot}"/></svg>`;
+      html += `<div class="trans-mark out${focused}" style="width:${w}px" data-side="out">` +
+        `<svg viewBox="0 0 ${w} ${clipH}" preserveAspectRatio="none" aria-hidden="true">` +
+        `<polygon points="0,0 ${w},0 ${w},${bot}"/></svg>` +
+        `<div class="trans-dur-handle" title="Drag to adjust duration"></div></div>`;
     }
   };
   wedge(c.transitionIn, "in");
@@ -1294,6 +1297,12 @@ els.tracksContent.addEventListener("pointerdown", (e) => {
   }
   const c = getClip(clipDiv.dataset.id);
   if (!c) return;
+  const transHandle = e.target.closest(".trans-dur-handle");
+  if (transHandle) {
+    const wrap = transHandle.closest(".trans-mark");
+    startTransDurGesture(e, c, wrap?.classList.contains("out") ? "out" : "in");
+    return;
+  }
   const transMark = e.target.closest(".trans-mark");
   if (transMark) {
     e.preventDefault();
@@ -1317,6 +1326,43 @@ els.tracksContent.addEventListener("pointerdown", (e) => {
   // a plain click (no drag) on a multi-selection collapses it to that clip on release
   startClipGesture(e, c, mode, !additive && state.selIds.size > 1);
 });
+
+const MIN_TRANS_DUR = 0.1;
+function startTransDurGesture(e, c, side) {
+  e.preventDefault();
+  const key = side === "in" ? "transitionIn" : "transitionOut";
+  const tr = c[key];
+  if (!tr) return;
+  selectClip(c.id, { transFocus: side });
+  state.gesture = true;
+  const origDur = tr.duration;
+  const x0 = e.clientX;
+  let moved = false;
+  pushUndo();
+
+  const onMove = (ev) => {
+    const dx = ev.clientX - x0;
+    if (Math.abs(dx) < 2 && !moved) return;
+    moved = true;
+    const sign = side === "in" ? 1 : -1;
+    const dur = clamp(origDur + sign * dx / state.pps, MIN_TRANS_DUR, c.duration);
+    tr.duration = +dur.toFixed(3);
+    state.dirtyTimeline = true;
+    rebuildClips();
+    const durK = side === "in" ? "transInDur" : "transOutDur";
+    const inp = els.inspector.querySelector(`[data-k="${durK}"]`);
+    if (inp) inp.value = tr.duration;
+  };
+  const onUp = () => {
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+    state.gesture = false;
+    if (moved) scheduleSave();
+    renderInspector();
+  };
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp);
+}
 
 function startClipGesture(e, c, mode, collapseOnClick) {
   e.preventDefault();
