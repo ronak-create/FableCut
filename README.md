@@ -4,6 +4,12 @@
 
 <a href="https://trendshift.io/repositories/77702?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-77702" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/77702/daily?language=JavaScript" alt="ronak-create%2FFableCut | Trendshift" width="250" height="55"/></a>
 
+[![Hacker News — front page](https://img.shields.io/badge/Hacker%20News-front%20page-ff6600?logo=ycombinator&logoColor=white)](https://news.ycombinator.com/item?id=48845422)
+[![DEV — Top 7 of the week](https://img.shields.io/badge/DEV-Top%207%20of%20the%20week-0A0A0A?logo=devdotto&logoColor=white)](https://dev.to/devteam/top-7-featured-dev-posts-of-the-week-815)
+[![Official MCP registry](https://img.shields.io/badge/MCP%20registry-io.github.ronak--create%2Ffablecut-7b6cff?logo=modelcontextprotocol&logoColor=white)](https://registry.modelcontextprotocol.io/v0/servers?search=fablecut)
+[![Mentioned in Awesome MCP Servers](https://awesome.re/mentioned-badge.svg)](https://github.com/punkpeye/awesome-mcp-servers)
+[![Glama score](https://glama.ai/mcp/servers/ronak-create/FableCut/badges/score.svg)](https://glama.ai/mcp/servers/ronak-create/FableCut)
+
 <https://github.com/user-attachments/assets/2430b854-168b-4a9a-af2e-489e5efa7543>
 
 FableCut is a Premiere-style non-linear video editor that runs entirely in your
@@ -13,11 +19,6 @@ speaks MCP/REST) cut your video for you while you watch the timeline update
 live.
 
 Zero npm dependencies. One `node server.js`. That's it.
-
-**Recognition** — [front page of Hacker News](https://news.ycombinator.com/item?id=48845422) ·
-featured in [DEV's Top 7 posts of the week](https://dev.to/devteam/top-7-featured-dev-posts-of-the-week-815) ·
-#8 JavaScript repository of the day on [Trendshift](https://trendshift.io/repositories/77702) ·
-listed on the [official MCP registry](https://registry.modelcontextprotocol.io/v0/servers?search=fablecut)
 
 ![FableCut editor](docs/screenshot.png)
 
