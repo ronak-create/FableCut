@@ -36,11 +36,12 @@ same time.
   select all, <kbd>Esc</kbd> to deselect. Drag any selected clip to move the
   whole group; <kbd>Delete</kbd> removes all selected; <kbd>S</kbd> splits all
   selected at the playhead. Inspector shows an "N clips selected" banner.
-- Beat & cue markers (tap <kbd>M</kbd> on the beat during playback) with edge snapping
+- Beat & cue markers (tap <kbd>⇧m</kbd> on the beat during playback) with edge snapping
 - Real decoded audio waveforms on clips
 - Canvas aspect presets (16:9, 9:16 reels, 4:5, 1:1) + safe-area guides
 - Resizable workspace: drag the divider between monitor and timeline (double-click resets), plus S/M/L timeline track-density presets (S hides thumbnails for compact tracks)
-- Zoom to selection (Z) frames all selected clips, not just one
+- Zoom to selection (<kbd>⇧z</kbd>) frames all selected clips, not just one
+- **IN/OUT work area** — set markers with <kbd>i</kbd> and <kbd>o</kbd> (<kbd>⇧I</kbd> / <kbd>⇧O</kbd> to clear). Enabling **Limit** constrains playback to the marked range and maps <kbd>Home</kbd> / <kbd>End</kbd> to the IN and OUT positions rather than the full timeline. <kbd>t</kbd> splits clips at the markers; <kbd>⇧t</kbd> trims clips to the work (between marker in and marker out) area.
 
 **Look**
 - 12 one-click filter presets (cinematic, teal-orange, noir, vintage, cyberpunk…)
