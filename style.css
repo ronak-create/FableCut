@@ -1004,7 +1004,8 @@ input[type=range] {
   top: 0;
   bottom: 0;
   height: auto;
-  pointer-events: none;
+  pointer-events: auto;
+  cursor: pointer;
   z-index: 2;
   overflow: hidden;
 }
@@ -1023,6 +1024,18 @@ input[type=range] {
   stroke: #ffffffcc;
   stroke-width: 1;
   vector-effect: non-scaling-stroke;
+}
+.clip .trans-mark.focused polygon {
+  fill: #7b6cff88;
+  stroke: #cfc8ff;
+  stroke-width: 1.5;
+}
+
+.insp-row.trans-active {
+  background: #7b6cff18;
+  border-radius: 6px;
+  margin: 0 -6px;
+  padding: 2px 6px;
 }
 
 .clip .fade {

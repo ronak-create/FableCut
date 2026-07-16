@@ -154,6 +154,7 @@ const state = {
   workAreaPlay: false,   // when true, play + Home/End stay inside IN/OUT
   binTab: "project",     // project | elements | sfx | svg
   disabledTracks: loadDisabledTracks(),
+  transFocus: null,      // "in" | "out" — inspector transition row highlighted
 };
 function saveDisabledTracks() {
   try { localStorage.setItem(DISABLED_TRACKS_KEY, JSON.stringify([...state.disabledTracks])); } catch {}
@@ -1097,12 +1098,13 @@ function transitionMarksHtml(c, trackH) {
     if (!dur) return;
     const w = Math.max(4, Math.min(dur, c.duration) * state.pps);
     const bot = clipH - r;
+    const focused = state.selId === c.id && state.transFocus === side ? " focused" : "";
     if (side === "in") {
       // top edge (0,0)→(w,0); bottom vertex on left edge, y inset for corner radius
-      html += `<svg class="trans-mark in" style="width:${w}px" viewBox="0 0 ${w} ${clipH}" preserveAspectRatio="none" aria-hidden="true">` +
+      html += `<svg class="trans-mark in${focused}" style="width:${w}px" viewBox="0 0 ${w} ${clipH}" preserveAspectRatio="none" aria-hidden="true" title="Edit transition in">` +
         `<polygon points="0,0 ${w},0 0,${bot}"/></svg>`;
     } else {
-      html += `<svg class="trans-mark out" style="width:${w}px" viewBox="0 0 ${w} ${clipH}" preserveAspectRatio="none" aria-hidden="true">` +
+      html += `<svg class="trans-mark out${focused}" style="width:${w}px" viewBox="0 0 ${w} ${clipH}" preserveAspectRatio="none" aria-hidden="true" title="Edit transition out">` +
         `<polygon points="0,0 ${w},0 ${w},${bot}"/></svg>`;
     }
   };
@@ -1292,6 +1294,12 @@ els.tracksContent.addEventListener("pointerdown", (e) => {
   }
   const c = getClip(clipDiv.dataset.id);
   if (!c) return;
+  const transMark = e.target.closest(".trans-mark");
+  if (transMark) {
+    e.preventDefault();
+    selectClip(c.id, { transFocus: transMark.classList.contains("out") ? "out" : "in" });
+    return;
+  }
   const additive = e.ctrlKey || e.metaKey || e.shiftKey;
   if (additive) {
     selectClip(c.id, { toggle: true });
@@ -1660,11 +1668,16 @@ function setSelection(ids, primary) {
 function selectClip(id, opts) {
   if (opts && opts.toggle && id != null) {
     const s = new Set(state.selIds);
+    state.transFocus = null;
     if (s.has(id)) { s.delete(id); setSelection([...s]); }
     else { s.add(id); setSelection([...s], id); }
     return;
   }
-  if (state.selId === id && state.selIds.size <= 1) return;
+  const focus = opts?.transFocus ?? null;
+  if (id == null) state.transFocus = null;
+  else if (focus) state.transFocus = focus;
+  else state.transFocus = null;
+  if (state.selId === id && state.selIds.size <= 1 && focus === state.transFocus && focus == null) return;
   setSelection(id == null ? [] : [id], id ?? null);
 }
 /* Drop selected ids whose clips no longer exist (undo/redo, external reload) */
@@ -1767,9 +1780,12 @@ function renderInspector(lite) {
       ${slider("speed", 0.25, 4, 0.05, p.speed, "×")}
     </div>`;
   }
-  const tsel = (label, key, tr) => row(label,
-    `<span class="insp-ctrls"><select data-k="${key}">${TRANSITIONS.map((x) => `<option ${x === (tr?.type || "none") ? "selected" : ""}>${x}</option>`).join("")}</select>
-     <input type="number" class="insp-dur" data-k="${key}Dur" step="0.1" min="0.1" value="${tr?.duration ?? 1}"></span>`);
+  const tsel = (label, key, tr) => {
+    const active = state.transFocus === (key === "transIn" ? "in" : "out");
+    return `<div class="insp-row${active ? " trans-active" : ""}"><label>${label}</label>
+      <span class="insp-ctrls"><select data-k="${key}">${TRANSITIONS.map((x) => `<option ${x === (tr?.type || "none") ? "selected" : ""}>${x}</option>`).join("")}</select>
+       <input type="number" class="insp-dur" data-k="${key}Dur" step="0.1" min="0.1" value="${tr?.duration ?? 1}"></span></div>`;
+  };
   html += `<div class="insp-section"><h3>Transition</h3>
     ${tsel("In", "transIn", c.transitionIn)}
     ${tsel("Out", "transOut", c.transitionOut)}
@@ -1905,6 +1921,12 @@ function renderInspector(lite) {
       scheduleSave(); renderInspector();
     });
   });
+  if (state.transFocus) {
+    const k = state.transFocus === "in" ? "transIn" : "transOut";
+    const row = els.inspector.querySelector(`[data-k="${k}"]`)?.closest(".insp-row");
+    row?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    requestAnimationFrame(() => els.inspector.querySelector(`[data-k="${k}"]`)?.focus());
+  }
 }
 
 /* ═══════════════════════════ PLAYBACK ENGINE ═══════════════════════════ */
