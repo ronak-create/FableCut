@@ -1736,8 +1736,8 @@ function renderInspector(lite) {
     </div>`;
   }
   const tsel = (label, key, tr) => row(label,
-    `<select data-k="${key}">${TRANSITIONS.map((x) => `<option ${x === (tr?.type || "none") ? "selected" : ""}>${x}</option>`).join("")}</select>
-     <input type="number" data-k="${key}Dur" step="0.1" min="0.1" style="max-width:58px" value="${tr?.duration ?? 1}">`);
+    `<span class="insp-ctrls"><select data-k="${key}">${TRANSITIONS.map((x) => `<option ${x === (tr?.type || "none") ? "selected" : ""}>${x}</option>`).join("")}</select>
+     <input type="number" class="insp-dur" data-k="${key}Dur" step="0.1" min="0.1" value="${tr?.duration ?? 1}"></span>`);
   html += `<div class="insp-section"><h3>Transition</h3>
     ${tsel("In", "transIn", c.transitionIn)}
     ${tsel("Out", "transOut", c.transitionOut)}
@@ -1749,9 +1749,9 @@ function renderInspector(lite) {
     html += `<div class="insp-section"><h3>Text</h3>
       ${row("Content", `<textarea data-k="text">${p.text}</textarea>`)}
       ${slider("fontSize", 12, 300, 1, p.fontSize, "px")}
-      ${row("Color", `<input type="color" data-k="color" value="${p.color}">
+      ${row("Color", `<span class="insp-ctrls"><input type="color" data-k="color" value="${p.color}">
                       <input type="color" data-k="color2" value="${p.color2 || p.color}" title="Gradient bottom color">
-                      <button class="btn tiny${p.color2 ? "" : " toggle on"}" data-action="grad-off" title="Disable gradient">flat</button>`)}
+                      <button class="btn tiny${p.color2 ? "" : " toggle on"}" data-action="grad-off" title="Disable gradient">flat</button></span>`)}
       ${sel("Align", "align", ["left", "center", "right"], p.align)}
     </div>
     <div class="insp-section"><h3>Font</h3>
