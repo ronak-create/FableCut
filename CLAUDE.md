@@ -255,6 +255,7 @@ Examples in `library/svg/`: `sparkles.svg` (loop), `lower-third.svg`,
 | `bold` / `weight` | true / 0 | `weight` (300–900) overrides `bold` when non-zero |
 | `italic` `uppercase` | false | |
 | `align` | "center" | left · center · right (multi-line block alignment) |
+| `direction` | "auto" | auto · ltr · rtl — `auto` detects per line (Hebrew/Arabic → RTL); all `textAnim` modes honor reading direction (wipe, typewriter reveal, word/letter layout) |
 | `letterSpacing` | 0 | px |
 | `lineHeight` | 1.2 | multiplier |
 | `textShadow` | 12 | soft drop shadow amount, 0 = off |
@@ -262,7 +263,7 @@ Examples in `library/svg/`: `sparkles.svg` (loop), `lower-third.svg`,
 | `glowColor` | "" | glow color ("" = use the text color) |
 | `strokeWidth` `strokeColor` | 0, "#000" | text outline |
 | `bgColor` `bgOpacity` | "#000", 0 | rounded pill behind each line |
-| `textAnim` | "none" | typewriter · word-pop · word-slide · karaoke · **letter-pop** (per-character entrance) · **wave** (looping per-character ride) · **bounce** (looping per-word hop) · **shake** (looping jitter) · **clip-reveal** (wipe-mask sweep, per line) · **zoom-in** (scale + opacity settle) · **font-cut** (rhythmically swaps typeface, then settles — see `fontCutSet`) · **rise-mask** (line rises from behind its baseline, lower-third reveal) |
+| `textAnim` | "none" | typewriter · word-pop · word-slide · karaoke · **letter-pop** (per-character entrance; Arabic/Indic auto-fallback to per-word clusters so joined letters shape correctly) · **wave** (looping per-character ride; same shaping fallback) · **bounce** (looping per-word hop) · **shake** (looping jitter) · **clip-reveal** (wipe-mask sweep, per line) · **zoom-in** (scale + opacity settle) · **font-cut** (rhythmically swaps typeface, then settles — see `fontCutSet`) · **rise-mask** (line rises from behind its baseline, lower-third reveal) |
 | `wordRate` | 0.15 | seconds per word (typewriter: /4, letter-pop: /3 per character); also staggers `clip-reveal`/`zoom-in`/`rise-mask` per line |
 | `fontCutSet` | (curated) | array of font family names cycled by `font-cut`, e.g. `["Anton","Bebas Neue","Archivo Black","Oswald"]`; each is auto-loaded |
 
@@ -453,6 +454,12 @@ font:"Bebas Neue", textAnim:"wave"}` on a dark shot.
 **Reel caption**: text clip with `props: {textAnim:"word-pop", wordRate:0.15,
 strokeWidth:6, bgColor:"#000000", bgOpacity:0.45, fontSize:88}`. `karaoke`
 dims words until "spoken"; `typewriter` for terminal vibes.
+
+**RTL / Hebrew / Arabic caption**: omit `direction` (defaults to `"auto"`) or set
+`direction:"rtl"` explicitly; pick a font with the script's glyphs (Google Fonts
+work). Animations wipe and stagger in reading order automatically. `letter-pop` /
+`wave` animate whole words on Arabic/Indic lines (not isolated letters) so
+cursive joining stays correct.
 
 **Branded title**: `props: {font:"Bebas Neue", weight:700, letterSpacing:6,
 uppercase:true, color:"#ffffff", color2:"#7b6cff", textShadow:20}` — any Google
