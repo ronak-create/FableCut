@@ -53,7 +53,7 @@ same time.
 
 **Look**
 
-- 12 one-click filter presets (cinematic, teal-orange, noir, vintage, cyberpunk…)
+- 14 one-click filter presets (cinematic, teal-orange, noir, vintage, cyberpunk, sunset, midnight…)
 - **Adjustment layers** — one clip grades everything below it, Premiere-style
 - Full grade controls: brightness/contrast/saturation/hue, **temperature & tint**,
   blur, grayscale/sepia/invert, **vignette**, animated **film grain**

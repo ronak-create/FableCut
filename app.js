@@ -84,6 +84,8 @@ const FILTER_PRESETS = {
   retro: { saturation: 130, hue: -6, contrast: 106, sepia: 15 },
   "bw-soft": { grayscale: 100, contrast: 95, brightness: 108 },
   cyberpunk: { saturation: 140, hue: 12, contrast: 118, temperature: -15, vignette: 25 },
+  sunset: { temperature: 24, tint: 6, brightness: 105, saturation: 116, contrast: 104, vignette: 20 },
+  midnight: { temperature: -24, brightness: 88, contrast: 122, saturation: 94, vignette: 38 },
 };
 const SYSTEM_FONTS = ["Segoe UI", "Arial", "Georgia", "Impact", "Courier New",
   "Trebuchet MS", "Verdana", "Times New Roman", "Comic Sans MS", "Consolas"];

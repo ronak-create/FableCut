@@ -214,7 +214,7 @@ Examples in `library/svg/`: `sparkles.svg` (loop), `lower-third.svg`,
 **Filter / color** (video/image/svg):
 | prop | default | notes |
 |---|---|---|
-| `filterPreset` | "none" | one of: cinematic · teal-orange · noir · vintage · faded · warm · cold · pop · dreamy · retro · bw-soft · cyberpunk. Combines non-destructively with the sliders below. |
+| `filterPreset` | "none" | one of: cinematic · teal-orange · noir · vintage · faded · warm · cold · pop · dreamy · retro · bw-soft · cyberpunk · sunset · midnight. Combines non-destructively with the sliders below. |
 | `brightness` `contrast` `saturation` | 100 | % (100 = neutral) |
 | `hue` | 0 | degrees |
 | `temperature` | 0 | −100 (cool blue) … +100 (warm orange) |
