@@ -123,15 +123,9 @@ const ASPECT_PRESETS = [
   { label: "1:1 · 1080×1080", w: 1080, h: 1080 },
 ];
 const WAVE_PEAKS_PER_SEC = 50;
+const TRACK_IDS = new Set(TRACKS.map((t) => t.id));
 
 /* ── State ─────────────────────────────────────────────────────────────── */
-const DISABLED_TRACKS_KEY = "fablecut-disabled-tracks";
-function loadDisabledTracks() {
-  try {
-    const raw = JSON.parse(localStorage.getItem(DISABLED_TRACKS_KEY) || "[]");
-    return new Set(Array.isArray(raw) ? raw : []);
-  } catch { return new Set(); }
-}
 const project = {
   name: "Untitled Project",
   width: 1280, height: 720, fps: 30,
@@ -142,6 +136,7 @@ const project = {
   markers: [], // {t, label?} — beat/cue markers on the ruler; snap targets
   inPoint: null,  // timeline work-area IN (seconds), or null
   outPoint: null, // timeline work-area OUT (seconds), or null
+  disabledTracks: [], // track ids (V4…A3) hidden from preview/export when listed
 };
 const state = {
   time: 0, playing: false, pps: 60, snap: true,
@@ -155,22 +150,21 @@ const state = {
   dirtyTimeline: true, gesture: false,
   workAreaPlay: false,   // when true, play + Home/End stay inside IN/OUT
   binTab: "project",     // project | elements | sfx | svg
-  disabledTracks: loadDisabledTracks(),
+  disabledTracks: new Set(), // mirror of project.disabledTracks for fast lookup
   transFocus: null,      // "in" | "out" — inspector transition row highlighted
 };
-function saveDisabledTracks() {
-  try { localStorage.setItem(DISABLED_TRACKS_KEY, JSON.stringify([...state.disabledTracks])); } catch {}
+function normalizeDisabledTracks(raw) {
+  if (raw == null) return [];
+  const arr = Array.isArray(raw) ? raw : [];
+  return [...new Set(arr.filter((id) => TRACK_IDS.has(id)))].sort();
 }
 function isTrackEnabled(id) {
   return !state.disabledTracks.has(id);
 }
-function toggleTrackEnabled(id) {
-  if (state.disabledTracks.has(id)) state.disabledTracks.delete(id);
-  else state.disabledTracks.add(id);
-  saveDisabledTracks();
+function syncTrackDisabledUI(id) {
+  const on = isTrackEnabled(id);
   const head = els.trackHeaders.querySelector(`.track-head[data-track="${id}"]`);
   const row = els.tracks.querySelector(`.track[data-track="${id}"]`);
-  const on = isTrackEnabled(id);
   if (head) {
     head.classList.toggle("disabled", !on);
     const btn = head.querySelector(".track-toggle");
@@ -180,6 +174,17 @@ function toggleTrackEnabled(id) {
     }
   }
   if (row) row.classList.toggle("disabled", !on);
+}
+function syncAllTrackDisabledUI() {
+  for (const t of TRACKS) syncTrackDisabledUI(t.id);
+}
+function toggleTrackEnabled(id) {
+  if (!TRACK_IDS.has(id)) return;
+  if (state.disabledTracks.has(id)) state.disabledTracks.delete(id);
+  else state.disabledTracks.add(id);
+  project.disabledTracks = [...state.disabledTracks].sort();
+  syncTrackDisabledUI(id);
+  scheduleSave();
 }
 const runtime = {
   clipEls: new Map(),   // clipId -> HTMLMediaElement
@@ -333,6 +338,7 @@ function normalizeWorkArea(i, o, t0 = TIMELINE_START_TIME) {
 }
 function applyProject(data) {
   const wa = normalizeWorkArea(data.inPoint, data.outPoint);
+  const disabledTracks = normalizeDisabledTracks(data.disabledTracks);
   Object.assign(project, {
     name: data.name || "Untitled Project",
     width: data.width || 1280, height: data.height || 720, fps: data.fps || 30,
@@ -342,7 +348,9 @@ function applyProject(data) {
     markers: (data.markers || []).filter((m) => m && isFinite(m.t)).sort((a, b) => a.t - b.t),
     inPoint: wa.inPoint,
     outPoint: wa.outPoint,
+    disabledTracks,
   });
+  state.disabledTracks = new Set(disabledTracks);
   for (const c of project.clips) {
     c.props = { ...DEFAULT_PROPS, ...(c.props || {}) };
     if (c.keyframes) for (const arr of Object.values(c.keyframes))
@@ -360,6 +368,7 @@ function applyProject(data) {
   renderBin(); renderInspector();
   updateWorkArea();
   syncTrimIOButton();
+  syncAllTrackDisabledUI();
 }
 function scheduleSave() {
   state.dirtyTimeline = true;
@@ -380,7 +389,7 @@ function scheduleSave() {
   }, 400);
 }
 function projectJSON() {
-  const { name, width, height, fps, background, revision, media, clips, markers, inPoint, outPoint } = project;
+  const { name, width, height, fps, background, revision, media, clips, markers, inPoint, outPoint, disabledTracks } = project;
   return {
     name, width, height, fps, background, revision,
     media: media.filter((m) => !m.transient).map(({ id, name, kind, src, duration, width, height }) =>
@@ -390,6 +399,7 @@ function projectJSON() {
     markers: (markers || []).map(({ t, label }) => (label ? { t, label } : { t })),
     inPoint: inPoint == null ? null : inPoint,
     outPoint: outPoint == null ? null : outPoint,
+    disabledTracks: normalizeDisabledTracks(disabledTracks),
   };
 }
 function listenSSE() {

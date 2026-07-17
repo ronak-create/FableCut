@@ -95,7 +95,7 @@ const TOOLS = [
   },
   {
     name: "fablecut_patch_project",
-    description: "Apply targeted edits to the FableCut project WITHOUT round-tripping the whole document — PREFER THIS over get+set for every edit (it is ~10-100x cheaper in tokens and merge-safe by design: it re-reads the latest document from disk, applies your ops in order, bumps revision once, saves atomically). Ops: {op:'addClip', clip:{…}} (id auto-generated if omitted) · {op:'updateClip', id, set:{…}} · {op:'removeClip', id} · {op:'addMedia', media:{…}} · {op:'removeMedia', id} · {op:'setProject', set:{name|width|height|fps|background|markers}}. updateClip merge rules: top-level keys are replaced (keyframes/transitionIn/transitionOut wholesale), `props` merges key-by-key, and setting any key to null deletes it. All-or-nothing: an invalid op aborts the whole patch unsaved.",
+    description: "Apply targeted edits to the FableCut project WITHOUT round-tripping the whole document — PREFER THIS over get+set for every edit (it is ~10-100x cheaper in tokens and merge-safe by design: it re-reads the latest document from disk, applies your ops in order, bumps revision once, saves atomically). Ops: {op:'addClip', clip:{…}} (id auto-generated if omitted) · {op:'updateClip', id, set:{…}} · {op:'removeClip', id} · {op:'addMedia', media:{…}} · {op:'removeMedia', id} · {op:'setProject', set:{name|width|height|fps|background|markers|disabledTracks}}. updateClip merge rules: top-level keys are replaced (keyframes/transitionIn/transitionOut wholesale), `props` merges key-by-key, and setting any key to null deletes it. All-or-nothing: an invalid op aborts the whole patch unsaved.",
     inputSchema: {
       type: "object",
       properties: {
@@ -298,7 +298,7 @@ async function callTool(name, args) {
             break;
           }
           case "setProject": {
-            const allowed = ["name", "width", "height", "fps", "background", "markers"];
+            const allowed = ["name", "width", "height", "fps", "background", "markers", "disabledTracks"];
             for (const [k, v] of Object.entries(op.set || {})) {
               if (!allowed.includes(k)) throw new Error(`setProject: '${k}' not settable (allowed: ${allowed.join(", ")})`);
               if (v === null) delete proj[k]; else proj[k] = v;
