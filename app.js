@@ -110,8 +110,9 @@ const TITLE_STYLES = {
   serifDrop: { label: "Serif drop", place: "center", props: { font: "Abril Fatface", fontSize: 96, bold: false, color: "#ffffff", textShadow: 18, textAnim: "zoom-in" } },
   subtitle: { label: "Subtitle", place: "lower", props: { font: "Roboto", fontSize: 52, bold: false, color: "#ffffff", bgColor: "#000000", bgOpacity: 0.5, textAnim: "karaoke" } },
   boldRise: { label: "Bold rise", place: "lower", props: { font: "Archivo Black", fontSize: 92, bold: false, uppercase: true, color: "#ffffff", textAnim: "rise-mask" } },
+  luxury: { label: "Luxury", place: "center", props: { font: "Cinzel", fontSize: 88, bold: false, uppercase: true, color: "#faf0dc", color2: "#c9a227", letterSpacing: 6, textAnim: "clip-reveal" } },
 };
-const STYLE_CYCLE = ["impact", "elegant", "kinetic", "neon", "handwritten", "serifDrop", "boldRise"];
+const STYLE_CYCLE = ["impact", "elegant", "kinetic", "neon", "handwritten", "serifDrop", "boldRise", "luxury"];
 const AUDIO_EXT = /\.(mp3|wav|ogg|m4a|aac|flac|mpeg)$/i;
 const VIDEO_EXT = /\.(mp4|webm|mov|mkv|m4v)$/i;
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|avif)$/i;
