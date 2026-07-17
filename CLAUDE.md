@@ -283,6 +283,7 @@ dropdown + Shuffle), or reproduce it from an agent by writing the same props:
 | `serifDrop` | Abril Fatface | centered, `zoom-in` |
 | `subtitle` | Roboto | small, bottom, bg pill, `karaoke` |
 | `boldRise` | Archivo Black | uppercase, lower third, `rise-mask` |
+| `luxury` | Cinzel | uppercase, cream→gold gradient, wide `letterSpacing`, `clip-reveal` |
 
 **Rule for agents: vary the font per title — never reuse one font across a whole
 edit.** Any Google Font name auto-loads; the display faces above ship in
