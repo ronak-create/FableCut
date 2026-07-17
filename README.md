@@ -48,8 +48,9 @@ same time.
 - Real decoded audio waveforms on clips
 - Canvas aspect presets (16:9, 9:16 reels, 4:5, 1:1) + safe-area guides
 - Resizable workspace: drag the divider between monitor and timeline (double-click resets), plus S/M/L timeline track-density presets (S hides thumbnails for compact tracks)
-- Zoom to selection (<kbd>⇧z</kbd>) frames all selected clips, not just one
+- **Zoom to selection*** (<kbd>⇧Z</kbd>) frames all selected clips, not just one
 - **IN/OUT work area** — set markers with <kbd>i</kbd> and <kbd>o</kbd> (<kbd>⇧I</kbd> / <kbd>⇧O</kbd> to clear). Enabling **Limit** constrains playback to the marked range and maps <kbd>Home</kbd> / <kbd>End</kbd> to the IN and OUT positions rather than the full timeline. <kbd>t</kbd> splits clips at the markers; <kbd>⇧t</kbd> trims clips to the work (between marker in and marker out) area.
+- **Find & close gaps** — a gap is a stretch where every enabled track is empty (black frames). <kbd>g</kbd> jumps the playhead to the next shared gap (wraps; respects IN/OUT when both are set). <kbd>⇧G</kbd> closes the gap under the playhead by pulling later clips left on all enabled tracks.
 
 **Look**
 
