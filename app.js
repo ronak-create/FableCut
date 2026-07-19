@@ -8,20 +8,20 @@
 
 /* ── Constants ─────────────────────────────────────────────────────────── */
 const TRACKS = [
-  { id: "V4", kind: "video", h: 44, color: "#ff8a5c" },
   { id: "V3", kind: "video", h: 44, color: "#ffd166" },
   { id: "V2", kind: "video", h: 58, color: "#7b6cff" },
   { id: "V1", kind: "video", h: 58, color: "#4f8cff" },
   { id: "A1", kind: "audio", h: 42, color: "#7ec249" },
   { id: "A2", kind: "audio", h: 42, color: "#5a9e3a" },
   { id: "A3", kind: "audio", h: 42, color: "#4a8a2f" },
+  { id: "A4", kind: "audio", h: 42, color: "#3a7226" },
 ];
 /* Three timeline density presets. L matches the original track heights (with thumbs).
    S is compact solid-color rows; M is in between. */
 const TRACK_SIZE_PRESETS = {
-  s: { thumbs: false, h: { V4: 26, V3: 26, V2: 26, V1: 26, A1: 22, A2: 22, A3: 22 } },
-  m: { thumbs: true, h: { V4: 36, V3: 36, V2: 44, V1: 44, A1: 32, A2: 32, A3: 32 } },
-  l: { thumbs: true, h: { V4: 44, V3: 44, V2: 58, V1: 58, A1: 42, A2: 42, A3: 42 } },
+  s: { thumbs: false, h: { V3: 26, V2: 26, V1: 26, A1: 22, A2: 22, A3: 22, A4: 22 } },
+  m: { thumbs: true, h: { V3: 36, V2: 44, V1: 44, A1: 32, A2: 32, A3: 32, A4: 32 } },
+  l: { thumbs: true, h: { V3: 44, V2: 58, V1: 58, A1: 42, A2: 42, A3: 42, A4: 42 } },
 };
 const TRACK_SIZE_KEY = "fablecut-track-size";
 const LAST_TRANS_KEY = { in: "fablecut-last-trans-in", out: "fablecut-last-trans-out" };
