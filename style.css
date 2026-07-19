@@ -564,7 +564,7 @@ body.track-size-s .clip.selected {
 /* ── Per-track VU (RMS / LUFS / Peak) ── */
 .vu-meter {
   position: absolute;
-  right: 10px;
+  right: 2px;
   bottom: 10px;
   display: flex;
   flex-direction: column;
@@ -593,8 +593,28 @@ body.track-size-s .clip.selected {
 .vu-mode:hover { opacity: 1; color: #fff; }
 .vu-channels {
   display: flex;
+  align-items: flex-start;
   gap: 4px;
 }
+.vu-scale {
+  position: relative;
+  /* Match .vu-segs height: 16×8px + 15×2px gap */
+  width: 16px;
+  height: 158px;
+  margin-right: 0px;
+  pointer-events: none;
+}
+.vu-scale-tick {
+  position: absolute;
+  right: 0;
+  transform: translateY(-50%);
+  font: 700 8px/1 ui-sans-serif, system-ui, sans-serif;
+  color: #8b8b93;
+  letter-spacing: .2px;
+  white-space: nowrap;
+}
+.vu-scale-tick:first-child { transform: translateY(0); }
+.vu-scale-tick:last-child { transform: translateY(-100%); }
 .vu-channel {
   display: flex;
   flex-direction: column;
@@ -608,7 +628,7 @@ body.track-size-s .clip.selected {
 }
 .vu-seg {
   width: 8px;
-  height: 8px;
+  height: 12px;
   border-radius: 1px;
   background: #2a2a33;
   box-shadow: inset 0 0 0 1px #0006;

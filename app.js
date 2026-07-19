@@ -2416,6 +2416,8 @@ function routeClipGain(c) {
 const METER_SEGS = 16;
 const METER_DB_MIN = -48;
 const METER_DB_MAX = 0;
+/** Scale tick marks shown beside the meter bars (dBFS). */
+const METER_DB_MARKS = [0, -6, -12, -24, -36, -48];
 const METER_MODES = ["rms", "lufs", "peak"];
 const METER_MODE_LABEL = { rms: "RMS", lufs: "LUFS", peak: "PEAK" };
 const meterState = {
@@ -2528,6 +2530,19 @@ function buildMeterDOM() {
 
   const row = document.createElement("div");
   row.className = "vu-channels";
+
+  const scale = document.createElement("div");
+  scale.className = "vu-scale";
+  const span = METER_DB_MAX - METER_DB_MIN;
+  for (const db of METER_DB_MARKS) {
+    const tick = document.createElement("span");
+    tick.className = "vu-scale-tick";
+    tick.textContent = db === 0 ? "0" : String(db);
+    tick.style.top = ((METER_DB_MAX - db) / span * 100) + "%";
+    scale.appendChild(tick);
+  }
+  row.appendChild(scale);
+
   meterState.segs = {};
   meterState.trackIds = tracks.map((t) => t.id);
   for (const t of tracks) {
