@@ -85,7 +85,15 @@ same time.
 - Font editor: system fonts, drop-in custom fonts (`library/fonts/`), and **any
   Google Font by name** — loaded automatically
 - Gradient fills, outline, background pills, letter-spacing, line-height,
-  weights, italic, uppercase, alignment, soft shadows
+  weights, italic, uppercase, soft shadows
+- **Text layout** — horizontal Align: left / center / right / **justify**
+  (extra spaces between words). Drag a title’s corner handles to create a
+  **text box** (`boxW` / `boxH`); further corner drags resize it (opposite
+  corner stays fixed; <kbd>Ctrl/Cmd</kbd> resizes from center; <kbd>Shift</kbd>
+  locks aspect). Inside a box, text wraps at the fixed font size by default;
+  enable **Scale to fit** to shrink the font so the whole block fits. **V-align**
+  (top / middle / bottom) places the text block vertically in the box. Set Box
+  W/H to `0` to return to hug-content sizing.
 
 **Animated SVG clips**
 

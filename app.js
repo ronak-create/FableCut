@@ -56,6 +56,9 @@ const DEFAULT_PROPS = {
   glow: 0, glowColor: "",                      // neon glow (glowColor defaults to fill)
   textAnim: "none", wordRate: 0.15, direction: "auto",
   strokeWidth: 0, strokeColor: "#000000", bgColor: "#000000", bgOpacity: 0,
+  boxW: 0, boxH: 0,                            // text box (px); 0 = hug content. Resize handles edit these.
+  boxFit: false,                               // false = wrap at fixed fontSize; true = scale font to fit box
+  vAlign: "middle",                            // top | middle | bottom — vertical align of the text block in the box
 };
 const ANIMATABLE = ["x", "y", "scale", "rotation", "opacity", "volume", "speed",
   "brightness", "contrast", "saturation", "hue", "blur", "grayscale", "sepia", "invert",
@@ -2032,11 +2035,19 @@ function renderInspector(lite) {
     const known = [...SYSTEM_FONTS, ...runtime.customFonts, ...GOOGLE_FONTS, ...runtime.googleLoaded];
     html += `<div class="insp-section"><h3>Text</h3>
       ${row("Content", `<textarea data-k="text">${p.text}</textarea>`, "", "text")}
-      ${slider("fontSize", 12, 300, 1, p.fontSize, "px")}
+      ${row(hasTextBox(p) && p.boxFit ? "Max size" : "Font size",
+        `<input type="range" data-k="fontSize" min="12" max="300" step="1" value="${p.fontSize}">
+         <span class="val" data-val="fontSize">${p.fontSize}px</span>`, "fontSize")}
+      ${row("Box W/H", `<span class="insp-ctrls">
+        <input type="number" data-k="boxW" min="0" step="1" value="${p.boxW || 0}" title="Width in px (0 = no box — hug content)" style="max-width:64px">
+        <input type="number" data-k="boxH" min="0" step="1" value="${p.boxH || 0}" title="Height in px (0 = no box — hug content)" style="max-width:64px">
+      </span>`, "", "boxW,boxH")}
+      ${hasTextBox(p) ? check("Scale to fit", "boxFit", !!p.boxFit) : ""}
       ${row("Color", `<span class="insp-ctrls"><input type="color" data-k="color" value="${p.color}">
                       <input type="color" data-k="color2" value="${p.color2 || p.color}" title="Gradient bottom color">
                       <button class="btn tiny${p.color2 ? "" : " toggle on"}" data-action="grad-off" title="Disable gradient">flat</button></span>`, "", "color,color2")}
-      ${sel("Align", "align", ["left", "center", "right"], p.align)}
+      ${sel("Align", "align", ["left", "center", "right", "justify"], p.align)}
+      ${hasTextBox(p) ? sel("V-align", "vAlign", ["top", "middle", "bottom"], p.vAlign || "middle") : ""}
       ${sel("Direction", "direction", ["auto", "ltr", "rtl"], p.direction || "auto")}
     </div>
     <div class="insp-section"><h3>Font</h3>
@@ -2721,17 +2732,12 @@ function clipBounds(c, p, W, H) {
   const rot = (p.rotation || 0) * Math.PI / 180, sc = +p.scale || 1;
   let hw, hh;
   if (c.kind === "text") {
-    ctx2d.save();
-    const size = p.fontSize || 72, weight = +p.weight || (p.bold ? 700 : 400);
-    ctx2d.font = `${p.italic ? "italic " : ""}${weight} ${size}px "${p.font || "Segoe UI"}", sans-serif`;
-    try { ctx2d.letterSpacing = `${+p.letterSpacing || 0}px`; } catch { }
-    let lines = String(p.text || "").split("\n");
-    if (p.uppercase) lines = lines.map((l) => l.toUpperCase());
-    const tw = Math.max(1, ...lines.map((l) => ctx2d.measureText(l).width));
-    const lh = size * clamp(+p.lineHeight || 1.2, 0.6, 3);
-    ctx2d.restore();
-    hw = (tw / 2 + size * 0.25) * sc;
-    hh = (lines.length * lh / 2 + size * 0.14) * sc;
+    if (hasTextBox(p)) {
+      hw = +p.boxW / 2; hh = +p.boxH / 2;
+    } else {
+      const half = measureTextHalfSize(p);
+      hw = half.hw; hh = half.hh;
+    }
   } else {                       // media/svg: canvas-sized base box, scaled
     hw = (W / 2) * sc; hh = (H / 2) * sc;
   }
@@ -2813,7 +2819,24 @@ els.preview.addEventListener("pointerdown", (e) => {
     if (Math.hypot(pt.x - hd.rotate.x, pt.y - hd.rotate.y) <= grab) {
       canvasDrag = { mode: "rotate", id: cur.id, startRot: +cur.props.rotation || 0, startAng: Math.atan2(pt.y - b.cy, pt.x - b.cx) };
     } else if (hd.corners.some((h) => Math.abs(pt.x - h.x) <= grab && Math.abs(pt.y - h.y) <= grab)) {
-      canvasDrag = { mode: "scale", id: cur.id, startScale: +cur.props.scale || 1, startDist: Math.hypot(lp.x, lp.y) || 1 };
+      if (cur.kind === "text") {
+        ensureTextBox(cur);
+        // Recompute bounds after seeding the box; pin the opposite corner.
+        const b2 = clipBounds(cur, evalProps(cur, state.time), W, H);
+        const hd2 = overlayHandles(b2, W, H);
+        const ci = hd2.corners.findIndex((h) => Math.abs(pt.x - h.x) <= grab && Math.abs(pt.y - h.y) <= grab);
+        const signs = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
+        const [dsx, dsy] = signs[ci >= 0 ? ci : 0];
+        const cs = Math.cos(b2.rot), sn = Math.sin(b2.rot);
+        const ox = -dsx * b2.hw, oy = -dsy * b2.hh; // opposite corner in local space
+        canvasDrag = {
+          mode: "box", id: cur.id, rot: b2.rot, dragSX: dsx, dragSY: dsy,
+          fix: { x: b2.cx + ox * cs - oy * sn, y: b2.cy + ox * sn + oy * cs },
+          aspect: Math.max(0.05, (b2.hw * 2) / Math.max(1e-6, b2.hh * 2)),
+        };
+      } else {
+        canvasDrag = { mode: "scale", id: cur.id, startScale: +cur.props.scale || 1, startDist: Math.hypot(lp.x, lp.y) || 1 };
+      }
     } else if (Math.abs(lp.x) <= b.hw && Math.abs(lp.y) <= b.hh) {
       canvasDrag = { mode: "move", id: cur.id, startX: +cur.props.x || 0, startY: +cur.props.y || 0, startPt: pt };
     }
@@ -2868,6 +2891,54 @@ els.preview.addEventListener("pointermove", (e) => {
   if (canvasDrag.mode === "move") {
     c.props.x = Math.round(canvasDrag.startX + (pt.x - canvasDrag.startPt.x));
     c.props.y = Math.round(canvasDrag.startY + (pt.y - canvasDrag.startPt.y));
+  } else if (canvasDrag.mode === "box") {
+    const aspect = canvasDrag.aspect || 1;
+    const lockAR = e.shiftKey;
+    if (e.ctrlKey || e.metaKey) {
+      // Ctrl/Cmd: resize from center (all corners move).
+      const b = clipBounds(c, evalProps(c, state.time), W, H), lp = toLocal(pt, b);
+      let bw = Math.abs(lp.x) * 2, bh = Math.abs(lp.y) * 2;
+      if (lockAR) {
+        if (bw / aspect >= bh) bh = bw / aspect;
+        else bw = bh * aspect;
+      }
+      c.props.boxW = +clamp(bw, 20, W * 3).toFixed(1);
+      c.props.boxH = +clamp(bh, 16, H * 3).toFixed(1);
+    } else {
+      // Default: opposite corner stays fixed; dragged corner follows the pointer.
+      const fix = canvasDrag.fix, rot = canvasDrag.rot;
+      let dx = pt.x - fix.x, dy = pt.y - fix.y;
+      const cs = Math.cos(-rot), sn = Math.sin(-rot);
+      let ldx = dx * cs - dy * sn, ldy = dx * sn + dy * cs;
+      if (lockAR) {
+        const aw = Math.abs(ldx), ah = Math.abs(ldy);
+        if (aw / aspect >= ah) {
+          ldy = (Math.sign(ldy) || canvasDrag.dragSY) * (aw / aspect);
+        } else {
+          ldx = (Math.sign(ldx) || canvasDrag.dragSX) * (ah * aspect);
+        }
+      }
+      const minW = 20, minH = 16;
+      if (Math.abs(ldx) < minW) ldx = (Math.sign(ldx) || canvasDrag.dragSX) * minW;
+      if (Math.abs(ldy) < minH) ldy = (Math.sign(ldy) || canvasDrag.dragSY) * minH;
+      if (lockAR) {
+        // Re-sync after min clamp so aspect stays locked.
+        if (Math.abs(ldx) / aspect >= Math.abs(ldy)) {
+          ldy = (Math.sign(ldy) || canvasDrag.dragSY) * (Math.abs(ldx) / aspect);
+        } else {
+          ldx = (Math.sign(ldx) || canvasDrag.dragSX) * (Math.abs(ldy) * aspect);
+        }
+      }
+      ldx = clamp(ldx, -W * 3, W * 3);
+      ldy = clamp(ldy, -H * 3, H * 3);
+      const c2 = Math.cos(rot), s2 = Math.sin(rot);
+      const freeX = fix.x + ldx * c2 - ldy * s2;
+      const freeY = fix.y + ldx * s2 + ldy * c2;
+      c.props.x = Math.round((fix.x + freeX) / 2 - W / 2);
+      c.props.y = Math.round((fix.y + freeY) / 2 - H / 2);
+      c.props.boxW = +Math.abs(ldx).toFixed(1);
+      c.props.boxH = +Math.abs(ldy).toFixed(1);
+    }
   } else if (canvasDrag.mode === "scale") {
     const b = clipBounds(c, evalProps(c, state.time), W, H), lp = toLocal(pt, b);
     c.props.scale = clamp(+(canvasDrag.startScale * (Math.hypot(lp.x, lp.y) / canvasDrag.startDist)).toFixed(3), 0.05, 12);
@@ -3067,25 +3138,148 @@ function hexToRgba(hex, a) {
   const n = parseInt(String(hex).replace("#", ""), 16) || 0;
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
 }
-function drawText(c, p, local) {
-  const size = p.fontSize || 72;
+function hasTextBox(p) { return +p.boxW > 0 && +p.boxH > 0; }
+/* Target width for justify: text box width when set, else max(natural, ~85% canvas). */
+function textJustifyTarget(p, naturalBlockW) {
+  if (+p.boxW > 0) return +p.boxW;
+  const sc = Math.max(0.001, +p.scale || 1);
+  return Math.max(naturalBlockW, project.width / sc * 0.85);
+}
+/* Expand a line to ≈ targetW by inserting whole spaces between words. */
+function justifyLineBySpaces(ctx, ln, targetW) {
+  const words = String(ln).split(/\s+/).filter(Boolean);
+  if (words.length < 2) return ln;
+  const natural = words.join(" ");
+  if (ctx.measureText(natural).width >= targetW - 0.5) return natural;
+  let lo = 1, hi = 2, best = natural;
+  while (hi < 160 && ctx.measureText(words.join(" ".repeat(hi))).width < targetW) hi *= 2;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const s = words.join(" ".repeat(mid));
+    if (ctx.measureText(s).width <= targetW) { best = s; lo = mid + 1; }
+    else hi = mid - 1;
+  }
+  return best;
+}
+function setTextFont(ctx, p, size) {
   const weight = +p.weight || (p.bold ? 700 : 400);
-  ctx2d.font = `${p.italic ? "italic " : ""}${weight} ${size}px "${p.font || "Segoe UI"}", sans-serif`;
+  ctx.font = `${p.italic ? "italic " : ""}${weight} ${size}px "${p.font || "Segoe UI"}", sans-serif`;
+  try { ctx.letterSpacing = `${+p.letterSpacing || 0}px`; } catch { }
+}
+function textSourceString(p) {
+  let t = String(p.text || "");
+  if (p.uppercase) t = t.split("\n").map((l) => l.toUpperCase()).join("\n");
+  return t;
+}
+/* Word-wrap paragraphs to maxW (hard newlines preserved as paragraph breaks). */
+function wrapTextToWidth(ctx, text, maxW) {
+  const out = [];
+  const width = Math.max(1, maxW);
+  for (const para of String(text).split("\n")) {
+    if (!para) { out.push(""); continue; }
+    const words = para.split(/\s+/).filter(Boolean);
+    if (!words.length) { out.push(""); continue; }
+    let line = words[0];
+    for (let i = 1; i < words.length; i++) {
+      const trial = line + " " + words[i];
+      if (ctx.measureText(trial).width <= width) line = trial;
+      else { out.push(line); line = words[i]; }
+    }
+    out.push(line);
+  }
+  return out.length ? out : [""];
+}
+/* Largest font size ≤ maxSize that wraps into boxW×boxH. */
+function fitFontSizeToBox(ctx, p, boxW, boxH, maxSize) {
+  const lhMul = clamp(+p.lineHeight || 1.2, 0.6, 3);
+  const justify = p.align === "justify";
+  const src = textSourceString(p);
+  let lo = 8, hi = Math.max(8, Math.round(maxSize || 72)), best = 8;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    setTextFont(ctx, p, mid);
+    let lines = wrapTextToWidth(ctx, src, boxW);
+    if (justify) lines = lines.map((ln) => justifyLineBySpaces(ctx, ln, boxW));
+    const totalH = Math.max(1, lines.length) * mid * lhMul;
+    if (totalH <= boxH + 0.5) { best = mid; lo = mid + 1; }
+    else hi = mid - 1;
+  }
+  return best;
+}
+/* Measure content-sized text bounds (half-width / half-height) at current props. */
+function measureTextHalfSize(p) {
+  ctx2d.save();
+  const size = p.fontSize || 72;
+  setTextFont(ctx2d, p, size);
+  let lines = textSourceString(p).split("\n");
+  if (p.align === "justify") {
+    const nat = Math.max(1, ...lines.map((l) => ctx2d.measureText(l).width));
+    const target = textJustifyTarget(p, nat);
+    lines = lines.map((l) => justifyLineBySpaces(ctx2d, l, target));
+  }
+  const tw = Math.max(1, ...lines.map((l) => ctx2d.measureText(l).width));
+  const lh = size * clamp(+p.lineHeight || 1.2, 0.6, 3);
+  ctx2d.restore();
+  const sc = +p.scale || 1;
+  return { hw: (tw / 2 + size * 0.25) * sc, hh: (lines.length * lh / 2 + size * 0.14) * sc };
+}
+/* First corner-drag on a hug-content title: create a box from current bounds. */
+function ensureTextBox(c) {
+  if (c.kind !== "text" || hasTextBox(c.props)) return;
+  const half = measureTextHalfSize(c.props);
+  const sc = +c.props.scale || 1;
+  if (Math.abs(sc - 1) > 0.01) {
+    c.props.fontSize = Math.round((+c.props.fontSize || 72) * sc);
+    c.props.scale = 1;
+  }
+  c.props.boxW = Math.max(40, +(half.hw * 2).toFixed(1));
+  c.props.boxH = Math.max(24, +(half.hh * 2).toFixed(1));
+}
+function drawText(c, p, local) {
+  const useBox = hasTextBox(p);
+  const boxW = +p.boxW, boxH = +p.boxH;
+  const scaleToFit = useBox && !!p.boxFit;
+  const src = textSourceString(p);
+  let size = p.fontSize || 72;
+  if (useBox) {
+    if (scaleToFit) size = fitFontSizeToBox(ctx2d, p, boxW, boxH, p.fontSize || 72);
+  } else {
+    ctx2d.scale(p.scale || 1, p.scale || 1);
+  }
+  setTextFont(ctx2d, p, size);
   ctx2d.textBaseline = "middle";
-  try { ctx2d.letterSpacing = `${+p.letterSpacing || 0}px`; } catch { }
-  ctx2d.scale(p.scale || 1, p.scale || 1);
-  let rawLines = String(p.text || "").split("\n");
-  if (p.uppercase) rawLines = rawLines.map((l) => l.toUpperCase());
-  const lh = size * (clamp(+p.lineHeight || 1.2, 0.6, 3)), y0 = -((rawLines.length - 1) * lh) / 2;
+  let rawLines = useBox ? wrapTextToWidth(ctx2d, src, boxW) : src.split("\n");
+  const justify = p.align === "justify";
+  if (justify) {
+    const target = useBox ? boxW : textJustifyTarget(p, Math.max(1, ...rawLines.map((ln) => ctx2d.measureText(ln).width)));
+    rawLines = rawLines.map((ln) => justifyLineBySpaces(ctx2d, ln, target));
+  }
+  const lh = size * (clamp(+p.lineHeight || 1.2, 0.6, 3));
+  const nLines = Math.max(1, rawLines.length);
+  const vAlign = p.vAlign === "top" || p.vAlign === "bottom" ? p.vAlign : "middle";
+  // y0 = first line center. With a box, place the whole block by vAlign; without, center on clip origin.
+  let y0;
+  if (useBox) {
+    if (vAlign === "top") y0 = -boxH / 2 + lh / 2;
+    else if (vAlign === "bottom") y0 = boxH / 2 - lh / 2 - (nLines - 1) * lh;
+    else y0 = -((nLines - 1) * lh) / 2;
+  } else {
+    y0 = -((nLines - 1) * lh) / 2;
+  }
   const anim = TEXT_ANIMS.includes(p.textAnim) ? p.textAnim : "none";
   const rate = clamp(+p.wordRate || 0.15, 0.03, 2);
   const align = p.align === "left" || p.align === "right" ? p.align : "center";
   const lineWidths = rawLines.map((ln) => ctx2d.measureText(ln).width);
-  const blockW = Math.max(1, ...lineWidths);
+  const blockW = useBox ? boxW : Math.max(1, ...lineWidths);
   const lineDirs = lineDirections(p, rawLines);
   // anchor x of each line's center, honoring block alignment
   const lineCx = (i) => align === "left" ? -blockW / 2 + lineWidths[i] / 2
     : align === "right" ? blockW / 2 - lineWidths[i] / 2 : 0;
+  if (useBox) {
+    ctx2d.beginPath();
+    ctx2d.rect(-boxW / 2, -boxH / 2, boxW, boxH);
+    ctx2d.clip();
+  }
   const shadowBlur = (p.textShadow === 0 ? 0 : (+p.textShadow || 12)) * size / 100;
 
   // background pill per line (static — anchors the animated words)
@@ -3269,7 +3463,13 @@ function drawText(c, p, local) {
     const rtl = lineDirs[i] === "rtl";
     const words = ln.split(/\s+/).filter(Boolean);
     const widths = words.map((w) => ctx2d.measureText(w).width);
-    const total = widths.reduce((a, b) => a + b, 0) + spaceW * Math.max(0, words.length - 1);
+    const wordsW = widths.reduce((a, b) => a + b, 0);
+    const gapN = Math.max(0, words.length - 1);
+    // After justify, ln already has expanded spaces — recreate that gap so word anims stay spread
+    const total = justify && gapN
+      ? lineWidths[i]
+      : wordsW + spaceW * gapN;
+    const gap = gapN ? (total - wordsW) / gapN : spaceW;
     let x = runOrigin(lineCx(i), total, rtl);
     words.forEach((word, j) => {
       const w = widths[j];
@@ -3294,7 +3494,7 @@ function drawText(c, p, local) {
       } else { // karaoke: everything visible dim, spoken words at full strength
         paint(word, cx, y, u >= 1 ? 1 : 0.3 + u * 0.7, rtl);
       }
-      x += rtl ? -(w + spaceW) : (w + spaceW);
+      x += rtl ? -(w + gap) : (w + gap);
       wi++;
     });
   });

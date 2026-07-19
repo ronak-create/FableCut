@@ -256,7 +256,10 @@ Examples in `library/svg/`: `sparkles.svg` (loop), `lower-third.svg`,
 | `font` | "Segoe UI" | system font, a `library/fonts` family, or ANY Google Font name — unknown names are fetched from Google Fonts automatically |
 | `bold` / `weight` | true / 0 | `weight` (300–900) overrides `bold` when non-zero |
 | `italic` `uppercase` | false | |
-| `align` | "center" | left · center · right (multi-line block alignment) |
+| `align` | "center" | left · center · right · **justify** (inserts spaces between words to fill the text box width, or ~85% of the canvas when no box) |
+| `boxW` `boxH` | 0 | px text box; **0 = hug content**. When both > 0, corner handles resize the box (not `scale`). Default: fixed `fontSize`, word-wrap inside the box. |
+| `boxFit` | false | when a box is set: `false` = wrap at fixed font size; `true` = scale font down (up to `fontSize`) so the whole text fits |
+| `vAlign` | "middle" | top · middle · bottom — vertical alignment of the text block inside the box |
 | `direction` | "auto" | auto · ltr · rtl — `auto` detects per line (Hebrew/Arabic → RTL); all `textAnim` modes honor reading direction (wipe, typewriter reveal, word/letter layout) |
 | `letterSpacing` | 0 | px |
 | `lineHeight` | 1.2 | multiplier |
