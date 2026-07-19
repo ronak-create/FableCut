@@ -199,7 +199,7 @@ body.resizing-panels * {
 
 body.track-size-s .clip .clip-label {
   font-size: 10px;
-  padding: 1px 6px;
+  padding: 0 6px;
 }
 
 body.track-size-s .clip .fade {
@@ -1092,9 +1092,12 @@ input[type=range] {
 .clip .clip-label {
   position: absolute;
   inset: 0;
-  padding: 3px 8px;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
   font-size: 11px;
   font-weight: 600;
+  line-height: 1;
   color: #fff;
   text-shadow: 0 1px 2px #000c;
   white-space: nowrap;
