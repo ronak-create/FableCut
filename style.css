@@ -1073,6 +1073,32 @@ input[type=range] {
   z-index: 3;
 }
 
+/* Keyframe diamonds on the clip — same size/color as ruler beat markers */
+.clip .clip-kfs {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 1px;
+  height: 8px;
+  pointer-events: none;
+  z-index: 4;
+}
+.clip .clip-kf {
+  position: absolute;
+  top: 0;
+  /* rotated square → ~8×8 tip-to-tip, matching ruler markers */
+  width: 6px;
+  height: 6px;
+  margin-left: -3px;
+  background: #ffd166;
+  transform: rotate(45deg);
+  pointer-events: auto;
+  cursor: pointer;
+}
+.clip .clip-kf:hover {
+  background: #ffe28a;
+}
+
 /* transition wedges — width from transition duration × pps (see transitionMarksHtml) */
 .clip .trans-mark {
   position: absolute;

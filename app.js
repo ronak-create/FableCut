@@ -1286,6 +1286,37 @@ function transitionMarksHtml(c, trackH) {
   wedge(c.transitionOut, "out");
   return html;
 }
+/* Unique clip-local keyframe times (seconds), sorted. */
+function clipKeyframeLocalTimes(c) {
+  if (!c?.keyframes) return [];
+  const seen = new Set();
+  const out = [];
+  for (const arr of Object.values(c.keyframes)) {
+    if (!Array.isArray(arr)) continue;
+    for (const kf of arr) {
+      const t = +kf.t;
+      if (!Number.isFinite(t)) continue;
+      const key = t.toFixed(4);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(t);
+    }
+  }
+  out.sort((a, b) => a - b);
+  return out;
+}
+/* Diamond marks on the clip body — one per unique keyframe time (all channels). */
+function clipKeyframesHtml(c) {
+  const times = clipKeyframeLocalTimes(c);
+  if (!times.length || !(c.duration > 0)) return "";
+  let html = `<div class="clip-kfs">`;
+  for (const t of times) {
+    if (t < -1e-6 || t > c.duration + 1e-6) continue;
+    const pct = Math.max(0, Math.min(100, (t / c.duration) * 100));
+    html += `<div class="clip-kf" style="left:${pct}%" data-t="${t}" title="Keyframe @ ${fmt(c.start + t)}"></div>`;
+  }
+  return html + `</div>`;
+}
 function rebuildClips() {
   const w = contentWidth();
   els.tracksContent.style.width = w + "px";
@@ -1307,10 +1338,10 @@ function rebuildClips() {
     }
     const hasWave = c.kind === "audio" && runtime.wavePeaks.get(c.mediaId) instanceof Float32Array;
     if (hasWave) body += `<canvas class="wave"></canvas>`;
-    const badge = c.keyframes && Object.keys(c.keyframes).length ? "◆ " : "";
     body += `<div class="fade"></div>
-      <div class="clip-label">${badge}${c.kind === "text" ? "T · " + (c.props.text || "").split("\n")[0]
+      <div class="clip-label">${c.kind === "text" ? "T · " + (c.props.text || "").split("\n")[0]
         : c.kind === "adjust" ? "FX · " + c.name : c.name}</div>`;
+    body += clipKeyframesHtml(c);
     let inner = `<div class="clip-body">${body}</div>`;
     inner += transitionMarksHtml(c, tr.h);
     inner += `<div class="handle l"></div><div class="handle r"></div>`;
@@ -1468,6 +1499,13 @@ els.tracksContent.addEventListener("pointerdown", (e) => {
   }
   const c = getClip(clipDiv.dataset.id);
   if (!c) return;
+  const kfMark = e.target.closest(".clip-kf");
+  if (kfMark) {
+    e.preventDefault();
+    selectClip(c.id);
+    setTime(c.start + (+kfMark.dataset.t || 0));
+    return;
+  }
   const transHandle = e.target.closest(".trans-dur-handle");
   if (transHandle) {
     const wrap = transHandle.closest(".trans-mark");
@@ -1700,6 +1738,47 @@ els.ruler.addEventListener("pointerdown", startScrub);
 function setTime(t) {
   state.time = clamp(t, 0, Math.max(projDur(), 0));
   seekMediaWhilePaused();
+}
+
+/* Absolute timeline times of every keyframe on the given clips (deduped). */
+function keyframeTimelineTimes(clips) {
+  const seen = new Set();
+  const out = [];
+  for (const c of clips) {
+    for (const local of clipKeyframeLocalTimes(c)) {
+      const t = +(c.start + local).toFixed(4);
+      if (seen.has(t)) continue;
+      seen.add(t);
+      out.push(t);
+    }
+  }
+  out.sort((a, b) => a - b);
+  return out;
+}
+/* Jump playhead to previous (−1) or next (+1) keyframe.
+   Prefers selected clips; falls back to clips under the playhead.
+   Keyboard counterpart to Avid’s Ctrl/Cmd-click snap-to-audio-keyframe. */
+function goToKeyframe(dir) {
+  let clips = state.selIds.size ? selectedClips() : [];
+  if (!clips.some((c) => clipKeyframeLocalTimes(c).length)) {
+    const t = state.time;
+    clips = project.clips.filter((c) =>
+      clipKeyframeLocalTimes(c).length &&
+      t >= c.start - 1e-6 && t <= c.start + c.duration + 1e-6);
+  }
+  const times = keyframeTimelineTimes(clips);
+  if (!times.length) { toast("No keyframes"); return; }
+  const eps = 0.5 / Math.max(1, project.fps || 30);
+  if (dir > 0) {
+    const next = times.find((t) => t > state.time + eps);
+    if (next == null) { toast("No next keyframe"); return; }
+    setTime(next);
+  } else {
+    let prev = null;
+    for (const t of times) if (t < state.time - eps) prev = t;
+    if (prev == null) { toast("No previous keyframe"); return; }
+    setTime(prev);
+  }
 }
 
 /* Add a marker at the playhead, or remove one already there (M key).
@@ -3842,6 +3921,10 @@ window.addEventListener("keydown", (e) => {
     e.shiftKey ? trimToWorkArea() : splitAtWorkArea();
   }
   else if (k === "Delete" || k === "Backspace") deleteSelected();
+  else if ((e.ctrlKey || e.metaKey) && !e.altKey && (k === "ArrowLeft" || k === "ArrowRight")) {
+    e.preventDefault();
+    goToKeyframe(k === "ArrowRight" ? 1 : -1);
+  }
   else if (k === "ArrowLeft") setTime(state.time - (e.shiftKey ? 1 : 1 / project.fps));
   else if (k === "ArrowRight") setTime(state.time + (e.shiftKey ? 1 : 1 / project.fps));
   else if (k === "Home") gotoHome();
