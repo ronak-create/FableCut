@@ -559,6 +559,15 @@ body.track-size-s .clip.selected {
   max-height: 100%;
   display: block;
   background: #000;
+  transform-origin: center center;
+  will-change: transform;
+}
+
+.monitor-stage.is-zoomed {
+  cursor: grab;
+}
+.monitor-stage.is-zoomed.is-panning {
+  cursor: grabbing;
 }
 
 /* ── Per-track VU (RMS / LUFS / Peak) ── */

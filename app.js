@@ -153,6 +153,8 @@ const state = {
   connected: false, exporting: false,
   rendering: false,      // fast (server/ffmpeg) export in progress
   guides: false,         // safe-area overlay on the monitor
+  viewZoom: 1,           // program-monitor display zoom (1 = fit stage)
+  viewPan: { x: 0, y: 0 }, // px offset while zoomed (zoom-to-cursor / pan)
   ffmpeg: false,         // server reports ffmpeg available
   dirtyTimeline: true, gesture: false,
   workAreaPlay: false,   // when true, play + Home/End stay inside IN/OUT
@@ -221,8 +223,8 @@ const els = {
   exportOverlay: $("exportOverlay"), exportProgress: $("exportProgress"),
   exportTitle: $("exportTitle"), exportNote: $("exportNote"),
   projectName: $("projectName"), monitorRes: $("monitorRes"),
-  aspectSel: $("aspectSel"), btnGuides: $("btnGuides"), safeOverlay: $("safeOverlay"),
-  btnSpeed: $("btnSpeed"),
+  aspectSel: $("aspectSel"), btnGuides: $("btnGuides"), btnZoom100: $("btnZoom100"),
+  safeOverlay: $("safeOverlay"), btnSpeed: $("btnSpeed"),
   monitorStage: $("monitorStage"),
   exportSetup: $("exportSetup"), engineFast: $("engineFast"), engineRealtime: $("engineRealtime"),
 };
@@ -3307,6 +3309,7 @@ function pickClipAt(pt, W, H) {
 let canvasDrag = null, canvasDidMove = false;
 els.preview.style.touchAction = "none";
 els.preview.addEventListener("pointerdown", (e) => {
+  if (e.altKey || e.button === 1) return; // leave to monitor pan
   const W = els.preview.width, H = els.preview.height, pt = canvasPt(e);
   const cur = getClip(state.selId);
   canvasDrag = null;
@@ -4388,6 +4391,79 @@ els.btnGuides.addEventListener("click", () => {
   els.btnGuides.classList.toggle("on", state.guides);
   els.safeOverlay.classList.toggle("hidden", !state.guides);
 });
+/* ── Program-monitor view zoom (wheel) + 100% reset ──
+   Zooms the CSS-scaled canvas inside the clipped stage. Pointer mapping via
+   getBoundingClientRect already includes the transform, so canvas edits stay accurate. */
+const VIEW_ZOOM_MIN = 1, VIEW_ZOOM_MAX = 6;
+function applyMonitorView() {
+  const z = state.viewZoom, pan = state.viewPan;
+  const zoomed = z > 1.001;
+  if (!zoomed) {
+    state.viewZoom = 1;
+    state.viewPan = { x: 0, y: 0 };
+    els.preview.style.transform = "";
+  } else {
+    els.preview.style.transform = `translate(${pan.x}px, ${pan.y}px) scale(${z})`;
+  }
+  els.btnZoom100.classList.toggle("hidden", !zoomed);
+  els.monitorStage.classList.toggle("is-zoomed", zoomed);
+  updateSafeOverlay();
+}
+function resetMonitorView() {
+  state.viewZoom = 1;
+  state.viewPan = { x: 0, y: 0 };
+  applyMonitorView();
+}
+els.btnZoom100.addEventListener("click", resetMonitorView);
+els.monitorStage.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  const stage = els.monitorStage.getBoundingClientRect();
+  const mx = e.clientX - stage.left - stage.width / 2;
+  const my = e.clientY - stage.top - stage.height / 2;
+  const oldZ = state.viewZoom;
+  const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+  const next = clamp(+(oldZ * factor).toFixed(3), VIEW_ZOOM_MIN, VIEW_ZOOM_MAX);
+  if (Math.abs(next - oldZ) < 1e-4) {
+    if (next <= VIEW_ZOOM_MIN) resetMonitorView();
+    return;
+  }
+  const pan = state.viewPan;
+  state.viewPan = {
+    x: mx - (mx - pan.x) * (next / oldZ),
+    y: my - (my - pan.y) * (next / oldZ),
+  };
+  state.viewZoom = next;
+  if (next <= VIEW_ZOOM_MIN) resetMonitorView();
+  else applyMonitorView();
+}, { passive: false });
+/* Pan while zoomed: middle mouse, or Alt+drag on the stage (not on a clip drag). */
+let viewPanDrag = null;
+els.monitorStage.addEventListener("pointerdown", (e) => {
+  if (state.viewZoom <= 1.001) return;
+  if (e.button === 1 || (e.button === 0 && e.altKey)) {
+    viewPanDrag = { x: e.clientX, y: e.clientY, panX: state.viewPan.x, panY: state.viewPan.y };
+    els.monitorStage.classList.add("is-panning");
+    els.monitorStage.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  }
+});
+els.monitorStage.addEventListener("pointermove", (e) => {
+  if (!viewPanDrag) return;
+  state.viewPan = {
+    x: viewPanDrag.panX + (e.clientX - viewPanDrag.x),
+    y: viewPanDrag.panY + (e.clientY - viewPanDrag.y),
+  };
+  applyMonitorView();
+});
+function endViewPan(e) {
+  if (!viewPanDrag) return;
+  viewPanDrag = null;
+  els.monitorStage.classList.remove("is-panning");
+  try { els.monitorStage.releasePointerCapture(e.pointerId); } catch { }
+}
+els.monitorStage.addEventListener("pointerup", endViewPan);
+els.monitorStage.addEventListener("pointercancel", endViewPan);
+els.monitorStage.addEventListener("auxclick", (e) => { if (e.button === 1) e.preventDefault(); });
 /* Keep the guide overlay glued to the (letterboxed, CSS-scaled) canvas */
 function updateSafeOverlay() {
   if (!state.guides) return;
