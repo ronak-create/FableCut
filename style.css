@@ -730,6 +730,14 @@ body.track-size-s .clip.selected {
   color: var(--dim);
 }
 
+.insp-row label.insp-reset {
+  cursor: help;
+}
+
+.insp-row label.insp-reset:hover {
+  color: #cfc8ff;
+}
+
 .insp-ctrls {
   display: flex;
   flex: 1;

@@ -1919,7 +1919,16 @@ function renderInspector(lite) {
   const kfCount = (k) => (c.keyframes && c.keyframes[k] ? c.keyframes[k].length : 0);
   const kfCtl = (k) => !ANIMATABLE.includes(k) ? "" :
     `<span class="kf-ctl"><button class="kf-btn${kfCount(k) ? " has" : ""}" data-kf="${k}" title="Set keyframe at playhead">◆${kfCount(k) || ""}</button>${kfCount(k) ? `<button class="kf-btn" data-kfclear="${k}" title="Clear keyframes">✕</button>` : ""}</span>`;
-  const row = (label, inner, k = "") => `<div class="insp-row"><label>${label}</label>${inner}${k ? kfCtl(k) : ""}</div>`;
+  /* reset: prop key(s) for Ctrl-click on the label; defaults to k when that key is in DEFAULT_PROPS. */
+  const row = (label, inner, k = "", reset) => {
+    const keys = reset !== undefined ? reset : k;
+    const list = (Array.isArray(keys) ? keys : String(keys || "").split(",")).map((s) => s.trim()).filter(Boolean);
+    const canReset = list.some((rk) => Object.hasOwn(DEFAULT_PROPS, rk) || rk === "transIn" || rk === "transOut");
+    const lab = canReset
+      ? `<label class="insp-reset" data-reset="${list.join(",")}" title="Ctrl-click to reset">${label}</label>`
+      : `<label>${label}</label>`;
+    return `<div class="insp-row">${lab}${inner}${k ? kfCtl(k) : ""}</div>`;
+  };
   const slider = (k, min, max, step, val, unit = "") =>
     row(k[0].toUpperCase() + k.slice(1),
       `<input type="range" data-k="${k}" min="${min}" max="${max}" step="${step}" value="${val}">
@@ -1932,8 +1941,8 @@ function renderInspector(lite) {
     ${row("Length (s)", `<input type="number" data-k="duration" step="0.01" value="${c.duration.toFixed(2)}">`)}
   </div>`;
   const sel = (label, k, opts, cur) => row(label,
-    `<select data-k="${k}">${opts.map((o) => `<option value="${o}" ${String(o) === String(cur) ? "selected" : ""}>${o}</option>`).join("")}</select>`);
-  const check = (label, k, on) => row(label, `<input type="checkbox" data-k="${k}" ${on ? "checked" : ""}>`);
+    `<select data-k="${k}">${opts.map((o) => `<option value="${o}" ${String(o) === String(cur) ? "selected" : ""}>${o}</option>`).join("")}</select>`, k);
+  const check = (label, k, on) => row(label, `<input type="checkbox" data-k="${k}" ${on ? "checked" : ""}>`, k);
   if (c.kind === "adjust") {
     html += `<div class="insp-section"><h3>Adjustment layer</h3>
       ${slider("opacity", 0, 1, 0.01, p.opacity)}
@@ -1952,9 +1961,9 @@ function renderInspector(lite) {
     html += `<div class="insp-section"><h3>Layout</h3>
       ${sel("Fit", "fit", ["contain", "cover", "stretch", "none"], p.fit)}
       ${row("Crop L/R %", `<input type="number" data-k="cropL" min="0" max="95" value="${p.cropL}" style="max-width:58px">
-                           <input type="number" data-k="cropR" min="0" max="95" value="${p.cropR}" style="max-width:58px">`)}
+                           <input type="number" data-k="cropR" min="0" max="95" value="${p.cropR}" style="max-width:58px">`, "", "cropL,cropR")}
       ${row("Crop T/B %", `<input type="number" data-k="cropT" min="0" max="95" value="${p.cropT}" style="max-width:58px">
-                           <input type="number" data-k="cropB" min="0" max="95" value="${p.cropB}" style="max-width:58px">`)}
+                           <input type="number" data-k="cropB" min="0" max="95" value="${p.cropB}" style="max-width:58px">`, "", "cropT,cropB")}
       ${slider("cornerRadius", 0, 300, 1, p.cornerRadius, "px")}
       ${check("Flip H", "flipH", p.flipH)}
       ${check("Flip V", "flipV", p.flipV)}
@@ -1985,7 +1994,7 @@ function renderInspector(lite) {
   if (c.kind === "video" || c.kind === "image") {
     html += `<div class="insp-section"><h3>Keying / Cut-out</h3>
       ${row("Key color", `<input type="color" data-k="chromaKey" value="${p.chromaKey || "#00ff00"}">
-        <button class="btn tiny${p.chromaKey ? "" : " toggle on"}" data-action="keyoff" title="Disable chroma key">off</button>`)}
+        <button class="btn tiny${p.chromaKey ? "" : " toggle on"}" data-action="keyoff" title="Disable chroma key">off</button>`, "", "chromaKey")}
       ${slider("chromaTolerance", 0, 100, 1, p.chromaTolerance)}
       ${slider("chromaSoftness", 0, 100, 1, p.chromaSoftness)}
       ${check("AI bg remove", "bgRemove", p.bgRemove)}
@@ -1999,7 +2008,7 @@ function renderInspector(lite) {
   }
   const tsel = (label, key, tr) => {
     const active = state.transFocus === (key === "transIn" ? "in" : "out");
-    return `<div class="insp-row${active ? " trans-active" : ""}"><label>${label}</label>
+    return `<div class="insp-row${active ? " trans-active" : ""}"><label class="insp-reset" data-reset="${key}" title="Ctrl-click to reset">${label}</label>
       <span class="insp-ctrls"><select data-k="${key}">${TRANSITIONS.map((x) => `<option ${x === (tr?.type || "none") ? "selected" : ""}>${x}</option>`).join("")}</select>
        <input type="number" class="insp-dur" data-k="${key}Dur" step="0.1" min="0.1" value="${tr?.duration ?? 1}"></span></div>`;
   };
@@ -2012,11 +2021,11 @@ function renderInspector(lite) {
       ? `<optgroup label="${label}">${fonts.map((f) => `<option ${f === p.font ? "selected" : ""}>${f}</option>`).join("")}</optgroup>` : "";
     const known = [...SYSTEM_FONTS, ...runtime.customFonts, ...GOOGLE_FONTS, ...runtime.googleLoaded];
     html += `<div class="insp-section"><h3>Text</h3>
-      ${row("Content", `<textarea data-k="text">${p.text}</textarea>`)}
+      ${row("Content", `<textarea data-k="text">${p.text}</textarea>`, "", "text")}
       ${slider("fontSize", 12, 300, 1, p.fontSize, "px")}
       ${row("Color", `<span class="insp-ctrls"><input type="color" data-k="color" value="${p.color}">
                       <input type="color" data-k="color2" value="${p.color2 || p.color}" title="Gradient bottom color">
-                      <button class="btn tiny${p.color2 ? "" : " toggle on"}" data-action="grad-off" title="Disable gradient">flat</button></span>`)}
+                      <button class="btn tiny${p.color2 ? "" : " toggle on"}" data-action="grad-off" title="Disable gradient">flat</button></span>`, "", "color,color2")}
       ${sel("Align", "align", ["left", "center", "right"], p.align)}
       ${sel("Direction", "direction", ["auto", "ltr", "rtl"], p.direction || "auto")}
     </div>
@@ -2026,7 +2035,7 @@ function renderInspector(lite) {
         ${fontGroup("Library fonts", runtime.customFonts)}
         ${fontGroup("Google fonts", [...new Set([...GOOGLE_FONTS, ...runtime.googleLoaded])])}
         ${known.includes(p.font) ? "" : `<option selected>${p.font}</option>`}
-      </select>`)}
+      </select>`, "", "font")}
       ${row("Google font", `<input type="text" data-gfont placeholder="Type any Google Font name…">
         <button class="btn tiny" data-action="gfont-load">Load</button>`)}
       ${sel("Weight", "weight", [0, 300, 400, 500, 600, 700, 800, 900], p.weight)}
@@ -2038,25 +2047,52 @@ function renderInspector(lite) {
     </div>
     <div class="insp-section"><h3>Text style</h3>
       ${slider("strokeWidth", 0, 20, 0.5, p.strokeWidth, "px")}
-      ${row("Stroke col.", `<input type="color" data-k="strokeColor" value="${p.strokeColor}">`)}
-      ${row("Bg color", `<input type="color" data-k="bgColor" value="${p.bgColor}">`)}
+      ${row("Stroke col.", `<input type="color" data-k="strokeColor" value="${p.strokeColor}">`, "", "strokeColor")}
+      ${row("Bg color", `<input type="color" data-k="bgColor" value="${p.bgColor}">`, "", "bgColor")}
       ${slider("bgOpacity", 0, 1, 0.05, p.bgOpacity)}
       ${slider("textShadow", 0, 40, 1, p.textShadow)}
       ${slider("glow", 0, 100, 1, p.glow)}
       ${row("Glow color", `<input type="color" data-k="glowColor" value="${p.glowColor || p.color}">
-        <button class="btn tiny${p.glowColor ? "" : " toggle on"}" data-action="glow-auto" title="Glow uses the text color">auto</button>`)}
+        <button class="btn tiny${p.glowColor ? "" : " toggle on"}" data-action="glow-auto" title="Glow uses the text color">auto</button>`, "", "glowColor")}
     </div>
     <div class="insp-section"><h3>Title &amp; caption</h3>
       ${row("Title style", `<button type="button" class="btn tiny style-picker-btn" data-style-open title="Pick a style — hover to preview it live">${(TITLE_STYLES[c.styleName] || {}).label || "Choose…"} ▾</button>
         <button class="btn tiny" data-action="title-shuffle" title="Random style">Shuffle</button>`)}
-      ${row("Animation", `<select data-k="textAnim">${TEXT_ANIMS.map((a) => `<option ${a === p.textAnim ? "selected" : ""}>${a}</option>`).join("")}</select>`)}
+      ${row("Animation", `<select data-k="textAnim">${TEXT_ANIMS.map((a) => `<option ${a === p.textAnim ? "selected" : ""}>${a}</option>`).join("")}</select>`, "", "textAnim")}
       ${slider("wordRate", 0.05, 0.6, 0.01, p.wordRate, "s")}
     </div>`;
   }
   els.inspector.innerHTML = html;
+  els.inspector.querySelectorAll("label.insp-reset[data-reset]").forEach((lab) => {
+    lab.addEventListener("click", (e) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      e.preventDefault();
+      const keys = lab.dataset.reset.split(",").map((s) => s.trim()).filter(Boolean);
+      if (!keys.length) return;
+      pushUndo();
+      for (const k of keys) {
+        if (k === "transIn" || k === "transOut") {
+          c[k === "transIn" ? "transitionIn" : "transitionOut"] = undefined;
+          state.dirtyTimeline = true;
+          continue;
+        }
+        if (!Object.hasOwn(DEFAULT_PROPS, k)) continue;
+        c.props[k] = DEFAULT_PROPS[k];
+        if (c.keyframes?.[k]) {
+          delete c.keyframes[k];
+          if (!Object.keys(c.keyframes).length) c.keyframes = undefined;
+          state.dirtyTimeline = true;
+        }
+        if (k === "text" || k === "font") state.dirtyTimeline = true;
+        if (k === "font") ensureFont(String(DEFAULT_PROPS.font));
+      }
+      scheduleSave();
+      renderInspector();
+    });
+  });
   els.inspector.querySelectorAll("[data-k]").forEach((input) => {
+    const k = input.dataset.k;
     input.addEventListener("input", () => {
-      const k = input.dataset.k;
       let v = input.type === "checkbox" ? input.checked
         : input.type === "range" || input.type === "number" ? parseFloat(input.value)
           : input.value;
