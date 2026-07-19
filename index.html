@@ -166,34 +166,38 @@
 <div class="overlay hidden" id="helpOverlay">
   <div class="dialog help">
     <h2>Keyboard shortcuts</h2>
-    <table class="keys">
-      <tr><td><kbd>Space</kbd></td><td>Play / pause</td></tr>
-      <tr><td><kbd>S</kbd></td><td>Split clip(s) at playhead</td></tr>
-      <tr><td><kbd>G</kbd></td><td>Find gap (jump to middle of next shared hole; wraps; respects IN/OUT when both are set)</td></tr>
-      <tr><td><kbd>⇧</kbd>+<kbd>G</kbd></td><td>Close gap at playhead (enabled tracks must all have a gap; closes the shared hole)</td></tr>
-      <tr><td><kbd>Alt</kbd>+<kbd>T</kbd></td><td>Add transition at playhead (first half → in, second half → out)</td></tr>
-      <tr><td><kbd>Del</kbd></td><td>Delete selected clip(s), or clear focused transition</td></tr>
-      <tr><td>Drag empty area</td><td>Marquee-select clips (drag a box around them)</td></tr>
-      <tr><td><kbd>Ctrl</kbd>+click bin</td><td>Import media files</td></tr>
-      <tr><td><kbd>Ctrl</kbd>+click clip</td><td>Add / remove a clip from the selection</td></tr>
-      <tr><td><kbd>Ctrl</kbd>+<kbd>A</kbd> / <kbd>Esc</kbd></td><td>Select all clips / deselect</td></tr>
-      <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>Step 1 frame (⇧ = 1 second)</td></tr>
-      <tr><td><kbd>[</kbd> / <kbd>]</kbd></td><td>Trim selected clip's in / out to playhead</td></tr>
-      <tr><td><kbd>Home</kbd> / <kbd>End</kbd></td><td>Jump to start / end</td></tr>
-      <tr><td><kbd>M</kbd></td><td>Add / remove marker at playhead (tap on the beat while playing)</td></tr>
-      <tr><td><kbd>I</kbd> / <kbd>O</kbd></td><td>Set IN / OUT work-area marker at playhead</td></tr>
-      <tr><td><kbd>⇧</kbd>+<kbd>I</kbd> / <kbd>⇧</kbd>+<kbd>O</kbd></td><td>Clear IN / OUT marker</td></tr>
-      <tr><td><kbd>T</kbd></td><td>Split clips at IN/OUT markers</td></tr>
-      <tr><td><kbd>⇧</kbd>+<kbd>T</kbd></td><td>Trim clips to IN/OUT (remove heads/tails)</td></tr>
-      <tr><td>Limit (toolbar)</td><td>When on, play stops at OUT and Home/End use IN/OUT; playhead outside the range overrides</td></tr>
-      <tr><td><kbd>N</kbd></td><td>Toggle snapping</td></tr>
-      <tr><td><kbd>+</kbd> / <kbd>-</kbd></td><td>Zoom timeline</td></tr>
-      <tr><td><kbd>Z</kbd></td><td>Zoom to selected clip(s)</td></tr>
-      <tr><td><kbd>Alt</kbd>+<kbd>Z</kbd></td><td>Zoom to IN–OUT work area</td></tr>
-      <tr><td><kbd>⇧</kbd>+<kbd>Z</kbd></td><td>Zoom timeline to fit</td></tr>
-      <tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>⇧</kbd>+<kbd>Z</kbd></td><td>Undo / redo</td></tr>
-      <tr><td><kbd>Ctrl</kbd>+wheel</td><td>Zoom timeline at cursor</td></tr>
-    </table>
+    <div class="keys-cols">
+      <table class="keys">
+        <tr><td><kbd>Space</kbd></td><td>Play / pause</td></tr>
+        <tr><td><kbd>S</kbd></td><td>Split clip(s) at playhead</td></tr>
+        <tr><td><kbd>G</kbd></td><td>Find next shared gap (wraps; respects IN/OUT)</td></tr>
+        <tr><td><kbd>⇧</kbd>+<kbd>G</kbd></td><td>Close gap at playhead (enabled tracks)</td></tr>
+        <tr><td><kbd>Alt</kbd>+<kbd>T</kbd></td><td>Add transition at playhead (in / out by half)</td></tr>
+        <tr><td><kbd>Del</kbd></td><td>Delete selected clip(s), or clear focused transition</td></tr>
+        <tr><td>Drag empty area</td><td>Marquee-select clips</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+click bin</td><td>Import media files</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+click clip</td><td>Add / remove from selection</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>A</kbd> / <kbd>Esc</kbd></td><td>Select all / deselect</td></tr>
+        <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>Step 1 frame (⇧ = 1 second)</td></tr>
+        <tr><td><kbd>[</kbd> / <kbd>]</kbd></td><td>Trim selected in / out to playhead</td></tr>
+        <tr><td><kbd>Home</kbd> / <kbd>End</kbd></td><td>Jump to start / end</td></tr>
+      </table>
+      <table class="keys">
+        <tr><td><kbd>M</kbd></td><td>Add / remove marker at playhead</td></tr>
+        <tr><td><kbd>I</kbd> / <kbd>O</kbd></td><td>Set IN / OUT work-area marker</td></tr>
+        <tr><td><kbd>⇧</kbd>+<kbd>I</kbd> / <kbd>⇧</kbd>+<kbd>O</kbd></td><td>Clear IN / OUT marker</td></tr>
+        <tr><td><kbd>T</kbd></td><td>Split clips at IN/OUT markers</td></tr>
+        <tr><td><kbd>⇧</kbd>+<kbd>T</kbd></td><td>Trim clips to IN/OUT (remove heads/tails)</td></tr>
+        <tr><td>Limit (toolbar)</td><td>Play stops at OUT; Home/End use IN/OUT</td></tr>
+        <tr><td><kbd>N</kbd></td><td>Toggle snapping</td></tr>
+        <tr><td><kbd>+</kbd> / <kbd>-</kbd></td><td>Zoom timeline</td></tr>
+        <tr><td><kbd>Z</kbd></td><td>Zoom to selected clip(s)</td></tr>
+        <tr><td><kbd>Alt</kbd>+<kbd>Z</kbd></td><td>Zoom to IN–OUT work area</td></tr>
+        <tr><td><kbd>⇧</kbd>+<kbd>Z</kbd></td><td>Zoom timeline to fit</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>⇧</kbd>+<kbd>Z</kbd></td><td>Undo / redo</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+wheel</td><td>Zoom timeline at cursor</td></tr>
+      </table>
+    </div>
     <div class="dialog-actions"><button class="btn primary" id="btnCloseHelp">Close</button></div>
   </div>
 </div>

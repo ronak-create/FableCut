@@ -1271,21 +1271,43 @@ input[type=range] {
   display: none;
 }
 
+.dialog.help {
+  width: min(820px, 94vw);
+  max-height: min(90vh, 640px);
+  overflow: auto;
+}
+
+.dialog.help .keys-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 28px;
+  margin-bottom: 12px;
+  align-items: start;
+}
+
 .dialog.help .keys {
   width: 100%;
   border-collapse: collapse;
-  margin-bottom: 16px;
+  margin-bottom: 0;
 }
 
 .dialog.help .keys td {
   padding: 5px 6px;
   border-bottom: 1px solid #26262c;
   font-size: 12px;
+  vertical-align: top;
 }
 
 .dialog.help .keys td:first-child {
-  width: 46%;
+  width: 40%;
   color: var(--dim);
+  white-space: nowrap;
+}
+
+@media (max-width: 700px) {
+  .dialog.help .keys-cols {
+    grid-template-columns: 1fr;
+  }
 }
 
 kbd {
