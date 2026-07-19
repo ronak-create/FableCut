@@ -161,10 +161,15 @@ Examples in `library/svg/`: `sparkles.svg` (loop), `lower-third.svg`,
   // ^ beat/cue markers: gold diamonds on the ruler, snap targets for clip edges.
   "inPoint": 10.023, // in timeline marker; paired with outPoint sets the focus on the part of the timeline  
   "outPoint": 21.500, // out timeline marker
+  "folders": [
+    // Project-bin virtual folders (tree). Media reference them via folderId.
+    { "id": "f_broll", "name": "B-roll", "parentId": null, "open": true }
+  ],
   "media": [
     { "id": "m_abc", "name": "intro.mp4", "kind": "video",  // video|audio|image|svg
       "src": "/media/intro.mp4",             // path under ./media or ./library
-      "duration": 12.4, "width": 1920, "height": 1080 }
+      "duration": 12.4, "width": 1920, "height": 1080,
+      "folderId": null }                     // optional: id of a folders[] entry
   ],
   "clips": [
     {

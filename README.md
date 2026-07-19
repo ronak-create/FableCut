@@ -46,6 +46,7 @@ same time.
 - Beat & cue markers (tap <kbd>⇧m</kbd> on the beat during playback) with edge snapping
 - Press <kbd>Alt+t</kbd> to add an in/out transition based on the playhead position over the selected clip. The last used transition is remembered as the default. Drag the overlay triangle to adjust duration; <kbd>Delete</kbd> clears the focused transition.
 - Real decoded audio waveforms on clips
+- **Project bin folders** — tree view with expand/collapse; drag media or folders to nest; right-click the **Project** tab → New folder; drop files onto a folder to import into it
 - Canvas aspect presets (16:9, 9:16 reels, 4:5, 1:1) + safe-area guides
 - Resizable workspace: drag the divider between monitor and timeline (double-click resets), plus S/M/L timeline track-density presets (S hides thumbnails for compact tracks)
 - **Zoom to selection** (<kbd>⇧Z</kbd>) frames all selected clips, not just one

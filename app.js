@@ -140,7 +140,8 @@ const project = {
   width: 1280, height: 720, fps: 30,
   background: "#000000",
   revision: 0,
-  media: [],   // {id, name, kind:'video'|'audio'|'image', src, duration, width?, height?}
+  folders: [], // {id, name, parentId:null|string, open:true} — Project-bin tree (virtual)
+  media: [],   // {id, name, kind, src, duration, width?, height?, folderId?}
   clips: [],   // {id, mediaId, kind, track, start, in, duration, name, props:{}}
   markers: [], // {t, label?} — beat/cue markers on the ruler; snap targets
   inPoint: null,  // timeline work-area IN (seconds), or null
@@ -197,6 +198,9 @@ const runtime = {
   audio: null,          // {ctx, master, recDest}
   saveTimer: null, pendingSync: false,
   sfxPreview: null,     // <audio> element for library sound previews
+  importFolderId: null, // Project-bin folder to place the next import into
+  binDragFolderId: null, // folder id currently being dragged (cycle checks)
+  binCtxMenu: null,     // Project-tab context menu element
 };
 
 /* ── DOM ───────────────────────────────────────────────────────────────── */
@@ -334,6 +338,122 @@ function normalizeWorkArea(i, o, t0 = TIMELINE_START_TIME) {
   }
   return { inPoint, outPoint };
 }
+function getFolder(id) {
+  return id ? project.folders.find((f) => f.id === id) : null;
+}
+function normalizeFolders(list) {
+  if (!Array.isArray(list)) return [];
+  const out = [];
+  const seen = new Set();
+  for (const f of list) {
+    if (!f || !f.id || seen.has(f.id)) continue;
+    seen.add(f.id);
+    out.push({
+      id: String(f.id),
+      name: String(f.name || "Folder").trim() || "Folder",
+      parentId: f.parentId || null,
+      open: f.open !== false,
+    });
+  }
+  // drop parent refs that don't exist
+  for (const f of out) if (f.parentId && !seen.has(f.parentId)) f.parentId = null;
+  return out;
+}
+function normalizeMediaEntry(m) {
+  if (!m || typeof m !== "object") return m;
+  return { ...m, folderId: m.folderId || null };
+}
+function folderChildren(parentId) {
+  return project.folders
+    .filter((f) => (f.parentId || null) === (parentId || null))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+}
+function mediaInFolder(folderId) {
+  return project.media
+    .filter((m) => (m.folderId || null) === (folderId || null))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+}
+/* True if ancestorId is the same as nodeId or an ancestor of nodeId. */
+function isSelfOrFolderAncestor(ancestorId, nodeId) {
+  let cur = getFolder(nodeId);
+  while (cur) {
+    if (cur.id === ancestorId) return true;
+    cur = cur.parentId ? getFolder(cur.parentId) : null;
+  }
+  return false;
+}
+function addFolder(parentId = null) {
+  if (parentId && !getFolder(parentId)) parentId = null;
+  const f = {
+    id: "f_" + uid(),
+    name: "New folder",
+    parentId: parentId || null,
+    open: true,
+  };
+  project.folders.push(f);
+  if (parentId) {
+    const p = getFolder(parentId);
+    if (p) p.open = true;
+  }
+  scheduleSave();
+  renderBin();
+  // defer rename so the row exists
+  requestAnimationFrame(() => startFolderRename(f.id));
+  return f;
+}
+function deleteFolder(id) {
+  const f = getFolder(id); if (!f) return;
+  const parent = f.parentId || null;
+  const doomed = new Set();
+  const walk = (fid) => {
+    doomed.add(fid);
+    for (const c of project.folders) if (c.parentId === fid) walk(c.id);
+  };
+  walk(id);
+  for (const m of project.media) if (m.folderId && doomed.has(m.folderId)) m.folderId = parent;
+  for (const c of project.folders) if (c.parentId && doomed.has(c.parentId) && !doomed.has(c.id)) c.parentId = parent;
+  project.folders = project.folders.filter((x) => !doomed.has(x.id));
+  scheduleSave();
+  renderBin();
+}
+function moveMediaToFolder(mediaId, folderId) {
+  const m = getMedia(mediaId); if (!m) return;
+  if (folderId && !getFolder(folderId)) folderId = null;
+  m.folderId = folderId || null;
+  if (folderId) { const f = getFolder(folderId); if (f) f.open = true; }
+  scheduleSave();
+  renderBin();
+}
+function moveFolderToParent(folderId, parentId) {
+  const f = getFolder(folderId); if (!f) return;
+  if (parentId && (parentId === folderId || isSelfOrFolderAncestor(folderId, parentId))) return;
+  if (parentId && !getFolder(parentId)) parentId = null;
+  f.parentId = parentId || null;
+  if (parentId) { const p = getFolder(parentId); if (p) p.open = true; }
+  scheduleSave();
+  renderBin();
+}
+function startFolderRename(folderId) {
+  const row = els.binList.querySelector(`.bin-folder[data-folder-id="${folderId}"] .bin-folder-name`);
+  if (!row) return;
+  row.contentEditable = "true";
+  row.focus();
+  const sel = window.getSelection(), range = document.createRange();
+  range.selectNodeContents(row); sel.removeAllRanges(); sel.addRange(range);
+  const commit = () => {
+    row.contentEditable = "false";
+    const f = getFolder(folderId); if (!f) return;
+    const name = row.textContent.replace(/\s+/g, " ").trim() || "Folder";
+    f.name = name;
+    row.textContent = name;
+    scheduleSave();
+  };
+  row.addEventListener("blur", commit, { once: true });
+  row.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); row.blur(); }
+    if (e.key === "Escape") { e.preventDefault(); row.textContent = getFolder(folderId)?.name || "Folder"; row.blur(); }
+  });
+}
 function applyProject(data) {
   const wa = normalizeWorkArea(data.inPoint, data.outPoint);
   Object.assign(project, {
@@ -341,11 +461,17 @@ function applyProject(data) {
     width: data.width || 1280, height: data.height || 720, fps: data.fps || 30,
     background: data.background || "#000000",
     revision: data.revision || 0,
-    media: data.media || [], clips: data.clips || [],
+    folders: normalizeFolders(data.folders),
+    media: (data.media || []).map(normalizeMediaEntry),
+    clips: data.clips || [],
     markers: (data.markers || []).filter((m) => m && isFinite(m.t)).sort((a, b) => a.t - b.t),
     inPoint: wa.inPoint,
     outPoint: wa.outPoint,
   });
+  const folderIds = new Set(project.folders.map((f) => f.id));
+  for (const m of project.media) {
+    if (m.folderId && !folderIds.has(m.folderId)) m.folderId = null;
+  }
   for (const c of project.clips) {
     c.props = { ...DEFAULT_PROPS, ...(c.props || {}) };
     if (c.keyframes) for (const arr of Object.values(c.keyframes))
@@ -383,11 +509,13 @@ function scheduleSave() {
   }, 400);
 }
 function projectJSON() {
-  const { name, width, height, fps, background, revision, media, clips, markers, inPoint, outPoint } = project;
+  const { name, width, height, fps, background, revision, folders, media, clips, markers, inPoint, outPoint } = project;
   return {
     name, width, height, fps, background, revision,
-    media: media.filter((m) => !m.transient).map(({ id, name, kind, src, duration, width, height }) =>
-      ({ id, name, kind, src, duration, width, height })),
+    folders: (folders || []).map(({ id, name, parentId, open }) =>
+      ({ id, name, parentId: parentId || null, open: open !== false })),
+    media: media.filter((m) => !m.transient).map(({ id, name, kind, src, duration, width, height, folderId }) =>
+      ({ id, name, kind, src, duration, width, height, folderId: folderId || null })),
     clips: clips.map(({ id, mediaId, kind, track, start, in: inn, duration, name, props, keyframes, transitionIn, transitionOut }) =>
       ({ id, mediaId, kind, track, start, in: inn, duration, name, props, keyframes, transitionIn, transitionOut })),
     markers: (markers || []).map(({ t, label }) => (label ? { t, label } : { t })),
@@ -530,6 +658,9 @@ function mediaKindFromFile(file) {
 async function importFiles(fileList) {
   const files = [...fileList];
   if (!files.length) return;
+  const folderId = runtime.importFolderId && getFolder(runtime.importFolderId)
+    ? runtime.importFolderId : null;
+  runtime.importFolderId = null;
   let added = 0, skipped = 0;
   for (const file of files) {
     const kind = mediaKindFromFile(file);
@@ -544,7 +675,7 @@ async function importFiles(fileList) {
     } else {
       src = URL.createObjectURL(file); transient = true;
     }
-    const m = { id: "m_" + uid(), name: file.name, kind, src, transient };
+    const m = { id: "m_" + uid(), name: file.name, kind, src, transient, folderId };
     try {
       if (kind === "svg") {
         await loadSvgMedia(m);
@@ -569,34 +700,166 @@ async function importFiles(fileList) {
 }
 
 function renderBin() {
-  els.binList.querySelectorAll(".bin-item").forEach((n) => n.remove());
-  els.binEmpty.style.display = project.media.length ? "none" : "";
-  for (const m of project.media) {
+  els.binList.querySelectorAll(".bin-item, .bin-folder, .bin-drop-root").forEach((n) => n.remove());
+  const empty = !project.media.length && !project.folders.length;
+  els.binEmpty.style.display = empty ? "" : "none";
+  if (empty) return;
+
+  const clearBinDropHints = () => {
+    els.binList.querySelectorAll(".bin-drop-over").forEach((n) => n.classList.remove("bin-drop-over"));
+  };
+
+  const bindFolderDropTarget = (el, folderId /* null = root */) => {
+    el.addEventListener("dragover", (e) => {
+      const types = [...(e.dataTransfer?.types || [])];
+      const hasMedia = types.includes("text/fablecut-media");
+      const hasFolder = types.includes("text/fablecut-folder");
+      const hasFiles = types.includes("Files");
+      if (!hasMedia && !hasFolder && !hasFiles) return;
+      if (hasFolder) {
+        const dragId = runtime.binDragFolderId;
+        if (dragId && folderId && isSelfOrFolderAncestor(dragId, folderId)) return;
+      }
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = hasFiles ? "copy" : "move";
+      clearBinDropHints();
+      el.classList.add("bin-drop-over");
+      if (hasFiles) runtime.importFolderId = folderId;
+    });
+    el.addEventListener("dragleave", (e) => {
+      if (el.contains(e.relatedTarget)) return;
+      el.classList.remove("bin-drop-over");
+      if (runtime.importFolderId === folderId) runtime.importFolderId = null;
+    });
+    el.addEventListener("drop", (e) => {
+      const mid = e.dataTransfer.getData("text/fablecut-media");
+      const fid = e.dataTransfer.getData("text/fablecut-folder");
+      const files = e.dataTransfer.files;
+      clearBinDropHints();
+      if (files?.length) {
+        e.preventDefault();
+        e.stopPropagation();
+        runtime.importFolderId = folderId;
+        importFiles(files);
+        return;
+      }
+      if (mid) {
+        e.preventDefault();
+        e.stopPropagation();
+        moveMediaToFolder(mid, folderId);
+        return;
+      }
+      if (fid) {
+        e.preventDefault();
+        e.stopPropagation();
+        moveFolderToParent(fid, folderId);
+      }
+    });
+  };
+
+  const makeMediaItem = (m, depth) => {
     const item = document.createElement("div");
-    item.className = "bin-item"; item.draggable = true;
+    item.className = "bin-item";
+    item.draggable = true;
+    item.dataset.mediaId = m.id;
+    item.style.setProperty("--bin-depth", depth);
     const aux = runtime.mediaAux.get(m.id) || {};
     const icon = m.kind === "audio" ? "🎵" : m.kind === "image" ? "🖼" : m.kind === "svg" ? "✨" : "🎞";
     const thumbSrc = aux.thumb || (m.kind === "image" || m.kind === "svg" ? m.src : null);
     item.innerHTML = `
       <div class="bin-thumb" ${thumbSrc ? `style="background-image:url('${thumbSrc}')"` : ""}>${thumbSrc ? "" : icon}</div>
       <div class="bin-meta">
-        <div class="bin-name" title="${m.name}">${m.name}</div>
+        <div class="bin-name" title="${m.name.replace(/"/g, "&quot;")}">${m.name}</div>
         <div class="bin-sub">${m.kind}${m.duration ? " · " + fmt(m.duration) : ""}</div>
       </div>
       <span class="bin-del" title="Remove (and its clips)">✕</span>`;
     item.addEventListener("dragstart", (e) => {
+      runtime.binDragFolderId = null;
       e.dataTransfer.setData("text/fablecut-media", m.id);
-      e.dataTransfer.effectAllowed = "copy";
+      e.dataTransfer.effectAllowed = "copyMove";
+      item.classList.add("bin-dragging");
     });
+    item.addEventListener("dragend", () => {
+      item.classList.remove("bin-dragging");
+      clearBinDropHints();
+      runtime.importFolderId = null;
+    });
+    // Don't bubble to the root drop zone while hovering a media row
+    item.addEventListener("dragover", (e) => e.stopPropagation());
     item.addEventListener("dblclick", () => addClipFromMedia(m, null, state.time));
-    item.querySelector(".bin-del").addEventListener("click", () => {
+    item.querySelector(".bin-del").addEventListener("click", (e) => {
+      e.stopPropagation();
       pushUndo();
       project.media = project.media.filter((x) => x.id !== m.id);
       project.clips = project.clips.filter((c) => c.mediaId !== m.id);
       renderBin(); scheduleSave(); renderInspector();
     });
-    els.binList.appendChild(item);
-  }
+    return item;
+  };
+
+  const renderLevel = (parentId, depth) => {
+    for (const f of folderChildren(parentId)) {
+      const row = document.createElement("div");
+      row.className = "bin-folder" + (f.open ? " open" : "");
+      row.dataset.folderId = f.id;
+      row.draggable = true;
+      row.style.setProperty("--bin-depth", depth);
+      const count = mediaInFolder(f.id).length + folderChildren(f.id).length;
+      row.innerHTML = `
+        <button type="button" class="bin-folder-twist" title="${f.open ? "Collapse" : "Expand"}" aria-expanded="${f.open}">${f.open ? "▼" : "▶"}</button>
+        <span class="bin-folder-icon">📁</span>
+        <span class="bin-folder-name" title="${f.name.replace(/"/g, "&quot;")}">${f.name}</span>
+        <span class="bin-folder-count">${count}</span>
+        <button type="button" class="bin-folder-add" title="New subfolder">+</button>
+        <button type="button" class="bin-del bin-folder-del" title="Delete folder (keeps media)">✕</button>`;
+      row.querySelector(".bin-folder-twist").addEventListener("click", (e) => {
+        e.stopPropagation();
+        f.open = !f.open;
+        scheduleSave();
+        renderBin();
+      });
+      row.querySelector(".bin-folder-name").addEventListener("dblclick", (e) => {
+        e.stopPropagation();
+        startFolderRename(f.id);
+      });
+      row.querySelector(".bin-folder-add").addEventListener("click", (e) => {
+        e.stopPropagation();
+        addFolder(f.id);
+      });
+      row.querySelector(".bin-folder-del").addEventListener("click", (e) => {
+        e.stopPropagation();
+        deleteFolder(f.id);
+      });
+      row.addEventListener("dragstart", (e) => {
+        // don't start folder drag from action buttons
+        if (e.target.closest("button")) { e.preventDefault(); return; }
+        runtime.binDragFolderId = f.id;
+        e.dataTransfer.setData("text/fablecut-folder", f.id);
+        e.dataTransfer.effectAllowed = "move";
+        row.classList.add("bin-dragging");
+      });
+      row.addEventListener("dragend", () => {
+        runtime.binDragFolderId = null;
+        row.classList.remove("bin-dragging");
+        clearBinDropHints();
+        runtime.importFolderId = null;
+      });
+      bindFolderDropTarget(row, f.id);
+      els.binList.appendChild(row);
+      if (f.open) renderLevel(f.id, depth + 1);
+    }
+    for (const m of mediaInFolder(parentId)) els.binList.appendChild(makeMediaItem(m, depth));
+  };
+
+  renderLevel(null, 0);
+
+  // Root drop zone at the bottom so items can be moved out of folders
+  const root = document.createElement("div");
+  root.className = "bin-drop-root";
+  root.textContent = "Drop here to move to root";
+  bindFolderDropTarget(root, null);
+  els.binList.appendChild(root);
 }
 
 /* Open the native file dialog. Windows anchors it to the <input>'s screen
@@ -642,7 +905,7 @@ function mediaForLibraryItem(f) {
   if (m) return m;
   const kind = libKind(f.name);
   if (!kind) return null;
-  m = { id: "m_" + uid(), name: f.name, kind, src: f.src };
+  m = { id: "m_" + uid(), name: f.name, kind, src: f.src, folderId: null };
   project.media.push(m);
   renderBin(); scheduleSave();
   return m;
@@ -3600,6 +3863,43 @@ $("trackSizeGroup").addEventListener("click", (e) => {
 els.binTabs.addEventListener("click", (e) => {
   const b = e.target.closest("[data-tab]");
   if (b) setBinTab(b.dataset.tab);
+});
+/* Right-click the Project tab → New folder */
+function closeBinCtxMenu() {
+  if (!runtime.binCtxMenu) return;
+  runtime.binCtxMenu.remove();
+  runtime.binCtxMenu = null;
+  document.removeEventListener("pointerdown", onBinCtxDoc, true);
+}
+function onBinCtxDoc(e) {
+  if (runtime.binCtxMenu && !runtime.binCtxMenu.contains(e.target)) closeBinCtxMenu();
+}
+function openProjectTabMenu(clientX, clientY) {
+  closeBinCtxMenu();
+  const menu = document.createElement("div");
+  menu.className = "ctx-menu";
+  const item = document.createElement("div");
+  item.className = "ctx-opt";
+  item.textContent = "New folder";
+  item.addEventListener("click", () => {
+    closeBinCtxMenu();
+    if (state.binTab !== "project") setBinTab("project");
+    addFolder(null);
+  });
+  menu.appendChild(item);
+  document.body.appendChild(menu);
+  const pad = 6;
+  const w = menu.offsetWidth, h = menu.offsetHeight;
+  menu.style.left = Math.min(clientX, window.innerWidth - w - pad) + "px";
+  menu.style.top = Math.min(clientY, window.innerHeight - h - pad) + "px";
+  runtime.binCtxMenu = menu;
+  document.addEventListener("pointerdown", onBinCtxDoc, true);
+}
+els.binTabs.addEventListener("contextmenu", (e) => {
+  const b = e.target.closest("[data-tab]");
+  if (!b || b.dataset.tab !== "project") return;
+  e.preventDefault();
+  openProjectTabMenu(e.clientX, e.clientY);
 });
 
 /* ── Canvas aspect presets + safe-area guides ── */
