@@ -502,7 +502,8 @@ function getAudioBuffer(m) {
   return p;
 }
 function ensureWave(m) {
-  if (m.kind !== "audio" || runtime.wavePeaks.has(m.id)) return;
+  // Also decode peaks from video files when their audio is placed on an A track
+  if ((m.kind !== "audio" && m.kind !== "video") || runtime.wavePeaks.has(m.id)) return;
   runtime.wavePeaks.set(m.id, null); // pending
   getAudioBuffer(m).then((buf) => {
     const n = Math.max(1, Math.ceil(buf.duration * WAVE_PEAKS_PER_SEC));
@@ -767,6 +768,27 @@ function redo() {
 function defaultTrackFor(kind) {
   return kind === "audio" ? "A1" : kind === "svg" ? "V3" : "V1";
 }
+function linkedClip(c) {
+  return c?.linkedId ? getClip(c.linkedId) : null;
+}
+/* Expand a clip list so each AV-linked partner is included once. */
+function withLinked(clips) {
+  const out = new Map();
+  for (const c of clips) {
+    out.set(c.id, c);
+    const L = linkedClip(c);
+    if (L) out.set(L.id, L);
+  }
+  return [...out.values()];
+}
+function syncLinkedTiming(c) {
+  const L = linkedClip(c);
+  if (!L) return;
+  L.start = c.start;
+  L.in = c.in;
+  L.duration = c.duration;
+  if (c.props?.speed != null) L.props.speed = c.props.speed;
+}
 
 function addClipFromMedia(m, trackId, at) {
   pushUndo();
@@ -774,13 +796,29 @@ function addClipFromMedia(m, trackId, at) {
   trackId = trackId || defaultTrackFor(kind);
   const tr = TRACKS.find((t) => t.id === trackId);
   if (!tr || (kind === "audio") !== (tr.kind === "audio")) trackId = defaultTrackFor(kind);
+  const start = Math.max(0, at ?? state.time);
+  const duration = m.duration || 5;
+  const name = m.name.replace(/\.[^.]+$/, "");
   const c = {
     id: "c_" + uid(), mediaId: m.id, kind, track: trackId,
-    start: Math.max(0, at ?? state.time), in: 0,
-    duration: m.duration || 5, name: m.name.replace(/\.[^.]+$/, ""),
+    start, in: 0, duration, name,
     props: { ...DEFAULT_PROPS },
   };
   project.clips.push(c);
+  // Video+audio: put picture on a V track and a linked sound clip on A1.
+  // Mute the video clip so audio isn't doubled.
+  if (kind === "video") {
+    c.props.volume = 0;
+    const a = {
+      id: "c_" + uid(), mediaId: m.id, kind: "audio", track: "A1",
+      start, in: 0, duration, name,
+      props: { ...DEFAULT_PROPS },
+      linkedId: c.id,
+    };
+    c.linkedId = a.id;
+    project.clips.push(a);
+    ensureWave(m);
+  }
   selectClip(c.id); scheduleSave();
   return c;
 }
@@ -885,11 +923,12 @@ function addAdjust() {
   selectClip(c.id); scheduleSave();
 }
 function deleteSelected() {
-  const doomed = selectedClips();
+  let doomed = withLinked(selectedClips());
   if (!doomed.length) return;
   pushUndo();
+  const ids = new Set(doomed.map((c) => c.id));
   for (const c of doomed) releaseClipEl(c.id);
-  project.clips = project.clips.filter((x) => !state.selIds.has(x.id));
+  project.clips = project.clips.filter((x) => !ids.has(x.id));
   setSelection([]);
   scheduleSave(); renderInspector();
 }
@@ -1061,10 +1100,16 @@ function goToNextGap() {
 function splitAtPlayhead() {
   const t = state.time;
   let targets = state.selIds.size ? selectedClips() : project.clips;
-  targets = targets.filter((c) => t > c.start + MIN_DUR && t < clipEnd(c) - MIN_DUR);
+  targets = withLinked(targets.filter((c) => t > c.start + MIN_DUR && t < clipEnd(c) - MIN_DUR));
   if (!targets.length) return;
   pushUndo();
-  for (const c of targets) splitClipAt(c, t);
+  // Pair linked splits so the new right halves stay linked to each other
+  const newLink = new Map(); // oldClipId -> newRightId
+  for (const c of targets) {
+    const right = splitClipAt(c, t);
+    if (right) newLink.set(c.id, right);
+  }
+  relinkSplitRights(targets, newLink);
   scheduleSave();
 }
 /* Cut a clip at timeline time t (must fall strictly inside the clip). Leaves
@@ -1077,12 +1122,26 @@ function splitClipAt(c, t) {
     start: t, in: c.in + cut * clipSpeed(c), duration: clipEnd(c) - t,
     keyframes: shiftKF(c.keyframes, cut, clipEnd(c) - t),
     transitionIn: undefined,
+    linkedId: undefined,
   };
   c.duration = cut;
   c.keyframes = shiftKF(c.keyframes, 0, cut);
   c.transitionOut = undefined;
   project.clips.push(right);
   return right;
+}
+/* After splitting a set of clips, wire each new right half to its partner's right half. */
+function relinkSplitRights(targets, newLink) {
+  for (const c of targets) {
+    const right = newLink.get(c.id);
+    const partner = c.linkedId ? newLink.get(c.linkedId) : null;
+    if (right && partner) {
+      right.linkedId = partner.id;
+      partner.linkedId = right.id;
+    } else if (right) {
+      delete right.linkedId;
+    }
+  }
 }
 /* Split every enabled-track clip that crosses IN and/or OUT (no head/tail removal). */
 function splitAtWorkArea() {
@@ -1092,17 +1151,20 @@ function splitAtWorkArea() {
     return;
   }
   const onTrack = (c) => typeof isTrackEnabled !== "function" || isTrackEnabled(c.track);
-  const targets = project.clips.filter((c) =>
+  const targets = withLinked(project.clips.filter((c) =>
     onTrack(c) && cuts.some((t) => t > c.start + MIN_DUR && t < clipEnd(c) - MIN_DUR)
-  );
+  ));
   if (!targets.length) { toast("Nothing to split at IN/OUT"); return; }
   pushUndo();
   // Right-to-left so each successive cut still lands on the left-hand piece
-  for (const c of targets) {
-    const pts = cuts
-      .filter((t) => t > c.start + MIN_DUR && t < clipEnd(c) - MIN_DUR)
-      .sort((a, b) => b - a);
-    for (const t of pts) splitClipAt(c, t);
+  for (const t of cuts.slice().sort((a, b) => b - a)) {
+    const atT = targets.filter((c) => t > c.start + MIN_DUR && t < clipEnd(c) - MIN_DUR);
+    const newLink = new Map();
+    for (const c of atT) {
+      const right = splitClipAt(c, t);
+      if (right) newLink.set(c.id, right);
+    }
+    relinkSplitRights(atT, newLink);
   }
   scheduleSave();
 }
@@ -1118,6 +1180,7 @@ function trimToPlayhead(side) {
   } else if (side === "out" && t > c.start + MIN_DUR && t < clipEnd(c)) {
     c.duration = t - c.start;
   }
+  syncLinkedTiming(c);
   scheduleSave(); renderInspector();
 }
 /* Split at IN/OUT and discard clip heads before IN and tails after OUT.
@@ -1555,9 +1618,13 @@ function startClipGesture(e, c, mode, collapseOnClick) {
     start: c.start, in: c.in, duration: c.duration, track: c.track,
     keyframes: c.keyframes ? JSON.parse(JSON.stringify(c.keyframes)) : undefined,
   };
-  // moving a clip that belongs to a multi-selection drags the whole group
-  const group = mode === "move" && state.selIds.has(c.id) ? selectedClips() : [c];
-  const groupOrig = new Map(group.map((x) => [x.id, x.start]));
+  // moving a clip that belongs to a multi-selection drags the whole group;
+  // AV-linked partners (video+audio from one file) always move together
+  const group = withLinked(mode === "move" && state.selIds.has(c.id) ? selectedClips() : [c]);
+  const groupOrig = new Map(group.map((x) => [x.id, {
+    start: x.start, in: x.in, duration: x.duration,
+    keyframes: x.keyframes ? JSON.parse(JSON.stringify(x.keyframes)) : undefined,
+  }]));
   const groupIds = new Set(group.map((x) => x.id));
   const t0 = timeAtEvent(e);
   let moved = false;
@@ -1581,17 +1648,16 @@ function startClipGesture(e, c, mode, collapseOnClick) {
       else if (dStart > 0) ns = snapStart;
       // one time-delta for the whole group, clamped so nothing crosses 0
       let d = ns - orig.start;
-      d = Math.max(d, -Math.min(...group.map((x) => groupOrig.get(x.id))));
-      for (const x of group) x.start = groupOrig.get(x.id) + d;
-      if (group.length === 1) {
-        const tk = trackAtEvent(ev);
-        if (tk) {
-          const trk = TRACKS.find((t) => t.id === tk);
-          if (trk && (c.kind === "audio") === (trk.kind === "audio")) c.track = tk;
-        }
+      d = Math.max(d, -Math.min(...group.map((x) => groupOrig.get(x.id).start)));
+      for (const x of group) x.start = groupOrig.get(x.id).start + d;
+      // Dragged clip may change track; its AV-linked partner stays on its own lane
+      const tk = trackAtEvent(ev);
+      if (tk) {
+        const trk = TRACKS.find((t) => t.id === tk);
+        if (trk && (c.kind === "audio") === (trk.kind === "audio")) c.track = tk;
       }
     } else if (mode === "trim-l") {
-      let ns = snapTime(orig.start + dt, c.id);
+      let ns = snapTime(orig.start + dt, groupIds);
       const sp = clipSpeed(c);
       const maxShiftLeft = (c.kind === "video" || c.kind === "audio") ? orig.in / sp : 1e6;
       ns = clamp(ns, Math.max(0, orig.start - maxShiftLeft), orig.start + orig.duration - MIN_DUR);
@@ -1600,13 +1666,15 @@ function startClipGesture(e, c, mode, collapseOnClick) {
       c.in = (c.kind === "video" || c.kind === "audio") ? orig.in + d * sp : 0;
       c.duration = orig.duration - d;
       c.keyframes = shiftKF(orig.keyframes, d, c.duration);
+      syncLinkedTiming(c);
     } else { // trim-r
-      let ne = snapTime(orig.start + orig.duration + dt, c.id);
+      let ne = snapTime(orig.start + orig.duration + dt, groupIds);
       let maxDur = 1e6;
       if ((c.kind === "video" || c.kind === "audio") && media?.duration)
         maxDur = (media.duration - orig.in) / clipSpeed(c);
       c.duration = clamp(ne - orig.start, MIN_DUR, maxDur);
       c.keyframes = shiftKF(orig.keyframes, 0, c.duration);
+      syncLinkedTiming(c);
     }
     state.dirtyTimeline = true;
     renderInspector(true);
