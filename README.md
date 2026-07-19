@@ -66,6 +66,13 @@ same time.
 **Motion**
 
 - Keyframe animation on ~25 properties with easing
+- **Keyframe markers on clips** — diamonds on the clip body at each unique
+  keyframe time (tooltip lists channels; a count badge when several share a
+  time). <kbd>Ctrl/Cmd+←</kbd> / <kbd>Ctrl/Cmd+→</kbd> jumps the playhead to
+  the previous / next keyframe (selected clips first, else clips under the
+  playhead)
+- **Keyframe graphs** — toggle a property’s curve in the inspector to show an
+  interpolated value graph beside the program monitor; click the graph to seek
 - **Speed ramps** — keyframe `speed` and the engine time-remaps video *and* the
   export audio mix (the fast-into-slow-mo reel move)
 - **Camera shake** and **RGB-split/chromatic aberration**, both animatable

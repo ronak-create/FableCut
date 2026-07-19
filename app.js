@@ -1286,34 +1286,36 @@ function transitionMarksHtml(c, trackH) {
   wedge(c.transitionOut, "out");
   return html;
 }
-/* Unique clip-local keyframe times (seconds), sorted. */
-function clipKeyframeLocalTimes(c) {
+/* Group keyframes by clip-local time → [{ t, keys: ["opacity","scale"] }, …]. */
+function clipKeyframeGroups(c) {
   if (!c?.keyframes) return [];
-  const seen = new Set();
-  const out = [];
-  for (const arr of Object.values(c.keyframes)) {
+  const byT = new Map();
+  for (const [channel, arr] of Object.entries(c.keyframes)) {
     if (!Array.isArray(arr)) continue;
     for (const kf of arr) {
       const t = +kf.t;
       if (!Number.isFinite(t)) continue;
       const key = t.toFixed(4);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push(t);
+      let g = byT.get(key);
+      if (!g) { g = { t, keys: [] }; byT.set(key, g); }
+      if (!g.keys.includes(channel)) g.keys.push(channel);
     }
   }
-  out.sort((a, b) => a - b);
-  return out;
+  return [...byT.values()].sort((a, b) => a.t - b.t);
 }
-/* Diamond marks on the clip body — one per unique keyframe time (all channels). */
+const clipKeyframeLocalTimes = (c) => clipKeyframeGroups(c).map((g) => g.t);
+/* Diamond marks on the clip body — one per unique time; count badge if multi-channel. */
 function clipKeyframesHtml(c) {
-  const times = clipKeyframeLocalTimes(c);
-  if (!times.length || !(c.duration > 0)) return "";
+  const groups = clipKeyframeGroups(c);
+  if (!groups.length || !(c.duration > 0)) return "";
   let html = `<div class="clip-kfs">`;
-  for (const t of times) {
+  for (const { t, keys } of groups) {
     if (t < -1e-6 || t > c.duration + 1e-6) continue;
     const pct = Math.max(0, Math.min(100, (t / c.duration) * 100));
-    html += `<div class="clip-kf" style="left:${pct}%" data-t="${t}" title="Keyframe @ ${fmt(c.start + t)}"></div>`;
+    const label = keys.join(", ") + " @ " + fmt(c.start + t);
+    const badge = keys.length > 1 ? `<span class="clip-kf-n">${keys.length}</span>` : "";
+    const multi = keys.length > 1 ? " multi" : "";
+    html += `<div class="clip-kf${multi}" style="left:${pct}%" data-t="${t}" title="${label}">${badge}</div>`;
   }
   return html + `</div>`;
 }

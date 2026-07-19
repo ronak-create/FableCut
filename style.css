@@ -1098,6 +1098,28 @@ input[type=range] {
 .clip .clip-kf:hover {
   background: #ffe28a;
 }
+/* Count badge when ≥2 channels share this time (diamond stays rotated; numeral counter-rotates) */
+.clip .clip-kf.multi {
+  width: 8px;
+  height: 8px;
+  margin-left: -4px;
+  top: -1px;
+}
+.clip .clip-kf-n {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform: rotate(-45deg);
+  font: 700 7px/1 ui-sans-serif, system-ui, sans-serif;
+  color: #1a1a1e;
+  pointer-events: none;
+  user-select: none;
+}
+body.track-size-s .clip .clip-kf-n {
+  font-size: 6px;
+}
 
 /* transition wedges — width from transition duration × pps (see transitionMarksHtml) */
 .clip .trans-mark {
