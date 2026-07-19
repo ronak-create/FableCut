@@ -561,6 +561,81 @@ body.track-size-s .clip.selected {
   background: #000;
 }
 
+/* ── Keyframe graphs (left gutter of program monitor) ── */
+.kf-graphs {
+  position: absolute;
+  left: 6px;
+  top: 6px;
+  bottom: 6px;
+  width: min(168px, 28%);
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  pointer-events: none;
+}
+.kf-graphs[hidden] { display: none; }
+.kf-graph {
+  pointer-events: auto;
+  flex: 0 0 auto;
+  background: #000a;
+  border: 1px solid #ffffff18;
+  border-radius: 4px;
+  padding: 4px 5px 3px;
+  user-select: none;
+}
+.kf-graph-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  margin-bottom: 2px;
+  font: 700 9px/1 ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: .35px;
+  color: #c8c8d0;
+}
+.kf-graph-head button {
+  margin: 0;
+  padding: 0 3px;
+  border: 0;
+  background: transparent;
+  color: #8b8b93;
+  font: 700 11px/1 ui-sans-serif, system-ui, sans-serif;
+  cursor: pointer;
+  opacity: .75;
+}
+.kf-graph-head button:hover { color: #fff; opacity: 1; }
+.kf-graph canvas {
+  display: block;
+  width: 100%;
+  height: 52px;
+  cursor: crosshair;
+  border-radius: 2px;
+  background: #0a0a0ccc;
+}
+
+.insp-row label.kf-graph-toggle {
+  cursor: pointer;
+  border-radius: 3px;
+  margin: -1px -2px;
+  padding: 1px 2px;
+}
+.insp-row label.kf-graph-toggle:hover {
+  color: #cfc8ff;
+  background: #7b6cff22;
+}
+.insp-row label.kf-graph-toggle.on {
+  color: #b9baff;
+  background: #7b6cff33;
+}
+.insp-row label.kf-graph-toggle.has-kf::after {
+  content: " ◆";
+  font-size: 8px;
+  opacity: .7;
+}
+
 .head-select {
   background: var(--panel-2);
   border: 1px solid var(--border);
@@ -996,6 +1071,54 @@ input[type=range] {
   text-overflow: ellipsis;
   pointer-events: none;
   z-index: 3;
+}
+
+/* Keyframe diamonds on the clip — same size/color as ruler beat markers */
+.clip .clip-kfs {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 1px;
+  height: 8px;
+  pointer-events: none;
+  z-index: 4;
+}
+.clip .clip-kf {
+  position: absolute;
+  top: 0;
+  /* rotated square → ~8×8 tip-to-tip, matching ruler markers */
+  width: 6px;
+  height: 6px;
+  margin-left: -3px;
+  background: #ffd166;
+  transform: rotate(45deg);
+  pointer-events: auto;
+  cursor: pointer;
+}
+.clip .clip-kf:hover {
+  background: #ffe28a;
+}
+/* Count badge when ≥2 channels share this time (diamond stays rotated; numeral counter-rotates) */
+.clip .clip-kf.multi {
+  width: 8px;
+  height: 8px;
+  margin-left: -4px;
+  top: -1px;
+}
+.clip .clip-kf-n {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform: rotate(-45deg);
+  font: 700 7px/1 ui-sans-serif, system-ui, sans-serif;
+  color: #1a1a1e;
+  pointer-events: none;
+  user-select: none;
+}
+body.track-size-s .clip .clip-kf-n {
+  font-size: 6px;
 }
 
 /* transition wedges — width from transition duration × pps (see transitionMarksHtml) */
