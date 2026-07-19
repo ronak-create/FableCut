@@ -360,6 +360,8 @@ function applyProject(data) {
       if (Array.isArray(arr)) arr.sort((a, b) => a.t - b.t);
     if (c.kind === "text") ensureFont(c.props.font);
   }
+  // AV links aren't always on disk (older saves / agents) — rebuild from matching timing.
+  relinkClips();
   // reset runtime playback elements so they rebuild against new data
   for (const el of runtime.clipEls.values()) { try { el.pause(); el.src = ""; } catch { } }
   runtime.clipEls.clear(); runtime.clipGain.clear();
@@ -397,8 +399,12 @@ function projectJSON() {
     name, width, height, fps, background, revision,
     media: media.filter((m) => !m.transient).map(({ id, name, kind, src, duration, width, height }) =>
       ({ id, name, kind, src, duration, width, height })),
-    clips: clips.map(({ id, mediaId, kind, track, start, in: inn, duration, name, props, keyframes, transitionIn, transitionOut }) =>
-      ({ id, mediaId, kind, track, start, in: inn, duration, name, props, keyframes, transitionIn, transitionOut })),
+    clips: clips.map(({ id, mediaId, kind, track, start, in: inn, duration, name, props, keyframes, transitionIn, transitionOut, linkedId, linkGroup }) => {
+      const out = { id, mediaId, kind, track, start, in: inn, duration, name, props, keyframes, transitionIn, transitionOut };
+      if (linkGroup) out.linkGroup = linkGroup;
+      if (linkedId) out.linkedId = linkedId;
+      return out;
+    }),
     markers: (markers || []).map(({ t, label }) => (label ? { t, label } : { t })),
     inPoint: inPoint == null ? null : inPoint,
     outPoint: outPoint == null ? null : outPoint,
@@ -820,6 +826,36 @@ function syncLinkedTiming(c) {
     if (c.props?.speed != null) {
       L.props = L.props || {};
       L.props.speed = c.props.speed;
+    }
+  }
+}
+/* Rebuild AV linkGroups after load. Unlinking isn't supported, so any video +
+   audio clips that share mediaId and the same start/in/duration belong together
+   (e.g. picture + L/R stems from one file). Legacy pairwise linkedId is cleared
+   in favor of linkGroup. */
+function relinkClips() {
+  const near = (a, b) => Math.abs((+a || 0) - (+b || 0)) < 1e-3;
+  for (const c of project.clips) {
+    delete c.linkGroup;
+    delete c.linkedId;
+  }
+  const audios = project.clips.filter((c) => c.kind === "audio" && c.mediaId);
+  const used = new Set();
+  for (const v of project.clips) {
+    if (v.kind !== "video" || !v.mediaId) continue;
+    const partners = audios.filter((a) =>
+      !used.has(a.id) &&
+      a.mediaId === v.mediaId &&
+      near(a.start, v.start) &&
+      near(a.in, v.in) &&
+      near(a.duration, v.duration)
+    );
+    if (!partners.length) continue;
+    const lg = "lg_" + uid();
+    v.linkGroup = lg;
+    for (const a of partners) {
+      a.linkGroup = lg;
+      used.add(a.id);
     }
   }
 }
