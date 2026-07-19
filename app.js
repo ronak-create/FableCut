@@ -199,7 +199,7 @@ const runtime = {
   customFonts: [],      // family names loaded from /library/fonts
   googleLoaded: new Set(),
   undo: [], redo: [],
-  audio: null,          // {ctx, master, recDest}
+  audio: null,          // {ctx, master, recDest, meter?, meterReady?}
   saveTimer: null, pendingSync: false,
   sfxPreview: null,     // <audio> element for library sound previews
 };
@@ -2287,10 +2287,12 @@ function ensureAudio() {
   const ctx = new (window.AudioContext || window.webkitAudioContext)();
   const master = ctx.createGain();
   const recDest = ctx.createMediaStreamDestination();
+  // Meter is inserted as a pass-through once the worklet loads; until then
+  // master goes straight to the speakers.
   master.connect(ctx.destination);
   master.connect(recDest);
-  runtime.audio = { ctx, master, recDest };
-  // hook any elements created before the audio context existed
+  runtime.audio = { ctx, master, recDest, meter: null, meterReady: false };
+  installMeterWorklet(runtime.audio).catch(() => {});
   for (const [id, el] of runtime.clipEls) {
     const c = getClip(id);
     if (c) hookAudio(c, el);
@@ -2306,6 +2308,108 @@ function hookAudio(c, el) {
     src.connect(g); g.connect(runtime.audio.master);
     runtime.clipGain.set(c.id, g);
   } catch { }
+}
+
+/* ── Master RMS meter (AudioWorklet) ── */
+const METER_SEGS = 16;
+const METER_DB_MIN = -48;
+const METER_DB_MAX = 0;
+const meterState = {
+  rms: [0, 0],       // raw from worklet
+  peak: [0, 0],
+  disp: [METER_DB_MIN, METER_DB_MIN], // ballistics (dBFS)
+  peakHold: [METER_DB_MIN, METER_DB_MIN],
+  peakHoldT: [0, 0],
+  segs: [[], []],
+};
+async function installMeterWorklet(audio) {
+  if (audio.meterReady || !audio.ctx.audioWorklet || meterState._loading) return;
+  meterState._loading = true;
+  try {
+    await audio.ctx.audioWorklet.addModule("meter-worklet.js");
+    const meter = new AudioWorkletNode(audio.ctx, "fablecut-meter", {
+      numberOfInputs: 1,
+      numberOfOutputs: 1,
+      outputChannelCount: [2],
+      channelCount: 2,
+      channelCountMode: "explicit",
+      processorOptions: { hopBlocks: 8 },
+    });
+    meter.port.onmessage = (ev) => {
+      const msg = ev.data;
+      if (!msg || msg.type !== "meter") return;
+      meterState.rms[0] = msg.rms[0] || 0;
+      meterState.rms[1] = msg.rms[1] != null ? msg.rms[1] : meterState.rms[0];
+      meterState.peak[0] = msg.peak[0] || 0;
+      meterState.peak[1] = msg.peak[1] != null ? msg.peak[1] : meterState.peak[0];
+      // msg.lufs reserved for momentary/short-term LUFS
+    };
+    // Insert: master → meter → destination (pass-through); recDest stays on master
+    try { audio.master.disconnect(audio.ctx.destination); } catch {}
+    audio.master.connect(meter);
+    meter.connect(audio.ctx.destination);
+    audio.meter = meter;
+    audio.meterReady = true;
+    buildMeterDOM();
+  } catch (err) {
+    console.warn("[FableCut] meter worklet unavailable:", err);
+  } finally {
+    meterState._loading = false;
+  }
+}
+function buildMeterDOM() {
+  const root = $("vuMeter");
+  if (!root || meterState.segs[0].length) return;
+  for (const ch of [0, 1]) {
+    const host = root.querySelector(`.vu-channel[data-ch="${ch}"] .vu-segs`);
+    if (!host) continue;
+    host.innerHTML = "";
+    meterState.segs[ch] = [];
+    for (let i = 0; i < METER_SEGS; i++) {
+      const seg = document.createElement("div");
+      const t = i / (METER_SEGS - 1); // 0 = bottom (quiet), 1 = top (hot)
+      seg.className = "vu-seg " + (t < 0.6 ? "g" : t < 0.85 ? "y" : "r");
+      host.appendChild(seg);
+      meterState.segs[ch].push(seg);
+    }
+  }
+}
+function rmsToDb(rms) {
+  return rms > 1e-8 ? 20 * Math.log10(rms) : METER_DB_MIN;
+}
+function updateMeterUI(dt) {
+  if (!runtime.audio?.meterReady) return;
+  const playing = state.playing;
+  const attack = 1 - Math.exp(-dt / 0.015);   // ~15 ms
+  const release = 1 - Math.exp(-dt / 0.180);  // ~180 ms
+  const now = performance.now();
+  for (let ch = 0; ch < 2; ch++) {
+    const target = playing ? rmsToDb(meterState.rms[ch]) : METER_DB_MIN;
+    const cur = meterState.disp[ch];
+    const a = target > cur ? attack : release;
+    const next = cur + (target - cur) * a;
+    meterState.disp[ch] = next;
+
+    // Peak hold from worklet sample peaks (visual tip)
+    const pk = playing ? rmsToDb(meterState.peak[ch]) : METER_DB_MIN;
+    if (pk >= meterState.peakHold[ch]) {
+      meterState.peakHold[ch] = pk;
+      meterState.peakHoldT[ch] = now;
+    } else if (now - meterState.peakHoldT[ch] > 800) {
+      meterState.peakHold[ch] += (METER_DB_MIN - meterState.peakHold[ch]) * release;
+    }
+
+    const segs = meterState.segs[ch];
+    if (!segs.length) continue;
+    const level = (next - METER_DB_MIN) / (METER_DB_MAX - METER_DB_MIN);
+    const lit = Math.round(clamp(level, 0, 1) * METER_SEGS);
+    const hold = Math.round(clamp(
+      (meterState.peakHold[ch] - METER_DB_MIN) / (METER_DB_MAX - METER_DB_MIN), 0, 1
+    ) * (METER_SEGS - 1));
+    for (let i = 0; i < METER_SEGS; i++) {
+      segs[i].classList.toggle("on", i < lit || i === hold);
+    }
+  }
 }
 
 function play() {
@@ -3427,6 +3531,7 @@ function loop(ts) {
   els.playhead.style.left = state.time * state.pps + "px";
   drawRuler();
   updateSafeOverlay();
+  updateMeterUI(dt);
   els.tcCurrent.textContent = fmt(state.time);
   els.tcTotal.textContent = fmt(projDur());
   if (state.exporting && !state.rendering) {
@@ -3935,5 +4040,6 @@ buildTrackDOM();
 rebuildClips();
 renderBin();
 syncTrimIOButton();
+buildMeterDOM();
 connectServer().then(loadLibraryFonts);
 requestAnimationFrame(loop);
