@@ -768,12 +768,18 @@ function renderBin() {
     const icon = m.kind === "audio" ? "🎵" : m.kind === "image" ? "🖼" : m.kind === "svg" ? "✨" : "🎞";
     const thumbSrc = aux.thumb || (m.kind === "image" || m.kind === "svg" ? m.src : null);
     item.innerHTML = `
-      <div class="bin-thumb" ${thumbSrc ? `style="background-image:url('${thumbSrc}')"` : ""}>${thumbSrc ? "" : icon}</div>
+      <div class="bin-thumb"></div>
       <div class="bin-meta">
-        <div class="bin-name" title="${m.name.replace(/"/g, "&quot;")}">${m.name}</div>
+        <div class="bin-name"></div>
         <div class="bin-sub">${m.kind}${m.duration ? " · " + fmt(m.duration) : ""}</div>
       </div>
       <span class="bin-del" title="Remove (and its clips)">✕</span>`;
+    const thumbEl = item.querySelector(".bin-thumb");
+    if (thumbSrc) thumbEl.style.backgroundImage = `url(${JSON.stringify(thumbSrc)})`;
+    else thumbEl.textContent = icon;
+    const nameEl = item.querySelector(".bin-name");
+    nameEl.textContent = m.name;
+    nameEl.title = m.name;
     item.addEventListener("dragstart", (e) => {
       runtime.binDragFolderId = null;
       e.dataTransfer.setData("text/fablecut-media", m.id);
@@ -809,10 +815,13 @@ function renderBin() {
       row.innerHTML = `
         <button type="button" class="bin-folder-twist" title="${f.open ? "Collapse" : "Expand"}" aria-expanded="${f.open}">${f.open ? "▼" : "▶"}</button>
         <span class="bin-folder-icon">📁</span>
-        <span class="bin-folder-name" title="${f.name.replace(/"/g, "&quot;")}">${f.name}</span>
+        <span class="bin-folder-name"></span>
         <span class="bin-folder-count">${count}</span>
         <button type="button" class="bin-folder-add" title="New subfolder">+</button>
         <button type="button" class="bin-del bin-folder-del" title="Delete folder (keeps media)">✕</button>`;
+      const nameEl = row.querySelector(".bin-folder-name");
+      nameEl.textContent = f.name;
+      nameEl.title = f.name;
       row.querySelector(".bin-folder-twist").addEventListener("click", (e) => {
         e.stopPropagation();
         f.open = !f.open;
@@ -966,13 +975,19 @@ function renderLibrary() {
     const visual = kind === "image" || kind === "svg";
     const icon = kind === "audio" ? "🎵" : kind === "video" ? "🎞" : kind === "svg" ? "✨" : "🧩";
     item.innerHTML = `
-      <div class="bin-thumb${kind === "svg" ? " svg" : ""}" ${visual ? `style="background-image:url('${f.src}')"` : ""}>${visual ? "" : icon}</div>
+      <div class="bin-thumb${kind === "svg" ? " svg" : ""}"></div>
       <div class="bin-meta">
-        <div class="bin-name" title="${f.rel}">${f.name}</div>
+        <div class="bin-name"></div>
         <div class="bin-sub">${(f.size / 1024).toFixed(0)} KB</div>
       </div>
       ${dir === "sfx" ? `<button class="btn tiny lib-play" title="Preview">▶</button>` : ""}
       <button class="btn tiny accent lib-add" title="Add at playhead">＋</button>`;
+    const thumbEl = item.querySelector(".bin-thumb");
+    if (visual) thumbEl.style.backgroundImage = `url(${JSON.stringify(f.src)})`;
+    else thumbEl.textContent = icon;
+    const nameEl = item.querySelector(".bin-name");
+    nameEl.textContent = f.name;
+    nameEl.title = f.rel || f.name;
     item.addEventListener("dragstart", (e) => {
       const m = mediaForLibraryItem(f);
       if (!m) { e.preventDefault(); return; }
