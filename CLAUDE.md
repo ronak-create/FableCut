@@ -178,6 +178,7 @@ Examples in `library/svg/`: `sparkles.svg` (loop), `lower-third.svg`,
       "in": 2.5,                 // offset into source media, seconds (0 for image/svg/text)
       "duration": 5,             // clip length on timeline, seconds
       "name": "intro",
+      "linkGroup": "lg_abc",     // OPTIONAL — AV link: video + its L/R audio companions share one id
       "props": { /* all optional — see the props reference below */ },
       // OPTIONAL — keyframe animation. Times are seconds RELATIVE TO CLIP START.
       // "ease" sits on the DESTINATION keyframe of each segment:
@@ -316,10 +317,14 @@ glitch (RGB split + jitter) · pop (overshoot scale — stickers/captions).
 
 ### Semantics
 
-- Rendering order: V1 is drawn first, then V2, V3 on top. A video clip's own
-  audio plays with it (control via `props.volume`); A1–A4 are for standalone
-  audio files. SVG/image/text clips go on any V track (V2/V3 are handy overlay
-  lanes).
+- Rendering order: V1 is drawn first, then V2, V3 on top. SVG/image/text clips
+  go on any V track (V2/V3 are handy overlay lanes).
+- **Audio tracks A1–A4** hold both standalone audio files *and* linked companions
+  for imported video. Dropping a video creates the picture on a V track
+  (`props.volume: 0` so it isn't doubled) plus stereo L/R `kind:"audio"` clips
+  on A1/A2 that share a `linkGroup` (and the same `mediaId` / timing). Standalone
+  music/SFX also live on A1–A4. Linked partners move/trim/split together — edit
+  timing on any member of the group; do not treat A-tracks as music-only.
 - Media is `fit`-ted to the canvas (default "contain"), then crop → scale/x/y/
   rotation → flips apply.
 - `props` keys are all optional — missing keys get the defaults above.

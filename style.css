@@ -598,9 +598,9 @@ body.track-size-s .clip.selected {
 }
 .vu-scale {
   position: relative;
-  /* Match .vu-segs height: 16×8px + 15×2px gap */
+  /* Match .vu-segs height: 16×12px + 15×2px gap */
   width: 16px;
-  height: 158px;
+  height: 222px;
   margin-right: 0px;
   pointer-events: none;
 }

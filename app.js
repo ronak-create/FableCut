@@ -226,6 +226,14 @@ const ctx2d = els.preview.getContext("2d");
 /* ── Utils ─────────────────────────────────────────────────────────────── */
 const uid = () => Math.random().toString(36).slice(2, 9);
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+function escapeHtml(s) {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
 function fmt(t) {
   t = Math.max(0, t);
   const m = Math.floor(t / 60), s = Math.floor(t % 60),
@@ -1468,11 +1476,12 @@ function rebuildClips() {
                   (c.transitionIn || c.transitionOut ? "⇄ " : "");
     const chTag = c.props?.audioChannel === 0 ? "L · "
                 : c.props?.audioChannel === 1 ? "R · " : "";
+    const label = c.kind === "text" ? "T · " + (c.props.text || "").split("\n")[0]
+      : c.kind === "adjust" ? "FX · " + (c.name || "")
+      : c.kind === "audio" ? chTag + (c.name || "")
+      : (c.name || "");
     body += `<div class="fade"></div>
-      <div class="clip-label">${badge}${c.kind === "text" ? "T · " + (c.props.text || "").split("\n")[0]
-        : c.kind === "adjust" ? "FX · " + c.name
-        : c.kind === "audio" ? chTag + c.name
-        : c.name}</div>`;
+      <div class="clip-label">${badge}${escapeHtml(label)}</div>`;
     let inner = `<div class="clip-body">${body}</div>`;
     inner += transitionMarksHtml(c, tr.h);
     inner += `<div class="handle l"></div><div class="handle r"></div>`;
