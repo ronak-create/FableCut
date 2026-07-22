@@ -948,13 +948,40 @@ input[type=range] {
 }
 
 .track-headers {
-  width: 58px;
+  width: 64px;
   flex: none;
   border-right: 1px solid var(--border);
-  padding-top: 26px;
+  padding-top: 0;
   background: var(--panel);
   z-index: 2;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.track-head-tools {
+  height: 26px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border-bottom: 1px solid var(--border);
+  box-sizing: border-box;
+}
+
+.track-head-tools .btn {
+  padding: 1px 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1.2;
+  min-width: 0;
+}
+
+#trackHeadInner {
+  flex: 1;
+  min-height: 0;
 }
 
 .track-head {

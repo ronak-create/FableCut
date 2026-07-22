@@ -120,7 +120,13 @@
       <button class="btn tiny" id="btnZoomFit" title="Zoom timeline to fit (⇧Z)"><span class="fit-icon">│<span class="fit-arrow">↔</span>│</span> Fit</button>
     </div>
     <div class="timeline">
-      <div class="track-headers" id="trackHeaders"></div>
+      <div class="track-headers" id="trackHeaders">
+        <div class="track-head-tools" id="trackHeadTools">
+          <button type="button" class="btn tiny" id="btnAddV" title="Add video track">+V</button>
+          <button type="button" class="btn tiny" id="btnAddA" title="Add audio track">+A</button>
+        </div>
+        <div id="trackHeadInner"></div>
+      </div>
       <div class="timeline-scroll" id="timelineScroll">
         <canvas class="ruler" id="ruler"></canvas>
         <div class="tracks-content" id="tracksContent">

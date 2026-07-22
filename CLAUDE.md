@@ -162,7 +162,16 @@ Examples in `library/svg/`: `sparkles.svg` (loop), `lower-third.svg`,
   "inPoint": 10.023, // in timeline marker; paired with outPoint sets the focus on the part of the timeline
   "outPoint": 21.500, // out timeline marker
   "disabledTracks": [ "A2" ],
-  // ^ optional — track ids (V4 V3 V2 V1 A1 A2 A3) omitted from preview/export when listed
+  // ^ optional — track ids (e.g. V4 V3 V2 V1 A1 A2 A3) omitted from preview/export when listed
+  "tracks": [                          // optional — timeline lanes (default V3…V1 + A1…A4)
+    { "id": "V3", "kind": "video" },   // video: higher number drawn on top (V1 under V2 under V3…)
+    { "id": "V2", "kind": "video" },
+    { "id": "V1", "kind": "video" },
+    { "id": "A1", "kind": "audio" },   // audio: A1…An top→bottom; +V/+A in the UI appends Vn+1 / An+1
+    { "id": "A2", "kind": "audio" },
+    { "id": "A3", "kind": "audio" },
+    { "id": "A4", "kind": "audio" }
+  ],
   "media": [
     { "id": "m_abc", "name": "intro.mp4", "kind": "video",  // video|audio|image|svg
       "src": "/media/intro.mp4",             // path under ./media or ./library
@@ -173,12 +182,12 @@ Examples in `library/svg/`: `sparkles.svg` (loop), `lower-third.svg`,
       "id": "c_xyz",             // unique string
       "mediaId": "m_abc",        // null for kind:"text" and kind:"adjust"
       "kind": "video",           // video | audio | image | svg | text | adjust
-      "track": "V1",             // V3 V2 V1 (top→bottom video) | A1 A2 A3 A4 (audio)
+      "track": "V1",             // Vn…V1 (video) | A1…An (audio); extras via UI +V/+A or tracks[]
       "start": 0,                // timeline position, seconds
       "in": 2.5,                 // offset into source media, seconds (0 for image/svg/text)
       "duration": 5,             // clip length on timeline, seconds
       "name": "intro",
-      "linkGroup": "lg_abc",     // OPTIONAL — AV link: video + its L/R audio companions share one id
+      "linkGroup": "lg_abc",     // OPTIONAL — AV link: video + per-channel audio stems share one id
       "props": { /* all optional — see the props reference below */ },
       // OPTIONAL — keyframe animation. Times are seconds RELATIVE TO CLIP START.
       // "ease" sits on the DESTINATION keyframe of each segment:
@@ -320,14 +329,16 @@ glitch (RGB split + jitter) · pop (overshoot scale — stickers/captions).
 
 ### Semantics
 
-- Rendering order: V1 is drawn first, then V2, V3 on top. SVG/image/text clips
-  go on any V track (V2/V3 are handy overlay lanes).
-- **Audio tracks A1–A4** hold both standalone audio files *and* linked companions
+- Rendering order: V1 is drawn first, then V2, V3, … on top. SVG/image/text clips
+  go on any V track (higher V lanes are handy overlay lanes). Add lanes with the
+  timeline **+V** / **+A** buttons (or by listing them in `tracks`); up to 16 per kind.
+- **Audio tracks A1–An** hold both standalone audio files *and* linked companions
   for imported video. Dropping a video creates the picture on a V track
-  (`props.volume: 0` so it isn't doubled) plus stereo L/R `kind:"audio"` clips
-  on A1/A2 that share a `linkGroup` (and the same `mediaId` / timing). Standalone
-  music/SFX also live on A1–A4. Linked partners move/trim/split together — edit
-  timing on any member of the group; do not treat A-tracks as music-only.
+  (`props.volume: 0` so it isn't doubled) plus one `kind:"audio"` clip per source
+  channel (L/R/C/…) on consecutive A-tracks that share a `linkGroup` (and the same
+  `mediaId` / timing). Standalone music/SFX also live on A-tracks. Linked partners
+  move/trim/split together — edit timing on any member of the group; do not treat
+  A-tracks as music-only.
 - Media is `fit`-ted to the canvas (default "contain"), then crop → scale/x/y/
   rotation → flips apply.
 - `props` keys are all optional — missing keys get the defaults above.

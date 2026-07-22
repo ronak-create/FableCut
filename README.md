@@ -35,7 +35,8 @@ same time.
 
 **Editing**
 
-- 3 video tracks + 4 audio tracks, drag/trim/split/snap, undo/redo
+- Video + audio tracks (default 3+4; add more with **+V** / **+A** in the track
+  header), drag/trim/split/snap, undo/redo
 - **Direct manipulation on the monitor** — click a clip or title on the preview to
   move, resize (corner handles), or rotate (top handle, Shift-snap) it directly
 - **Timeline multi-select** — rubber-band marquee (drag on empty track area),
