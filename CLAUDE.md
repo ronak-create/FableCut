@@ -173,11 +173,12 @@ Examples in `library/svg/`: `sparkles.svg` (loop), `lower-third.svg`,
       "id": "c_xyz",             // unique string
       "mediaId": "m_abc",        // null for kind:"text" and kind:"adjust"
       "kind": "video",           // video | audio | image | svg | text | adjust
-      "track": "V1",             // V4 V3 V2 V1 (top→bottom video) | A1 A2 A3 (audio)
+      "track": "V1",             // V3 V2 V1 (top→bottom video) | A1 A2 A3 A4 (audio)
       "start": 0,                // timeline position, seconds
       "in": 2.5,                 // offset into source media, seconds (0 for image/svg/text)
       "duration": 5,             // clip length on timeline, seconds
       "name": "intro",
+      "linkGroup": "lg_abc",     // OPTIONAL — AV link: video + its L/R audio companions share one id
       "props": { /* all optional — see the props reference below */ },
       // OPTIONAL — keyframe animation. Times are seconds RELATIVE TO CLIP START.
       // "ease" sits on the DESTINATION keyframe of each segment:
@@ -301,9 +302,9 @@ canvas-aware placement is applied only when a title is first created.
 everything drawn *below* it (lower tracks + earlier clips) through its own
 filter stack — Premiere-style. Supports all Filter/Color props, vignette,
 grain, rgbSplit, temperature/tint, whole-frame `shake`, and `opacity` as the
-intensity. Keyframe/transition it like any clip. Put it on V3/V4 above the
+intensity. Keyframe/transition it like any clip. Put it on V2/V3 above the
 footage. Example: 0.3 s impact shake over everything =
-`{kind:"adjust", track:"V4", duration:0.3, props:{shake:18}}`.
+`{kind:"adjust", track:"V3", duration:0.3, props:{shake:18}}`.
 
 **Animatable props** (usable in `keyframes`): x, y, scale, rotation, opacity,
 volume, speed, brightness, contrast, saturation, hue, blur, grayscale, sepia,
@@ -316,10 +317,14 @@ glitch (RGB split + jitter) · pop (overshoot scale — stickers/captions).
 
 ### Semantics
 
-- Rendering order: V1 is drawn first, then V2, V3, V4 on top. A video clip's own
-  audio plays with it (control via `props.volume`); A1/A2/A3 are for standalone
-  audio files. SVG/image/text clips go on any V track (V3/V4 are handy overlay
-  lanes).
+- Rendering order: V1 is drawn first, then V2, V3 on top. SVG/image/text clips
+  go on any V track (V2/V3 are handy overlay lanes).
+- **Audio tracks A1–A4** hold both standalone audio files *and* linked companions
+  for imported video. Dropping a video creates the picture on a V track
+  (`props.volume: 0` so it isn't doubled) plus stereo L/R `kind:"audio"` clips
+  on A1/A2 that share a `linkGroup` (and the same `mediaId` / timing). Standalone
+  music/SFX also live on A1–A4. Linked partners move/trim/split together — edit
+  timing on any member of the group; do not treat A-tracks as music-only.
 - Media is `fit`-ted to the canvas (default "contain"), then crop → scale/x/y/
   rotation → flips apply.
 - `props` keys are all optional — missing keys get the defaults above.
@@ -434,11 +439,11 @@ Remember the source window is `duration × speed`.
 — sync the drop (t:1.3) to a marker; add `transitionIn:{type:"whip",duration:0.2}` before it.
 
 **Impact hit**: adjustment layer, 0.25–0.4 s at the hit:
-`{kind:"adjust", track:"V4", props:{shake:20, rgbSplit:8}}` + `impact-hit.mp3`
+`{kind:"adjust", track:"V3", props:{shake:20, rgbSplit:8}}` + `impact-hit.mp3`
 from `library/sfx` on A2.
 
 **VHS / glitch look**: `props: {rgbSplit:4, grain:35, saturation:120}` +
-`library/elements/vhs-scanlines.svg` on V4 with `blend:"soft-light", fit:"stretch"`.
+`library/elements/vhs-scanlines.svg` on V3 with `blend:"soft-light", fit:"stretch"`.
 Cut between shots with `transitionIn:{type:"glitch",duration:0.3}`.
 
 **Film look**: adjustment layer across the whole edit:
@@ -447,11 +452,11 @@ Cut between shots with `transitionIn:{type:"glitch",duration:0.3}`.
 **Neon caption**: `props: {glow:60, glowColor:"#22d3ee", color:"#ffffff",
 font:"Bebas Neue", textAnim:"wave"}` on a dark shot.
 
-**Light leak accent**: `library/elements/light-leak-warm.svg` on V4,
+**Light leak accent**: `library/elements/light-leak-warm.svg` on V3,
 `props:{blend:"screen", fit:"cover", opacity:0.7}`, 1–2 s at scene changes,
 `transitionIn/Out: fade`.
 
-**Light-leak / dust overlay**: element from `library/elements` on V4 with
+**Light-leak / dust overlay**: element from `library/elements` on V3 with
 `props: {blend:"screen", opacity:0.6, fit:"cover"}`.
 
 **Reel caption**: text clip with `props: {textAnim:"word-pop", wordRate:0.15,
@@ -484,7 +489,7 @@ behind its baseline. Pair with a `serifDrop`/`zoom-in` kicker above it.
 `props.font: "MyBrand"`.
 
 **Animated sticker**: author an SVG (convention above) into `library/svg/`,
-register `{kind:"svg", src:"/library/svg/foo.svg"}`, clip on V3/V4. Scale/move/
+register `{kind:"svg", src:"/library/svg/foo.svg"}`, clip on V2/V3. Scale/move/
 rotate with normal props & keyframes; the SVG's own CSS animation plays on top,
 frame-accurately.
 
