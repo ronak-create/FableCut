@@ -4429,13 +4429,39 @@ $("btnBack").addEventListener("click", () => setTime(state.time - 1 / project.fp
 $("btnFwd").addEventListener("click", () => setTime(state.time + 1 / project.fps));
 $("btnHelp").addEventListener("click", () => $("helpOverlay").classList.remove("hidden"));
 $("btnCloseHelp").addEventListener("click", () => $("helpOverlay").classList.add("hidden"));
+function settingsFocusables() {
+  const root = $("settingsDialog");
+  if (!root) return [];
+  return [...root.querySelectorAll("button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])")]
+    .filter((el) => !el.disabled && el.getClientRects().length);
+}
+function onSettingsTabTrap(e) {
+  if (e.key !== "Tab") return;
+  const list = settingsFocusables();
+  if (!list.length) return;
+  const first = list[0], last = list[list.length - 1];
+  if (e.shiftKey && document.activeElement === first) {
+    e.preventDefault();
+    last.focus();
+  } else if (!e.shiftKey && document.activeElement === last) {
+    e.preventDefault();
+    first.focus();
+  }
+}
 function openSettings() {
   const cb = $("setLinkSelect");
   if (cb) cb.checked = !!getSetting("linkSelect");
-  $("settingsOverlay").classList.remove("hidden");
+  const overlay = $("settingsOverlay");
+  overlay.classList.remove("hidden");
+  overlay.addEventListener("keydown", onSettingsTabTrap);
+  const dialog = $("settingsDialog");
+  (cb || dialog)?.focus();
 }
 function closeSettings() {
-  $("settingsOverlay").classList.add("hidden");
+  const overlay = $("settingsOverlay");
+  overlay.removeEventListener("keydown", onSettingsTabTrap);
+  overlay.classList.add("hidden");
+  $("btnSettings")?.focus();
 }
 $("btnSettings").addEventListener("click", openSettings);
 $("btnCloseSettings").addEventListener("click", closeSettings);
