@@ -217,6 +217,79 @@ function addTimelineTrack(kind) {
   scheduleSave();
   return t;
 }
+function trackHasClips(trackId) {
+  return project.clips.some((c) => c.track === trackId);
+}
+function canRemoveTrack(trackId) {
+  const t = TRACKS.find((x) => x.id === trackId);
+  if (!t) return { ok: false, reason: "Unknown track" };
+  if (trackHasClips(trackId)) return { ok: false, reason: "Track has clips" };
+  if (TRACKS.filter((x) => x.kind === t.kind).length <= 1)
+    return { ok: false, reason: `Keep at least one ${t.kind} track` };
+  return { ok: true, reason: "" };
+}
+function removeTimelineTrack(trackId) {
+  const check = canRemoveTrack(trackId);
+  if (!check.ok) { toast(check.reason); return false; }
+  const wasAudio = TRACKS.find((t) => t.id === trackId)?.kind === "audio";
+  const idx = TRACKS.findIndex((t) => t.id === trackId);
+  if (idx < 0) return false;
+  TRACKS.splice(idx, 1);
+  syncTrackIds();
+  if (state.disabledTracks.has(trackId)) {
+    state.disabledTracks.delete(trackId);
+    project.disabledTracks = [...state.disabledTracks].sort();
+  }
+  project.tracks = serializeTracks();
+  if (wasAudio) syncAudioGraphTracks();
+  buildTrackDOM();
+  syncAllTrackDisabledUI();
+  state.dirtyTimeline = true;
+  rebuildClips();
+  scheduleSave();
+  return true;
+}
+/* Lightweight right-click menu for track headers. */
+let trackCtxMenu = null;
+function hideTrackCtxMenu() {
+  if (trackCtxMenu) { trackCtxMenu.remove(); trackCtxMenu = null; }
+}
+function showTrackCtxMenu(clientX, clientY, track) {
+  hideTrackCtxMenu();
+  const check = canRemoveTrack(track.id);
+  const menu = document.createElement("div");
+  menu.className = "ctx-menu";
+  menu.id = "trackCtxMenu";
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "ctx-item";
+  btn.textContent = "Remove track";
+  if (!check.ok) {
+    btn.disabled = true;
+    btn.title = check.reason;
+  } else {
+    btn.addEventListener("click", () => {
+      hideTrackCtxMenu();
+      removeTimelineTrack(track.id);
+    });
+  }
+  menu.appendChild(btn);
+  document.body.appendChild(menu);
+  trackCtxMenu = menu;
+  const pad = 6;
+  const w = menu.offsetWidth, h = menu.offsetHeight;
+  let x = clientX, y = clientY;
+  if (x + w + pad > window.innerWidth) x = window.innerWidth - w - pad;
+  if (y + h + pad > window.innerHeight) y = window.innerHeight - h - pad;
+  menu.style.left = Math.max(pad, x) + "px";
+  menu.style.top = Math.max(pad, y) + "px";
+}
+document.addEventListener("pointerdown", (e) => {
+  if (trackCtxMenu && !trackCtxMenu.contains(e.target)) hideTrackCtxMenu();
+}, true);
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") hideTrackCtxMenu();
+}, true);
 
 /* ── State ─────────────────────────────────────────────────────────────── */
 const project = {
@@ -1556,6 +1629,11 @@ function buildTrackDOM() {
       ev.preventDefault();
       ev.stopPropagation();
       toggleTrackEnabled(t.id);
+    });
+    h.addEventListener("contextmenu", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      showTrackCtxMenu(ev.clientX, ev.clientY, t);
     });
     inner.appendChild(h);
     const row = document.createElement("div");

@@ -332,6 +332,8 @@ glitch (RGB split + jitter) · pop (overshoot scale — stickers/captions).
 - Rendering order: V1 is drawn first, then V2, V3, … on top. SVG/image/text clips
   go on any V track (higher V lanes are handy overlay lanes). Add lanes with the
   timeline **+V** / **+A** buttons (or by listing them in `tracks`); up to 16 per kind.
+  Right-click an empty track header → **Remove track** (disabled if the lane has
+  clips or is the last video/audio track).
 - **Audio tracks A1–An** hold both standalone audio files *and* linked companions
   for imported video. Dropping a video creates the picture on a V track
   (`props.volume: 0` so it isn't doubled) plus one `kind:"audio"` clip per source
