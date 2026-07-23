@@ -25,6 +25,11 @@
           <button type="button" class="btn tiny" data-track-size="l" title="Large tracks">L</button>
         </span>
       </span>
+      <button class="btn ghost" id="btnSettings" title="Settings" aria-label="Settings">
+        <svg class="ico" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+          <path fill="currentColor" fill-rule="evenodd" d="M6.71 2.81L6.88.94L9.12.94L9.29 2.81L10.76 3.41L12.2 2.22L13.78 3.8L12.59 5.24L13.19 6.71L15.06 6.88L15.06 9.12L13.19 9.29L12.59 10.76L13.78 12.2L12.2 13.78L10.76 12.59L9.29 13.19L9.12 15.06L6.88 15.06L6.71 13.19L5.24 12.59L3.8 13.78L2.22 12.2L3.41 10.76L2.81 9.29L.94 9.12L.94 6.88L2.81 6.71L3.41 5.24L2.22 3.8L3.8 2.22L5.24 3.41Z M5.15 8a2.85 2.85 0 1 0 5.7 0a2.85 2.85 0 1 0-5.7 0"/>
+        </svg>
+      </button>
       <button class="btn ghost" id="btnHelp" title="Keyboard shortcuts">?</button>
       <button class="btn primary" id="btnExport">⬇ Export</button>
     </div>
@@ -161,6 +166,25 @@
     <p class="dim" id="exportNote">Rendering your sequence in real time. Keep this tab focused.</p>
     <div class="progress"><div class="progress-fill" id="exportProgress"></div></div>
     <div class="dialog-actions"><button class="btn" id="btnCancelExport">Cancel</button></div>
+  </div>
+</div>
+
+<!-- ══════════ SETTINGS OVERLAY ══════════ -->
+<div class="overlay hidden" id="settingsOverlay">
+  <div class="dialog settings" role="dialog" aria-labelledby="settingsTitle">
+    <h2 id="settingsTitle">Settings</h2>
+    <p class="dim settings-intro">Preferences are stored in this browser only.</p>
+    <div class="settings-section">
+      <h3>Selection</h3>
+      <label class="settings-row">
+        <input type="checkbox" id="setLinkSelect">
+        <span>
+          <span class="settings-label">Link timeline and Project bin selection</span>
+          <span class="settings-hint">Selecting a timeline clip highlights its media in Project, and the reverse. Off by default.</span>
+        </span>
+      </label>
+    </div>
+    <div class="dialog-actions"><button class="btn primary" id="btnCloseSettings">Close</button></div>
   </div>
 </div>
 
