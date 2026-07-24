@@ -41,6 +41,9 @@ same time.
     has clips, or if it would leave you with zero video/audio tracks)
   - Track header **S** solos that lane (mutes all others); click again to restore
     the previous mute state. Using the mute toggle while soloed exits solo.
+  - Dropping a video with more audio channels than A-tracks **adds the missing
+    lanes automatically** (up to 16) and toasts how many were added; each channel
+    becomes a linked stem on its own A-track
 - **Direct manipulation on the monitor** — click a clip or title on the preview to
   move, resize (corner handles), or rotate (top handle, Shift-snap) it directly
 - **Timeline multi-select** — rubber-band marquee (drag on empty track area),

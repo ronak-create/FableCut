@@ -1106,6 +1106,34 @@ function linkedAudioChannelCount(m) {
   const n = Math.max(1, m.channels | 0);
   return Math.min(n, audioTrackIds().length);
 }
+/** Grow A-tracks to at least `need` (capped at MAX_TRACKS_PER_KIND). Returns how many were added. */
+function ensureAudioTrackCount(need) {
+  need = Math.min(Math.max(0, need | 0), MAX_TRACKS_PER_KIND);
+  let added = 0;
+  while (audioTrackIds().length < need) {
+    if (TRACKS.filter((t) => t.kind === "audio").length >= MAX_TRACKS_PER_KIND) break;
+    const id = nextTrackId("audio");
+    TRACKS.push(makeTrack(id, "audio"));
+    if (state.soloId && state.soloId !== id) state.disabledTracks.add(id);
+    added++;
+  }
+  if (!added) return 0;
+  sortTracksInPlace();
+  applyTrackHeights();
+  project.tracks = serializeTracks();
+  if (state.disabledTracks.size) project.disabledTracks = [...state.disabledTracks].sort();
+  syncAudioGraphTracks();
+  buildTrackDOM();
+  syncAllTrackDisabledUI();
+  state.dirtyTimeline = true;
+  rebuildClips();
+  const h = setTimelineHeight(Math.max(
+    $("timelinePanel")?.getBoundingClientRect().height || 0,
+    defaultTimelineHeight()
+  ));
+  localStorage.setItem(TL_H_KEY, String(h));
+  return added;
+}
 /** Attach one audio clip per source channel (A1…An), sharing the video's linkGroup. */
 function attachLinkedAudioChannels(videoClip, m, nCh) {
   if (!videoClip?.linkGroup || !getClip(videoClip.id)) return [];
@@ -1167,6 +1195,13 @@ function addClipFromMedia(m, trackId, at) {
     const finish = (nCh) => {
       if (!getClip(c.id) || !c.linkGroup) return;
       m.channels = nCh;
+      const want = Math.min(Math.max(1, nCh | 0), MAX_TRACKS_PER_KIND);
+      const added = ensureAudioTrackCount(want);
+      if (added) {
+        toast(added === 1
+          ? `Added an audio track for ${nCh}-channel audio`
+          : `Added ${added} audio tracks for ${nCh}-channel audio`);
+      }
       attachLinkedAudioChannels(c, m, linkedAudioChannelCount(m));
       state.dirtyTimeline = true;
       scheduleSave();
