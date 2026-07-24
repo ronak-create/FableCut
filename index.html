@@ -74,12 +74,16 @@
         </span>
       </div>
       <div class="monitor-stage" id="monitorStage">
-        <canvas id="preview" width="1280" height="720"></canvas>
-        <div id="safeOverlay" class="hidden">
-          <div class="sa-action"></div>
-          <div class="sa-title"></div>
-          <div class="sa-ui-bottom"></div>
-          <div class="sa-ui-right"></div>
+        <div class="monitor-scroll" id="monitorScroll">
+          <div class="monitor-zoom-inner" id="monitorZoomInner">
+            <canvas id="preview" width="1280" height="720"></canvas>
+            <div id="safeOverlay" class="hidden">
+              <div class="sa-action"></div>
+              <div class="sa-title"></div>
+              <div class="sa-ui-bottom"></div>
+              <div class="sa-ui-right"></div>
+            </div>
+          </div>
         </div>
         <div class="vu-meter" id="vuMeter" title="Click to switch RMS / LUFS / Peak"></div>
       </div>

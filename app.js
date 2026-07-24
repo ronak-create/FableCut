@@ -154,7 +154,6 @@ const state = {
   rendering: false,      // fast (server/ffmpeg) export in progress
   guides: false,         // safe-area overlay on the monitor
   viewZoom: 1,           // program-monitor display zoom (1 = fit stage)
-  viewPan: { x: 0, y: 0 }, // px offset while zoomed (zoom-to-cursor / pan)
   ffmpeg: false,         // server reports ffmpeg available
   dirtyTimeline: true, gesture: false,
   workAreaPlay: false,   // when true, play + Home/End stay inside IN/OUT
@@ -225,7 +224,8 @@ const els = {
   projectName: $("projectName"), monitorRes: $("monitorRes"),
   aspectSel: $("aspectSel"), btnGuides: $("btnGuides"), btnZoom100: $("btnZoom100"),
   safeOverlay: $("safeOverlay"), btnSpeed: $("btnSpeed"),
-  monitorStage: $("monitorStage"),
+  monitorStage: $("monitorStage"), monitorScroll: $("monitorScroll"),
+  monitorZoomInner: $("monitorZoomInner"),
   exportSetup: $("exportSetup"), engineFast: $("engineFast"), engineRealtime: $("engineRealtime"),
 };
 const ctx2d = els.preview.getContext("2d");
@@ -4390,49 +4390,67 @@ els.btnGuides.addEventListener("click", () => {
   state.guides = !state.guides;
   els.btnGuides.classList.toggle("on", state.guides);
   els.safeOverlay.classList.toggle("hidden", !state.guides);
+  if (state.guides) updateSafeOverlay();
 });
 /* ── Program-monitor view zoom (wheel) + fit reset ──
-   Zooms the CSS-scaled canvas inside the clipped stage. Pointer mapping via
-   getBoundingClientRect already includes the transform, so canvas edits stay accurate.
-   Max zoom = VIEW_PIXEL_MAX screen CSS pixels per canvas pixel (not a fixed ×fit). */
+   Zoom enlarges the canvas layout size inside a scrollport (native scrollbars),
+   not a CSS transform — overflow stays reachable. Pointer mapping via
+   getBoundingClientRect still tracks the visible canvas.
+   Max zoom = VIEW_PIXEL_MAX screen CSS pixels per canvas pixel. */
 const VIEW_ZOOM_MIN = 1;
 const VIEW_PIXEL_MAX = 2;
-function maxViewZoom() {
-  const layoutW = els.preview.offsetWidth;
-  const pxW = project.width || els.preview.width;
-  if (!layoutW || !pxW) return VIEW_ZOOM_MIN;
-  return Math.max(VIEW_ZOOM_MIN, VIEW_PIXEL_MAX * pxW / layoutW);
+let monitorFitCache = null; // {w,h} fit size captured at zoom start (stable while zoomed)
+let monitorViewPad = { x: 0, y: 0 }; // content padding so any canvas point can sit under the cursor
+function measureMonitorFit() {
+  const sw = els.monitorStage.clientWidth, sh = els.monitorStage.clientHeight;
+  const pw = project.width || els.preview.width || 1;
+  const ph = project.height || els.preview.height || 1;
+  const s = Math.min(sw / pw, sh / ph);
+  return { w: pw * s, h: ph * s };
 }
-/** Keep pan so the scaled canvas still covers the stage (can't drag it fully off-screen). */
-function clampViewPan(stageRect) {
-  const z = state.viewZoom;
-  if (z <= 1.001) {
-    state.viewPan = { x: 0, y: 0 };
-    return;
-  }
-  const stage = stageRect || els.monitorStage.getBoundingClientRect();
-  // offsetWidth/Height are layout size (ignore CSS transform); scaled size = layout × zoom
-  const cw = els.preview.offsetWidth, ch = els.preview.offsetHeight;
-  if (!cw || !ch || !stage.width || !stage.height) return;
-  const maxX = Math.max(0, (cw * z - stage.width) / 2);
-  const maxY = Math.max(0, (ch * z - stage.height) / 2);
-  state.viewPan = {
-    x: clamp(state.viewPan.x, -maxX, maxX),
-    y: clamp(state.viewPan.y, -maxY, maxY),
-  };
+function monitorFitSize() {
+  if (monitorFitCache) return monitorFitCache;
+  const w = els.preview.offsetWidth, h = els.preview.offsetHeight;
+  if (w > 0 && h > 0 && state.viewZoom <= 1.001) return { w, h };
+  return measureMonitorFit();
+}
+function maxViewZoom() {
+  const { w } = monitorFitSize();
+  const pxW = project.width || els.preview.width;
+  if (!w || !pxW) return VIEW_ZOOM_MIN;
+  return Math.max(VIEW_ZOOM_MIN, VIEW_PIXEL_MAX * pxW / w);
 }
 function applyMonitorView() {
-  const z = state.viewZoom, pan = state.viewPan;
+  const z = state.viewZoom;
   const zoomed = z > 1.001;
+  const scroll = els.monitorScroll;
+  const inner = els.monitorZoomInner;
   if (!zoomed) {
     state.viewZoom = 1;
-    state.viewPan = { x: 0, y: 0 };
-    els.preview.style.transform = "";
+    monitorFitCache = null;
+    monitorViewPad = { x: 0, y: 0 };
+    els.preview.style.width = "";
+    els.preview.style.height = "";
+    if (inner) inner.style.padding = "";
+    scroll.scrollLeft = 0;
+    scroll.scrollTop = 0;
   } else {
-    els.preview.style.transform = `translate(${pan.x}px, ${pan.y}px) scale(${z})`;
+    if (!monitorFitCache) monitorFitCache = monitorFitSize();
+    const fit = monitorFitCache;
+    els.preview.style.width = (fit.w * z) + "px";
+    els.preview.style.height = (fit.h * z) + "px";
+    // Pad by the stage size so scrollLeft can be "negative" relative to the canvas
+    // (needed when zooming from a centered fit letterbox without jumping).
+    if (!monitorViewPad.x && !monitorViewPad.y) {
+      monitorViewPad = {
+        x: Math.ceil(els.monitorStage.clientWidth || scroll.clientWidth || 0),
+        y: Math.ceil(els.monitorStage.clientHeight || scroll.clientHeight || 0),
+      };
+    }
+    if (inner) inner.style.padding = `${monitorViewPad.y}px ${monitorViewPad.x}px`;
   }
   els.btnZoom100.classList.toggle("hidden", !zoomed);
-  els.monitorStage.classList.toggle("is-zoomed", zoomed);
+  scroll.classList.toggle("is-zoomed", zoomed);
   updateSafeOverlay();
 }
 let monitorViewRaf = 0;
@@ -4446,7 +4464,8 @@ function scheduleMonitorView() {
 }
 function resetMonitorView() {
   state.viewZoom = 1;
-  state.viewPan = { x: 0, y: 0 };
+  monitorFitCache = null;
+  monitorViewPad = { x: 0, y: 0 };
   if (monitorViewRaf) {
     cancelAnimationFrame(monitorViewRaf);
     monitorViewRaf = 0;
@@ -4454,65 +4473,97 @@ function resetMonitorView() {
   applyMonitorView(); // immediate — don't wait a frame to clear zoom
 }
 els.btnZoom100.addEventListener("click", resetMonitorView);
-els.monitorStage.addEventListener("wheel", (e) => {
+els.monitorScroll.addEventListener("wheel", (e) => {
   e.preventDefault();
-  const stage = els.monitorStage.getBoundingClientRect();
-  const mx = e.clientX - stage.left - stage.width / 2;
-  const my = e.clientY - stage.top - stage.height / 2;
+  const scroll = els.monitorScroll;
+  const rect = scroll.getBoundingClientRect();
+  const ox = e.clientX - rect.left;
+  const oy = e.clientY - rect.top;
   const oldZ = state.viewZoom;
+  if (oldZ <= 1.001) {
+    monitorFitCache = {
+      w: els.preview.offsetWidth || measureMonitorFit().w,
+      h: els.preview.offsetHeight || measureMonitorFit().h,
+    };
+  }
+  const fit = monitorFitSize();
   const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
   const next = clamp(+(oldZ * factor).toFixed(3), VIEW_ZOOM_MIN, maxViewZoom());
   if (Math.abs(next - oldZ) < 1e-4) {
     if (next <= VIEW_ZOOM_MIN) resetMonitorView();
     return;
   }
-  const pan = state.viewPan;
+  // Fraction of the canvas under the cursor (works for centered fit and scrolled zoom).
+  const cv = els.preview.getBoundingClientRect();
+  const relX = cv.width > 0 ? (e.clientX - cv.left) / cv.width : 0.5;
+  const relY = cv.height > 0 ? (e.clientY - cv.top) / cv.height : 0.5;
   state.viewZoom = next;
-  state.viewPan = {
-    x: mx - (mx - pan.x) * (next / oldZ),
-    y: my - (my - pan.y) * (next / oldZ),
-  };
-  clampViewPan(stage);
-  if (next <= VIEW_ZOOM_MIN) resetMonitorView();
-  else scheduleMonitorView();
+  if (next <= VIEW_ZOOM_MIN) {
+    resetMonitorView();
+    return;
+  }
+  applyMonitorView();
+  void scroll.scrollWidth; // ensure padding/size are laid out before assigning scroll
+  const pad = monitorViewPad;
+  scroll.scrollLeft = pad.x + relX * fit.w * next - ox;
+  scroll.scrollTop = pad.y + relY * fit.h * next - oy;
 }, { passive: false });
-/* Pan while zoomed: middle mouse, or Alt+drag on the stage (not on a clip drag). */
+/* Pan while zoomed: middle mouse, or Alt+drag — drives native scroll position. */
 let viewPanDrag = null;
-els.monitorStage.addEventListener("pointerdown", (e) => {
+els.monitorScroll.addEventListener("pointerdown", (e) => {
   if (state.viewZoom <= 1.001) return;
   if (e.button === 1 || (e.button === 0 && e.altKey)) {
-    viewPanDrag = { x: e.clientX, y: e.clientY, panX: state.viewPan.x, panY: state.viewPan.y };
-    els.monitorStage.classList.add("is-panning");
-    els.monitorStage.setPointerCapture(e.pointerId);
+    const scroll = els.monitorScroll;
+    viewPanDrag = { x: e.clientX, y: e.clientY, sl: scroll.scrollLeft, st: scroll.scrollTop };
+    scroll.classList.add("is-panning");
+    scroll.setPointerCapture(e.pointerId);
     e.preventDefault();
   }
 });
-els.monitorStage.addEventListener("pointermove", (e) => {
+els.monitorScroll.addEventListener("pointermove", (e) => {
   if (!viewPanDrag) return;
-  state.viewPan = {
-    x: viewPanDrag.panX + (e.clientX - viewPanDrag.x),
-    y: viewPanDrag.panY + (e.clientY - viewPanDrag.y),
-  };
-  clampViewPan();
-  scheduleMonitorView();
+  const scroll = els.monitorScroll;
+  scroll.scrollLeft = viewPanDrag.sl - (e.clientX - viewPanDrag.x);
+  scroll.scrollTop = viewPanDrag.st - (e.clientY - viewPanDrag.y);
 });
 function endViewPan(e) {
   if (!viewPanDrag) return;
   viewPanDrag = null;
-  els.monitorStage.classList.remove("is-panning");
-  try { els.monitorStage.releasePointerCapture(e.pointerId); } catch { }
+  els.monitorScroll.classList.remove("is-panning");
+  try { els.monitorScroll.releasePointerCapture(e.pointerId); } catch { }
 }
-els.monitorStage.addEventListener("pointerup", endViewPan);
-els.monitorStage.addEventListener("pointercancel", endViewPan);
-els.monitorStage.addEventListener("auxclick", (e) => { if (e.button === 1) e.preventDefault(); });
-/* Keep the guide overlay glued to the (letterboxed, CSS-scaled) canvas */
+els.monitorScroll.addEventListener("pointerup", endViewPan);
+els.monitorScroll.addEventListener("pointercancel", endViewPan);
+els.monitorScroll.addEventListener("auxclick", (e) => { if (e.button === 1) e.preventDefault(); });
+els.monitorScroll.addEventListener("scroll", () => {
+  if (state.guides) updateSafeOverlay();
+});
+if (typeof ResizeObserver !== "undefined") {
+  new ResizeObserver(() => {
+    if (state.viewZoom <= 1.001) {
+      monitorFitCache = null;
+      if (state.guides) updateSafeOverlay();
+      return;
+    }
+    const scroll = els.monitorScroll;
+    const relX = scroll.scrollWidth > 0 ? scroll.scrollLeft / scroll.scrollWidth : 0;
+    const relY = scroll.scrollHeight > 0 ? scroll.scrollTop / scroll.scrollHeight : 0;
+    monitorFitCache = measureMonitorFit();
+    if (state.viewZoom > maxViewZoom()) state.viewZoom = maxViewZoom();
+    applyMonitorView();
+    scroll.scrollLeft = relX * scroll.scrollWidth;
+    scroll.scrollTop = relY * scroll.scrollHeight;
+  }).observe(els.monitorStage);
+}
+/* Keep the guide overlay glued to the canvas inside .monitor-zoom-inner */
 function updateSafeOverlay() {
   if (!state.guides) return;
-  const stage = els.monitorStage.getBoundingClientRect();
-  const cv = els.preview.getBoundingClientRect();
+  const cv = els.preview;
   const o = els.safeOverlay.style;
-  o.left = (cv.left - stage.left) + "px"; o.top = (cv.top - stage.top) + "px";
-  o.width = cv.width + "px"; o.height = cv.height + "px";
+  o.left = cv.offsetLeft + "px";
+  o.top = cv.offsetTop + "px";
+  o.width = cv.offsetWidth + "px";
+  o.height = cv.offsetHeight + "px";
   els.safeOverlay.classList.toggle("vertical", project.height > project.width);
 }
 
