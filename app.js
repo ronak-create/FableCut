@@ -4391,10 +4391,36 @@ els.btnGuides.addEventListener("click", () => {
   els.btnGuides.classList.toggle("on", state.guides);
   els.safeOverlay.classList.toggle("hidden", !state.guides);
 });
-/* ── Program-monitor view zoom (wheel) + 100% reset ──
+/* ── Program-monitor view zoom (wheel) + fit reset ──
    Zooms the CSS-scaled canvas inside the clipped stage. Pointer mapping via
-   getBoundingClientRect already includes the transform, so canvas edits stay accurate. */
-const VIEW_ZOOM_MIN = 1, VIEW_ZOOM_MAX = 6;
+   getBoundingClientRect already includes the transform, so canvas edits stay accurate.
+   Max zoom = VIEW_PIXEL_MAX screen CSS pixels per canvas pixel (not a fixed ×fit). */
+const VIEW_ZOOM_MIN = 1;
+const VIEW_PIXEL_MAX = 2;
+function maxViewZoom() {
+  const layoutW = els.preview.offsetWidth;
+  const pxW = project.width || els.preview.width;
+  if (!layoutW || !pxW) return VIEW_ZOOM_MIN;
+  return Math.max(VIEW_ZOOM_MIN, VIEW_PIXEL_MAX * pxW / layoutW);
+}
+/** Keep pan so the scaled canvas still covers the stage (can't drag it fully off-screen). */
+function clampViewPan(stageRect) {
+  const z = state.viewZoom;
+  if (z <= 1.001) {
+    state.viewPan = { x: 0, y: 0 };
+    return;
+  }
+  const stage = stageRect || els.monitorStage.getBoundingClientRect();
+  // offsetWidth/Height are layout size (ignore CSS transform); scaled size = layout × zoom
+  const cw = els.preview.offsetWidth, ch = els.preview.offsetHeight;
+  if (!cw || !ch || !stage.width || !stage.height) return;
+  const maxX = Math.max(0, (cw * z - stage.width) / 2);
+  const maxY = Math.max(0, (ch * z - stage.height) / 2);
+  state.viewPan = {
+    x: clamp(state.viewPan.x, -maxX, maxX),
+    y: clamp(state.viewPan.y, -maxY, maxY),
+  };
+}
 function applyMonitorView() {
   const z = state.viewZoom, pan = state.viewPan;
   const zoomed = z > 1.001;
@@ -4409,10 +4435,23 @@ function applyMonitorView() {
   els.monitorStage.classList.toggle("is-zoomed", zoomed);
   updateSafeOverlay();
 }
+let monitorViewRaf = 0;
+/** Coalesce repeated zoom/pan updates into one paint (updateSafeOverlay ≤ once/frame). */
+function scheduleMonitorView() {
+  if (monitorViewRaf) return;
+  monitorViewRaf = requestAnimationFrame(() => {
+    monitorViewRaf = 0;
+    applyMonitorView();
+  });
+}
 function resetMonitorView() {
   state.viewZoom = 1;
   state.viewPan = { x: 0, y: 0 };
-  applyMonitorView();
+  if (monitorViewRaf) {
+    cancelAnimationFrame(monitorViewRaf);
+    monitorViewRaf = 0;
+  }
+  applyMonitorView(); // immediate — don't wait a frame to clear zoom
 }
 els.btnZoom100.addEventListener("click", resetMonitorView);
 els.monitorStage.addEventListener("wheel", (e) => {
@@ -4422,19 +4461,20 @@ els.monitorStage.addEventListener("wheel", (e) => {
   const my = e.clientY - stage.top - stage.height / 2;
   const oldZ = state.viewZoom;
   const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
-  const next = clamp(+(oldZ * factor).toFixed(3), VIEW_ZOOM_MIN, VIEW_ZOOM_MAX);
+  const next = clamp(+(oldZ * factor).toFixed(3), VIEW_ZOOM_MIN, maxViewZoom());
   if (Math.abs(next - oldZ) < 1e-4) {
     if (next <= VIEW_ZOOM_MIN) resetMonitorView();
     return;
   }
   const pan = state.viewPan;
+  state.viewZoom = next;
   state.viewPan = {
     x: mx - (mx - pan.x) * (next / oldZ),
     y: my - (my - pan.y) * (next / oldZ),
   };
-  state.viewZoom = next;
+  clampViewPan(stage);
   if (next <= VIEW_ZOOM_MIN) resetMonitorView();
-  else applyMonitorView();
+  else scheduleMonitorView();
 }, { passive: false });
 /* Pan while zoomed: middle mouse, or Alt+drag on the stage (not on a clip drag). */
 let viewPanDrag = null;
@@ -4453,7 +4493,8 @@ els.monitorStage.addEventListener("pointermove", (e) => {
     x: viewPanDrag.panX + (e.clientX - viewPanDrag.x),
     y: viewPanDrag.panY + (e.clientY - viewPanDrag.y),
   };
-  applyMonitorView();
+  clampViewPan();
+  scheduleMonitorView();
 });
 function endViewPan(e) {
   if (!viewPanDrag) return;
