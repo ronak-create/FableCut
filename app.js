@@ -2806,26 +2806,31 @@ function syncAudioGraphTracks() {
   const audio = runtime.audio;
   if (!audio) return;
   const ids = audioTrackIds();
+  const idSet = new Set(ids);
+  // Drop buses for removed A-tracks (independent of meter state).
+  for (const id of Object.keys(audio.trackBus)) {
+    if (idSet.has(id)) continue;
+    try { audio.trackBus[id].disconnect(); } catch { }
+    delete audio.trackBus[id];
+  }
   for (const id of ids) {
-    if (!audio.trackBus[id]) {
-      const g = audio.ctx.createGain();
-      audio.trackBus[id] = g;
-      g.connect(audio.master);
-    }
+    if (!audio.trackBus[id]) audio.trackBus[id] = audio.ctx.createGain();
   }
   audio.audioTrackIds = ids.slice();
   // Tear down meter so installMeterWorklet can rebuild with the new input count.
   if (audio.meter) {
     try { audio.meter.disconnect(); } catch { }
-    for (const id of Object.keys(audio.trackBus)) {
-      try { audio.trackBus[id].disconnect(); } catch { }
-      if (ids.includes(id)) audio.trackBus[id].connect(audio.master);
-    }
     try { audio.master.disconnect(); } catch { }
     audio.master.connect(audio.ctx.destination);
     audio.master.connect(audio.recDest);
     audio.meter = null;
     audio.meterReady = false;
+  }
+  // Always wire current buses → master so re-added tracks stay audible if meter install fails.
+  for (const id of ids) {
+    const g = audio.trackBus[id];
+    try { g.disconnect(); } catch { }
+    try { g.connect(audio.master); } catch { }
   }
   installMeterWorklet(audio).catch(() => {});
   // Re-route clip gains onto (possibly new) buses
