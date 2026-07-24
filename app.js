@@ -7,21 +7,31 @@
 "use strict";
 
 /* ── Constants ─────────────────────────────────────────────────────────── */
-const TRACKS = [
-  { id: "V3", kind: "video", h: 44, color: "#ffd166" },
-  { id: "V2", kind: "video", h: 58, color: "#7b6cff" },
-  { id: "V1", kind: "video", h: 58, color: "#4f8cff" },
-  { id: "A1", kind: "audio", h: 42, color: "#7ec249" },
-  { id: "A2", kind: "audio", h: 42, color: "#5a9e3a" },
-  { id: "A3", kind: "audio", h: 42, color: "#4a8a2f" },
-  { id: "A4", kind: "audio", h: 42, color: "#3a7226" },
+const VIDEO_TRACK_COLORS = ["#4f8cff", "#7b6cff", "#ffd166", "#ff6b9d", "#45d9c2", "#f4a261", "#e76f51", "#a8dadc"];
+const AUDIO_TRACK_COLORS = ["#7ec249", "#5a9e3a", "#4a8a2f", "#3a7226", "#2d5a1e", "#8fbc5a", "#6b9e3a", "#4d7a28"];
+const MAX_TRACKS_PER_KIND = 16;
+const DEFAULT_TRACK_DEFS = [
+  { id: "V3", kind: "video" },
+  { id: "V2", kind: "video" },
+  { id: "V1", kind: "video" },
+  { id: "A1", kind: "audio" },
+  { id: "A2", kind: "audio" },
+  { id: "A3", kind: "audio" },
+  { id: "A4", kind: "audio" },
 ];
+function makeTrack(id, kind) {
+  const n = Math.max(1, parseInt(String(id).slice(1), 10) || 1);
+  const colors = kind === "audio" ? AUDIO_TRACK_COLORS : VIDEO_TRACK_COLORS;
+  return { id, kind, h: kind === "audio" ? 42 : 58, color: colors[(n - 1) % colors.length] };
+}
+/** Live track list (top→bottom). Mutated by +V/+A; rebuilt from project.tracks on load. */
+let TRACKS = DEFAULT_TRACK_DEFS.map((d) => makeTrack(d.id, d.kind));
 /* Three timeline density presets. L matches the original track heights (with thumbs).
    S is compact solid-color rows; M is in between. */
 const TRACK_SIZE_PRESETS = {
-  s: { thumbs: false, h: { V3: 26, V2: 26, V1: 26, A1: 22, A2: 22, A3: 22, A4: 22 } },
-  m: { thumbs: true, h: { V3: 36, V2: 44, V1: 44, A1: 32, A2: 32, A3: 32, A4: 32 } },
-  l: { thumbs: true, h: { V3: 44, V2: 58, V1: 58, A1: 42, A2: 42, A3: 42, A4: 42 } },
+  s: { thumbs: false, hVideo: 26, hAudio: 22 },
+  m: { thumbs: true, hVideo: 44, hAudio: 32 },
+  l: { thumbs: true, hVideo: 58, hAudio: 42 },
 };
 const TRACK_SIZE_KEY = "fablecut-track-size";
 const LAST_TRANS_KEY = { in: "fablecut-last-trans-in", out: "fablecut-last-trans-out" };
@@ -130,6 +140,165 @@ const ASPECT_PRESETS = [
 ];
 const WAVE_PEAKS_PER_SEC = 50;
 const TRACK_IDS = new Set(TRACKS.map((t) => t.id));
+function syncTrackIds() {
+  TRACK_IDS.clear();
+  for (const t of TRACKS) TRACK_IDS.add(t.id);
+}
+function serializeTracks() {
+  return TRACKS.map(({ id, kind }) => ({ id, kind }));
+}
+function sortTracksInPlace() {
+  const vids = TRACKS.filter((t) => t.kind === "video")
+    .sort((a, b) => (parseInt(b.id.slice(1), 10) || 0) - (parseInt(a.id.slice(1), 10) || 0));
+  const auds = TRACKS.filter((t) => t.kind === "audio")
+    .sort((a, b) => (parseInt(a.id.slice(1), 10) || 0) - (parseInt(b.id.slice(1), 10) || 0));
+  TRACKS.length = 0;
+  TRACKS.push(...vids, ...auds);
+  syncTrackIds();
+}
+function applyTracksFromProject(defs) {
+  const list = Array.isArray(defs) && defs.length
+    ? defs.filter((d) => d && d.id && (d.kind === "video" || d.kind === "audio"))
+    : DEFAULT_TRACK_DEFS;
+  TRACKS.length = 0;
+  for (const d of list) TRACKS.push(makeTrack(d.id, d.kind === "audio" ? "audio" : "video"));
+  sortTracksInPlace();
+  applyTrackHeights();
+}
+/** Ensure every clip.track exists (agents may reference V4+ before the UI adds it). */
+function ensureTracksCoverClips() {
+  let added = false;
+  for (const c of project.clips) {
+    if (!c.track || TRACK_IDS.has(c.track)) continue;
+    const kind = c.kind === "audio" || /^A\d+$/i.test(c.track) ? "audio" : "video";
+    TRACKS.push(makeTrack(c.track, kind));
+    TRACK_IDS.add(c.track); // mark present before later clips (avoids duplicate makeTrack)
+    added = true;
+  }
+  if (added) {
+    sortTracksInPlace();
+    applyTrackHeights();
+  }
+}
+function audioTrackIds() {
+  return TRACKS.filter((t) => t.kind === "audio").map((t) => t.id);
+}
+function nextTrackId(kind) {
+  const prefix = kind === "audio" ? "A" : "V";
+  let max = 0;
+  for (const t of TRACKS) {
+    if (t.kind !== kind) continue;
+    const n = parseInt(t.id.slice(1), 10);
+    if (n > max) max = n;
+  }
+  return prefix + (max + 1);
+}
+function addTimelineTrack(kind) {
+  const existing = TRACKS.filter((t) => t.kind === kind).length;
+  if (existing >= MAX_TRACKS_PER_KIND) {
+    toast(`Maximum ${MAX_TRACKS_PER_KIND} ${kind} tracks`);
+    return null;
+  }
+  const id = nextTrackId(kind);
+  const t = makeTrack(id, kind);
+  TRACKS.push(t);
+  sortTracksInPlace();
+  applyTrackHeights();
+  project.tracks = serializeTracks();
+  if (state.soloId && state.soloId !== id) {
+    state.disabledTracks.add(id);
+    project.disabledTracks = [...state.disabledTracks].sort();
+  }
+  if (kind === "audio") syncAudioGraphTracks();
+  buildTrackDOM();
+  syncAllTrackDisabledUI();
+  state.dirtyTimeline = true;
+  rebuildClips();
+  const h = setTimelineHeight(Math.max(
+    $("timelinePanel")?.getBoundingClientRect().height || 0,
+    defaultTimelineHeight()
+  ));
+  localStorage.setItem(TL_H_KEY, String(h));
+  scheduleSave();
+  return t;
+}
+function trackHasClips(trackId) {
+  return project.clips.some((c) => c.track === trackId);
+}
+function canRemoveTrack(trackId) {
+  const t = TRACKS.find((x) => x.id === trackId);
+  if (!t) return { ok: false, reason: "Unknown track" };
+  if (trackHasClips(trackId)) return { ok: false, reason: "Track has clips" };
+  if (TRACKS.filter((x) => x.kind === t.kind).length <= 1)
+    return { ok: false, reason: `Keep at least one ${t.kind} track` };
+  return { ok: true, reason: "" };
+}
+function removeTimelineTrack(trackId) {
+  const check = canRemoveTrack(trackId);
+  if (!check.ok) { toast(check.reason); return false; }
+  const wasAudio = TRACKS.find((t) => t.id === trackId)?.kind === "audio";
+  const idx = TRACKS.findIndex((t) => t.id === trackId);
+  if (idx < 0) return false;
+  if (state.soloId === trackId) clearTrackSolo({ restore: true });
+  TRACKS.splice(idx, 1);
+  syncTrackIds();
+  if (state.disabledTracks.has(trackId)) {
+    state.disabledTracks.delete(trackId);
+    project.disabledTracks = [...state.disabledTracks].sort();
+  }
+  if (Array.isArray(state.soloRestore)) {
+    state.soloRestore = state.soloRestore.filter((id) => id !== trackId);
+  }
+  project.tracks = serializeTracks();
+  if (wasAudio) syncAudioGraphTracks();
+  buildTrackDOM();
+  syncAllTrackDisabledUI();
+  state.dirtyTimeline = true;
+  rebuildClips();
+  scheduleSave();
+  return true;
+}
+/* Lightweight right-click menu for track headers. */
+let trackCtxMenu = null;
+function hideTrackCtxMenu() {
+  if (trackCtxMenu) { trackCtxMenu.remove(); trackCtxMenu = null; }
+}
+function showTrackCtxMenu(clientX, clientY, track) {
+  hideTrackCtxMenu();
+  const check = canRemoveTrack(track.id);
+  const menu = document.createElement("div");
+  menu.className = "ctx-menu";
+  menu.id = "trackCtxMenu";
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "ctx-item";
+  btn.textContent = "Remove track";
+  if (!check.ok) {
+    btn.disabled = true;
+    btn.title = check.reason;
+  } else {
+    btn.addEventListener("click", () => {
+      hideTrackCtxMenu();
+      removeTimelineTrack(track.id);
+    });
+  }
+  menu.appendChild(btn);
+  document.body.appendChild(menu);
+  trackCtxMenu = menu;
+  const pad = 6;
+  const w = menu.offsetWidth, h = menu.offsetHeight;
+  let x = clientX, y = clientY;
+  if (x + w + pad > window.innerWidth) x = window.innerWidth - w - pad;
+  if (y + h + pad > window.innerHeight) y = window.innerHeight - h - pad;
+  menu.style.left = Math.max(pad, x) + "px";
+  menu.style.top = Math.max(pad, y) + "px";
+}
+document.addEventListener("pointerdown", (e) => {
+  if (trackCtxMenu && !trackCtxMenu.contains(e.target)) hideTrackCtxMenu();
+}, true);
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") hideTrackCtxMenu();
+}, true);
 
 /* ── State ─────────────────────────────────────────────────────────────── */
 const project = {
@@ -142,7 +311,8 @@ const project = {
   markers: [], // {t, label?} — beat/cue markers on the ruler; snap targets
   inPoint: null,  // timeline work-area IN (seconds), or null
   outPoint: null, // timeline work-area OUT (seconds), or null
-  disabledTracks: [], // track ids (V4…A3) hidden from preview/export when listed
+  disabledTracks: [], // track ids omitted from preview/export when listed
+  tracks: null, // optional [{id, kind}] — null means default V3…V1 + A1…A4
 };
 const state = {
   time: 0, playing: false, pps: 60, snap: true,
@@ -158,6 +328,8 @@ const state = {
   workAreaPlay: false,   // when true, play + Home/End stay inside IN/OUT
   binTab: "project",     // project | elements | sfx | svg
   disabledTracks: new Set(), // mirror of project.disabledTracks for fast lookup
+  soloId: null,              // track id when solo is active, else null
+  soloRestore: null,         // disabledTracks snapshot taken when solo engaged
   transFocus: null,      // "in" | "out" — inspector transition row highlighted
 };
 function normalizeDisabledTracks(raw) {
@@ -170,27 +342,62 @@ function isTrackEnabled(id) {
 }
 function syncTrackDisabledUI(id) {
   const on = isTrackEnabled(id);
+  const solo = state.soloId === id;
   const head = els.trackHeaders.querySelector(`.track-head[data-track="${id}"]`);
   const row = els.tracks.querySelector(`.track[data-track="${id}"]`);
   if (head) {
     head.classList.toggle("disabled", !on);
+    head.classList.toggle("solo", solo);
     const btn = head.querySelector(".track-toggle");
     if (btn) {
       btn.setAttribute("aria-pressed", on ? "true" : "false");
       btn.title = on ? "Disable track" : "Enable track";
     }
+    const sBtn = head.querySelector(".track-solo");
+    if (sBtn) {
+      sBtn.setAttribute("aria-pressed", solo ? "true" : "false");
+      sBtn.classList.toggle("on", solo);
+      sBtn.title = solo ? "Unsolo track" : "Solo track (mute all others)";
+    }
   }
-  if (row) row.classList.toggle("disabled", !on);
+  if (row) {
+    row.classList.toggle("disabled", !on);
+    row.classList.toggle("solo", solo);
+  }
 }
 function syncAllTrackDisabledUI() {
   for (const t of TRACKS) syncTrackDisabledUI(t.id);
 }
+function clearTrackSolo({ restore = false } = {}) {
+  if (!state.soloId) return;
+  if (restore && Array.isArray(state.soloRestore)) {
+    state.disabledTracks = new Set(state.soloRestore.filter((id) => TRACK_IDS.has(id)));
+    project.disabledTracks = [...state.disabledTracks].sort();
+  }
+  state.soloId = null;
+  state.soloRestore = null;
+}
+function toggleTrackSolo(id) {
+  if (!TRACK_IDS.has(id)) return;
+  if (state.soloId === id) {
+    clearTrackSolo({ restore: true });
+  } else {
+    if (!state.soloId) state.soloRestore = [...state.disabledTracks];
+    state.soloId = id;
+    state.disabledTracks = new Set(TRACKS.filter((t) => t.id !== id).map((t) => t.id));
+    project.disabledTracks = [...state.disabledTracks].sort();
+  }
+  syncAllTrackDisabledUI();
+  scheduleSave();
+}
 function toggleTrackEnabled(id) {
   if (!TRACK_IDS.has(id)) return;
+  // Manual mute exits solo without restoring the pre-solo snapshot
+  if (state.soloId) clearTrackSolo({ restore: false });
   if (state.disabledTracks.has(id)) state.disabledTracks.delete(id);
   else state.disabledTracks.add(id);
   project.disabledTracks = [...state.disabledTracks].sort();
-  syncTrackDisabledUI(id);
+  syncAllTrackDisabledUI();
   scheduleSave();
 }
 const runtime = {
@@ -354,7 +561,6 @@ function normalizeWorkArea(i, o, t0 = TIMELINE_START_TIME) {
 }
 function applyProject(data) {
   const wa = normalizeWorkArea(data.inPoint, data.outPoint);
-  const disabledTracks = normalizeDisabledTracks(data.disabledTracks);
   Object.assign(project, {
     name: data.name || "Untitled Project",
     width: data.width || 1280, height: data.height || 720, fps: data.fps || 30,
@@ -364,9 +570,17 @@ function applyProject(data) {
     markers: (data.markers || []).filter((m) => m && isFinite(m.t)).sort((a, b) => a.t - b.t),
     inPoint: wa.inPoint,
     outPoint: wa.outPoint,
-    disabledTracks,
+    disabledTracks: [],
+    tracks: null,
   });
+  applyTracksFromProject(data.tracks);
+  ensureTracksCoverClips();
+  project.tracks = serializeTracks();
+  const disabledTracks = normalizeDisabledTracks(data.disabledTracks);
+  project.disabledTracks = disabledTracks;
   state.disabledTracks = new Set(disabledTracks);
+  state.soloId = null;
+  state.soloRestore = null;
   for (const c of project.clips) {
     c.props = { ...DEFAULT_PROPS, ...(c.props || {}) };
     if (c.keyframes) for (const arr of Object.values(c.keyframes))
@@ -378,10 +592,12 @@ function applyProject(data) {
   // reset runtime playback elements so they rebuild against new data
   for (const el of runtime.clipEls.values()) { try { el.pause(); el.src = ""; } catch { } }
   runtime.clipEls.clear(); runtime.clipGain.clear();
+  if (runtime.audio) syncAudioGraphTracks();
   els.preview.width = project.width; els.preview.height = project.height;
   els.monitorRes.textContent = `${project.width} × ${project.height} · ${project.fps}fps`;
   syncAspectSel();
   pruneSelection(); // keep the selection across external reloads where possible
+  buildTrackDOM();
   state.dirtyTimeline = true;
   renderBin(); renderInspector();
   updateWorkArea();
@@ -410,6 +626,7 @@ function projectJSON() {
   const { name, width, height, fps, background, revision, media, clips, markers, inPoint, outPoint, disabledTracks } = project;
   return {
     name, width, height, fps, background, revision,
+    tracks: serializeTracks(),
     media: media.filter((m) => !m.transient).map(({ id, name, kind, src, duration, width, height }) =>
       ({ id, name, kind, src, duration, width, height })),
     clips: clips.map(({ id, mediaId, kind, track, start, in: inn, duration, name, props, keyframes, transitionIn, transitionOut, linkedId, linkGroup }) => {
@@ -558,7 +775,7 @@ function wavePeaksFor(c) {
   if (w instanceof Float32Array) return w;
   if (!w.max) return null;
   const ch = c.props?.audioChannel;
-  if ((ch === 0 || ch === 1) && w.channels?.[ch]) return w.channels[ch];
+  if (Number.isInteger(ch) && ch >= 0 && w.channels?.[ch]) return w.channels[ch];
   return w.max;
 }
 
@@ -811,7 +1028,7 @@ function linkedClip(c) {
   return c?.linkedId ? getClip(c.linkedId) : null;
 }
 /* Expand a clip list so each AV-linked partner is included once.
-   Supports N-way `linkGroup` (video + L + R) and legacy pairwise `linkedId`. */
+   Supports N-way `linkGroup` (video + per-channel stems) and legacy pairwise `linkedId`. */
 function withLinked(clips) {
   const out = new Map();
   const groups = new Set();
@@ -844,7 +1061,7 @@ function syncLinkedTiming(c) {
 }
 /* Rebuild AV linkGroups after load. Unlinking isn't supported, so any video +
    audio clips that share mediaId and the same start/in/duration belong together
-   (e.g. picture + L/R stems from one file). Legacy pairwise linkedId is cleared
+   (e.g. picture + L/R/C stems from one file). Legacy pairwise linkedId is cleared
    in favor of linkGroup. */
 function relinkClips() {
   const near = (a, b) => Math.abs((+a || 0) - (+b || 0)) < 1e-3;
@@ -873,6 +1090,88 @@ function relinkClips() {
   }
 }
 
+/* Discrete-channel labels for linked stems (WAV / Web Audio order). */
+const CHANNEL_SHORT = ["L", "R", "C", "LFE", "Ls", "Rs", "Lb", "Rb"];
+const CHANNEL_LONG = ["Left", "Right", "Center", "LFE", "Surround L", "Surround R", "Back L", "Back R"];
+function audioChannelShort(ch) {
+  if (!Number.isInteger(ch) || ch < 0) return "";
+  return CHANNEL_SHORT[ch] || `Ch${ch + 1}`;
+}
+function audioChannelLong(ch) {
+  if (!Number.isInteger(ch) || ch < 0) return null;
+  return CHANNEL_LONG[ch] || `Channel ${ch + 1}`;
+}
+/** How many linked A-track stems we can create for a media item. */
+function linkedAudioChannelCount(m) {
+  const n = Math.max(1, m.channels | 0);
+  return Math.min(n, audioTrackIds().length);
+}
+/** Grow A-tracks to at least `need` (capped at MAX_TRACKS_PER_KIND). Returns how many were added. */
+function ensureAudioTrackCount(need) {
+  need = Math.min(Math.max(0, need | 0), MAX_TRACKS_PER_KIND);
+  let added = 0;
+  while (audioTrackIds().length < need) {
+    if (TRACKS.filter((t) => t.kind === "audio").length >= MAX_TRACKS_PER_KIND) break;
+    const id = nextTrackId("audio");
+    TRACKS.push(makeTrack(id, "audio"));
+    if (state.soloId && state.soloId !== id) state.disabledTracks.add(id);
+    added++;
+  }
+  if (!added) return 0;
+  sortTracksInPlace();
+  applyTrackHeights();
+  project.tracks = serializeTracks();
+  if (state.disabledTracks.size) project.disabledTracks = [...state.disabledTracks].sort();
+  syncAudioGraphTracks();
+  buildTrackDOM();
+  syncAllTrackDisabledUI();
+  state.dirtyTimeline = true;
+  rebuildClips();
+  const h = setTimelineHeight(Math.max(
+    $("timelinePanel")?.getBoundingClientRect().height || 0,
+    defaultTimelineHeight()
+  ));
+  localStorage.setItem(TL_H_KEY, String(h));
+  return added;
+}
+/** Attach one audio clip per source channel (A1…An), sharing the video's linkGroup. */
+function attachLinkedAudioChannels(videoClip, m, nCh) {
+  if (!videoClip?.linkGroup || !getClip(videoClip.id)) return [];
+  const lg = videoClip.linkGroup;
+  // Drop any prior stems for this group (e.g. stereo placeholder → 3.0 upgrade).
+  project.clips = project.clips.filter((x) => !(x.linkGroup === lg && x.kind === "audio"));
+  const ids = audioTrackIds();
+  const n = Math.min(Math.max(1, nCh | 0), ids.length);
+  const out = [];
+  for (let ch = 0; ch < n; ch++) {
+    const a = {
+      id: "c_" + uid(), mediaId: m.id, kind: "audio", track: ids[ch],
+      start: videoClip.start, in: videoClip.in, duration: videoClip.duration,
+      name: videoClip.name,
+      props: { ...DEFAULT_PROPS, audioChannel: ch },
+      linkGroup: lg,
+    };
+    if (videoClip.props?.speed != null) a.props.speed = videoClip.props.speed;
+    project.clips.push(a);
+    out.push(a);
+  }
+  return out;
+}
+/** Wire a single source channel into the stereo bus: L→left, R→right, else→center. */
+function connectIsolatedChannel(ctx, srcNode, gainNode, ch, nCh) {
+  const outputs = Math.max(2, nCh | 0, (ch | 0) + 1);
+  const splitter = ctx.createChannelSplitter(outputs);
+  const merger = ctx.createChannelMerger(2);
+  srcNode.connect(splitter);
+  splitter.connect(gainNode, ch);
+  if (ch === 0) gainNode.connect(merger, 0, 0);
+  else if (ch === 1) gainNode.connect(merger, 0, 1);
+  else { gainNode.connect(merger, 0, 0); gainNode.connect(merger, 0, 1); }
+  gainNode._fcSplit = splitter;
+  gainNode._fcOut = merger;
+  gainNode._fcChannel = ch;
+}
+
 function addClipFromMedia(m, trackId, at) {
   pushUndo();
   const kind = m.kind;
@@ -888,25 +1187,32 @@ function addClipFromMedia(m, trackId, at) {
     props: { ...DEFAULT_PROPS },
   };
   project.clips.push(c);
-  // Video+audio: picture on a V track; stereo L/R as separate linked clips on A1/A2.
+  // Video+audio: picture on a V track; one linked stem per source channel on A-tracks.
   // Mute the video clip so audio isn't doubled.
   if (kind === "video") {
     c.props.volume = 0;
-    const lg = "lg_" + uid();
-    c.linkGroup = lg;
-    const aL = {
-      id: "c_" + uid(), mediaId: m.id, kind: "audio", track: "A1",
-      start, in: 0, duration, name,
-      props: { ...DEFAULT_PROPS, audioChannel: 0 },
-      linkGroup: lg,
+    c.linkGroup = "lg_" + uid();
+    const finish = (nCh) => {
+      if (!getClip(c.id) || !c.linkGroup) return;
+      m.channels = nCh;
+      const want = Math.min(Math.max(1, nCh | 0), MAX_TRACKS_PER_KIND);
+      const added = ensureAudioTrackCount(want);
+      if (added) {
+        toast(added === 1
+          ? `Added an audio track for ${nCh}-channel audio`
+          : `Added ${added} audio tracks for ${nCh}-channel audio`);
+      }
+      attachLinkedAudioChannels(c, m, linkedAudioChannelCount(m));
+      state.dirtyTimeline = true;
+      scheduleSave();
+      renderInspector();
     };
-    const aR = {
-      id: "c_" + uid(), mediaId: m.id, kind: "audio", track: "A2",
-      start, in: 0, duration, name,
-      props: { ...DEFAULT_PROPS, audioChannel: 1 },
-      linkGroup: lg,
-    };
-    project.clips.push(aL, aR);
+    if (m.channels > 0) {
+      finish(m.channels);
+    } else {
+      getAudioBuffer(m).then((buf) => finish(buf.numberOfChannels))
+        .catch(() => finish(2)); // unknown → stereo fallback
+    }
     ensureWave(m);
   }
   selectClip(c.id); scheduleSave();
@@ -1383,30 +1689,46 @@ function trackToggleIcon(kind) {
     `</svg>`;
 }
 function buildTrackDOM() {
-  els.trackHeaders.innerHTML = "";
+  let inner = $("trackHeadInner");
+  if (!inner) {
+    inner = document.createElement("div");
+    inner.id = "trackHeadInner";
+    els.trackHeaders.appendChild(inner);
+  }
+  inner.innerHTML = "";
   els.tracks.innerHTML = "";
-  const inner = document.createElement("div");
-  inner.id = "trackHeadInner";
-  els.trackHeaders.appendChild(inner);
   for (const t of TRACKS) {
     const on = isTrackEnabled(t.id);
+    const solo = state.soloId === t.id;
     const h = document.createElement("div");
-    h.className = "track-head" + (on ? "" : " disabled");
+    h.className = "track-head" + (on ? "" : " disabled") + (solo ? " solo" : "");
     h.dataset.track = t.id;
     h.style.height = t.h + "px";
     h.innerHTML =
       `<button type="button" class="track-toggle" aria-pressed="${on}" ` +
       `title="${on ? "Disable track" : "Enable track"}" style="color:${t.color}">` +
       `${trackToggleIcon(t.kind)}</button>` +
-      `<span class="track-id">${t.id}</span>`;
+      `<span class="track-id">${escapeHtml(t.id)}</span>` +
+      `<button type="button" class="track-solo${solo ? " on" : ""}" aria-pressed="${solo}" ` +
+      `title="${solo ? "Unsolo track" : "Solo track (mute all others)"}">S</button>`;
     h.querySelector(".track-toggle").addEventListener("click", (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
       toggleTrackEnabled(t.id);
     });
+    h.querySelector(".track-solo").addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      toggleTrackSolo(t.id);
+    });
+    h.addEventListener("contextmenu", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      showTrackCtxMenu(ev.clientX, ev.clientY, t);
+    });
     inner.appendChild(h);
     const row = document.createElement("div");
-    row.className = "track" + (on ? "" : " disabled");
+    row.className = "track" + (on ? "" : " disabled") + (solo ? " solo" : "");
     row.dataset.track = t.id;
     row.style.height = t.h + "px";
     els.tracks.appendChild(row);
@@ -1479,8 +1801,10 @@ function rebuildClips() {
     if (hasWave) body += `<canvas class="wave"></canvas>`;
     const badge = (c.keyframes && Object.keys(c.keyframes).length ? "◆ " : "") +
                   (c.transitionIn || c.transitionOut ? "⇄ " : "");
-    const chTag = c.props?.audioChannel === 0 ? "L · "
-                : c.props?.audioChannel === 1 ? "R · " : "";
+    const chTag = (() => {
+      const s = audioChannelShort(c.props?.audioChannel);
+      return s ? s + " · " : "";
+    })();
     const label = c.kind === "text" ? "T · " + (c.props.text || "").split("\n")[0]
       : c.kind === "adjust" ? "FX · " + (c.name || "")
       : c.kind === "audio" ? chTag + (c.name || "")
@@ -2095,6 +2419,8 @@ function zoomToRange(t0, t1) {
 }
 els.zoomSlider.addEventListener("input", () => setZoom(+els.zoomSlider.value));
 $("btnZoomFit").addEventListener("click", zoomToFit);
+$("btnAddV").addEventListener("click", () => addTimelineTrack("video"));
+$("btnAddA").addEventListener("click", () => addTimelineTrack("audio"));
 els.timelineScroll.addEventListener("wheel", (e) => {
   if (e.ctrlKey || e.metaKey) {
     e.preventDefault();
@@ -2229,8 +2555,7 @@ function renderInspector(lite) {
     </div>`;
   }
   if (c.kind === "video" || c.kind === "audio") {
-    const chLabel = c.props?.audioChannel === 0 ? "Left"
-                  : c.props?.audioChannel === 1 ? "Right" : null;
+    const chLabel = audioChannelLong(c.props?.audioChannel);
     html += `<div class="insp-section"><h3>Audio / Time</h3>
       ${chLabel ? row("Channel", `<span style="opacity:.75">${chLabel}</span>`) : ""}
       ${slider("volume", 0, 2, 0.01, p.volume)}
@@ -2453,10 +2778,10 @@ function ensureAudio() {
   const ctx = new (window.AudioContext || window.webkitAudioContext)();
   const master = ctx.createGain();
   const recDest = ctx.createMediaStreamDestination();
-  const audioTracks = TRACKS.filter((t) => t.kind === "audio");
+  const ids = audioTrackIds();
   const trackBus = {};
-  for (const t of audioTracks) {
-    trackBus[t.id] = ctx.createGain();
+  for (const id of ids) {
+    trackBus[id] = ctx.createGain();
   }
   // Until the worklet is ready, audio-track buses and master both feed speakers.
   master.connect(ctx.destination);
@@ -2466,7 +2791,7 @@ function ensureAudio() {
   }
   runtime.audio = {
     ctx, master, recDest, trackBus,
-    audioTrackIds: audioTracks.map((t) => t.id),
+    audioTrackIds: ids.slice(),
     meter: null, meterReady: false,
   };
   installMeterWorklet(runtime.audio).catch(() => {});
@@ -2476,6 +2801,43 @@ function ensureAudio() {
   }
   return runtime.audio;
 }
+/** Create missing A-track buses and rebuild the meter when the track list changes. */
+function syncAudioGraphTracks() {
+  const audio = runtime.audio;
+  if (!audio) return;
+  const ids = audioTrackIds();
+  const idSet = new Set(ids);
+  // Drop buses for removed A-tracks (independent of meter state).
+  for (const id of Object.keys(audio.trackBus)) {
+    if (idSet.has(id)) continue;
+    try { audio.trackBus[id].disconnect(); } catch { }
+    delete audio.trackBus[id];
+  }
+  for (const id of ids) {
+    if (!audio.trackBus[id]) audio.trackBus[id] = audio.ctx.createGain();
+  }
+  audio.audioTrackIds = ids.slice();
+  // Tear down meter so installMeterWorklet can rebuild with the new input count.
+  if (audio.meter) {
+    try { audio.meter.disconnect(); } catch { }
+    try { audio.master.disconnect(); } catch { }
+    audio.master.connect(audio.ctx.destination);
+    audio.master.connect(audio.recDest);
+    audio.meter = null;
+    audio.meterReady = false;
+  }
+  // Always wire current buses → master so re-added tracks stay audible if meter install fails.
+  for (const id of ids) {
+    const g = audio.trackBus[id];
+    try { g.disconnect(); } catch { }
+    try { g.connect(audio.master); } catch { }
+  }
+  installMeterWorklet(audio).catch(() => {});
+  // Re-route clip gains onto (possibly new) buses
+  for (const c of project.clips) {
+    if (c.kind === "audio" || c.kind === "video") routeClipGain(c);
+  }
+}
 function hookAudio(c, el) {
   if (!runtime.audio || runtime.clipGain.has(c.id)) return;
   if (c.kind !== "video" && c.kind !== "audio") return;
@@ -2484,16 +2846,11 @@ function hookAudio(c, el) {
     const src = ctx.createMediaElementSource(el);
     const g = ctx.createGain();
     const ch = c.props?.audioChannel;
-    if (ch === 0 || ch === 1) {
-      // Isolate one stereo channel and place it on L or R of the track bus
-      const splitter = ctx.createChannelSplitter(2);
-      const merger = ctx.createChannelMerger(2);
-      src.connect(splitter);
-      splitter.connect(g, ch);
-      g.connect(merger, 0, ch);
-      g._fcSplit = splitter;
-      g._fcOut = merger;
-      g._fcChannel = ch;
+    if (Number.isInteger(ch) && ch >= 0) {
+      const m = getMedia(c.mediaId);
+      const nCh = Math.max(m?.channels || 0, ch + 1, 2);
+      try { src.channelInterpretation = "discrete"; } catch { }
+      connectIsolatedChannel(ctx, src, g, ch, nCh);
     } else {
       src.connect(g);
     }
@@ -4171,13 +4528,10 @@ async function renderAudioMix(dur) {
       curve[i] = clamp(evalProps(c, c.start + (i / (n - 1)) * c.duration).volume, 0, 4);
     g.gain.setValueCurveAtTime(curve, Math.max(0, c.start), Math.max(0.01, c.duration));
     const ch = c.props?.audioChannel;
-    if (ch === 0 || ch === 1) {
-      const splitter = off.createChannelSplitter(2);
-      const merger = off.createChannelMerger(2);
-      src.connect(splitter);
-      splitter.connect(g, ch);
-      g.connect(merger, 0, ch);
-      merger.connect(off.destination);
+    if (Number.isInteger(ch) && ch >= 0) {
+      const nCh = Math.max(buf.numberOfChannels, ch + 1, 2);
+      connectIsolatedChannel(off, src, g, ch, nCh);
+      g._fcOut.connect(off.destination);
     } else {
       src.connect(g); g.connect(off.destination);
     }
@@ -4519,7 +4873,7 @@ function syncTrackSizeButtons() {
 function applyTrackHeights() {
   const preset = TRACK_SIZE_PRESETS[state.trackSize] || TRACK_SIZE_PRESETS.l;
   for (const t of TRACKS) {
-    if (preset.h[t.id] != null) t.h = preset.h[t.id];
+    t.h = t.kind === "audio" ? preset.hAudio : preset.hVideo;
   }
 }
 /* Switch S/M/L track density, rebuild the timeline, and grow/shrink the pane

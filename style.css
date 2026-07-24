@@ -948,20 +948,47 @@ input[type=range] {
 }
 
 .track-headers {
-  width: 58px;
+  width: 68px;
   flex: none;
   border-right: 1px solid var(--border);
-  padding-top: 26px;
+  padding-top: 0;
   background: var(--panel);
   z-index: 2;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.track-head-tools {
+  height: 26px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border-bottom: 1px solid var(--border);
+  box-sizing: border-box;
+}
+
+.track-head-tools .btn {
+  padding: 1px 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1.2;
+  min-width: 0;
+}
+
+#trackHeadInner {
+  flex: 1;
+  min-height: 0;
 }
 
 .track-head {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 0 6px;
+  gap: 2px;
+  padding: 0 4px;
   border-bottom: 1px solid #232328;
   font-size: 11px;
   font-weight: 700;
@@ -969,8 +996,85 @@ input[type=range] {
   letter-spacing: .5px;
 }
 
+.track-head .track-id {
+  flex: 1;
+  min-width: 0;
+  max-width: 3ch;
+}
+
+.track-solo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--dim);
+  font: inherit;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.track-solo:hover {
+  color: #fff;
+  background: #ffffff12;
+}
+
+.track-solo.on {
+  color: #111;
+  background: #ffd166;
+  border-color: #ffd166;
+}
+
 .track-head.disabled {
   opacity: .55;
+}
+
+.track-head.solo:not(.disabled) {
+  opacity: 1;
+}
+
+.ctx-menu {
+  position: fixed;
+  z-index: 10000;
+  min-width: 140px;
+  padding: 4px;
+  background: var(--panel, #1c1c22);
+  border: 1px solid var(--border, #2e2e36);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px #00000088;
+}
+
+.ctx-menu .ctx-item {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #e8e8ec;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ctx-menu .ctx-item:hover:not(:disabled) {
+  background: #ffffff14;
+}
+
+.ctx-menu .ctx-item:disabled {
+  opacity: .45;
+  cursor: default;
 }
 
 .track-toggle {
