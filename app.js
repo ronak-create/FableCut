@@ -4454,18 +4454,24 @@ function applyMonitorView() {
   updateSafeOverlay();
 }
 let monitorViewRaf = 0;
+let monitorViewAfter = null;
 /** Coalesce repeated zoom/pan updates into one paint (updateSafeOverlay ≤ once/frame). */
-function scheduleMonitorView() {
+function scheduleMonitorView(after) {
+  if (after) monitorViewAfter = after;
   if (monitorViewRaf) return;
   monitorViewRaf = requestAnimationFrame(() => {
     monitorViewRaf = 0;
+    const fn = monitorViewAfter;
+    monitorViewAfter = null;
     applyMonitorView();
+    if (fn) fn();
   });
 }
 function resetMonitorView() {
   state.viewZoom = 1;
   monitorFitCache = null;
   monitorViewPad = { x: 0, y: 0 };
+  monitorViewAfter = null;
   if (monitorViewRaf) {
     cancelAnimationFrame(monitorViewRaf);
     monitorViewRaf = 0;
@@ -4502,11 +4508,12 @@ els.monitorScroll.addEventListener("wheel", (e) => {
     resetMonitorView();
     return;
   }
-  applyMonitorView();
-  void scroll.scrollWidth; // ensure padding/size are laid out before assigning scroll
-  const pad = monitorViewPad;
-  scroll.scrollLeft = pad.x + relX * fit.w * next - ox;
-  scroll.scrollTop = pad.y + relY * fit.h * next - oy;
+  scheduleMonitorView(() => {
+    void scroll.scrollWidth; // ensure padding/size are laid out before assigning scroll
+    const pad = monitorViewPad;
+    scroll.scrollLeft = pad.x + relX * fit.w * next - ox;
+    scroll.scrollTop = pad.y + relY * fit.h * next - oy;
+  });
 }, { passive: false });
 /* Pan while zoomed: middle mouse, or Alt+drag — drives native scroll position. */
 let viewPanDrag = null;
@@ -4537,6 +4544,7 @@ els.monitorScroll.addEventListener("pointercancel", endViewPan);
 els.monitorScroll.addEventListener("auxclick", (e) => { if (e.button === 1) e.preventDefault(); });
 els.monitorScroll.addEventListener("scroll", () => {
   if (state.guides) updateSafeOverlay();
+  scheduleMonitorView();
 });
 if (typeof ResizeObserver !== "undefined") {
   new ResizeObserver(() => {
