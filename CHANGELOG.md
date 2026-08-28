@@ -39,6 +39,15 @@ installs as a Claude Code plugin.
 - Project FPS select in the Program Monitor header (next to aspect presets) —
   pick 24 / 25 / 30 / 50 / 60 fps; writes `project.fps` and persists like canvas
   size. Non-preset rates appear as Custom.
+- Per-clip **stereo pan** (`props.pan`, −1…+1) on video/audio clips — inspector
+  slider + keyframes; preview, audio-hold, and Fast export all honor it. Linked
+  stems default to L `−1` / R `+1` / center for other channels; projects saved
+  before pan migrate once via `panSchema` (so omitting `pan: 0` later does not
+  re-hard-pan a centered stem). Compact MCP keeps `pan` on linked stems.
+- Stereo **master meter** (L/R) on the monitor — post-pan program sum in the
+  same RMS / LUFS / Peak modes as the per-track bars; A-tracks + video spill
+  route through one summed path when the meter worklet is active. Per-track
+  bars collapse via **◂** / **▸** beside the master strip (master L/R stay visible).
 - Preview playback speed — a monitor toolbar toggle plus **J**/**K**/**L** shortcuts cycle the preview player through 1×, 1.5×, 2×, and 4× (L faster, J slower, K play/pause and reset to 1×). It rides on top of each clip's own speed and is forced back to 1× during export, so renders always come out at real time.
   (thanks @ur5fot, #18)
 - **Separate audio and video tracks.** Imported video now shows its audio as
@@ -106,6 +115,14 @@ installs as a Claude Code plugin.
   over an ASCII field.
 - README: ASCII block wordmark, zh-CN / ja / es / pt-BR translations, DeepWiki
   link, community Discord link, and a Trendshift badge.
+
+### Fixed
+- Audio graph teardown on project reload — clip chains
+  (`MediaElementSource → splitter → gain → panner → bus`) are now fully
+  disconnected via `releaseClipEl` instead of only clearing the maps (which
+  left nodes wired to live track buses). Panner attach degrades gracefully if
+  `StereoPannerNode` is unavailable; inspector volume/pan changes refresh
+  audio-hold voices.
 
 ## [1.6.0] - 2026-07-14
 

@@ -200,7 +200,7 @@ async function callTool(name, args) {
       // the UI persists default-valued props on every clip; hide them so the
       // compact view only shows what actually deviates
       const DEFAULTS = {
-        x: 0, y: 0, scale: 1, rotation: 0, opacity: 1, volume: 1, speed: 1,
+        x: 0, y: 0, scale: 1, rotation: 0, opacity: 1, volume: 1, pan: 0, speed: 1,
         blend: "normal", fit: "contain", cropL: 0, cropR: 0, cropT: 0, cropB: 0,
         cornerRadius: 0, flipH: false, flipV: false, filterPreset: "none",
         brightness: 100, contrast: 100, saturation: 100, hue: 0, temperature: 0,
@@ -221,12 +221,19 @@ async function callTool(name, args) {
         const kept = {};
         for (const [k, v] of Object.entries(o)) {
           if (kind !== "text" && k === "text" && v === "Title") continue;
+          // Always keep pan on linked stems — pan:0 (center) is meaningful and
+          // must not be stripped, or agents rebuilding from compact can lose it.
+          if (k === "pan" && Number.isInteger(o.audioChannel) && o.audioChannel >= 0) {
+            kept[k] = v;
+            continue;
+          }
           if (hex(DEFAULTS[k]) !== hex(v)) kept[k] = v;
         }
         return Object.keys(kept).length ? " " + JSON.stringify(kept) : "";
       };
       const lines = [
         `"${doc.name}" ${doc.width}x${doc.height}@${doc.fps} rev:${doc.revision}` +
+        (doc.panSchema >= 1 ? " panSchema:1" : "") +
         (doc.background ? ` bg:${doc.background}` : "") +
         (doc.markers?.length ? ` markers:${doc.markers.length} [${doc.markers.slice(0, 12).map((m) => m.t).join(",")}${doc.markers.length > 12 ? ",…" : ""}]` : ""),
         `MEDIA (${doc.media.length}):`,
@@ -356,6 +363,9 @@ async function callTool(name, args) {
           `Pass force:true only if the user explicitly wants those changes discarded.`);
       }
       doc.revision = Math.max(curRev + 1, (doc.revision || 0));
+      // Agents often omit top-level flags they don't know about. Keep panSchema
+      // once established so a rewrite that drops pan:0 cannot re-trigger L/R migration.
+      if (!(doc.panSchema >= 1) && (cur.panSchema >= 1)) doc.panSchema = 1;
       writeProject(doc);
       lastReadRevision = doc.revision;
       return `Saved (revision ${doc.revision}). ${doc.clips.length} clip(s). The editor UI (if open at ${BASE}) has hot-reloaded.`;

@@ -1,8 +1,7 @@
-/* FableCut per-track meter worklet.
-   Each input = one timeline audio track. Pass-through mix to stereo out.
-   Reports per-track: RMS, sample peak, and momentary LUFS (ITU-R BS.1770-4,
-   400 ms, K-weighted stereo). */
-function shelfCoeffs(fs) {
+/* FableCut per-track meter worklet + stereo program sum pass-through.
+   Inputs 0…nAudio−1 = A-track buses; input nAudio = video/other spill on master.
+   Pass-through sum → stereo out. Per-track RMS/LUFS/Peak via port; master L/R
+   is metered on the main thread (AnalyserNodes on the worklet output). */function shelfCoeffs(fs) {
   const f0 = 1681.974450955533;
   const G = 3.999843853973347;
   const Q = 0.7071752369554196;
@@ -47,7 +46,7 @@ class FableCutMeterProcessor extends AudioWorkletProcessor {
     const opts = (options && options.processorOptions) || {};
     this._hopBlocks = Math.max(1, opts.hopBlocks || 8);
     this._nTracks = Math.max(1, opts.nTracks || 1);
-    this._ids = opts.trackIds || [];
+    this._nAudio = Math.max(0, opts.nAudioTracks ?? opts.nTracks ?? 1);
     this._block = 0;
     this._sumSq = new Float64Array(this._nTracks);
     this._peak = new Float64Array(this._nTracks);
@@ -67,7 +66,8 @@ class FableCutMeterProcessor extends AudioWorkletProcessor {
       this._hpfR.push(makeBiquad(hpf));
     }
 
-    // Momentary = 400 ms of block mean-squares (BS.1770)
+    // Momentary = 400 ms of block mean-squares (BS.1770) — per A-track only;
+    // master L/R is sampled via AnalyserNodes on the post-meter output in app.js.
     const hopFrames = 128 * this._hopBlocks;
     this._lufsLen = Math.max(1, Math.round(0.4 * sampleRate / hopFrames));
     this._lufsRing = [];
@@ -83,16 +83,18 @@ class FableCutMeterProcessor extends AudioWorkletProcessor {
   process(inputs, outputs) {
     const output = outputs[0];
     const outL = output && output[0];
-    const outR = output && (output[1] || output[0]);
+    const outR = output && output[1];
     if (outL) outL.fill(0);
-    if (outR && outR !== outL) outR.fill(0);
+    if (outR) outR.fill(0);
 
     let frames = 0;
     for (let t = 0; t < this._nTracks; t++) {
       const chans = inputs[t];
       const has = chans && chans[0];
       const L = has ? chans[0] : null;
-      const R = has ? (chans[1] || chans[0]) : null;
+      // Never mirror L→R: post-pan buses are stereo; mono input = one channel only.
+      const hasR = has && chans.length > 1 && chans[1];
+      const R = hasR ? chans[1] : null;
       const n = L ? L.length : (outL ? outL.length : 128);
       frames = n;
 
@@ -105,7 +107,7 @@ class FableCutMeterProcessor extends AudioWorkletProcessor {
       for (let i = 0; i < n; i++) {
         const l = L ? L[i] : 0;
         const r = R ? R[i] : 0;
-        const mono = (l + r) * 0.5;
+        const mono = R ? (l + r) * 0.5 : l;
         sum += mono * mono;
         const aL = l >= 0 ? l : -l;
         const aR = r >= 0 ? r : -r;
@@ -117,7 +119,7 @@ class FableCutMeterProcessor extends AudioWorkletProcessor {
         sumK += fl * fl + fr * fr;
 
         if (outL) outL[i] += l;
-        if (outR && outR !== outL) outR[i] += r;
+        if (outR) outR[i] += r;
       }
       this._sumSq[t] = sum;
       this._peak[t] = peak;
@@ -129,10 +131,10 @@ class FableCutMeterProcessor extends AudioWorkletProcessor {
 
     if (this._block >= this._hopBlocks) {
       const n = Math.max(1, this._frames);
-      const rms = new Array(this._nTracks);
-      const peak = new Array(this._nTracks);
-      const lufs = new Array(this._nTracks);
-      for (let t = 0; t < this._nTracks; t++) {
+      const rms = new Array(this._nAudio);
+      const peak = new Array(this._nAudio);
+      const lufs = new Array(this._nAudio);
+      for (let t = 0; t < this._nAudio; t++) {
         rms[t] = Math.sqrt(this._sumSq[t] / n);
         peak[t] = this._peak[t];
 
@@ -153,9 +155,9 @@ class FableCutMeterProcessor extends AudioWorkletProcessor {
         this._peak[t] = 0;
         this._sumSqK[t] = 0;
       }
+
       this.port.postMessage({
         type: "meter",
-        trackIds: this._ids,
         rms,
         peak,
         lufs,

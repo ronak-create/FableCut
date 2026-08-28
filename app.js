@@ -7,25 +7,32 @@
 "use strict";
 
 /* ── Constants ─────────────────────────────────────────────────────────── */
-const TRACKS = [
-  { id: "V3", kind: "video", h: 44, color: "#ffd166" },
-  { id: "V2", kind: "video", h: 58, color: "#7b6cff" },
-  { id: "V1", kind: "video", h: 58, color: "#4f8cff" },
-  { id: "A1", kind: "audio", h: 42, color: "#7ec249" },
-  { id: "A2", kind: "audio", h: 42, color: "#5a9e3a" },
-  { id: "A3", kind: "audio", h: 42, color: "#4a8a2f" },
-  { id: "A4", kind: "audio", h: 42, color: "#3a7226" },
+const VIDEO_TRACK_COLORS = ["#4f8cff", "#7b6cff", "#ffd166", "#ff6b9d", "#45d9c2", "#f4a261", "#e76f51", "#a8dadc"];
+const AUDIO_TRACK_COLORS = ["#7ec249", "#5a9e3a", "#4a8a2f", "#3a7226", "#2d5a1e", "#8fbc5a", "#6b9e3a", "#4d7a28"];
+const MAX_TRACKS_PER_KIND = 16; // +V/+A and auto-grown A-tracks for multi-channel sources
+const DEFAULT_TRACK_DEFS = [
+  { id: "V3", kind: "video" },
+  { id: "V2", kind: "video" },
+  { id: "V1", kind: "video" },
+  { id: "A1", kind: "audio" },
+  { id: "A2", kind: "audio" },
+  { id: "A3", kind: "audio" },
+  { id: "A4", kind: "audio" },
 ];
+function makeTrack(id, kind) {
+  const n = Math.max(1, parseInt(String(id).slice(1), 10) || 1);
+  const colors = kind === "audio" ? AUDIO_TRACK_COLORS : VIDEO_TRACK_COLORS;
+  return { id, kind, h: kind === "audio" ? 42 : 58, color: colors[(n - 1) % colors.length] };
+}
+/** Live track list (top→bottom). Mutated by +V/+A; rebuilt from project.tracks on load. */
+let TRACKS = DEFAULT_TRACK_DEFS.map((d) => makeTrack(d.id, d.kind));
 /* Three timeline density presets. L matches the original track heights (with thumbs).
    S is compact solid-color rows; M is in between. */
 const TRACK_SIZE_PRESETS = {
-  s: { thumbs: false, h: { V3: 26, V2: 26, V1: 26, A1: 22, A2: 22, A3: 22, A4: 22 } },
-  m: { thumbs: true, h: { V3: 36, V2: 44, V1: 44, A1: 32, A2: 32, A3: 32, A4: 32 } },
-  l: { thumbs: true, h: { V3: 44, V2: 58, V1: 58, A1: 42, A2: 42, A3: 42, A4: 42 } },
+  s: { thumbs: false, hVideo: 26, hAudio: 22 },
+  m: { thumbs: true, hVideo: 44, hAudio: 32 },
+  l: { thumbs: true, hVideo: 58, hAudio: 42 },
 };
-// Generous cap on how many audio tracks can be auto-added for a multi-channel
-// source (e.g. 7.1 surround = 8 channels) — see ensureAudioTrackCount().
-const MAX_AUDIO_TRACKS = 16;
 const TRACK_SIZE_KEY = "fablecut-track-size";
 const LAST_TRANS_KEY = { in: "fablecut-last-trans-in", out: "fablecut-last-trans-out" };
 const DEFAULT_LAST_TRANS = { type: "fade", duration: 1 };
@@ -38,7 +45,7 @@ const TIMELINE_PAD_SEC = 15; // trailing empty seconds in the scrollable content
 const TIMELINE_FIT_FILL = 0.95; // ⇧Z / Fit — clip content fills this fraction of the viewport
 
 const DEFAULT_PROPS = {
-  x: 0, y: 0, scale: 1, rotation: 0, opacity: 1, volume: 1,
+  x: 0, y: 0, scale: 1, rotation: 0, opacity: 1, volume: 1, pan: 0,
   speed: 1,                                    // playback rate (video/audio)
   brightness: 100, contrast: 100, saturation: 100, hue: 0,
   blur: 0, grayscale: 0, sepia: 0, invert: 0,
@@ -64,7 +71,7 @@ const DEFAULT_PROPS = {
   boxFit: false,                               // false = wrap at fixed fontSize; true = scale font to fit box
   vAlign: "middle",                            // top | middle | bottom — vertical align of the text block in the box
 };
-const ANIMATABLE = ["x", "y", "scale", "rotation", "opacity", "volume", "speed",
+const ANIMATABLE = ["x", "y", "scale", "rotation", "opacity", "volume", "pan", "speed",
   "brightness", "contrast", "saturation", "hue", "blur", "grayscale", "sepia", "invert",
   "temperature", "tint", "vignette", "cornerRadius", "shake", "rgbSplit", "grain",
   "fontSize", "letterSpacing", "glow"];
@@ -135,63 +142,172 @@ const ASPECT_PRESETS = [
 const FPS_PRESETS = [24, 25, 30, 50, 60];
 const WAVE_PEAKS_PER_SEC = 50;
 const TRACK_IDS = new Set(TRACKS.map((t) => t.id));
-// Audio lanes available for a video's per-channel linked audio (index = props.audioChannel).
-// Starts as the 4 built-in tracks; ensureAudioTrackCount() grows both this and
-// TRACKS/TRACK_IDS at runtime for sources with more channels (5.1, 7.1, …).
-const AUDIO_TRACK_IDS = TRACKS.filter((t) => t.kind === "audio").map((t) => t.id);
-/* Add A5, A6, … until there are `need` audio tracks (capped at
-   MAX_AUDIO_TRACKS), so multi-channel sources beyond stereo/quad (5.1, 7.1…)
-   each get their own linked audio track. Returns how many were added. */
-function ensureAudioTrackCount(need) {
-  need = Math.min(need, MAX_AUDIO_TRACKS);
-  const palette = ["#7ec249", "#5a9e3a", "#4a8a2f", "#3a7226"];
-  const newIds = [];
-  while (AUDIO_TRACK_IDS.length < need) {
-    const n = AUDIO_TRACK_IDS.length + 1;
-    const id = "A" + n;
-    const preset = TRACK_SIZE_PRESETS[state.trackSize] || TRACK_SIZE_PRESETS.l;
-    TRACKS.push({ id, kind: "audio", h: preset.h.A1 || 42, color: palette[(n - 1) % palette.length] });
-    TRACK_IDS.add(id);
-    AUDIO_TRACK_IDS.push(id);
-    newIds.push(id);
-  }
-  if (newIds.length) {
-    buildTrackDOM();
-    if (runtime.audio) addLiveAudioTrackBuses(newIds);
-  }
-  return newIds.length;
+function syncTrackIds() {
+  TRACK_IDS.clear();
+  for (const t of TRACKS) TRACK_IDS.add(t.id);
 }
-/* Wire newly-added tracks into an already-running audio graph (playback may
-   have started before a multi-channel replace/add grew the track set). All
-   buses are created up front, then the meter is reinstalled at most once —
-   its AudioWorkletNode input count is fixed at creation, so adding several
-   tracks in one go (e.g. 4 new lanes for a 7.1 source) must snapshot the
-   full updated track list before rebuilding it, not one track at a time. */
-function addLiveAudioTrackBuses(ids) {
-  const audio = runtime.audio;
-  if (!audio) return;
-  for (const id of ids) {
-    if (audio.trackBus[id]) continue;
-    audio.trackBus[id] = audio.ctx.createGain();
-    audio.audioTrackIds.push(id);
-  }
-  if (!audio.meterReady) {
-    for (const id of ids) audio.trackBus[id]?.connect(audio.master);
-    return;
-  }
-  // Feed every bus (old + new) through master directly before tearing down
-  // the old meter — if the rebuild below fails, all tracks stay audible via
-  // this fallback instead of feeding an orphaned, disconnected meter node.
-  for (const id of Object.keys(audio.trackBus)) {
-    try { audio.trackBus[id].disconnect(); } catch {}
-    audio.trackBus[id].connect(audio.master);
-  }
-  try { audio.meter.port.onmessage = null; } catch {}
-  try { audio.meter.disconnect(); } catch {}
-  audio.meter = null;
-  audio.meterReady = false;
-  installMeterWorklet(audio).catch(() => {});
+function serializeTracks() {
+  return TRACKS.map(({ id, kind }) => ({ id, kind }));
 }
+function sortTracksInPlace() {
+  const vids = TRACKS.filter((t) => t.kind === "video")
+    .sort((a, b) => (parseInt(b.id.slice(1), 10) || 0) - (parseInt(a.id.slice(1), 10) || 0));
+  const auds = TRACKS.filter((t) => t.kind === "audio")
+    .sort((a, b) => (parseInt(a.id.slice(1), 10) || 0) - (parseInt(b.id.slice(1), 10) || 0));
+  TRACKS.length = 0;
+  TRACKS.push(...vids, ...auds);
+  syncTrackIds();
+}
+function applyTracksFromProject(defs) {
+  const raw = Array.isArray(defs) && defs.length
+    ? defs.filter((d) => d && d.id && (d.kind === "video" || d.kind === "audio"))
+    : DEFAULT_TRACK_DEFS;
+  const seen = new Set();
+  const list = raw.filter((d) => {
+    if (seen.has(d.id)) return false;
+    seen.add(d.id);
+    return true;
+  });
+  TRACKS.length = 0;
+  for (const d of list) TRACKS.push(makeTrack(d.id, d.kind === "audio" ? "audio" : "video"));
+  sortTracksInPlace();
+  applyTrackHeights();
+}
+/** Ensure every clip.track exists (agents may reference V4+ before the UI adds it). */
+function ensureTracksCoverClips() {
+  let added = false;
+  for (const c of project.clips) {
+    if (!c.track || TRACK_IDS.has(c.track)) continue;
+    const kind = c.kind === "audio" || /^A\d+$/i.test(c.track) ? "audio" : "video";
+    TRACKS.push(makeTrack(c.track, kind));
+    TRACK_IDS.add(c.track); // mark present before later clips (avoids duplicate makeTrack)
+    added = true;
+  }
+  if (added) {
+    sortTracksInPlace();
+    applyTrackHeights();
+  }
+}
+function audioTrackIds() {
+  return TRACKS.filter((t) => t.kind === "audio").map((t) => t.id);
+}
+function nextTrackId(kind) {
+  const prefix = kind === "audio" ? "A" : "V";
+  let max = 0;
+  for (const t of TRACKS) {
+    if (t.kind !== kind) continue;
+    const n = parseInt(t.id.slice(1), 10);
+    if (n > max) max = n;
+  }
+  return prefix + (max + 1);
+}
+function addTimelineTrack(kind) {
+  const existing = TRACKS.filter((t) => t.kind === kind).length;
+  if (existing >= MAX_TRACKS_PER_KIND) {
+    toast(`Maximum ${MAX_TRACKS_PER_KIND} ${kind} tracks`);
+    return null;
+  }
+  const id = nextTrackId(kind);
+  const t = makeTrack(id, kind);
+  TRACKS.push(t);
+  sortTracksInPlace();
+  applyTrackHeights();
+  project.tracks = serializeTracks();
+  if (state.soloId && state.soloId !== id) {
+    state.disabledTracks.add(id);
+    project.disabledTracks = [...state.disabledTracks].sort();
+  }
+  if (kind === "audio") syncAudioGraphTracks();
+  buildTrackDOM();
+  syncAllTrackDisabledUI();
+  state.dirtyTimeline = true;
+  rebuildClips();
+  const h = setTimelineHeight(Math.max(
+    $("timelinePanel")?.getBoundingClientRect().height || 0,
+    defaultTimelineHeight()
+  ));
+  localStorage.setItem(TL_H_KEY, String(h));
+  scheduleSave();
+  return t;
+}
+function trackHasClips(trackId) {
+  return project.clips.some((c) => c.track === trackId);
+}
+function canRemoveTrack(trackId) {
+  const t = TRACKS.find((x) => x.id === trackId);
+  if (!t) return { ok: false, reason: "Unknown track" };
+  if (trackHasClips(trackId)) return { ok: false, reason: "Track has clips" };
+  if (TRACKS.filter((x) => x.kind === t.kind).length <= 1)
+    return { ok: false, reason: `Keep at least one ${t.kind} track` };
+  return { ok: true, reason: "" };
+}
+function removeTimelineTrack(trackId) {
+  const check = canRemoveTrack(trackId);
+  if (!check.ok) { toast(check.reason); return false; }
+  const wasAudio = TRACKS.find((t) => t.id === trackId)?.kind === "audio";
+  const idx = TRACKS.findIndex((t) => t.id === trackId);
+  if (idx < 0) return false;
+  if (state.soloId === trackId) clearTrackSolo({ restore: true });
+  TRACKS.splice(idx, 1);
+  syncTrackIds();
+  if (state.disabledTracks.has(trackId)) {
+    state.disabledTracks.delete(trackId);
+    project.disabledTracks = [...state.disabledTracks].sort();
+  }
+  if (Array.isArray(state.soloRestore)) {
+    state.soloRestore = state.soloRestore.filter((id) => id !== trackId);
+  }
+  project.tracks = serializeTracks();
+  if (wasAudio) syncAudioGraphTracks();
+  buildTrackDOM();
+  syncAllTrackDisabledUI();
+  state.dirtyTimeline = true;
+  rebuildClips();
+  scheduleSave();
+  return true;
+}
+/* Lightweight right-click menu for track headers. */
+let trackCtxMenu = null;
+function hideTrackCtxMenu() {
+  if (trackCtxMenu) { trackCtxMenu.remove(); trackCtxMenu = null; }
+}
+function showTrackCtxMenu(clientX, clientY, track) {
+  hideTrackCtxMenu();
+  const check = canRemoveTrack(track.id);
+  const menu = document.createElement("div");
+  menu.className = "ctx-menu";
+  menu.id = "trackCtxMenu";
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "ctx-item";
+  btn.textContent = "Remove track";
+  if (!check.ok) {
+    btn.disabled = true;
+    btn.title = check.reason;
+  } else {
+    btn.addEventListener("click", () => {
+      hideTrackCtxMenu();
+      removeTimelineTrack(track.id);
+    });
+  }
+  menu.appendChild(btn);
+  document.body.appendChild(menu);
+  trackCtxMenu = menu;
+  const pad = 6;
+  const w = menu.offsetWidth, h = menu.offsetHeight;
+  let x = clientX, y = clientY;
+  if (x + w + pad > window.innerWidth) x = window.innerWidth - w - pad;
+  if (y + h + pad > window.innerHeight) y = window.innerHeight - h - pad;
+  menu.style.left = Math.max(pad, x) + "px";
+  menu.style.top = Math.max(pad, y) + "px";
+  btn.focus();
+}
+document.addEventListener("pointerdown", (e) => {
+  if (trackCtxMenu && !trackCtxMenu.contains(e.target)) hideTrackCtxMenu();
+}, true);
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") hideTrackCtxMenu();
+}, true);
 
 /* ── User settings (localStorage; optional behavior toggles) ── */
 const SETTINGS_KEY = "fablecut-settings";
@@ -236,7 +352,9 @@ const project = {
   markers: [], // {t, label?} — beat/cue markers on the ruler; snap targets
   inPoint: null,  // timeline work-area IN (seconds), or null
   outPoint: null, // timeline work-area OUT (seconds), or null
-  disabledTracks: [], // track ids (V4…A3) hidden from preview/export when listed
+  disabledTracks: [], // track ids omitted from preview/export when listed
+  tracks: null, // optional [{id, kind}] — null means default V3…V1 + A1…A4
+  panSchema: 1, // 1 = pan-aware; gates one-time L/R stem migration on load
 };
 const state = {
   time: 0, playing: false, pps: 60, snap: true,
@@ -254,6 +372,8 @@ const state = {
   workAreaPlay: false,   // when true, play + Home/End stay inside IN/OUT
   binTab: "project",     // project | elements | sfx | svg
   disabledTracks: new Set(), // mirror of project.disabledTracks for fast lookup
+  soloId: null,              // track id when solo is active, else null
+  soloRestore: null,         // disabledTracks snapshot taken when solo engaged
   transFocus: null,      // "in" | "out" — inspector transition row highlighted
   kfGraphs: new Set(),   // animatable prop keys with open monitor graphs
 };
@@ -267,27 +387,62 @@ function isTrackEnabled(id) {
 }
 function syncTrackDisabledUI(id) {
   const on = isTrackEnabled(id);
+  const solo = state.soloId === id;
   const head = els.trackHeaders.querySelector(`.track-head[data-track="${id}"]`);
   const row = els.tracks.querySelector(`.track[data-track="${id}"]`);
   if (head) {
     head.classList.toggle("disabled", !on);
+    head.classList.toggle("solo", solo);
     const btn = head.querySelector(".track-toggle");
     if (btn) {
       btn.setAttribute("aria-pressed", on ? "true" : "false");
       btn.title = on ? "Disable track" : "Enable track";
     }
+    const sBtn = head.querySelector(".track-solo");
+    if (sBtn) {
+      sBtn.setAttribute("aria-pressed", solo ? "true" : "false");
+      sBtn.classList.toggle("on", solo);
+      sBtn.title = solo ? "Unsolo track" : "Solo track (mute all others)";
+    }
   }
-  if (row) row.classList.toggle("disabled", !on);
+  if (row) {
+    row.classList.toggle("disabled", !on);
+    row.classList.toggle("solo", solo);
+  }
 }
 function syncAllTrackDisabledUI() {
   for (const t of TRACKS) syncTrackDisabledUI(t.id);
 }
+function clearTrackSolo({ restore = false } = {}) {
+  if (!state.soloId) return;
+  if (restore && Array.isArray(state.soloRestore)) {
+    state.disabledTracks = new Set(state.soloRestore.filter((id) => TRACK_IDS.has(id)));
+    project.disabledTracks = [...state.disabledTracks].sort();
+  }
+  state.soloId = null;
+  state.soloRestore = null;
+}
+function toggleTrackSolo(id) {
+  if (!TRACK_IDS.has(id)) return;
+  if (state.soloId === id) {
+    clearTrackSolo({ restore: true });
+  } else {
+    if (!state.soloId) state.soloRestore = [...state.disabledTracks];
+    state.soloId = id;
+    state.disabledTracks = new Set(TRACKS.filter((t) => t.id !== id).map((t) => t.id));
+    project.disabledTracks = [...state.disabledTracks].sort();
+  }
+  syncAllTrackDisabledUI();
+  scheduleSave();
+}
 function toggleTrackEnabled(id) {
   if (!TRACK_IDS.has(id)) return;
+  // Manual mute exits solo without restoring the pre-solo snapshot
+  if (state.soloId) clearTrackSolo({ restore: false });
   if (state.disabledTracks.has(id)) state.disabledTracks.delete(id);
   else state.disabledTracks.add(id);
   project.disabledTracks = [...state.disabledTracks].sort();
-  syncTrackDisabledUI(id);
+  syncAllTrackDisabledUI();
   scheduleSave();
 }
 const runtime = {
@@ -579,7 +734,6 @@ function startFolderRename(folderId) {
 }
 function applyProject(data) {
   const wa = normalizeWorkArea(data.inPoint, data.outPoint);
-  const disabledTracks = normalizeDisabledTracks(data.disabledTracks);
   Object.assign(project, {
     name: data.name || "Untitled Project",
     width: data.width || 1280, height: data.height || 720, fps: data.fps || 30,
@@ -591,39 +745,51 @@ function applyProject(data) {
     markers: (data.markers || []).filter((m) => m && isFinite(m.t)).sort((a, b) => a.t - b.t),
     inPoint: wa.inPoint,
     outPoint: wa.outPoint,
-    disabledTracks,
+    disabledTracks: [],
+    tracks: null,
   });
+  applyTracksFromProject(data.tracks);
+  ensureTracksCoverClips();
+  project.tracks = serializeTracks();
+  const disabledTracks = normalizeDisabledTracks(data.disabledTracks);
+  project.disabledTracks = disabledTracks;
   const folderIds = new Set(project.folders.map((f) => f.id));
   for (const m of project.media) {
     if (m.folderId && !folderIds.has(m.folderId)) m.folderId = null;
   }
   state.disabledTracks = new Set(disabledTracks);
+  state.soloId = null;
+  state.soloRestore = null;
+  // One-shot migration for projects saved before props.pan existed. Gated by
+  // panSchema so a later write that omits pan:0 (compact MCP / agent rebuild)
+  // does not re-hard-pan a deliberately centered stem.
+  const migratePan = !(data.panSchema >= 1);
   for (const c of project.clips) {
-    c.props = { ...DEFAULT_PROPS, ...(c.props || {}) };
+    const raw = c.props || {};
+    c.props = { ...DEFAULT_PROPS, ...raw };
+    if (migratePan && !Object.hasOwn(raw, "pan") && Number.isInteger(raw.audioChannel) && raw.audioChannel >= 0)
+      c.props.pan = defaultPanForChannel(raw.audioChannel);
     if (c.keyframes) for (const arr of Object.values(c.keyframes))
       if (Array.isArray(arr)) arr.sort((a, b) => a.t - b.t);
     if (c.kind === "text") ensureFont(c.props.font);
   }
-  // TRACKS isn't persisted — any extra audio lanes (A5+, from a multi-channel
-  // source) only exist as clip.track references on disk. Recreate them so
-  // those clips don't silently vanish from the timeline on reload.
-  let maxAudioTrack = AUDIO_TRACK_IDS.length;
-  for (const c of project.clips) {
-    const am = /^A(\d+)$/.exec(c.track || "");
-    if (am) maxAudioTrack = Math.max(maxAudioTrack, +am[1]);
-  }
-  if (maxAudioTrack > AUDIO_TRACK_IDS.length) ensureAudioTrackCount(maxAudioTrack);
+  project.panSchema = 1;
+  if (migratePan) scheduleSave(); // persist marker + migrated stem pans
   // AV links aren't always on disk (older saves / agents) — rebuild from matching timing.
   relinkClips();
   // reset runtime playback elements so they rebuild against new data
   if (state.audioHold) setAudioHold(false);
   else stopAudioHoldNodes();
-  for (const el of runtime.clipEls.values()) { try { el.pause(); el.src = ""; } catch { } }
-  runtime.clipEls.clear(); runtime.clipGain.clear();
+  // Tear down each clip's Web Audio chain (src→split→gain→panner→bus) before
+  // clearing the maps — otherwise nodes stay wired to live track buses and leak.
+  for (const id of new Set([...runtime.clipEls.keys(), ...runtime.clipGain.keys()]))
+    releaseClipEl(id);
+  if (runtime.audio) syncAudioGraphTracks();
   els.preview.width = project.width; els.preview.height = project.height;
   syncAspectSel();
   syncFpsSel();
   pruneSelection(); // keep the selection across external reloads where possible
+  buildTrackDOM();
   state.dirtyTimeline = true;
   renderBin(); renderInspector();
   updateWorkArea();
@@ -652,8 +818,10 @@ function projectJSON() {
   const { name, width, height, fps, background, revision, folders, media, clips, markers, inPoint, outPoint, disabledTracks } = project;
   return {
     name, width, height, fps, background, revision,
+    panSchema: 1,
     folders: (folders || []).map(({ id, name, parentId, open }) =>
       ({ id, name, parentId: parentId || null, open: open !== false })),
+    tracks: serializeTracks(),
     media: media.filter((m) => !m.transient).map(({ id, name, kind, src, duration, width, height, folderId }) =>
       ({ id, name, kind, src, duration, width, height, folderId: folderId || null })),
     clips: clips.map(({ id, mediaId, kind, track, start, in: inn, duration, name, props, keyframes, transitionIn, transitionOut, linkedId, linkGroup }) => {
@@ -813,7 +981,7 @@ function wavePeaksFor(c) {
   if (w instanceof Float32Array) return w;
   if (!w.max) return null;
   const ch = c.props?.audioChannel;
-  if (Number.isInteger(ch) && w.channels?.[ch]) return w.channels[ch];
+  if (Number.isInteger(ch) && ch >= 0 && w.channels?.[ch]) return w.channels[ch];
   return w.max;
 }
 
@@ -1222,7 +1390,7 @@ function linkedClip(c) {
   return c?.linkedId ? getClip(c.linkedId) : null;
 }
 /* Expand a clip list so each AV-linked partner is included once.
-   Supports N-way `linkGroup` (video + L + R) and legacy pairwise `linkedId`. */
+   Supports N-way `linkGroup` (video + per-channel stems) and legacy pairwise `linkedId`. */
 function withLinked(clips) {
   const out = new Map();
   const groups = new Set();
@@ -1255,7 +1423,7 @@ function syncLinkedTiming(c) {
 }
 /* Rebuild AV linkGroups after load. Unlinking isn't supported, so any video +
    audio clips that share mediaId and the same start/in/duration belong together
-   (e.g. picture + L/R stems from one file). Legacy pairwise linkedId is cleared
+   (e.g. picture + L/R/C stems from one file). Legacy pairwise linkedId is cleared
    in favor of linkGroup. */
 function relinkClips() {
   const near = (a, b) => Math.abs((+a || 0) - (+b || 0)) < 1e-3;
@@ -1284,6 +1452,88 @@ function relinkClips() {
   }
 }
 
+/* Discrete-channel labels for linked stems (WAV / Web Audio order). */
+const CHANNEL_SHORT = ["L", "R", "C", "LFE", "Ls", "Rs", "Lb", "Rb"];
+const CHANNEL_LONG = ["Left", "Right", "Center", "LFE", "Surround L", "Surround R", "Back L", "Back R"];
+function audioChannelShort(ch) {
+  if (!Number.isInteger(ch) || ch < 0) return "";
+  return CHANNEL_SHORT[ch] || `Ch${ch + 1}`;
+}
+function audioChannelLong(ch) {
+  if (!Number.isInteger(ch) || ch < 0) return null;
+  return CHANNEL_LONG[ch] || `Channel ${ch + 1}`;
+}
+/** Default stereo pan for an isolated linked stem (L −1, R +1, else center). */
+function defaultPanForChannel(ch) {
+  if (ch === 0) return -1;
+  if (ch === 1) return 1;
+  return 0;
+}
+function clipPan(v) { return clamp(+v || 0, -1, 1); }
+/** Grow A-tracks to at least `need` (capped at MAX_TRACKS_PER_KIND). Returns how many were added. */
+function ensureAudioTrackCount(need) {
+  need = Math.min(Math.max(0, need | 0), MAX_TRACKS_PER_KIND);
+  let added = 0;
+  while (audioTrackIds().length < need) {
+    if (TRACKS.filter((t) => t.kind === "audio").length >= MAX_TRACKS_PER_KIND) break;
+    const id = nextTrackId("audio");
+    TRACKS.push(makeTrack(id, "audio"));
+    if (state.soloId && state.soloId !== id) state.disabledTracks.add(id);
+    added++;
+  }
+  if (!added) return 0;
+  sortTracksInPlace();
+  applyTrackHeights();
+  project.tracks = serializeTracks();
+  if (state.disabledTracks.size) project.disabledTracks = [...state.disabledTracks].sort();
+  syncAudioGraphTracks();
+  buildTrackDOM();
+  syncAllTrackDisabledUI();
+  state.dirtyTimeline = true;
+  rebuildClips();
+  const h = setTimelineHeight(Math.max(
+    $("timelinePanel")?.getBoundingClientRect().height || 0,
+    defaultTimelineHeight()
+  ));
+  localStorage.setItem(TL_H_KEY, String(h));
+  scheduleSave();
+  return added;
+}
+/** Attach one audio clip per source channel (A1…An), sharing the video's linkGroup. */
+function attachLinkedAudioChannels(videoClip, m, nCh) {
+  if (!videoClip?.linkGroup || !getClip(videoClip.id)) return [];
+  const lg = videoClip.linkGroup;
+  // Drop any prior stems for this group (e.g. stereo placeholder → 3.0 upgrade).
+  const doomed = project.clips.filter((x) => x.linkGroup === lg && x.kind === "audio");
+  for (const c of doomed) releaseClipEl(c.id);
+  project.clips = project.clips.filter((x) => !(x.linkGroup === lg && x.kind === "audio"));
+  const ids = audioTrackIds();
+  const n = Math.min(Math.max(1, nCh | 0), ids.length);
+  const out = [];
+  for (let ch = 0; ch < n; ch++) {
+    const a = {
+      id: "c_" + uid(), mediaId: m.id, kind: "audio", track: ids[ch],
+      start: videoClip.start, in: videoClip.in, duration: videoClip.duration,
+      name: videoClip.name,
+      props: { ...DEFAULT_PROPS, audioChannel: ch, pan: defaultPanForChannel(ch) },
+      linkGroup: lg,
+    };
+    if (videoClip.props?.speed != null) a.props.speed = videoClip.props.speed;
+    project.clips.push(a);
+    out.push(a);
+  }
+  return out;
+}
+/** Tap one source channel into a mono gain (pan places it in the stereo field). */
+function connectIsolatedChannel(ctx, srcNode, gainNode, ch, nCh) {
+  const outputs = Math.max(2, nCh | 0, (ch | 0) + 1);
+  const splitter = ctx.createChannelSplitter(outputs);
+  srcNode.connect(splitter);
+  splitter.connect(gainNode, ch);
+  gainNode._fcSplit = splitter;
+  gainNode._fcChannel = ch;
+}
+
 function addClipFromMedia(m, trackId, at) {
   pushUndo();
   const kind = m.kind;
@@ -1299,25 +1549,22 @@ function addClipFromMedia(m, trackId, at) {
     props: { ...DEFAULT_PROPS },
   };
   project.clips.push(c);
-  // Video+audio: picture on a V track; stereo L/R as separate linked clips on A1/A2.
-  // Mute the video clip so audio isn't doubled.
+  // Video+audio: picture on a V track; one linked stem per source channel on A-tracks.
+  // Mute the video clip so audio isn't doubled. If channel count isn't known yet,
+  // plant a stereo placeholder now (so the drop isn't picture-only, and so the
+  // next pushUndo snapshot includes the AV link); reconcileAudioChannels upgrades
+  // or trims once decodeAudioData reports the real count.
   if (kind === "video") {
     c.props.volume = 0;
-    const lg = "lg_" + uid();
-    c.linkGroup = lg;
-    const aL = {
-      id: "c_" + uid(), mediaId: m.id, kind: "audio", track: "A1",
-      start, in: 0, duration, name,
-      props: { ...DEFAULT_PROPS, audioChannel: 0 },
-      linkGroup: lg,
-    };
-    const aR = {
-      id: "c_" + uid(), mediaId: m.id, kind: "audio", track: "A2",
-      start, in: 0, duration, name,
-      props: { ...DEFAULT_PROPS, audioChannel: 1 },
-      linkGroup: lg,
-    };
-    project.clips.push(aL, aR);
+    c.linkGroup = "lg_" + uid();
+    const nCh = m.channels > 0 ? m.channels : 2;
+    const added = ensureAudioTrackCount(Math.min(nCh, MAX_TRACKS_PER_KIND));
+    if (added) {
+      toast(added === 1
+        ? `Added an audio track for ${nCh}-channel audio`
+        : `Added ${added} audio tracks for ${nCh}-channel audio`);
+    }
+    attachLinkedAudioChannels(c, m, nCh);
     ensureWave(m);
     reconcileAudioChannels(c);
   }
@@ -1342,7 +1589,7 @@ async function detectChannelCount(m) {
    ensureAudioTrackCount() for sources beyond 4 channels (5.1, 7.1…), and is
    also re-run after replaceClipMedia swaps the source. Drops linked clips
    for channels the (new) source no longer has, and warns only if a source
-   has more channels than MAX_AUDIO_TRACKS. */
+   has more channels than MAX_TRACKS_PER_KIND. */
 async function reconcileAudioChannels(videoClip) {
   if (videoClip.kind !== "video" || !videoClip.linkGroup) return;
   const mediaId = videoClip.mediaId;
@@ -1352,10 +1599,11 @@ async function reconcileAudioChannels(videoClip) {
   const live = getClip(videoClip.id);
   if (!live || live.mediaId !== mediaId) return; // superseded by a newer add/replace
   const lg = live.linkGroup;
-  const tracksBefore = AUDIO_TRACK_IDS.length;
+  const tracksBefore = audioTrackIds().length;
   if (chCount > tracksBefore) ensureAudioTrackCount(chCount);
-  const newTracks = AUDIO_TRACK_IDS.length - tracksBefore;
-  const wantCh = Math.min(chCount, AUDIO_TRACK_IDS.length);
+  const ids = audioTrackIds();
+  const newTracks = ids.length - tracksBefore;
+  const wantCh = Math.min(chCount, ids.length);
   const have = project.clips.filter((c) => c.linkGroup === lg && c.kind === "audio");
   let added = 0, removed = 0;
   for (const c of have) {
@@ -1368,18 +1616,21 @@ async function reconcileAudioChannels(videoClip) {
   for (let ch = 0; ch < wantCh; ch++) {
     if (have.some((c) => c.props?.audioChannel === ch)) continue;
     project.clips.push({
-      id: "c_" + uid(), mediaId, kind: "audio", track: AUDIO_TRACK_IDS[ch],
+      id: "c_" + uid(), mediaId, kind: "audio", track: ids[ch],
       start: live.start, in: live.in, duration: live.duration, name: live.name,
-      props: { ...DEFAULT_PROPS, audioChannel: ch },
+      props: { ...DEFAULT_PROPS, audioChannel: ch, pan: defaultPanForChannel(ch) },
       linkGroup: lg,
     });
     added++;
   }
-  if (!added && !removed) return;
+  if (!added && !removed) {
+    if (newTracks > 0) scheduleSave();
+    return;
+  }
   state.dirtyTimeline = true;
   scheduleSave(); renderInspector();
-  if (chCount > AUDIO_TRACK_IDS.length)
-    toast(`${m.name}: ${chCount} audio channels, only ${MAX_AUDIO_TRACKS} tracks supported — extra channel(s) dropped`);
+  if (chCount > ids.length)
+    toast(`${m.name}: ${chCount} audio channels, only ${MAX_TRACKS_PER_KIND} tracks supported — extra channel(s) dropped`);
   else if (added)
     toast(newTracks
       ? `${m.name}: added ${newTracks} audio track${newTracks === 1 ? "" : "s"} and linked ${wantCh} channels`
@@ -1980,30 +2231,46 @@ function trackToggleIcon(kind) {
     `</svg>`;
 }
 function buildTrackDOM() {
-  els.trackHeaders.innerHTML = "";
+  let inner = $("trackHeadInner");
+  if (!inner) {
+    inner = document.createElement("div");
+    inner.id = "trackHeadInner";
+    els.trackHeaders.appendChild(inner);
+  }
+  inner.innerHTML = "";
   els.tracks.innerHTML = "";
-  const inner = document.createElement("div");
-  inner.id = "trackHeadInner";
-  els.trackHeaders.appendChild(inner);
   for (const t of TRACKS) {
     const on = isTrackEnabled(t.id);
+    const solo = state.soloId === t.id;
     const h = document.createElement("div");
-    h.className = "track-head" + (on ? "" : " disabled");
+    h.className = "track-head" + (on ? "" : " disabled") + (solo ? " solo" : "");
     h.dataset.track = t.id;
     h.style.height = t.h + "px";
     h.innerHTML =
       `<button type="button" class="track-toggle" aria-pressed="${on}" ` +
       `title="${on ? "Disable track" : "Enable track"}" style="color:${t.color}">` +
       `${trackToggleIcon(t.kind)}</button>` +
-      `<span class="track-id">${t.id}</span>`;
+      `<span class="track-id">${escapeHtml(t.id)}</span>` +
+      `<button type="button" class="track-solo${solo ? " on" : ""}" aria-pressed="${solo}" ` +
+      `title="${solo ? "Unsolo track" : "Solo track (mute all others)"}">S</button>`;
     h.querySelector(".track-toggle").addEventListener("click", (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
       toggleTrackEnabled(t.id);
     });
+    h.querySelector(".track-solo").addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      toggleTrackSolo(t.id);
+    });
+    h.addEventListener("contextmenu", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      showTrackCtxMenu(ev.clientX, ev.clientY, t);
+    });
     inner.appendChild(h);
     const row = document.createElement("div");
-    row.className = "track" + (on ? "" : " disabled");
+    row.className = "track" + (on ? "" : " disabled") + (solo ? " solo" : "");
     row.dataset.track = t.id;
     row.style.height = t.h + "px";
     els.tracks.appendChild(row);
@@ -2109,9 +2376,10 @@ function rebuildClips() {
     if (hasWave) body += `<canvas class="wave"></canvas>`;
     const badge = (c.keyframes && Object.keys(c.keyframes).length ? "◆ " : "") +
                   (c.transitionIn || c.transitionOut ? "⇄ " : "");
-    const chN = c.props?.audioChannel;
-    const chTag = chN === 0 ? "L · " : chN === 1 ? "R · "
-                : Number.isInteger(chN) ? `Ch${chN + 1} · ` : "";
+    const chTag = (() => {
+      const s = audioChannelShort(c.props?.audioChannel);
+      return s ? s + " · " : "";
+    })();
     const label = c.kind === "text" ? "T · " + (c.props.text || "").split("\n")[0]
       : c.kind === "adjust" ? "FX · " + (c.name || "")
       : c.kind === "audio" ? chTag + (c.name || "")
@@ -2811,6 +3079,8 @@ function zoomToRange(t0, t1) {
 }
 els.zoomSlider.addEventListener("input", () => setZoom(+els.zoomSlider.value));
 $("btnZoomFit").addEventListener("click", zoomToFit);
+$("btnAddV").addEventListener("click", () => addTimelineTrack("video"));
+$("btnAddA").addEventListener("click", () => addTimelineTrack("audio"));
 els.timelineScroll.addEventListener("wheel", (e) => {
   if (e.ctrlKey || e.metaKey) {
     e.preventDefault();
@@ -2995,12 +3265,11 @@ function renderInspector(lite) {
     </div>`;
   }
   if (c.kind === "video" || c.kind === "audio") {
-    const chIdx = c.props?.audioChannel;
-    const chLabel = chIdx === 0 ? "Left" : chIdx === 1 ? "Right"
-                  : Number.isInteger(chIdx) ? `Channel ${chIdx + 1}` : null;
+    const chLabel = audioChannelLong(c.props?.audioChannel);
     html += `<div class="insp-section"><h3>Audio / Time</h3>
       ${chLabel ? row("Channel", `<span style="opacity:.75">${chLabel}</span>`) : ""}
       ${slider("volume", 0, 2, 0.01, p.volume)}
+      ${slider("pan", -1, 1, 0.01, p.pan)}
       ${slider("speed", 0.25, 4, 0.05, p.speed, "×")}
     </div>`;
   }
@@ -3127,6 +3396,7 @@ function renderInspector(lite) {
       else { c.props[k] = v; if (k === "text") state.dirtyTimeline = true; }
       const valEl = els.inspector.querySelector(`[data-val="${k}"]`);
       if (valEl) valEl.textContent = input.value;
+      if (state.audioHold && (k === "volume" || k === "pan")) scheduleAudioHoldRefresh();
       scheduleSave();
     });
     input.addEventListener("focus", () => pushUndo(), { once: true });
@@ -3210,7 +3480,7 @@ function renderInspector(lite) {
 /* ── Keyframe graphs (program-monitor left gutter) ── */
 const KF_GRAPH_LABEL = {
   x: "Pos X", y: "Pos Y", scale: "Scale", rotation: "Rotation", opacity: "Opacity",
-  volume: "Volume", speed: "Speed", brightness: "Bright", contrast: "Contrast",
+  volume: "Volume", pan: "Pan", speed: "Speed", brightness: "Bright", contrast: "Contrast",
   saturation: "Sat", hue: "Hue", blur: "Blur", grayscale: "Gray", sepia: "Sepia",
   invert: "Invert", temperature: "Temp", tint: "Tint", vignette: "Vignette",
   cornerRadius: "Radius", shake: "Shake", rgbSplit: "RGB", grain: "Grain",
@@ -3389,21 +3659,38 @@ function releaseClipEl(id) {
   if (el) { try { el.pause(); el.src = ""; } catch { } runtime.clipEls.delete(id); }
   const g = runtime.clipGain.get(id);
   if (g) {
+    const out = g._fcOut || g;
+    try { out.disconnect(); } catch {}
+    out._fcBus = null;
+    if (g._fcPanner && g._fcPanner !== out) { try { g._fcPanner.disconnect(); } catch {} }
     try { g.disconnect(); } catch {}
-    if (g._fcOut) { try { g._fcOut.disconnect(); } catch {} }
     if (g._fcSplit) { try { g._fcSplit.disconnect(); } catch {} }
+    if (g._fcSrc) { try { g._fcSrc.disconnect(); } catch {} }
+    g._fcOut = g._fcPanner = g._fcSplit = g._fcSrc = null;
     runtime.clipGain.delete(id);
   }
+}
+/** Configure an A-track bus so stereo panner output stays L/R through the meter. */
+function configureTrackBus(g) {
+  g.channelCount = 2;
+  g.channelCountMode = "explicit";
+  g.channelInterpretation = "discrete";
+}
+/** Master spill bus (V-track / direct video audio) — same stereo rules as A-buses. */
+function configureMasterBus(g) {
+  configureTrackBus(g);
 }
 function ensureAudio() {
   if (runtime.audio) return runtime.audio;
   const ctx = new (window.AudioContext || window.webkitAudioContext)();
   const master = ctx.createGain();
+  configureMasterBus(master);
   const recDest = ctx.createMediaStreamDestination();
-  const audioTracks = TRACKS.filter((t) => t.kind === "audio");
+  const ids = audioTrackIds();
   const trackBus = {};
-  for (const t of audioTracks) {
-    trackBus[t.id] = ctx.createGain();
+  for (const id of ids) {
+    trackBus[id] = ctx.createGain();
+    configureTrackBus(trackBus[id]);
   }
   // Until the worklet is ready, audio-track buses and master both feed speakers.
   master.connect(ctx.destination);
@@ -3413,7 +3700,7 @@ function ensureAudio() {
   }
   runtime.audio = {
     ctx, master, recDest, trackBus,
-    audioTrackIds: audioTracks.map((t) => t.id),
+    audioTrackIds: ids.slice(),
     meter: null, meterReady: false,
   };
   installMeterWorklet(runtime.audio).catch(() => {});
@@ -3423,42 +3710,98 @@ function ensureAudio() {
   }
   return runtime.audio;
 }
-/** Route `src -> g -> (channel-isolated ->) out` on `ctx`. When `ch` is 0/1,
- * `src` is split to stereo, only channel `ch` is fed through `g`, then
- * re-merged onto the same side — used to isolate one stereo audio stem onto
- * a single track bus. Returns the node to connect downstream (`g` when no
- * isolation applies) plus the split/merge nodes (null when unused) so callers
- * can track them for later disconnect/dispose. Shared by hookAudio,
- * refreshAudioHold and the offline export mixdown. */
-function connectChannelIsolated(ctx, src, g, ch) {
-  if (ch === 0 || ch === 1) {
-    const split = ctx.createChannelSplitter(2);
-    const merge = ctx.createChannelMerger(2);
-    src.connect(split);
-    split.connect(g, ch);
-    g.connect(merge, 0, ch);
-    return { out: merge, split, merge };
+/** Route `src → gain → (optional channel split) → stereoPanner → bus`.
+ * When `ch` is set, only that source channel feeds the gain (mono); pan places
+ * it in the stereo field. Returns split node when used (for dispose). */
+function connectChannelIsolated(ctx, src, g, ch, nCh) {
+  if (Number.isInteger(ch) && ch >= 0) {
+    connectIsolatedChannel(ctx, src, g, ch, nCh);
+    return { split: g._fcSplit };
   }
   src.connect(g);
-  return { out: g, split: null, merge: null };
+  return { split: null };
+}
+/** Gain → StereoPanner; panner becomes `_fcOut` for routing.
+ * Falls back to gain-as-out when StereoPannerNode is unavailable.
+ * Keep default `speakers` interpretation — `discrete` leaves mono on L at pan 0. */
+function attachClipPanner(ctx, g) {
+  try {
+    const panner = ctx.createStereoPanner();
+    g.connect(panner);
+    g._fcPanner = panner;
+    g._fcOut = panner;
+    return panner;
+  } catch {
+    g._fcPanner = null;
+    g._fcOut = g;
+    return null;
+  }
+}
+/** Create missing A-track buses and rebuild the meter when the track list changes. */
+function syncAudioGraphTracks() {
+  const audio = runtime.audio;
+  if (!audio) return;
+  const ids = audioTrackIds();
+  const idSet = new Set(ids);
+  // Drop buses for removed A-tracks (independent of meter state).
+  for (const id of Object.keys(audio.trackBus)) {
+    if (idSet.has(id)) continue;
+    try { audio.trackBus[id].disconnect(); } catch { }
+    delete audio.trackBus[id];
+  }
+  for (const id of ids) {
+    if (!audio.trackBus[id]) audio.trackBus[id] = audio.ctx.createGain();
+    configureTrackBus(audio.trackBus[id]);
+  }
+  audio.audioTrackIds = ids.slice();
+  // Tear down meter so installMeterWorklet can rebuild with the new input count.
+  if (audio.meter) {
+    teardownMeterNode(audio);
+    audio.meter = null;
+  }
+  audio.meterReady = false;
+  // Allow a new install even if a previous addModule is still in flight — that
+  // call's finally will see _reloadMeter and run again.
+  meterState._reloadMeter = true;
+  // Always wire current buses → master so re-added tracks stay audible if meter install fails.
+  for (const id of ids) {
+    const g = audio.trackBus[id];
+    try { g.disconnect(); } catch { }
+    try { g.connect(audio.master); } catch { }
+  }
+  installMeterWorklet(audio).catch(() => {});
+  // Re-route clip gains onto (possibly new) buses
+  for (const c of project.clips) {
+    if (c.kind === "audio" || c.kind === "video") routeClipGain(c);
+  }
 }
 function hookAudio(c, el) {
   if (!runtime.audio || runtime.clipGain.has(c.id)) return;
   if (c.kind !== "video" && c.kind !== "audio") return;
   try {
     const ctx = runtime.audio.ctx;
+    // createMediaElementSource irreversibly diverts element audio into the
+    // graph — register the gain first so releaseClipEl can always tear it down
+    // even if a later step throws.
     const src = ctx.createMediaElementSource(el);
     const g = ctx.createGain();
-    const ch = c.props?.audioChannel;
-    const { split, merge } = connectChannelIsolated(ctx, src, g, ch);
-    if (split) {
-      g._fcSplit = split;
-      g._fcOut = merge;
-      g._fcChannel = ch;
-    }
+    g._fcSrc = src;
     runtime.clipGain.set(c.id, g);
+    const ch = c.props?.audioChannel;
+    if (Number.isInteger(ch) && ch >= 0) {
+      const m = getMedia(c.mediaId);
+      const nCh = Math.max(m?.channels || 0, ch + 1, 2);
+      try { src.channelInterpretation = "discrete"; } catch { }
+      connectChannelIsolated(ctx, src, g, ch, nCh);
+    } else {
+      src.connect(g);
+    }
+    attachClipPanner(ctx, g); // degrades to gain-as-out if StereoPanner fails
     routeClipGain(c);
-  } catch {}
+  } catch {
+    // Element source was created but graph setup failed — keep the map entry
+    // so a later releaseClipEl can disconnect whatever did get wired.
+  }
 }
 /** Reconnect a clip's gain to the correct track bus (or master for video tracks). */
 function routeClipGain(c) {
@@ -3468,6 +3811,7 @@ function routeClipGain(c) {
   const out = g._fcOut || g;
   if (out._fcBus === bus) return;
   try { out.disconnect(); } catch {}
+  out._fcBus = null;
   out.connect(bus);
   out._fcBus = bus;
 }
@@ -3478,6 +3822,9 @@ const METER_DB_MIN = -48;
 const METER_DB_MAX = 0;
 /** Scale tick marks shown beside the meter bars (dBFS). */
 const METER_DB_MARKS = [0, -6, -12, -24, -36, -48];
+function meterMarkTopPct(db) {
+  return ((METER_DB_MAX - db) / (METER_DB_MAX - METER_DB_MIN)) * 100;
+}
 const METER_MODES = ["rms", "lufs", "peak"];
 const METER_MODE_LABEL = { rms: "RMS", lufs: "LUFS", peak: "PEAK" };
 /* Each channel's segment ladder is one <canvas> instead of METER_SEGS separate
@@ -3520,6 +3867,76 @@ function paintMeterSegs(entry, lit, hold) {
     }
   }
 }
+const MASTER_METER_L = "M:L";
+const MASTER_METER_R = "M:R";
+const MASTER_METER_IDS = [MASTER_METER_L, MASTER_METER_R];
+function resetMasterMeterBallistics() {
+  meterState.master.dispL = meterState.master.dispR = METER_DB_MIN;
+  meterState.master.peakHoldL = meterState.master.peakHoldR = METER_DB_MIN;
+  meterState.master.peakHoldTL = meterState.master.peakHoldTR = 0;
+  meterState.lastLit[MASTER_METER_L] = meterState.lastLit[MASTER_METER_R] = -1;
+  meterState.lastHold[MASTER_METER_L] = meterState.lastHold[MASTER_METER_R] = -1;
+}
+/** Tap the post-meter stereo bus for true L/R master readings (matches headphones). */
+function disposeMasterAnalysers(audio) {
+  if (!audio?.masterSplit) return;
+  try { audio.meter?.disconnect(audio.masterSplit); } catch {}
+  try { audio.masterSplit.disconnect(); } catch {}
+  audio.masterSplit = null;
+  audio.masterAnalysers = null;
+}
+/** Disconnect meter + analysers; restore buses→master→speakers fallback. */
+function teardownMeterNode(audio) {
+  if (!audio) return;
+  disposeMasterAnalysers(audio);
+  if (audio.meter) {
+    try { audio.meter.port.onmessage = null; } catch {}
+    try { audio.meter.disconnect(); } catch {}
+  }
+  try { audio.master.disconnect(); } catch {}
+  try { audio.master.connect(audio.ctx.destination); } catch {}
+  try { audio.master.connect(audio.recDest); } catch {}
+}
+function installMasterAnalysers(audio, meterNode) {
+  disposeMasterAnalysers(audio);
+  const meter = meterNode || audio?.meter;
+  if (!meter) return;
+  const ctx = audio.ctx;
+  const split = ctx.createChannelSplitter(2);
+  const aL = ctx.createAnalyser();
+  const aR = ctx.createAnalyser();
+  const n = 2048;
+  aL.fftSize = n;
+  aR.fftSize = n;
+  aL.smoothingTimeConstant = 0;
+  aR.smoothingTimeConstant = 0;
+  meter.connect(split);
+  split.connect(aL, 0);
+  split.connect(aR, 1);
+  audio.masterSplit = split;
+  audio.masterAnalysers = { L: aL, R: aR, bufL: new Float32Array(n), bufR: new Float32Array(n) };
+}
+function sampleMasterAnalysers() {
+  const a = runtime.audio?.masterAnalysers;
+  if (!a) return;
+  a.L.getFloatTimeDomainData(a.bufL);
+  a.R.getFloatTimeDomainData(a.bufR);
+  let sumL = 0, sumR = 0, pkL = 0, pkR = 0;
+  const n = a.bufL.length;
+  for (let i = 0; i < n; i++) {
+    const l = a.bufL[i], r = a.bufR[i];
+    sumL += l * l;
+    sumR += r * r;
+    const al = l >= 0 ? l : -l, ar = r >= 0 ? r : -r;
+    if (al > pkL) pkL = al;
+    if (ar > pkR) pkR = ar;
+  }
+  const inv = 1 / Math.max(1, n);
+  meterState.master.rmsL = Math.sqrt(sumL * inv);
+  meterState.master.rmsR = Math.sqrt(sumR * inv);
+  meterState.master.peakL = pkL;
+  meterState.master.peakR = pkR;
+}
 const meterState = {
   mode: (() => {
     try {
@@ -3538,6 +3955,15 @@ const meterState = {
   lastLit: {},   // id -> last-painted lit/hold seg indices, to skip redundant DOM writes
   lastHold: {},
   modeBtn: null,
+  tracksToggleBtn: null,
+  tracksExpanded: (() => {
+    try { return localStorage.getItem("fablecut-meter-tracks-expanded") !== "0"; }
+    catch { return true; }
+  })(),
+  master: { rmsL: 0, rmsR: 0, peakL: 0, peakR: 0, lufs: -70,
+    dispL: METER_DB_MIN, dispR: METER_DB_MIN,
+    peakHoldL: METER_DB_MIN, peakHoldR: METER_DB_MIN,
+    peakHoldTL: 0, peakHoldTR: 0 },
 };
 function audioMeterTracks() {
   return TRACKS.filter((t) => t.kind === "audio");
@@ -3556,47 +3982,87 @@ function cycleMeterMode(ev) {
     meterState.peakHold[id] = METER_DB_MIN;
     meterState.peakHoldT[id] = 0;
   }
+  resetMasterMeterBallistics();
+}
+function syncMeterTracksExpandedUI() {
+  const root = $("vuMeter");
+  if (!root) return;
+  root.classList.toggle("vu-tracks-open", meterState.tracksExpanded);
+  const btn = meterState.tracksToggleBtn;
+  if (btn) {
+    btn.textContent = meterState.tracksExpanded ? "▸" : "◂";
+    btn.title = meterState.tracksExpanded ? "Hide track meters" : "Show track meters";
+    btn.setAttribute("aria-expanded", meterState.tracksExpanded ? "true" : "false");
+  }
+  if (meterState.tracksExpanded) {
+    for (const id of meterState.trackIds) {
+      meterState.lastLit[id] = -1;
+      meterState.lastHold[id] = -1;
+    }
+  }
+}
+function toggleMeterTracksExpanded(ev) {
+  if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+  meterState.tracksExpanded = !meterState.tracksExpanded;
+  try { localStorage.setItem("fablecut-meter-tracks-expanded", meterState.tracksExpanded ? "1" : "0"); } catch {}
+  syncMeterTracksExpandedUI();
 }
 async function installMeterWorklet(audio) {
-  if (audio.meterReady || !audio.ctx.audioWorklet || meterState._loading) return;
+  if (audio.meterReady || !audio.ctx.audioWorklet) return;
+  if (meterState._loading) {
+    meterState._reloadMeter = true; // sync tore down mid-install — retry in finally
+    return;
+  }
   meterState._loading = true;
+  meterState._reloadMeter = false;
   const trackIds = audio.audioTrackIds.slice();
+  const nAudio = trackIds.length;
+  const nInputs = Math.max(1, nAudio + 1); // +1 = video/other spill on master
+  let meter = null;
   try {
-    await audio.ctx.audioWorklet.addModule("meter-worklet.js?v=2");
-    const n = trackIds.length;
-    const meter = new AudioWorkletNode(audio.ctx, "fablecut-meter", {
-      numberOfInputs: n,
+    await audio.ctx.audioWorklet.addModule("meter-worklet.js?v=7");
+    // Aborted by syncAudioGraphTracks while we were loading — retry fresh.
+    if (meterState._reloadMeter) return;
+    meter = new AudioWorkletNode(audio.ctx, "fablecut-meter", {
+      numberOfInputs: nInputs,
       numberOfOutputs: 1,
       outputChannelCount: [2],
       channelCount: 2,
       channelCountMode: "explicit",
-      processorOptions: { hopBlocks: 8, nTracks: n, trackIds },
+      channelInterpretation: "discrete",
+      processorOptions: { hopBlocks: 8, nTracks: nInputs, nAudioTracks: nAudio, trackIds },
     });
     meter.port.onmessage = (ev) => {
       const msg = ev.data;
       if (!msg || msg.type !== "meter") return;
-      const ids = msg.trackIds || trackIds;
-      for (let i = 0; i < ids.length; i++) {
-        const id = ids[i];
+      for (let i = 0; i < nAudio; i++) {
+        const id = trackIds[i];
+        if (!id) continue;
         meterState.rms[id] = msg.rms[i] || 0;
         meterState.peak[id] = msg.peak[i] || 0;
         meterState.lufs[id] = msg.lufs[i] != null ? msg.lufs[i] : -70;
       }
     };
 
-    // Reroute: trackBus → meter inputs → speakers/rec (no double via master)
-    for (const id of trackIds) {
-      const bus = audio.trackBus[id];
-      try { bus.disconnect(); } catch {}
-      bus.connect(meter, 0, trackIds.indexOf(id));
-    }
-    // master still carries video-track embedded audio (recDest already wired)
-    try { audio.master.disconnect(audio.ctx.destination); } catch {}
-    audio.master.connect(audio.ctx.destination);
+    // Connect outputs first so a wiring error never leaves the graph silent.
     meter.connect(audio.ctx.destination);
     meter.connect(audio.recDest);
 
+    // Full mix: A-buses + master spill → meter (single summed path).
+    for (let i = 0; i < trackIds.length; i++) {
+      const bus = audio.trackBus[trackIds[i]];
+      if (!bus) continue;
+      try { bus.disconnect(); } catch {}
+      bus.connect(meter, 0, i);
+    }
+    try { audio.master.disconnect(audio.ctx.destination); } catch {}
+    try { audio.master.disconnect(audio.recDest); } catch {}
+    audio.master.connect(meter, 0, nAudio);
+
+    installMasterAnalysers(audio, meter);
+
     audio.meter = meter;
+    meter = null; // ownership transferred — catch must not tear down live node
     audio.meterReady = true;
     meterState.trackIds = trackIds;
     for (const id of trackIds) {
@@ -3607,11 +4073,30 @@ async function installMeterWorklet(audio) {
       meterState.peakHold[id] = METER_DB_MIN;
       meterState.peakHoldT[id] = 0;
     }
+    resetMasterMeterBallistics();
     buildMeterDOM();
   } catch (err) {
     console.warn("[FableCut] meter worklet unavailable:", err);
+    if (meter) {
+      try { meter.port.onmessage = null; } catch {}
+      try { meter.disconnect(); } catch {}
+    }
+    // Buses were disconnected above — restore direct master path.
+    for (const id of trackIds) {
+      const bus = audio.trackBus[id];
+      if (!bus) continue;
+      try { bus.disconnect(); } catch {}
+      try { bus.connect(audio.master); } catch {}
+    }
+    try { audio.master.disconnect(); } catch {}
+    try { audio.master.connect(audio.ctx.destination); } catch {}
+    try { audio.master.connect(audio.recDest); } catch {}
   } finally {
     meterState._loading = false;
+    if (meterState._reloadMeter && !audio.meterReady) {
+      meterState._reloadMeter = false;
+      installMeterWorklet(audio).catch(() => {});
+    }
   }
 }
 function buildMeterDOM() {
@@ -3619,36 +4104,19 @@ function buildMeterDOM() {
   if (!root) return;
   const tracks = audioMeterTracks();
   root.innerHTML = "";
-  root.title = `Mode: ${METER_MODE_LABEL[meterState.mode]} — click to switch`;
-
-  const modeBtn = document.createElement("button");
-  modeBtn.type = "button";
-  modeBtn.className = "vu-mode";
-  modeBtn.textContent = METER_MODE_LABEL[meterState.mode];
-  modeBtn.title = "Cycle RMS → LUFS → Peak";
-  modeBtn.addEventListener("click", cycleMeterMode);
-  root.appendChild(modeBtn);
-  meterState.modeBtn = modeBtn;
+  root.classList.toggle("vu-tracks-open", meterState.tracksExpanded);
 
   const row = document.createElement("div");
   row.className = "vu-channels";
 
-  const scale = document.createElement("div");
-  scale.className = "vu-scale";
-  const span = METER_DB_MAX - METER_DB_MIN;
-  for (const db of METER_DB_MARKS) {
-    const tick = document.createElement("span");
-    tick.className = "vu-scale-tick";
-    tick.textContent = db === 0 ? "0" : String(db);
-    tick.style.top = ((METER_DB_MAX - db) / span * 100) + "%";
-    scale.appendChild(tick);
-  }
-  row.appendChild(scale);
+  const tracksWrap = document.createElement("div");
+  tracksWrap.className = "vu-tracks-wrap";
 
   meterState.segs = {};
   meterState.lastLit = {};
   meterState.lastHold = {};
   meterState.trackIds = tracks.map((t) => t.id);
+
   for (const t of tracks) {
     if (meterState.disp[t.id] == null) {
       meterState.disp[t.id] = METER_DB_MIN;
@@ -3671,15 +4139,88 @@ function buildMeterDOM() {
     label.textContent = t.id;
     col.appendChild(segsCv);
     col.appendChild(label);
-    row.appendChild(col);
+    tracksWrap.appendChild(col);
   }
+  row.appendChild(tracksWrap);
+
+  const scaleMaster = document.createElement("div");
+  scaleMaster.className = "vu-scale-master";
+
+  const scale = document.createElement("div");
+  scale.className = "vu-scale";
+  for (const db of METER_DB_MARKS) {
+    const tick = document.createElement("span");
+    tick.className = "vu-scale-tick";
+    tick.textContent = db === 0 ? "0" : String(db);
+    tick.style.top = meterMarkTopPct(db) + "%";
+    scale.appendChild(tick);
+  }
+
+  const masterStack = document.createElement("div");
+  masterStack.className = "vu-master-stack";
+
+  if (tracks.length) {
+    const tracksBtn = document.createElement("button");
+    tracksBtn.type = "button";
+    tracksBtn.className = "vu-tracks-toggle";
+    tracksBtn.addEventListener("click", toggleMeterTracksExpanded);
+    masterStack.appendChild(tracksBtn);
+    meterState.tracksToggleBtn = tracksBtn;
+  } else {
+    meterState.tracksToggleBtn = null;
+  }
+
+  const modeBtn = document.createElement("button");
+  modeBtn.type = "button";
+  modeBtn.className = "vu-mode";
+  modeBtn.textContent = METER_MODE_LABEL[meterState.mode];
+  modeBtn.title = "Cycle RMS → LUFS → Peak";
+  modeBtn.addEventListener("click", cycleMeterMode);
+  masterStack.appendChild(modeBtn);
+  meterState.modeBtn = modeBtn;
+
+  const masterWrap = document.createElement("div");
+  masterWrap.className = "vu-master";
+  for (const ch of ["L", "R"]) {
+    const id = ch === "L" ? MASTER_METER_L : MASTER_METER_R;
+    const col = document.createElement("div");
+    col.className = "vu-channel vu-master-ch";
+    col.dataset.track = id;
+    const segsCv = document.createElement("canvas");
+    segsCv.className = "vu-segs";
+    const entry = makeMeterCanvas(segsCv);
+    meterState.segs[id] = entry;
+    paintMeterSegs(entry, 0, -1);
+    const label = document.createElement("span");
+    label.className = "vu-label";
+    label.textContent = ch;
+    col.appendChild(segsCv);
+    col.appendChild(label);
+    masterWrap.appendChild(col);
+  }
+  masterStack.appendChild(masterWrap);
+  scaleMaster.appendChild(masterStack);
+  scaleMaster.appendChild(scale);
+  row.appendChild(scaleMaster);
+  if (!tracks.length) masterStack.classList.add("vu-master-only");
   root.appendChild(row);
+  syncMeterTracksExpandedUI();
 }
 function rmsToDb(rms) {
   return rms > 1e-8 ? 20 * Math.log10(rms) : METER_DB_MIN;
 }
 function meterReadingDb(id) {
   const mode = meterState.mode;
+  if (id === MASTER_METER_L || id === MASTER_METER_R) {
+    const m = meterState.master;
+    const isL = id === MASTER_METER_L;
+    if (mode === "peak") return rmsToDb(isL ? m.peakL : m.peakR);
+    if (mode === "lufs") {
+      // Per-channel level for stereo master bars (worklet stereo LUFS is one combined value).
+      return rmsToDb(isL ? m.rmsL : m.rmsR);
+    }
+    return rmsToDb(isL ? m.rmsL : m.rmsR);
+  }
   if (mode === "peak") return rmsToDb(meterState.peak[id] || 0);
   if (mode === "lufs") {
     const v = meterState.lufs[id];
@@ -3687,10 +4228,58 @@ function meterReadingDb(id) {
   }
   return rmsToDb(meterState.rms[id] || 0);
 }
+function updateMeterChannel(id, target, dt, attack, release, now) {
+  const curKey = id === MASTER_METER_L ? "dispL" : id === MASTER_METER_R ? "dispR" : null;
+  const holdKey = id === MASTER_METER_L ? "peakHoldL" : id === MASTER_METER_R ? "peakHoldR" : null;
+  const holdTKey = id === MASTER_METER_L ? "peakHoldTL" : id === MASTER_METER_R ? "peakHoldTR" : null;
+  let cur, peakHold, peakHoldT;
+  if (curKey) {
+    cur = meterState.master[curKey] ?? METER_DB_MIN;
+    peakHold = meterState.master[holdKey] ?? METER_DB_MIN;
+    peakHoldT = meterState.master[holdTKey] || 0;
+  } else {
+    cur = meterState.disp[id] ?? METER_DB_MIN;
+    peakHold = meterState.peakHold[id] ?? METER_DB_MIN;
+    peakHoldT = meterState.peakHoldT[id] || 0;
+  }
+  const a = target > cur ? attack : release;
+  const next = cur + (target - cur) * a;
+  if (curKey) meterState.master[curKey] = next;
+  else meterState.disp[id] = next;
+
+  const pk = target;
+  if (pk >= peakHold) {
+    if (curKey) {
+      meterState.master[holdKey] = pk;
+      meterState.master[holdTKey] = now;
+    } else {
+      meterState.peakHold[id] = pk;
+      meterState.peakHoldT[id] = now;
+    }
+    peakHold = pk;
+  } else if (now - peakHoldT > 800) {
+    peakHold += (METER_DB_MIN - peakHold) * release;
+    if (curKey) meterState.master[holdKey] = peakHold;
+    else meterState.peakHold[id] = peakHold;
+  }
+
+  const segs = meterState.segs[id];
+  if (!segs) return;
+  const isMaster = id === MASTER_METER_L || id === MASTER_METER_R;
+  if (!isMaster && !meterState.tracksExpanded) return;
+  const level = (next - METER_DB_MIN) / (METER_DB_MAX - METER_DB_MIN);
+  const lit = Math.round(clamp(level, 0, 1) * METER_SEGS);
+  const hold = Math.round(clamp(
+    (peakHold - METER_DB_MIN) / (METER_DB_MAX - METER_DB_MIN), 0, 1
+  ) * (METER_SEGS - 1));
+  if (meterState.lastLit[id] === lit && meterState.lastHold[id] === hold) return;
+  meterState.lastLit[id] = lit;
+  meterState.lastHold[id] = hold;
+  paintMeterSegs(segs, lit, hold);
+}
 function updateMeterUI(dt) {
-  const ids = meterState.trackIds;
-  if (!ids.length) return;
   const metering = (state.playing || state.audioHold) && runtime.audio?.meterReady;
+  if (metering) sampleMasterAnalysers();
   const mode = meterState.mode;
   // Peak: snappy; LUFS already smoothed in-worklet (400 ms); RMS: classic VU feel
   const atkMs = mode === "peak" ? 0.005 : mode === "lufs" ? 0.04 : 0.015;
@@ -3698,36 +4287,10 @@ function updateMeterUI(dt) {
   const attack = 1 - Math.exp(-dt / atkMs);
   const release = 1 - Math.exp(-dt / relMs);
   const now = performance.now();
-  for (const id of ids) {
-    const target = metering ? meterReadingDb(id) : METER_DB_MIN;
-    const cur = meterState.disp[id] ?? METER_DB_MIN;
-    const a = target > cur ? attack : release;
-    const next = cur + (target - cur) * a;
-    meterState.disp[id] = next;
-
-    // Hold tip follows the active mode reading (not always sample-peak)
-    const pk = target;
-    if (pk >= (meterState.peakHold[id] ?? METER_DB_MIN)) {
-      meterState.peakHold[id] = pk;
-      meterState.peakHoldT[id] = now;
-    } else if (now - (meterState.peakHoldT[id] || 0) > 800) {
-      meterState.peakHold[id] += (METER_DB_MIN - meterState.peakHold[id]) * release;
-    }
-
-    const segs = meterState.segs[id];
-    if (!segs) continue;
-    const level = (next - METER_DB_MIN) / (METER_DB_MAX - METER_DB_MIN);
-    const lit = Math.round(clamp(level, 0, 1) * METER_SEGS);
-    const hold = Math.round(clamp(
-      ((meterState.peakHold[id] ?? METER_DB_MIN) - METER_DB_MIN) / (METER_DB_MAX - METER_DB_MIN), 0, 1
-    ) * (METER_SEGS - 1));
-    // The ballistics above still run every frame (needed for smooth decay),
-    // but the canvas only needs repainting when the result actually differs —
-    // skips a redraw for most tracks most frames.
-    if (meterState.lastLit[id] === lit && meterState.lastHold[id] === hold) continue;
-    meterState.lastLit[id] = lit;
-    meterState.lastHold[id] = hold;
-    paintMeterSegs(segs, lit, hold);
+  const floor = METER_DB_MIN;
+  for (const id of [...meterState.trackIds, ...MASTER_METER_IDS]) {
+    const target = metering ? meterReadingDb(id) : floor;
+    updateMeterChannel(id, target, dt, attack, release, now);
   }
 }
 
@@ -3767,8 +4330,8 @@ function disposeAudioHoldNode(n) {
   try { n.src.disconnect(); } catch { }
   try { if (n.src) n.src.buffer = null; } catch { }
   try { n.gain.disconnect(); } catch { }
+  if (n.panner) { try { n.panner.disconnect(); } catch { } }
   if (n.split) { try { n.split.disconnect(); } catch { } }
-  if (n.merge) { try { n.merge.disconnect(); } catch { } }
 }
 function stopAudioHoldNodes() {
   audioHoldGen++;
@@ -3834,10 +4397,14 @@ function refreshAudioHold() {
       const g = audio.ctx.createGain();
       g.gain.value = vol;
       const ch = c.props?.audioChannel;
-      const { out, split, merge } = connectChannelIsolated(audio.ctx, src, g, ch);
+      const nCh = Math.max(buf.numberOfChannels, Number.isInteger(ch) ? ch + 1 : 0, 2);
+      const { split } = connectChannelIsolated(audio.ctx, src, g, ch, nCh);
+      const panner = audio.ctx.createStereoPanner();
+      panner.pan.value = clipPan(p.pan);
+      g.connect(panner);
       const bus = audio.trackBus[c.track] || audio.master;
-      out.connect(bus);
-      const node = { src, gain: g, split, merge };
+      panner.connect(bus);
+      const node = { src, gain: g, panner, split };
       try { src.start(0); } catch { disposeAudioHoldNode(node); return; }
       // Re-check after start: a newer refresh/stop may have run while we built the graph.
       if (gen !== audioHoldGen || !state.audioHold || state.playing) {
@@ -3908,7 +4475,10 @@ function syncMedia() {
       if (Math.abs(el.currentTime - mt) > 0.25 * eff) { try { el.currentTime = mt; } catch {} }
       const vol = clamp(p.volume, 0, 4);
       const g = runtime.clipGain.get(c.id);
-      if (g) g.gain.value = vol;
+      if (g) {
+        g.gain.value = vol;
+        if (g._fcPanner) g._fcPanner.pan.value = clipPan(p.pan);
+      }
       else el.volume = clamp(vol, 0, 1);
     } else {
       if (!el.paused) el.pause();
@@ -5297,14 +5867,27 @@ async function renderAudioMix(dur) {
   for (const { c, buf } of sources) {
     const src = off.createBufferSource(); src.buffer = buf;
     const g = off.createGain();
+    const panner = off.createStereoPanner();
+    g.connect(panner);
     const n = Math.max(2, Math.ceil(c.duration * 30));
-    const curve = new Float32Array(n);
-    for (let i = 0; i < n; i++)
-      curve[i] = clamp(evalProps(c, c.start + (i / (n - 1)) * c.duration).volume, 0, 4);
-    g.gain.setValueCurveAtTime(curve, Math.max(0, c.start), Math.max(0.01, c.duration));
+    const volCurve = new Float32Array(n);
+    const panCurve = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const ep = evalProps(c, c.start + (i / (n - 1)) * c.duration);
+      volCurve[i] = clamp(ep.volume, 0, 4);
+      panCurve[i] = clipPan(ep.pan);
+    }
+    g.gain.setValueCurveAtTime(volCurve, Math.max(0, c.start), Math.max(0.01, c.duration));
+    try {
+      panner.pan.setValueCurveAtTime(panCurve, Math.max(0, c.start), Math.max(0.01, c.duration));
+    } catch {
+      panner.pan.value = panCurve[0] ?? 0;
+    }
     const ch = c.props?.audioChannel;
-    const { out } = connectChannelIsolated(off, src, g, ch);
-    out.connect(off.destination);
+    if (Number.isInteger(ch) && ch >= 0)
+      connectChannelIsolated(off, src, g, ch, Math.max(buf.numberOfChannels, ch + 1, 2));
+    else src.connect(g);
+    panner.connect(off.destination);
     if (hasSpeedRamp(c)) {
       const rc = new Float32Array(n);
       for (let i = 0; i < n; i++)
@@ -5936,10 +6519,7 @@ function syncTrackSizeButtons() {
 function applyTrackHeights() {
   const preset = TRACK_SIZE_PRESETS[state.trackSize] || TRACK_SIZE_PRESETS.l;
   for (const t of TRACKS) {
-    // tracks beyond the static set (e.g. A5+, auto-added for >4-channel audio)
-    // aren't named in the preset map — size them like the first track of their kind.
-    const h = preset.h[t.id] ?? preset.h[t.kind === "audio" ? "A1" : "V1"];
-    if (h != null) t.h = h;
+    t.h = t.kind === "audio" ? preset.hAudio : preset.hVideo;
   }
 }
 /* Switch S/M/L track density, rebuild the timeline, and grow/shrink the pane

@@ -50,11 +50,22 @@ same time.
 
 **Editing**
 
-- 3 video tracks + 4 audio tracks, drag/trim/split/snap, undo/redo
+- Video + audio tracks (default 3+4; add more with **+V** / **+A** in the track
+  header; right-click an empty header → **Remove track**), drag/trim/split/snap,
+  undo/redo
 - **Settings** (cog in the top bar) — optional prefs stored in this browser via
   `localStorage`. Enable **Link timeline and Project bin selection** so picking a
   timeline clip highlights its media in Project, and clicking a Project item
   selects every timeline clip that uses it (off by default).
+- Video + audio tracks (default 3+4), drag/trim/split/snap, undo/redo
+  - **+V** / **+A** in the track header add a video or audio lane (up to 16 each)
+  - Right-click an empty track header → **Remove track** (disabled if the lane
+    has clips, or if it would leave you with zero video/audio tracks)
+  - Track header **S** solos that lane (mutes all others); click again to restore
+    the previous mute state. Using the mute toggle while soloed exits solo.
+  - Dropping a video with more audio channels than A-tracks **adds the missing
+    lanes automatically** (up to 16) and toasts how many were added; each channel
+    becomes a linked stem on its own A-track
 - **Direct manipulation on the monitor** — click a clip or title on the preview to
   move, resize (corner handles), or rotate (top handle, Shift-snap) it directly
 - **Timeline multi-select** — rubber-band marquee (drag on empty track area),
