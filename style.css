@@ -1742,6 +1742,42 @@ body.track-size-s .clip .clip-kf-n {
   transition: width .2s;
 }
 
+.import-url-field {
+  display: block;
+  margin-bottom: 14px;
+}
+
+.import-url-field input {
+  width: 100%;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font: inherit;
+  user-select: text;
+}
+
+.import-url-field input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.import-url-status {
+  margin: -6px 0 12px;
+}
+
+.progress-fill.indeterminate {
+  width: 36%;
+  transition: none;
+  animation: import-url-slide 1.15s ease-in-out infinite;
+}
+
+@keyframes import-url-slide {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(280%); }
+}
+
 .dialog-actions {
   display: flex;
   justify-content: flex-end;

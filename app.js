@@ -313,6 +313,7 @@ const runtime = {
   audio: null,          // {ctx, master, recDest, meter?, meterReady?}
   saveTimer: null, pendingSync: false,
   sfxPreview: null,     // <audio> element for library sound previews
+  importUrlAbort: null, // AbortController for an in-flight /api/import-url
   importFolderId: null, // Project-bin folder to place the next import into
   binDragFolderId: null, // folder id currently being dragged (cycle checks)
   binCtxMenu: null,     // Project-tab context menu element
@@ -340,6 +341,8 @@ const els = {
   monitorStage: $("monitorStage"), monitorScroll: $("monitorScroll"),
   monitorZoomInner: $("monitorZoomInner"), kfGraphs: $("kfGraphs"),
   exportSetup: $("exportSetup"), engineFast: $("engineFast"), engineRealtime: $("engineRealtime"),
+  importUrlOverlay: $("importUrlOverlay"), importUrlInput: $("importUrlInput"),
+  importUrlStatus: $("importUrlStatus"), importUrlProgress: $("importUrlProgress"),
 };
 const ctx2d = els.preview.getContext("2d");
 
@@ -953,6 +956,76 @@ async function importFiles(fileList) {
   else if (skipped)
     toast(`Imported ${added}, skipped ${skipped}`);
   return addedMedia;
+}
+
+function setImportUrlBusy(busy) {
+  const input = els.importUrlInput;
+  const go = $("btnDoImportUrl");
+  if (input) input.disabled = busy;
+  if (go) go.disabled = busy;
+  els.importUrlStatus?.classList.toggle("hidden", !busy);
+  els.importUrlProgress?.classList.toggle("hidden", !busy);
+}
+
+function closeImportUrl() {
+  if (runtime.importUrlAbort) {
+    try { runtime.importUrlAbort.abort(); } catch { }
+    runtime.importUrlAbort = null;
+  }
+  setImportUrlBusy(false);
+  els.importUrlOverlay?.classList.add("hidden");
+}
+
+function openImportUrl() {
+  if (!state.connected) {
+    toast("Import from URL needs the editor server");
+    return;
+  }
+  if (!els.importUrlOverlay) return;
+  if (els.importUrlInput) els.importUrlInput.value = "";
+  setImportUrlBusy(false);
+  els.importUrlOverlay.classList.remove("hidden");
+  setTimeout(() => els.importUrlInput?.focus(), 0);
+}
+
+async function importFromUrl(url) {
+  const trimmed = String(url || "").trim();
+  if (!trimmed) { toast("Paste an HTTPS URL first"); return; }
+  if (!/^https:\/\//i.test(trimmed)) { toast("URL must start with https://"); return; }
+  if (!state.connected) { toast("Import from URL needs the editor server"); return; }
+  runtime.importUrlAbort = new AbortController();
+  setImportUrlBusy(true);
+  try {
+    const res = await fetch("/api/import-url", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: trimmed }),
+      signal: runtime.importUrlAbort.signal,
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || "import failed (" + res.status + ")");
+    const kind = libKind(body.name);
+    if (!kind) throw new Error("unsupported file type: " + (body.name || ""));
+    const folderId = runtime.importFolderId && getFolder(runtime.importFolderId)
+      ? runtime.importFolderId : null;
+    runtime.importFolderId = null;
+    const m = { id: "m_" + uid(), name: body.name, kind, src: body.src, folderId };
+    try {
+      await loadMediaMetadata(m);
+      if (kind === "video") grabThumb(m).catch(() => { });
+      ensureWave(m);
+    } catch { /* browser will retry via probeMissingMeta */ }
+    project.media.push(m);
+    renderBin(); scheduleSave();
+    closeImportUrl();
+    toast("Imported " + m.name);
+  } catch (e) {
+    if (e && e.name === "AbortError") return;
+    setImportUrlBusy(false);
+    toast(e && e.message ? e.message : "Couldn't import URL");
+  } finally {
+    runtime.importUrlAbort = null;
+  }
 }
 
 function renderBin() {
@@ -5574,6 +5647,15 @@ function finishExport(keep) {
 
 /* ═══════════════════════════ WIRING ═══════════════════════════ */
 els.fileInput.addEventListener("change", () => { importFiles(els.fileInput.files); els.fileInput.value = ""; });
+$("btnImportUrl")?.addEventListener("click", openImportUrl);
+$("btnCancelImportUrl")?.addEventListener("click", closeImportUrl);
+$("btnDoImportUrl")?.addEventListener("click", () => importFromUrl(els.importUrlInput?.value));
+els.importUrlInput?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); importFromUrl(els.importUrlInput.value); }
+});
+els.importUrlOverlay?.addEventListener("click", (e) => {
+  if (e.target === els.importUrlOverlay) closeImportUrl();
+});
 $("btnTitle").addEventListener("click", addTitle);
 $("btnAdjust").addEventListener("click", addAdjust);
 $("btnSplit").addEventListener("click", splitAtPlayhead);
@@ -6084,6 +6166,11 @@ window.addEventListener("keydown", (e) => {
       e.preventDefault();
       return;
     }
+  }
+  if (k === "Escape" && els.importUrlOverlay && !els.importUrlOverlay.classList.contains("hidden")) {
+    e.preventDefault();
+    closeImportUrl();
+    return;
   }
   if (isTypingTarget(document.activeElement)) return;
   if (k === " ") { e.preventDefault(); state.playing ? pause() : play(); }

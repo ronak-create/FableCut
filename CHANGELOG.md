@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Import from URL** — `POST /api/import-url` downloads an HTTPS video, audio
+  or image into `./media/` and returns a same-origin `/media/…` src. The
+  editor **+ URL** button and `fablecut_import_media` (now accepts `https://`
+  as well as a local path) use it. HTTPS-only with SSRF guards (no localhost /
+  private / link-local / CGNAT, including after DNS and redirects). Remote SVG
+  is refused so a scripted file cannot run on the editor origin. A raw HTTPS
+  `media.src` is still unsupported — canvas CORS would break export.
 - A real test suite (`npm test`, zero dependencies, `node:test`): MCP protocol
   negotiation and framing, MCP tool semantics including the conflict rules, the
   REST API with its Host/Origin and path-traversal guards, and the shipped SVG

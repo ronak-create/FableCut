@@ -5,6 +5,8 @@
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const { makeDataDir, readProject, writeProject, seedProject, startMcp } = require("./helpers");
 
 const boot = async (t, project) => {
@@ -165,4 +167,30 @@ test("fablecut_set_project validates the document before writing it", async (t) 
     assert.match(text, expected);
   }
   assert.deepEqual(readProject(dir), before, "an invalid save must leave the file untouched");
+});
+
+test("fablecut_import_media copies a local file and registers it", async (t) => {
+  const { dir, mcp } = await boot(t);
+  const src = path.join(dir, "take.mp4");
+  fs.writeFileSync(src, "clip-bytes");
+  const { text, isError } = await mcp.callTool("fablecut_import_media", { path: src });
+  assert.equal(isError, false, text);
+  const entry = JSON.parse(text.replace(/^Imported → /, "").split("\n")[0]);
+  assert.equal(entry.kind, "video");
+  assert.equal(entry.src, "/media/take.mp4");
+  assert.ok(fs.existsSync(path.join(dir, "media", "take.mp4")));
+  const doc = readProject(dir);
+  assert.equal(doc.media.some((m) => m.id === entry.id && m.src === entry.src), true);
+  assert.equal(doc.revision, 2);
+});
+
+test("fablecut_import_media rejects http and loopback https URLs", async (t) => {
+  const { dir, mcp } = await boot(t);
+  const http = await mcp.callTool("fablecut_import_media", { path: "http://example.com/a.mp4" });
+  assert.ok(http.isError);
+  assert.match(http.text, /https/i);
+  const loop = await mcp.callTool("fablecut_import_media", { path: "https://127.0.0.1/a.mp4" });
+  assert.ok(loop.isError);
+  assert.match(loop.text, /blocked/i);
+  assert.equal(readProject(dir).media.length, 1, "a rejected import must not add media");
 });

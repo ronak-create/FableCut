@@ -67,6 +67,10 @@ same time.
 - Press <kbd>Alt+t</kbd> to add an in/out transition based on the playhead position over the selected clip. The last used transition is remembered as the default. Drag the overlay triangle to adjust duration; <kbd>Delete</kbd> clears the focused transition.
 - Real decoded audio waveforms on clips
 - **Project bin folders** — tree view with expand/collapse; drag media or folders to nest; right-click the **Project** tab → New folder; drop files onto a folder to import into it
+- **Import from URL** — **+ URL** downloads an HTTPS video/audio/image into
+  `./media/` (same-origin after import). Remote SVG is refused. Agents use
+  `fablecut_import_media` with an `https://` path. The URL is not kept as
+  `media.src` — that would taint the canvas and break export.
 - **Audio Hold** — timeline toolbar toggle: while paused, loops **one frame** of
   audio at the playhead (useful when stepping frame-by-frame). Scrubbing or
   frame-step retargets the held slice; meters stay live. **Play** / **Pause**
@@ -195,8 +199,8 @@ removal fetches its model from a CDN on first use.
 The server binds **127.0.0.1 only** (v1.3.1+). To use it from another device on
 your LAN, opt in explicitly: `HOST=0.0.0.0 FABLECUT_ALLOWED_HOSTS=<your-ip> node server.js`.
 
-Drop media into the window (or `./media/`), drag clips onto the timeline, edit,
-export.
+Drop media into the window (or `./media/`), paste an HTTPS URL via **+ URL**,
+drag clips onto the timeline, edit, export.
 
 To keep your work outside the checkout, set **`FABLECUT_DATA_DIR`** — it moves
 `project.json`, `media/`, `exports/`, `analysis/` and `library/` to a directory
@@ -283,8 +287,8 @@ Three equivalent control surfaces:
    they need (`fablecut_docs {section:"props"}`).
 2. **The file** — read `project.json`, modify, bump `revision`, write. The UI
    live-reloads.
-3. **REST** — `GET/PUT /api/project`, `POST /api/upload`, `GET /api/library`,
-   SSE at `/api/events`. See CLAUDE.md for the full list.
+3. **REST** — `GET/PUT /api/project`, `POST /api/upload`, `POST /api/import-url`,
+   `GET /api/library`, SSE at `/api/events`. See CLAUDE.md for the full list.
 
 Example: ask Claude Code *"cut these six clips to the beat markers, add a
 teal-orange grade, put a word-pop caption on top and a whoosh on every cut"* —

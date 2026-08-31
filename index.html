@@ -46,6 +46,7 @@
           <button type="button" class="btn tiny" id="btnTitle" title="Add a title card at the playhead">+ Title</button>
           <button type="button" class="btn tiny" id="btnAdjust" title="Add an adjustment layer (grades everything below it)">+ Adjust</button>
           <label class="btn tiny accent" id="btnImport" for="fileInput" title="Import media files">+ Import</label>
+          <button type="button" class="btn tiny" id="btnImportUrl" title="Download media from an HTTPS URL into the project">+ URL</button>
         </span>
       </div>
       <div class="bin-tabs" id="binTabs">
@@ -58,7 +59,7 @@
       <div class="bin-list" id="binList">
         <div class="bin-empty" id="binEmpty">
           <div class="bin-empty-icon">🎬</div>
-          <p>Drop video, audio or images here<br>or click <b>+ Import</b></p>
+          <p>Drop video, audio or images here<br>or click <b>+ Import</b> / <b>+ URL</b></p>
           <p class="hint">Then drag media onto the timeline below.</p>
         </div>
       </div>
@@ -159,6 +160,24 @@
       </div>
     </div>
   </section>
+</div>
+
+<!-- ══════════ IMPORT URL ══════════ -->
+<div class="overlay hidden" id="importUrlOverlay">
+  <div class="dialog" id="importUrlDialog" role="dialog" aria-modal="true" aria-labelledby="importUrlTitle">
+    <h2 id="importUrlTitle">Import from URL</h2>
+    <p class="dim">Downloads an HTTPS video, audio or image into the project media folder. The file is stored locally — the URL is not used as the playback source. Remote SVGs are not imported (they can run script if opened as a document).</p>
+    <label class="import-url-field">
+      <span class="sr-only">Media URL</span>
+      <input type="url" id="importUrlInput" placeholder="https://…" autocomplete="off" spellcheck="false">
+    </label>
+    <p class="dim import-url-status hidden" id="importUrlStatus">Downloading…</p>
+    <div class="progress hidden" id="importUrlProgress"><div class="progress-fill indeterminate"></div></div>
+    <div class="dialog-actions">
+      <button class="btn" id="btnCancelImportUrl">Cancel</button>
+      <button class="btn primary" id="btnDoImportUrl">Import</button>
+    </div>
+  </div>
 </div>
 
 <!-- ══════════ EXPORT SETUP ══════════ -->

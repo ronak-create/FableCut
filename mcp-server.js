@@ -18,6 +18,7 @@ const { spawn, spawnSync } = require("child_process");
 const {
   APP_DIR, DATA_DIR, MEDIA_DIR, ANALYSIS_DIR, LIBRARY_DIR, PROJECT_FILE, ensureDirs,
 } = require("./paths");
+const { downloadImportUrl, kindFromName, maybeFaststart } = require("./import-url");
 
 /* ROOT is where the code lives (server.js, CLAUDE.md); the user's timeline and
    media live under DATA_DIR. Identical unless FABLECUT_DATA_DIR is set. */
@@ -148,10 +149,10 @@ const TOOLS = [
   },
   {
     name: "fablecut_import_media",
-    description: "Copy a local media file (video/audio/image) into FableCut's media library and register it in the project. Returns the created media entry (use its id in clips).",
+    description: "Import a media file into FableCut's media library and register it in the project. Pass a local absolute path (copied, including .svg) or an https:// URL (downloaded into ./media/; video/audio/image only — remote SVG is refused). The URL is never kept as the playback src — CORS would break export. Returns the created media entry (use its id in clips).",
     inputSchema: {
       type: "object",
-      properties: { path: { type: "string", description: "Absolute path to the source file on disk" } },
+      properties: { path: { type: "string", description: "Absolute path to a local file, or an https:// URL to download" } },
       required: ["path"],
     },
   },
@@ -413,24 +414,35 @@ async function callTool(name, args) {
     }
     case "fablecut_import_media": {
       const src = args.path;
-      if (!src || !fs.existsSync(src) || !fs.statSync(src).isFile())
-        throw new Error("File not found: " + src);
-      const ext = path.extname(src).toLowerCase();
-      const kind = KIND_BY_EXT[ext];
-      if (!kind) throw new Error(`Unsupported extension ${ext}`);
-      if (!fs.existsSync(MEDIA_DIR)) fs.mkdirSync(MEDIA_DIR);
-      let base = path.basename(src).replace(/[^\w.\- ()\[\]]+/g, "_");
-      let target = path.join(MEDIA_DIR, base);
-      let i = 1;
-      const stem = path.basename(base, ext);
-      while (fs.existsSync(target)) target = path.join(MEDIA_DIR, `${stem}_${i++}${ext}`);
-      fs.copyFileSync(src, target);
+      if (!src) throw new Error("path is required");
+      let target, kind;
+      if (/^https?:\/\//i.test(src)) {
+        if (!/^https:\/\//i.test(src)) throw new Error("URL must be https");
+        const got = await downloadImportUrl(src, MEDIA_DIR);
+        target = got.target;
+        kind = kindFromName(got.name);
+        await maybeFaststart(target);
+      } else {
+        if (!fs.existsSync(src) || !fs.statSync(src).isFile())
+          throw new Error("File not found: " + src);
+        const ext = path.extname(src).toLowerCase();
+        kind = KIND_BY_EXT[ext];
+        if (!kind) throw new Error(`Unsupported extension ${ext}`);
+        if (!fs.existsSync(MEDIA_DIR)) fs.mkdirSync(MEDIA_DIR);
+        let base = path.basename(src).replace(/[^\w.\- ()\[\]]+/g, "_");
+        target = path.join(MEDIA_DIR, base);
+        let i = 1;
+        const stem = path.basename(base, ext);
+        while (fs.existsSync(target)) target = path.join(MEDIA_DIR, `${stem}_${i++}${ext}`);
+        fs.copyFileSync(src, target);
+      }
+      if (!kind) throw new Error("Unsupported media type");
       const entry = {
         id: "m_" + uid(),
         name: path.basename(target),
         kind,
         src: "/media/" + encodeURIComponent(path.basename(target)),
-        duration: kind === "image" ? undefined : ffprobeDuration(target),
+        duration: kind === "image" || kind === "svg" ? undefined : ffprobeDuration(target),
       };
       const proj = readProject();
       // import only appends a media entry (never touches clips), so it merges

@@ -41,11 +41,20 @@ HTTP server intended for a single trusted user on their own machine. Since
   DNS-rebinding) and an **Origin allowlist** (anti cross-origin writes from
   malicious web pages).
 - The static server refuses dot-files/dot-directories (`.git/` etc.).
+- `POST /api/import-url` (and `fablecut_import_media` with an `https://` path)
+  fetches a remote file into `./media/`. The fetch is **HTTPS-only** and
+  refuses localhost, private, link-local and CGNAT destinations (including
+  after DNS lookup and on redirects), so a crafted URL cannot turn the editor
+  into an SSRF proxy. Remote SVG is refused: `/media/*.svg` is served
+  same-origin as `image/svg+xml`, and a scripted SVG opened as a document
+  would run on the editor origin. The stored `src` is always a local
+  `/media/…` path. Local `.svg` files (drop / library) are unchanged.
 
 It remains **not** hardened for untrusted networks or multi-tenant use:
 
 - The REST API (`/api/*`) has no authentication — anyone who can reach the port
-  can read and overwrite `project.json` and upload files into `media/`.
+  can read and overwrite `project.json`, upload files, and ask the server to
+  fetch an HTTPS URL into `media/`.
 - The server reads and writes files under the project directory and shells out to
   `ffmpeg` for export/remux.
 - Do not expose the port publicly. If you must, put it behind your own

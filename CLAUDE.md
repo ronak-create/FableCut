@@ -21,7 +21,8 @@ Every Claude Code session then has these tools:
   `fablecut_get_project {compact:true}` returns a one-line-per-clip summary instead.
 - `fablecut_patch_project` — apply targeted ops (add/update/remove clip/media,
   set project fields) without round-tripping the document. **Prefer this for edits.**
-- `fablecut_import_media` — copy a local file into `./media/` and register it.
+- `fablecut_import_media` — copy a local file (or download an `https://` URL)
+  into `./media/` and register it. The stored `src` is always `/media/…`.
 - `fablecut_analyze_reference` — turn a reference video into an edit blueprint
   (shots, beats, BPM, energy, drop) + extract its music. See "Remake a reference video".
 
@@ -88,7 +89,8 @@ Files: `index.html` + `style.css` + `app.js` (editor UI), `server.js` (API + hos
 ## How Claude Code edits a video
 
 1. Ensure the server is running (background: `node server.js`, or `fablecut_status`).
-2. Put source files in `./media/` (copy them in, or the user imports via the UI).
+2. Put source files in `./media/` (copy them in, import via the UI / **+ URL**,
+   or `fablecut_import_media` with a local path or HTTPS URL).
 3. Read `project.json`, modify `media` / `clips`, **increment `revision`**, write it back.
 4. The browser UI (if open) reloads instantly. The user previews/exports from the UI.
 
@@ -186,7 +188,7 @@ Examples in `library/svg/`: `sparkles.svg` (loop), `lower-third.svg`,
   // ^ optional — track ids (V4 V3 V2 V1 A1 A2 A3) omitted from preview/export when listed
   "media": [
     { "id": "m_abc", "name": "intro.mp4", "kind": "video",  // video|audio|image|svg
-      "src": "/media/intro.mp4",             // path under ./media or ./library
+      "src": "/media/intro.mp4",             // path under ./media or ./library (never a raw https:// URL)
       "duration": 12.4, "width": 1920, "height": 1080,
       "folderId": null }                     // optional: id of a folders[] entry
   ],
@@ -424,6 +426,14 @@ obvious cuts were missed, raise it if motion is being misread as cuts.
   MP4/MOV/M4V uploads are auto-remuxed with `+faststart` (needs ffmpeg on PATH).
   Files copied straight into ./media by external tools skip this — remux big ones
   yourself (`ffmpeg -i in.mp4 -c copy -movflags +faststart out.mp4`) or playback stalls.
+- `POST /api/import-url` — body `{url:"https://…"}` downloads the file into
+  `./media/` and returns `{src,name}` (same-origin `/media/…`, like upload).
+  HTTPS only; rejects localhost, private/link-local/CGNAT addresses, and
+  redirects to those. Remote SVG is refused (`/media/*.svg` is served
+  same-origin as `image/svg+xml` — a scripted SVG opened as a document would
+  run on the editor origin). Does not write `project.json` — register the media
+  afterwards (UI and `fablecut_import_media` do this). Do **not** put the
+  HTTPS URL in `media.src`: canvas CORS would break thumbs, FX and export.
 - `POST /api/analyze` — body `{src:"/media/ref.mp4", threshold?, music?}`: analyze a
   reference video into an edit blueprint (see "Remake a reference video"); extracts
   its music into ./media. `GET /api/analyze?src=…` returns the cached blueprint.

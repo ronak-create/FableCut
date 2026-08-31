@@ -6,6 +6,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
+const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
 const { makeDataDir, readProject, seedProject, startServer, rawGet } = require("./helpers");
@@ -81,12 +82,69 @@ test("GET /api/library lists assets and validates the dir argument", async (t) =
   // A served src must actually resolve — a listing that links to 404s is useless.
   const one = await fetch(base + items[0].src);
   assert.equal(one.status, 200);
+  assert.match(one.headers.get("content-security-policy") || "", /sandbox/);
+  await one.arrayBuffer();
 
   for (const bad of ["", "bogus", "../..", "sfx/../../.."]) {
     const r = await fetch(base + "/api/library?dir=" + encodeURIComponent(bad));
     assert.equal(r.status, 400, `dir=${bad} should be refused`);
     await r.text();
   }
+});
+
+test("POST /api/import-url rejects non-https and private targets", async (t) => {
+  const { dir, base } = await boot(t);
+  const reject = async (url, expect) => {
+    const res = await fetch(base + "/api/import-url", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    });
+    assert.equal(res.status, 400, url);
+    const body = await res.json();
+    assert.match(body.error, expect, url);
+  };
+  await reject("http://example.com/a.mp4", /https/i);
+  await reject("file:///etc/passwd", /https|invalid/i);
+  await reject("https://127.0.0.1/a.mp4", /blocked/i);
+  await reject("https://localhost/a.mp4", /blocked/i);
+  await reject("https://192.168.1.9/a.mp4", /blocked/i);
+  await reject("https://169.254.169.254/latest/meta-data", /blocked/i);
+  assert.equal(fs.readdirSync(path.join(dir, "media")).length, 0);
+});
+
+test("POST /api/import-url downloads into media and returns a same-origin src", async (t) => {
+  const dir = makeDataDir(t);
+  const fixture = await new Promise((resolve) => {
+    const server = http.createServer((req, res) => {
+      if (req.url === "/clip.mp4") {
+        res.writeHead(200, { "Content-Type": "video/mp4" });
+        res.end("fake-mp4-bytes");
+        return;
+      }
+      res.writeHead(404); res.end();
+    });
+    server.listen(0, "127.0.0.1", () => {
+      resolve({ server, url: `http://127.0.0.1:${server.address().port}` });
+    });
+  });
+  t.after(() => fixture.server.close());
+  const { base } = await startServer(t, dir, {
+    FABLECUT_TEST_IMPORT_ALLOW_PRIVATE: "1",
+    // libuv fs.watch on Windows aborts the process when a file is created under
+    // a Temp data dir (uv assertion in fs-event.c). This test only needs the
+    // HTTP handler to finish writing the file.
+    FABLECUT_NO_FS_WATCH: "1",
+  });
+  const res = await fetch(base + "/api/import-url", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url: fixture.url + "/clip.mp4" }),
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.name, "clip.mp4");
+  assert.equal(body.src, "/media/clip.mp4");
+  assert.equal(fs.readFileSync(path.join(dir, "media", "clip.mp4"), "utf8"), "fake-mp4-bytes");
 });
 
 test("GET /api/media lists the media folder", async (t) => {
