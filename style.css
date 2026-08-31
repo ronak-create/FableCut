@@ -1783,6 +1783,40 @@ body.track-size-s .clip .clip-kf-n {
   font-size: 12px;
 }
 
+.export-wc-opts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  align-items: flex-end;
+  margin: -4px 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+.export-wc-opts.hidden { display: none; }
+.export-wc-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted, #9a9aaa);
+}
+.export-wc-sel {
+  min-width: 160px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel, #1a1a22);
+  color: inherit;
+  font: inherit;
+}
+.export-wc-hint {
+  flex: 1 1 100%;
+  margin: 0;
+  font-size: 12px;
+}
+
 .export-track-warn {
   margin: 0 0 12px;
   padding: 9px 12px;

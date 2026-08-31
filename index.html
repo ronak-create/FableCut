@@ -78,7 +78,7 @@
           <select id="exportFrameSel" class="head-select" title="Delivery export frame — crop inside the canvas for reframing"></select>
           <button class="btn tiny toggle" id="btnExportFrame" title="Toggle export frame overlay (drag handle to reframe)">⬒ Frame</button>
           <button class="btn tiny toggle" id="btnGuides" title="Toggle safe-area guides">▦ Safe</button>
-          <span class="dim" id="monitorRes">1280 × 720 · 30fps</span>
+          <span class="dim" id="monitorRes"></span>
         </span>
       </div>
       <div class="monitor-stage" id="monitorStage">
@@ -171,8 +171,31 @@
     </label>
     <label class="engine-opt">
       <input type="radio" name="engine" id="engineRealtime">
-      <span><b>Realtime (in-browser)</b><br><span class="dim">Plays the timeline once and records it. Keep the tab focused.</span></span>
+      <span><b>WebCodecs (HW encode)</b><br><span class="dim" id="engineWebCodecsNote">Frame-accurate. Browser encodes H.264; server muxes. Needs a modern Chromium and ffmpeg.</span></span>
     </label>
+    <div class="export-wc-opts hidden" id="exportWcOpts">
+      <label class="export-wc-field" for="exportWcBitrate">Bitrate
+        <select id="exportWcBitrate" class="export-wc-sel">
+          <option value="auto">Auto (from resolution)</option>
+          <option value="2">2 Mbps</option>
+          <option value="4">4 Mbps</option>
+          <option value="6">6 Mbps</option>
+          <option value="8">8 Mbps</option>
+          <option value="12">12 Mbps</option>
+          <option value="16">16 Mbps</option>
+          <option value="20">20 Mbps</option>
+          <option value="30">30 Mbps</option>
+          <option value="50">50 Mbps</option>
+        </select>
+      </label>
+      <label class="export-wc-field" for="exportWcMode">Rate control
+        <select id="exportWcMode" class="export-wc-sel">
+          <option value="variable">VBR (variable)</option>
+          <option value="constant">CBR (constant)</option>
+        </select>
+      </label>
+      <p class="dim export-wc-hint">WebCodecs has no CRF — quality is driven by bitrate. VBR spends bits on hard frames; CBR holds a steady rate.</p>
+    </div>
     <div class="export-track-warn hidden" id="exportTrackWarn" role="status"></div>
     <div class="dialog-actions">
       <button class="btn" id="btnCancelSetup">Cancel</button>

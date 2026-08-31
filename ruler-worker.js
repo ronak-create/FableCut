@@ -12,7 +12,7 @@ let cv = null, g = null;
 function fmt(t, fps) {
   t = Math.max(0, t);
   const m = Math.floor(t / 60), s = Math.floor(t % 60),
-    f = Math.floor((t % 1) * (fps || 30));
+    f = Math.floor((t % 1) * (fps > 0 ? fps : 1));
   const p = (n) => String(n).padStart(2, "0");
   return `${p(m)}:${p(s)}:${p(f)}`;
 }

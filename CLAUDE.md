@@ -167,7 +167,7 @@ Examples in `library/svg/`: `sparkles.svg` (loop), `lower-third.svg`,
 ```jsonc
 {
   "name": "My Edit",
-  "width": 1280, "height": 720, "fps": 30,   // composition canvas + timeline/export rate (UI: FPS select)
+  "width": 1280, "height": 720, "fps": 30,   // composition canvas + timeline/export rate — sole FPS source (UI: FPS select)
   "exportFrame": { "x": 438, "y": 0, "w": 404, "h": 720 },  // optional delivery crop (even w/h for H.264)
   // ^ omit = export the full canvas. Preview dims outside this rect; Fast export crops
   // JPEGs to w×h. Clip x/y/scale stay relative to the composition center, not the frame.
@@ -428,10 +428,16 @@ obvious cuts were missed, raise it if motion is being misread as cuts.
   reference video into an edit blueprint (see "Remake a reference video"); extracts
   its music into ./media. `GET /api/analyze?src=…` returns the cached blueprint.
 - `GET  /api/events`  — SSE, emits `change` when project.json, ./media or ./library changes
-- Fast export (used by the UI; browser renders frames, ffmpeg encodes):
-  `GET /api/export/ffmpeg` → `{available}` · `POST /api/export/begin` `{fps,name}` → `{id}`
-  · `POST /api/export/frame?id=` (JPEG body, in order) · `POST /api/export/audio?id=` (WAV body)
-  · `POST /api/export/end?id=[&discard=1]` → `{src}` under `/exports/`
+- Fast / WebCodecs export (browser compositor → server ffmpeg):
+  `GET /api/export/ffmpeg` → `{available}` · `POST /api/export/begin`
+  `{fps,name,mode?}` → `{id,mode}` where `fps` is required (pass
+  `project.fps` — no server-side default) and `mode` is `"jpeg"` (default,
+  Fast) or `"annexb"` (WebCodecs H.264 elementary stream)
+  · `POST /api/export/frame?id=` (JPEG body for jpeg mode; Annex-B bytes for
+  annexb — one POST may carry several concatenated AUs. Must be after audio;
+  ffmpeg is spawned on the first frame in both modes)
+  · `POST /api/export/audio?id=` (WAV body) · `POST /api/export/end?id=[&discard=1]`
+  → `{src}` under `/exports/`
 
 ## Recipes
 
@@ -553,10 +559,22 @@ Realtime export, and `/api/export/begin` all use this value; pass the same
 
 ## Export
 
-Export is user-driven (Export button → dialog). Two engines: **Fast** (browser
-renders each frame with the normal compositor — including SVG frames, keys and
-AI masks — streams JPEG frames + an offline WAV mix to the server, ffmpeg
-encodes a CRF-18 faststart MP4 into `./exports/`) and **Realtime**
-(MediaRecorder fallback). Claude cannot trigger export headlessly — the
-compositor lives in the browser; ask the user to click Export, or render with
-ffmpeg directly from `media/` sources if a file is needed.
+Export is user-driven (Export button → dialog). Three engines:
+
+1. **Fast** — browser renders each frame with the normal compositor (SVG, keys,
+   AI masks), streams JPEGs + an offline WAV mix to the server; ffmpeg encodes a
+   CRF-18 faststart MP4 into `./exports/`. Quality / software path.
+2. **WebCodecs** — same frame-accurate compositor loop, but the browser’s
+   `VideoEncoder` produces Annex-B H.264 (Main 4:2:0) and the server stream-copies
+   (`-c:v copy`) while muxing the WAV. Faster uploads, less server CPU. Requires
+   Chromium-class `VideoEncoder` with `avc: { format: "annexb" }` plus ffmpeg.
+   No ffmpeg-style CRF — quality is bitrate + VBR/CBR (export dialog; remembered
+   in localStorage). Optional `bitrateMode: "quantizer"` (fixed QP) exists in the
+   spec but is rarely supported by hardware encoders with Annex-B.
+3. **Realtime (MediaRecorder)** — automatic offline fallback when the server,
+   ffmpeg, or WebCodecs is unavailable. Plays the timeline once and records it;
+   keep the tab focused.
+
+Claude cannot trigger export headlessly — the compositor lives in the browser;
+ask the user to click Export, or render with ffmpeg directly from `media/`
+sources if a file is needed.
