@@ -105,7 +105,7 @@ same time.
 - **Zoom to selection** (<kbd>⇧Z</kbd>) frames all selected clips, not just one
 - **IN/OUT work area** — set markers with <kbd>i</kbd> and <kbd>o</kbd> (<kbd>⇧I</kbd> / <kbd>⇧O</kbd> to clear). Enabling **Limit** constrains playback to the marked range and maps <kbd>Home</kbd> / <kbd>End</kbd> to the IN and OUT positions rather than the full timeline. <kbd>t</kbd> splits clips at the markers; <kbd>⇧t</kbd> trims clips to the work (between marker in and marker out) area.
 - **Find & close gaps** — a gap is a stretch where every enabled track is empty (black frames). <kbd>g</kbd> jumps the playhead to the next shared gap (wraps; respects IN/OUT when both are set). <kbd>⇧G</kbd> closes the gap under the playhead by pulling later clips left on all enabled tracks.
-- **Reset a property** — <kbd>Ctrl/Cmd+click</kbd> an inspector **label** to restore that effect/prop to its default (paired fields like Crop L/R reset together). Matching keyframes for the prop are cleared too; transition labels clear the in/out transition.
+- **Reset a property** — <kbd>Ctrl/Cmd+click</kbd> an inspector **label** restores that effect/prop to its default *and* clears every keyframe on the channel (paired fields like Crop L/R reset together; transition labels clear the in/out transition). <kbd>Shift+click</kbd> the same label is playhead-local: if you are parked on a keyframe it removes **that** keyframe only; otherwise it sets the value at the playhead to the default (auto-keys if the channel is already animated).
 - **Replace media** — the inspector's **Source** button (any video/audio/image/svg
   clip) swaps the underlying file while keeping position, trim, keyframes,
   transitions and every effect. Pick another item already in the bin or
@@ -136,7 +136,10 @@ same time.
   keyframe time (tooltip lists channels; a count badge when several share a
   time). <kbd>Ctrl/Cmd+←</kbd> / <kbd>Ctrl/Cmd+→</kbd> jumps the playhead to
   the previous / next keyframe (selected clips first, else clips under the
-  playhead)
+  playhead). Inspector fields show the interpolated value at the playhead;
+  changing one updates the keyframe you’re on, or inserts one if that channel
+  is already keyed. The ◆ button adds a keyframe at the playhead, or removes
+  the one you’re parked on; ✕ clears the whole channel
 - **Keyframe graphs** — toggle a property’s curve in the inspector to show an
   interpolated value graph beside the program monitor; click the graph to seek
 - **Speed ramps** — keyframe `speed` and the engine time-remaps video *and* the

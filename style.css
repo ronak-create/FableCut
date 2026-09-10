@@ -1333,6 +1333,12 @@ input[type=range] {
   border-color: #ffd16666;
 }
 
+.kf-btn.has.on {
+  background: #ffd166;
+  color: #1a1a22;
+  border-color: #ffd166;
+}
+
 /* ── Timeline ── */
 .timeline-toolbar {
   display: flex;
@@ -1855,20 +1861,30 @@ body.track-size-s .clip .clip-kf-n {
 }
 
 /* ── Playhead ── */
+/* 13px wrapper (cap box) so we don't compositor-scale a 1px layer. Line at x=6. */
 .playhead {
   position: absolute;
   top: 0;
   bottom: 0;
-  width: 1px;
-  background: #ff4d6a;
+  left: -6px;
+  width: 13px;
   z-index: 4;
   pointer-events: none;
+}
+
+.playhead-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 6px;
+  width: 1px;
+  background: #ff4d6a;
 }
 
 .playhead-cap {
   position: absolute;
   top: 0;
-  left: -6px;
+  left: 0;
   width: 13px;
   height: 14px;
   background: #ff4d6a;
