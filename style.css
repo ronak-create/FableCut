@@ -1110,11 +1110,12 @@ body.track-size-s .clip.selected {
 }
 
 .transport {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  justify-content: space-between;
-  padding: 4px 14px 10px;
-  gap: 12px;
+  padding: 4px 14px 8px;
+  gap: 10px;
+  min-height: 50px;
 }
 
 .transport-btns {
@@ -1155,17 +1156,67 @@ body.track-size-s .clip.selected {
 }
 
 .timecode {
-  font: 600 14px/1 "Consolas", monospace;
+  font: 600 14px/1 Consolas, monospace;
   color: #b9b3ff;
-  min-width: 86px;
-  height: 14px;
-  line-height: 14px;
-  align-self: center;
+  min-width: 0;
+  height: auto;
+  line-height: 1;
 }
 
 .timecode.dim {
   color: var(--dim);
+}
+
+.tc-playhead {
+  justify-self: start;
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+}
+
+.tc-slash {
+  color: var(--dim);
+  font: 600 13px/1 Consolas, monospace;
+}
+
+.tc-io {
+  justify-self: end;
+  display: grid;
+  grid-template-columns: auto 8ch;
+  align-items: center;
+  column-gap: 6px;
+  row-gap: 1px;
+}
+
+.tc-io.idle {
+  visibility: hidden;
+}
+
+.tc-io-item {
+  display: contents;
+}
+
+.tc-io-lab {
+  font: 700 9px/1 "Segoe UI", system-ui, sans-serif;
+  letter-spacing: 0.05em;
+  color: var(--dim);
   text-align: right;
+}
+
+.tc-io-item.in .tc-io-lab { color: #5eead4; }
+.tc-io-item.out .tc-io-lab { color: #fb923c; }
+
+.tc-io .timecode {
+  min-width: 8ch;
+  font-size: 12px;
+  text-align: right;
+  color: #d7d7dc;
+}
+
+.tc-io .timecode.unset {
+  color: var(--dim);
+  opacity: 0.55;
 }
 
 /* ── Inspector ── */

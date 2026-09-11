@@ -103,7 +103,7 @@ same time.
   preview player only, never the export
 - Resizable workspace: drag the divider between monitor and timeline (double-click resets), plus S/M/L timeline track-density presets (S hides thumbnails for compact tracks)
 - **Zoom to selection** (<kbd>⇧Z</kbd>) frames all selected clips, not just one
-- **IN/OUT work area** — set markers with <kbd>i</kbd> and <kbd>o</kbd> (<kbd>⇧I</kbd> / <kbd>⇧O</kbd> to clear). Enabling **Limit** constrains playback to the marked range and maps <kbd>Home</kbd> / <kbd>End</kbd> to the IN and OUT positions rather than the full timeline. <kbd>t</kbd> splits clips at the markers; <kbd>⇧t</kbd> trims clips to the work (between marker in and marker out) area.
+- **IN/OUT work area** — set markers with <kbd>i</kbd> and <kbd>o</kbd> (<kbd>⇧I</kbd> / <kbd>⇧O</kbd> to clear). The Program Monitor shows playhead as `current / sequence duration`; when markers are set, IN, marked duration, and OUT stack on the right. **Export** has a Range dropdown (Entire timeline / IN–OUT; defaults to IN–OUT when markers exist) so you can keep markers for split/trim and still export the full sequence. Enabling **Limit** constrains playback to the marked range and maps <kbd>Home</kbd> / <kbd>End</kbd> to the IN and OUT positions rather than the full timeline. <kbd>t</kbd> splits clips at the markers; <kbd>⇧t</kbd> trims clips to the work (between marker in and marker out) area.
 - **Find & close gaps** — a gap is a stretch where every enabled track is empty (black frames). <kbd>g</kbd> jumps the playhead to the next shared gap (wraps; respects IN/OUT when both are set). <kbd>⇧G</kbd> closes the gap under the playhead by pulling later clips left on all enabled tracks.
 - **Reset a property** — <kbd>Ctrl/Cmd+click</kbd> an inspector **label** restores that effect/prop to its default *and* clears every keyframe on the channel (paired fields like Crop L/R reset together; transition labels clear the in/out transition). <kbd>Shift+click</kbd> the same label is playhead-local: if you are parked on a keyframe it removes **that** keyframe only; otherwise it sets the value at the playhead to the default (auto-keys if the channel is already animated).
 - **Replace media** — the inspector's **Source** button (any video/audio/image/svg
@@ -208,6 +208,8 @@ same time.
   stream-copies and muxes audio. Faster uploads; bitrate/VBR-CBR in the
   Export dialog. Unavailable while an export frame is set (use Fast)
 - Realtime MediaRecorder fallback when ffmpeg or WebCodecs isn't available
+- Export **Range** dropdown: Entire timeline or IN–OUT (defaults to IN–OUT when
+  markers are set). Effective IN/OUT export bounds are clamped to `projDur()`.
 
 ## Quick start
 

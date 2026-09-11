@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Program Monitor transport: playhead as `current / sequence duration` on the
+  left; when IN/OUT are set, a right-side stack of IN, marked duration, OUT.
 - **Import from URL** — `POST /api/import-url` downloads an HTTPS video, audio
   or image into `./media/` and returns a same-origin `/media/…` src. The
   editor **+ URL** button and `fablecut_import_media` (now accepts `https://`
@@ -73,6 +75,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   left nodes wired to live track buses). Panner attach degrades gracefully if
   `StereoPannerNode` is unavailable; inspector volume/pan changes refresh
   audio-hold voices.
+- **Export follows IN/OUT** — Fast, WebCodecs, and Realtime honor a Range
+  choice in the Export dialog (Entire timeline / IN–OUT; IN–OUT is the default
+  when markers exist). Effective IN/OUT export bounds are clamped to `projDur`
+  so an IN past the last clip cannot become a one-frame black file.
 
 ## [1.7.0] - 2026-08-25
 

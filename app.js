@@ -501,6 +501,7 @@ const els = {
   binList: $("binList"), binEmpty: $("binEmpty"), fileInput: $("fileInput"),
   binTabs: $("binTabs"), libList: $("libList"), toast: $("toast"),
   preview: $("preview"), tcCurrent: $("tcCurrent"), tcTotal: $("tcTotal"),
+  tcIo: $("tcIo"), tcIn: $("tcIn"), tcOut: $("tcOut"), tcDur: $("tcDur"),
   btnPlay: $("btnPlay"), inspector: $("inspector"),
   trackHeaders: $("trackHeaders"), timelineScroll: $("timelineScroll"),
   tracksContent: $("tracksContent"), tracks: $("tracks"), playhead: $("playhead"),
@@ -1107,6 +1108,8 @@ function applyProject(data) {
   renderBin(); renderInspector();
   updateWorkArea();
   syncTrimIOButton();
+  syncExportRangeSelect();
+  syncExportRangeUi();
   syncAllTrackDisabledUI();
 }
 function scheduleSave() {
@@ -2592,6 +2595,32 @@ function playRange() {
   const end = project.outPoint != null ? project.outPoint : Math.max(projDur(), 0);
   return { start, end: Math.max(end, start) };
 }
+/* Export window. IN/OUT are clamped to the content span so a marker past
+   the last clip cannot inflate a 0-length range into a 1-frame black file.
+   Mode comes from the Export dialog (Entire timeline / IN–OUT). */
+function exportRangeMode() {
+  const sel = $("exportRangeSel");
+  const v = sel && sel.value === "in-out" ? "in-out" : "entire";
+  if (v === "in-out" && !hasWorkArea()) return "entire";
+  return v;
+}
+function exportRange() {
+  const fps = projectFps();
+  const span = Math.max(projDur(), 0);
+  let start = 0, end = span;
+  if (exportRangeMode() === "in-out") {
+    const r = playRange();
+    start = Math.min(Math.max(0, r.start), span);
+    end = Math.min(Math.max(0, r.end), span);
+    if (end < start) end = start;
+  }
+  const sec = Math.max(0, end - start);
+  let frames = Math.round(sec * fps);
+  if (exportRangeMode() === "entire") frames = Math.max(1, frames);
+  else frames = Math.max(0, frames);
+  const dur = frames / fps;
+  return { start, end: start + dur, dur, frames };
+}
 function playLimited() {
   return state.workAreaPlay && !state.exporting && hasWorkArea();
 }
@@ -2610,6 +2639,34 @@ function gotoHome() {
 }
 function gotoEnd() {
   setTime(playLimited() && project.outPoint != null ? project.outPoint : projDur());
+}
+function setTcField(el, t) {
+  if (!el) return;
+  if (t == null) {
+    el.textContent = "00:00:00";
+    el.classList.add("unset");
+  } else {
+    el.textContent = fmt(t);
+    el.classList.remove("unset");
+  }
+}
+function updateTimecode(dur) {
+  const d = Math.max(dur ?? projDur(), 0);
+  els.tcCurrent.textContent = fmt(state.time);
+  els.tcTotal.textContent = fmt(d);
+  const has = hasWorkArea();
+  if (els.tcIo) {
+    els.tcIo.classList.toggle("idle", !has);
+    els.tcIo.setAttribute("aria-hidden", has ? "false" : "true");
+  }
+  setTcField(els.tcIn, project.inPoint);
+  setTcField(els.tcOut, project.outPoint);
+  if (has) {
+    const { start, end } = playRange();
+    setTcField(els.tcDur, Math.max(0, end - start));
+  } else {
+    setTcField(els.tcDur, null);
+  }
 }
 function syncTrimIOButton() {
   const has = hasWorkArea();
@@ -6280,6 +6337,7 @@ function ensureFont(name) {
 
 /* ── Main loop ── */
 let lastTs = null;
+let exportWindow = null;
 function loop(ts) {
   if (lastTs == null) lastTs = ts;
   const dt = Math.min(0.1, (ts - lastTs) / 1000);
@@ -6289,7 +6347,8 @@ function loop(ts) {
   const dur = projDur();
   if (state.playing) {
     state.time += dt * playRate();
-    const end = playStopAt(dur);
+    let end = playStopAt(dur);
+    if (state.exporting && !state.rendering && exportWindow) end = exportWindow.end;
     if (state.time >= end) {
       state.time = end;
       if (state.exporting) finishExport(true);
@@ -6311,10 +6370,12 @@ function loop(ts) {
   updateKfGraphs();
   syncInspectorPlayhead();
   updateMeterUI(dt);
-  els.tcCurrent.textContent = fmt(state.time);
-  els.tcTotal.textContent = fmt(dur);
+  updateTimecode(dur);
   if (state.exporting && !state.rendering) {
-    const pct = dur ? (state.time / dur) * 100 : 0;
+    const w = exportWindow;
+    const span = w ? w.dur : dur;
+    const t0 = w ? w.start : 0;
+    const pct = span ? ((state.time - t0) / span) * 100 : 0;
     els.exportProgress.style.width = pct.toFixed(1) + "%";
     els.exportTitle.textContent = `Exporting… ${pct.toFixed(0)}%`;
   }
@@ -6506,6 +6567,8 @@ async function openExportSetup() {
     warn.textContent = "";
     warn.classList.add("hidden");
   }
+  fillExportRangeSelect();
+  syncExportRangeUi();
   syncExportProfileVisibility();
   fetchEncodeProfiles().then(() => {
     populateExportProfileSelect();
@@ -6525,15 +6588,60 @@ function startChosenExport() {
     alert("No export engine is available.");
     return;
   }
+  if (exportRange().frames < 1) {
+    alert("Export range is empty — IN/OUT is at or past the end of the timeline. Choose Entire timeline, or move the markers.");
+    return;
+  }
   els.exportSetup.classList.add("hidden");
   if (useFast) fastExport();
   else if (useSecond && state.connected && state.ffmpeg && state.webCodecs && !getExportFrame()) webCodecsExport();
   else startExport();
 }
 
+/* Keep Range's IN–OUT option in sync with marker presence without clobbering
+   a deliberate "entire" choice. Invalid "in-out" (no work area) snaps to entire
+   so the displayed value matches exportRangeMode(). */
+function syncExportRangeSelect() {
+  const sel = $("exportRangeSel");
+  if (!sel) return;
+  const opt = sel.querySelector('option[value="in-out"]');
+  const has = hasWorkArea();
+  if (opt) opt.disabled = !has;
+  if (!has && sel.value === "in-out") sel.value = "entire";
+}
+function fillExportRangeSelect() {
+  syncExportRangeSelect();
+  const sel = $("exportRangeSel");
+  if (sel) sel.value = hasWorkArea() ? "in-out" : "entire";
+}
+function exportRangeNoteText() {
+  const mode = exportRangeMode();
+  const { start, dur, frames } = exportRange();
+  const end = start + dur;
+  if (mode === "entire") return `Full timeline · ${fmt(start)} → ${fmt(end)}`;
+  if (frames < 1) return "IN–OUT is empty — markers are at or past the end of the timeline.";
+  const inn = project.inPoint != null, out = project.outPoint != null;
+  if (inn && out) return `IN–OUT · ${fmt(start)} → ${fmt(end)}`;
+  if (inn) return `IN to end · ${fmt(start)} → ${fmt(end)}`;
+  return `Start to OUT · ${fmt(start)} → ${fmt(end)}`;
+}
+function syncExportRangeUi() {
+  const note = $("exportRangeNote");
+  if (note) note.textContent = exportRangeNoteText();
+  const btn = $("btnStartExport");
+  if (btn) btn.disabled = exportRange().frames < 1;
+}
+
 /* ── Fast export ── */
 let renderCancelled = false;
 let exportAbort = null;
+function beginExportWindow() {
+  exportWindow = exportRange();
+  return exportWindow;
+}
+function endExportWindow() {
+  exportWindow = null;
+}
 let exportCropCanvas = null;
 let exportCropCtx = null;
 function canvasTaintError(e) {
@@ -6995,8 +7103,9 @@ function encodeWAV(buf) {
   }
   return new Blob([ab], { type: "audio/wav" });
 }
-/* Mix all audio-bearing clips offline, honoring volume keyframes + fades */
-async function renderAudioMix(dur) {
+/* Mix all audio-bearing clips offline, honoring volume keyframes + fades.
+   t0/t1 are timeline seconds (export window); mix time 0 is t0. */
+async function renderAudioMix(t0, t1) {
   const jobs = [];
   for (const c of project.clips) {
     if (c.kind !== "audio" && c.kind !== "video") continue;
@@ -7006,24 +7115,32 @@ async function renderAudioMix(dur) {
   }
   const sources = (await Promise.all(jobs)).filter(Boolean);
   if (!sources.length) return null;
+  const dur = Math.max(0, t1 - t0);
+  if (dur <= 0) return null;
   const sr = 48000;
   const off = new OfflineAudioContext(2, Math.ceil(dur * sr) + 1, sr);
+  let scheduled = false;
   for (const { c, buf } of sources) {
+    const a = Math.max(c.start, t0), b = Math.min(c.start + c.duration, t1);
+    if (b - a <= 1e-6) continue;
+    const mixWhen = Math.max(0, a - t0);
+    const mixDur = b - a;
+    const local0 = a - c.start;
     const src = off.createBufferSource(); src.buffer = buf;
     const g = off.createGain();
     const panner = off.createStereoPanner();
     g.connect(panner);
-    const n = Math.max(2, Math.ceil(c.duration * 30));
+    const n = Math.max(2, Math.ceil(mixDur * 30));
     const volCurve = new Float32Array(n);
     const panCurve = new Float32Array(n);
     for (let i = 0; i < n; i++) {
-      const ep = evalProps(c, c.start + (i / (n - 1)) * c.duration);
+      const ep = evalProps(c, a + (i / (n - 1)) * mixDur);
       volCurve[i] = clamp(ep.volume, 0, 4);
       panCurve[i] = clipPan(ep.pan);
     }
-    g.gain.setValueCurveAtTime(volCurve, Math.max(0, c.start), Math.max(0.01, c.duration));
+    g.gain.setValueCurveAtTime(volCurve, mixWhen, Math.max(0.01, mixDur));
     try {
-      panner.pan.setValueCurveAtTime(panCurve, Math.max(0, c.start), Math.max(0.01, c.duration));
+      panner.pan.setValueCurveAtTime(panCurve, mixWhen, Math.max(0.01, mixDur));
     } catch {
       panner.pan.value = panCurve[0] ?? 0;
     }
@@ -7035,16 +7152,18 @@ async function renderAudioMix(dur) {
     if (hasSpeedRamp(c)) {
       const rc = new Float32Array(n);
       for (let i = 0; i < n; i++)
-        rc[i] = clamp(kfChannel(c, "speed", (i / (n - 1)) * c.duration, clipSpeed(c)), 0.1, 8);
-      src.playbackRate.setValueCurveAtTime(rc, Math.max(0, c.start), Math.max(0.01, c.duration));
-      src.start(Math.max(0, c.start), Math.max(0, c.in));
-      src.stop(Math.max(0, c.start) + c.duration);
+        rc[i] = clamp(kfChannel(c, "speed", local0 + (i / (n - 1)) * mixDur, clipSpeed(c)), 0.1, 8);
+      src.playbackRate.setValueCurveAtTime(rc, mixWhen, Math.max(0.01, mixDur));
+      src.start(mixWhen, Math.max(0, mediaTimeAt(c, a)));
+      src.stop(mixWhen + mixDur);
     } else {
       const sp = clipSpeed(c);
       src.playbackRate.value = sp;
-      src.start(Math.max(0, c.start), Math.max(0, c.in), c.duration * sp);
+      src.start(mixWhen, Math.max(0, c.in + local0 * sp), mixDur * sp);
     }
+    scheduled = true;
   }
+  if (!scheduled) return null;
   return encodeWAV(await off.startRendering());
 }
 /* Frame-exact asset prep for the fast exporter: rasterize the SVG frame for
@@ -7069,14 +7188,14 @@ async function fastExport() {
   els.exportProgress.style.width = "0%";
   els.exportNote.textContent = "Rendering frames → ffmpeg. You can switch tabs; export continues.";
   restoreExportVideoState();
-  const fps = projectFps(), dur = Math.max(1 / fps, projDur());
-  const frames = Math.max(1, Math.round(dur * fps));
+  const { start: t0, end: t1, frames } = beginExportWindow();
+  const fps = projectFps();
   let sessId = null;
   let uploadError = null;
   const setError = (err) => { if (!uploadError) uploadError = err; };
   try {
     els.exportTitle.textContent = "Mixing audio…";
-    const wav = await renderAudioMix(dur);
+    const wav = await renderAudioMix(t0, t1);
     if (renderCancelled) throw new Error("cancelled");
     const profileId = els.exportProfileSel?.value || effectiveEncodeProfileId();
     const jpegQ = exportProfileMeta(profileId).jpegQuality ?? 0.95;
@@ -7123,7 +7242,7 @@ async function fastExport() {
       if (uploadError) throw uploadError;
       await waitPixels(3);
       await up.waitBackpressure(2);
-      const t = f / fps;
+      const t = t0 + f / fps;
       state.time = t;
       await seekVideosTo(t);
       await prepareFrameAssets(t);
@@ -7178,6 +7297,7 @@ async function fastExport() {
   } finally {
     exportAbort = null;
     restoreExportVideoState();
+    endExportWindow();
     state.exporting = false; state.rendering = false;
     els.exportOverlay.classList.add("hidden");
     els.exportNote.textContent = "Rendering your sequence in real time. Keep this tab focused.";
@@ -7227,8 +7347,8 @@ async function webCodecsExport() {
   els.exportProgress.style.width = "0%";
   els.exportNote.textContent = "Encoding with WebCodecs → ffmpeg mux. You can switch tabs; export continues.";
   restoreExportVideoState();
-  const fps = projectFps(), dur = Math.max(1 / fps, projDur());
-  const frames = Math.max(1, Math.round(dur * fps));
+  const { start: t0, end: t1, frames } = beginExportWindow();
+  const fps = projectFps();
   const keyEvery = Math.max(1, Math.round(fps * 2));
   let sessId = null;
   let encoder = null;
@@ -7237,7 +7357,7 @@ async function webCodecsExport() {
   let up = null;
   try {
     els.exportTitle.textContent = "Mixing audio…";
-    const wav = await renderAudioMix(dur);
+    const wav = await renderAudioMix(t0, t1);
     if (renderCancelled) throw new Error("cancelled");
 
     const begin = await fetch("/api/export/begin", {
@@ -7294,7 +7414,7 @@ async function webCodecsExport() {
       if (uploadError) throw uploadError;
       await up.waitBackpressure(2);
       await waitEncodeQueue(encoder, 2, { signal, getError: () => uploadError });
-      const t = f / fps;
+      const t = t0 + f / fps;
       state.time = t;
       await seekVideosTo(t);
       await prepareFrameAssets(t);
@@ -7342,6 +7462,7 @@ async function webCodecsExport() {
   } finally {
     exportAbort = null;
     restoreExportVideoState();
+    endExportWindow();
     state.exporting = false; state.rendering = false;
     els.exportOverlay.classList.add("hidden");
     els.exportNote.textContent = "Rendering your sequence in real time. Keep this tab focused.";
@@ -7366,7 +7487,8 @@ async function startExport() {
   ensureAudio();
   await runtime.audio.ctx.resume();
   pause();
-  state.time = 0;
+  const { start } = beginExportWindow();
+  state.time = start;
   seekMediaWhilePaused();
   await new Promise((r) => setTimeout(r, 350)); // let first frames decode
   const stream = els.preview.captureStream(projectFps());
@@ -7396,6 +7518,7 @@ async function startExport() {
 function finishExport(keep) {
   if (!state.exporting) return;
   state.exporting = false;
+  endExportWindow();
   if (runtime.pendingSync) syncFromServer();
   recDiscard = !keep;
   state.playing = false;
@@ -7437,6 +7560,7 @@ els.exportSetup?.addEventListener("change", (e) => {
     syncExportProfileVisibility();
     syncExportWcOpts();
   }
+  if (e.target.id === "exportRangeSel") syncExportRangeUi();
 });
 els.exportProfileSel?.addEventListener("change", (e) => {
   const id = e.target.value;
