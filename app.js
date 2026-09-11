@@ -716,6 +716,19 @@ function resetPropAtPlayhead(c, k) {
   if (k === "font") ensureFont(String(def));
   return true;
 }
+function applyInspectorReset(keys, channelWide) {
+  const c = getClip(state.selId);
+  if (!c || !keys.length) return;
+  pushUndo();
+  let refused = false;
+  for (const k of keys) {
+    if (channelWide) resetPropChannel(c, k);
+    else refused = !resetPropAtPlayhead(c, k) || refused;
+  }
+  if (refused) toast("Move the playhead over the clip to edit its keyframes");
+  scheduleSave();
+  renderInspector();
+}
 /* ◆ : add a keyframe at the playhead, or remove the one already there.
    Refused (false) when the playhead is off the clip — there is no "at the
    playhead" then, and clamping would plant a keyframe on the clip's edge. */
@@ -3666,7 +3679,7 @@ function renderInspector(lite) {
   const slider = (k, min, max, step, val, unit = "") => {
     const shown = fmtInspNum(val, step);
     return row(k[0].toUpperCase() + k.slice(1),
-      `<input type="range" data-k="${k}" min="${min}" max="${max}" step="${step}" value="${shown}">
+      `<input type="range" data-k="${k}" min="${min}" max="${max}" step="${step}" value="${shown}" title="Ctrl/Cmd-click: reset to default">
        <span class="val" data-val="${k}" data-unit="${unit}">${shown}${unit}</span>`, k);
   };
   let html = (state.selIds.size > 1
@@ -3763,7 +3776,7 @@ function renderInspector(lite) {
     html += `<div class="insp-section"><h3>Text</h3>
       ${row("Content", `<textarea data-k="text">${p.text}</textarea>`, "", "text")}
       ${row(hasTextBox(p) && p.boxFit ? "Max size" : "Font size",
-        `<input type="range" data-k="fontSize" min="12" max="300" step="1" value="${fmtInspNum(p.fontSize, 1)}">
+        `<input type="range" data-k="fontSize" min="12" max="300" step="1" value="${fmtInspNum(p.fontSize, 1)}" title="Ctrl/Cmd-click: reset to default">
          <span class="val" data-val="fontSize" data-unit="px">${fmtInspNum(p.fontSize, 1)}px</span>`, "fontSize")}
       ${row("Box W/H", `<span class="insp-ctrls">
         <input type="number" data-k="boxW" min="0" step="1" value="${p.boxW || 0}" title="Width in px (0 = no box — hug content)" style="max-width:64px">
@@ -3818,22 +3831,14 @@ function renderInspector(lite) {
       const local = e.shiftKey && !all;
       if (!all && !local) return;
       e.preventDefault();
-      const keys = lab.dataset.reset.split(",").map((s) => s.trim()).filter(Boolean);
-      if (!keys.length) return;
-      pushUndo();
-      let refused = false;
-      for (const k of keys) {
-        if (all) resetPropChannel(c, k); // channel-wide: playhead-independent
-        else refused = !resetPropAtPlayhead(c, k) || refused;
-      }
-      if (refused) toast("Move the playhead over the clip to edit its keyframes");
-      scheduleSave();
-      renderInspector();
+      applyInspectorReset(lab.dataset.reset.split(",").map((s) => s.trim()).filter(Boolean), all);
     });
   });
   els.inspector.querySelectorAll("[data-k]").forEach((input) => {
     const k = input.dataset.k;
-    input.addEventListener("input", () => {
+    input.addEventListener("input", (e) => {
+      if (!input.isConnected) return;
+      if (input.type === "range" && (e.ctrlKey || e.metaKey)) return;
       let v = input.type === "checkbox" ? input.checked
         : input.type === "range" || input.type === "number" ? parseFloat(input.value)
           : input.value;
@@ -3942,6 +3947,22 @@ function renderInspector(lite) {
   syncInspectorOffClip(c);
   renderKfGraphsPanel();
 }
+/* One listener for every slider: capture so preventDefault runs before the
+   range jumps the thumb to the click. */
+els.inspector.addEventListener("pointerdown", (e) => {
+  if (!(e.ctrlKey || e.metaKey)) return;
+  const input = e.target.closest?.("input[type=range][data-k]");
+  if (!input || !els.inspector.contains(input)) return;
+  e.preventDefault();
+  const k = input.dataset.k;
+  if (!k || !Object.hasOwn(DEFAULT_PROPS, k)) return;
+  applyInspectorReset([k], true);
+}, true);
+els.inspector.addEventListener("contextmenu", (e) => {
+  if (!(e.ctrlKey || e.metaKey)) return;
+  if (!e.target.closest?.("input[type=range][data-k]")) return;
+  e.preventDefault();
+});
 
 /* Off the clip, keyframed fields show their edge value but must not be
    editable — a write would land clamped on the clip's edge. Disables those

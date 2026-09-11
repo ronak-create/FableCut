@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Program Monitor transport: playhead as `current / sequence duration` on the
   left; when IN/OUT are set, a right-side stack of IN, marked duration, OUT.
+- Ctrl/Cmd-click an inspector **slider** to reset that property to its default
+  and clear its keyframes (same as Ctrl/Cmd-clicking the label — scale → 1,
+  opacity → 1, brightness → 100, …).
 - **Import from URL** — `POST /api/import-url` downloads an HTTPS video, audio
   or image into `./media/` and returns a same-origin `/media/…` src. The
   editor **+ URL** button and `fablecut_import_media` (now accepts `https://`
