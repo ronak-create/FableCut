@@ -60,17 +60,21 @@
         <div class="bin-empty" id="binEmpty">
           <div class="bin-empty-icon">🎬</div>
           <p>Drop video, audio or images here<br>or click <b>+ Import</b> / <b>+ URL</b></p>
-          <p class="hint">Then drag media onto the timeline below.</p>
+          <p class="hint">Double-click to open in Source, or drag onto the timeline.</p>
         </div>
       </div>
       <div class="bin-list hidden" id="libList"></div>
     </aside>
 
-    <!-- Program monitor -->
-    <section class="panel monitor">
+    <!-- Single monitor (Source / Program — Avid-style toggle) -->
+    <section class="panel monitor" id="monitorPanel">
       <div class="panel-head">
         <span class="panel-head-title">
-          <span>Program Monitor</span>
+          <span class="btn-group monitor-mode" id="monitorModeGroup" title="Source = loaded clip · Program = timeline">
+            <button type="button" class="btn tiny" data-monitor-mode="source" id="btnMonSource">Source</button>
+            <button type="button" class="btn tiny on" data-monitor-mode="program" id="btnMonProgram">Program</button>
+          </span>
+          <span class="monitor-clip-name dim" id="monitorClipName"></span>
           <button class="btn tiny hidden" id="btnZoom100" title="Reset monitor view to fit stage"><svg class="ico" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="square" d="M1.5 5V1.5H5M11 1.5h3.5V5M14.5 11v3.5H11M5 14.5H1.5V11"/><path fill="none" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round" d="M3.2 3.2l2.6 2.6M12.8 3.2l-2.6 2.6M12.8 12.8l-2.6-2.6M3.2 12.8l2.6-2.6"/></svg> Fit</button>
         </span>
         <span class="panel-head-actions">
@@ -107,6 +111,14 @@
         <div class="kf-graphs" id="kfGraphs" hidden></div>
         <div class="vu-meter" id="vuMeter" title="Click to switch RMS / LUFS / Peak"></div>
       </div>
+      <div class="source-scrub hidden" id="sourceScrub" title="Scrub source · drag to seek">
+        <div class="source-scrub-track" id="sourceScrubTrack">
+          <div class="source-scrub-range" id="sourceScrubRange"></div>
+          <div class="source-scrub-mark in" id="sourceScrubIn" hidden></div>
+          <div class="source-scrub-mark out" id="sourceScrubOut" hidden></div>
+          <div class="source-scrub-head" id="sourceScrubHead"></div>
+        </div>
+      </div>
       <div class="transport">
         <span class="tc-playhead" title="Playhead / sequence duration">
           <span class="timecode" id="tcCurrent">00:00:00</span>
@@ -114,26 +126,42 @@
           <span class="timecode dim" id="tcTotal">00:00:00</span>
         </span>
         <div class="transport-btns">
+          <button class="btn icon" id="btnMarkIn" title="Mark In (I) — Source marks when Source is active; timeline work area in Program">I</button>
           <button class="btn icon" id="btnHome" title="Go to start (Home)">⏮</button>
           <button class="btn icon" id="btnBack" title="Back 1 frame (←)">◀︎</button>
           <button class="btn icon big" id="btnPlay" title="Play / Pause (Space)">▶</button>
           <button class="btn icon" id="btnFwd" title="Forward 1 frame (→)">▶︎</button>
           <button class="btn icon" id="btnEnd" title="Go to end (End)">⏭</button>
+          <button class="btn icon" id="btnMarkOut" title="Mark Out (O) — Source marks when Source is active; timeline work area in Program">O</button>
           <button class="btn icon toggle" id="btnSpeed" title="Preview speed — click to cycle 1×/1.5×/2×/4×. While playing: L faster · J slower · K play/pause and reset to 1×. Preview only, not export.">1×</button>
         </div>
-        <div class="tc-io idle" id="tcIo" aria-hidden="true">
-          <span class="tc-io-item in" title="IN point">
-            <span class="tc-io-lab">IN</span>
-            <span class="timecode unset" id="tcIn">00:00:00</span>
-          </span>
-          <span class="tc-io-item dur" title="Marked duration">
-            <span class="tc-io-lab">DUR</span>
-            <span class="timecode unset" id="tcDur">00:00:00</span>
-          </span>
-          <span class="tc-io-item out" title="OUT point">
-            <span class="tc-io-lab">OUT</span>
-            <span class="timecode unset" id="tcOut">00:00:00</span>
-          </span>
+        <div class="transport-end">
+          <button type="button" class="btn icon hidden" id="btnInsert" title="Insert Source In→Out at the timeline playhead (,)" aria-label="Insert">
+            <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+              <path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="square" d="M0.75 5H3.5V11H0.75M15.25 5H12.5V11h2.75"/>
+              <path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" d="M8 4.2v5.4M5.55 7.35L8 9.9L10.45 7.35"/>
+            </svg>
+          </button>
+          <button type="button" class="btn icon hidden" id="btnReplace" title="Replace (overwrite) Source In→Out at the timeline playhead (.)" aria-label="Replace">
+            <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+              <path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="square" d="M0.75 5H3.5V11H0.75M15.25 5H12.5V11h2.75"/>
+              <rect x="5.35" y="5" width="5.3" height="6" rx="0.4" fill="currentColor"/>
+            </svg>
+          </button>
+          <div class="tc-io idle" id="tcIo" aria-hidden="true">
+            <span class="tc-io-item in" title="IN point">
+              <span class="tc-io-lab">IN</span>
+              <span class="timecode unset" id="tcIn">00:00:00</span>
+            </span>
+            <span class="tc-io-item dur" title="Marked duration">
+              <span class="tc-io-lab">DUR</span>
+              <span class="timecode unset" id="tcDur">00:00:00</span>
+            </span>
+            <span class="tc-io-item out" title="OUT point">
+              <span class="tc-io-lab">OUT</span>
+              <span class="timecode unset" id="tcOut">00:00:00</span>
+            </span>
+          </div>
         </div>
       </div>
     </section>
@@ -154,10 +182,11 @@
     <div class="timeline-toolbar">
       <button class="btn tiny hidden" id="btnTrimIO" title="Trim clips to IN/OUT (⇧T)"><svg class="ico" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="square" d="M1.25 4.5H12M4.5 1.25V12M4.5 12H14.75M12 4.5V14.75"/></svg> Trim</button>
       <button class="btn tiny toggle hidden" id="btnWorkAreaPlay" title="Limit playback to IN/OUT (Home/End jump to markers; playhead outside = override)"><svg class="ico" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="square" stroke-linejoin="miter" d="M1.5 2.5V13.5M14.5 2.5V13.5M4.25 8H11.75M9.35 5.6L12 8L9.35 10.4"/></svg> Limit</button>
-      <button class="btn tiny" id="btnSplit" title="Split at playhead (S)">✂ Split</button>
+      <button class="btn tiny" id="btnSplit" title="Split at playhead on enabled tracks (S)">✂ Split</button>
       <button class="btn tiny" id="btnCloseGap" title="Close gap at playhead (⇧G)"><svg class="ico" viewBox="0 0 16 16" width="14" height="14" style="vertical-align:-3px" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square" stroke-linejoin="miter" d="M0.75 4.5H3.5V11.5H0.75M15.25 4.5H12.5V11.5H15.25"/><path fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" d="M6.35 5.85L9.65 10.15M9.65 5.85L6.35 10.15"/></svg> Close gap</button>
       <button class="btn tiny" id="btnNextGap" title="Find gap (G)"><svg class="ico" viewBox="0 0 16 16" width="14" height="14" style="vertical-align:-3px" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square" stroke-linejoin="miter" d="M0.75 4.5H3.5V11.5H0.75M15.25 4.5H12.5V11.5H15.25"/><text x="8" y="11.1" text-anchor="middle" fill="currentColor" font-size="9.5" font-family="Segoe UI, system-ui, sans-serif" font-weight="700">?</text></svg> Find gap</button>
       <button class="btn tiny" id="btnDelete" title="Delete selected (Del)"><svg class="ico" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path fill="currentColor" d="M5.5 1.5h5v1.25H14v1.5H2v-1.5h3.5V1.5zM3.75 5.5h8.5v8.25a1.5 1.5 0 0 1-1.5 1.5h-5.5a1.5 1.5 0 0 1-1.5-1.5V5.5zm2 2v5h1.25v-5H5.75zm3.25 0v5H10.25v-5H9z"/></svg> Delete</button>
+      <button class="btn tiny" id="btnRippleDelete" title="Ripple delete selection (⇧Del) — closes gap on enabled tracks"><svg class="ico" viewBox="0 0 16 16" width="14" height="14" style="vertical-align:-3px" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square" stroke-linejoin="miter" d="M0.75 4.5H3.5V11.5H0.75M15.25 4.5H12.5V11.5H15.25"/><path fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" d="M6.8 6.2L9.2 8.6M9.2 6.2L6.8 8.6"/><path fill="currentColor" d="M7.35 9.55h1.3v1.05h-1.3V9.55zm0 1.55h1.3v1.05h-1.3v-1.05z"/></svg> Ripple delete</button>
       <button class="btn tiny toggle on" id="btnSnap" title="Toggle snapping (N)"><svg class="ico" viewBox="0 0 16 16" width="13" height="13" style="vertical-align:-3px" aria-hidden="true"><g transform="rotate(270 8 7)"><path fill="none" stroke="currentColor" stroke-width="3.25" stroke-linecap="butt" d="M4 10.25V7a4 4 0 0 1 8 0v3.25"/><path fill="currentColor" d="M2.375 10.75h3.25v2.5h-3.25zm8 0h3.25v2.5h-3.25z"/></g></svg> Snap</button>
       <button class="btn tiny toggle" id="btnAudioHold" title="Audio Hold — while paused, loop one frame of audio at the playhead. Play/Stop turns it off."><svg class="ico" viewBox="0 0 16 16" width="13" height="13" style="vertical-align:-3px" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="square" d="M1.75 2.75V13.25M14.25 2.75V13.25"/><path fill="currentColor" d="M5.2 5.85h1.15v4.3H5.2V5.85zM7.05 5.85h0.55l2.85-2.2v8.7l-2.85-2.2H7.05V5.85z"/></svg> Audio hold</button>
       <span class="flex-spacer"></span>
@@ -296,13 +325,17 @@
     <h2>Keyboard shortcuts</h2>
     <div class="keys-cols">
       <table class="keys">
-        <tr><td><kbd>Space</kbd></td><td>Play / pause</td></tr>
+        <tr><td><kbd>Space</kbd></td><td>Play / pause (Source or Program — whichever is active)</td></tr>
+        <tr><td>Dbl-click bin / clip</td><td>Load into Source monitor</td></tr>
+        <tr><td><kbd>,</kbd></td><td>Insert Source In→Out at the timeline playhead (ripples later clips)</td></tr>
+        <tr><td><kbd>.</kbd></td><td>Replace — overwrite at playhead, or apply new Source In/Out to a timeline-loaded clip (ripples if duration changes)</td></tr>
         <tr><td><kbd>J</kbd> <kbd>K</kbd> <kbd>L</kbd></td><td>Shuttle preview — <kbd>L</kbd> faster / <kbd>J</kbd> slower (1× · 1.5× · 2× · 4×); <kbd>K</kbd> play/pause + reset to 1×</td></tr>
-        <tr><td><kbd>S</kbd></td><td>Split clip(s) at playhead</td></tr>
+        <tr><td><kbd>S</kbd></td><td>Split clip(s) at playhead (enabled tracks)</td></tr>
         <tr><td><kbd>G</kbd></td><td>Find next shared gap (wraps; respects IN/OUT)</td></tr>
         <tr><td><kbd>⇧</kbd>+<kbd>G</kbd></td><td>Close gap at playhead (enabled tracks)</td></tr>
         <tr><td><kbd>Alt</kbd>+<kbd>T</kbd></td><td>Add transition at playhead (in / out by half)</td></tr>
         <tr><td><kbd>Del</kbd></td><td>Delete selected clip(s), or clear focused transition</td></tr>
+        <tr><td><kbd>⇧</kbd>+<kbd>Del</kbd></td><td>Ripple delete — remove selection and close the gap on enabled tracks</td></tr>
         <tr><td>Drag empty area</td><td>Marquee-select clips</td></tr>
         <tr><td>Right-click track</td><td>Remove empty track (keeps ≥1 video + ≥1 audio)</td></tr>
         <tr><td>Track <b>S</b></td><td>Solo track (mute all others; click again to restore)</td></tr>
@@ -310,6 +343,7 @@
         <tr><td><kbd>Ctrl</kbd>+click clip</td><td>Add / remove from selection</td></tr>
         <tr><td><kbd>Ctrl</kbd>+<kbd>A</kbd> / <kbd>Esc</kbd></td><td>Select all / deselect</td></tr>
         <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>Step 1 frame (⇧ = 1 second)</td></tr>
+        <tr><td><kbd>↑</kbd> / <kbd>↓</kbd></td><td>Jump playhead to previous / next cut (selected clip In then Out; no selection → enabled tracks). Source monitor: In / Out marks</td></tr>
         <tr><td><kbd>Ctrl/Cmd</kbd>+<kbd>←</kbd> / <kbd>Ctrl/Cmd</kbd>+<kbd>→</kbd></td><td>Go to previous / next keyframe (inspector follows)</td></tr>
         <tr><td><kbd>Ctrl/Cmd</kbd>+click inspector label or slider</td><td>Reset property + clear all its keyframes</td></tr>
         <tr><td><kbd>⇧</kbd>+click inspector label</td><td>Reset value at playhead, or remove that keyframe</td></tr>
@@ -318,8 +352,8 @@
       </table>
       <table class="keys">
         <tr><td><kbd>M</kbd></td><td>Add / remove marker at playhead</td></tr>
-        <tr><td><kbd>I</kbd> / <kbd>O</kbd></td><td>Set IN / OUT work-area marker (also bounds Export)</td></tr>
-        <tr><td><kbd>⇧</kbd>+<kbd>I</kbd> / <kbd>⇧</kbd>+<kbd>O</kbd></td><td>Clear IN / OUT marker</td></tr>
+        <tr><td><kbd>I</kbd> / <kbd>O</kbd></td><td>Set Source In/Out (Source mode) or timeline work-area (Program; also bounds Export)</td></tr>
+        <tr><td><kbd>⇧</kbd>+<kbd>I</kbd> / <kbd>⇧</kbd>+<kbd>O</kbd></td><td>Clear Source or timeline IN / OUT</td></tr>
         <tr><td><kbd>T</kbd></td><td>Split clips at IN/OUT markers</td></tr>
         <tr><td><kbd>⇧</kbd>+<kbd>T</kbd></td><td>Trim clips to IN/OUT (remove heads/tails)</td></tr>
         <tr><td>Limit (toolbar)</td><td>Play stops at OUT; Home/End use IN/OUT</td></tr>

@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Jump to cut** — `↑` / `↓` move the playhead to the previous / next clip In
+  or Out (selected clip first; otherwise enabled tracks). Source monitor: In /
+  Out marks. Does not replace ← / → frame step, Home / End, or Ctrl/Cmd+←/→
+  keyframe jump.
 - Program Monitor transport: playhead as `current / sequence duration` on the
   left; when IN/OUT are set, a right-side stack of IN, marked duration, OUT.
 - Ctrl/Cmd-click an inspector **slider** to reset that property to its default
@@ -119,6 +123,12 @@ installs as a Claude Code plugin.
 - Project FPS select in the Program Monitor header (next to aspect presets) —
   pick 24 / 25 / 30 / 50 / 60 fps; writes `project.fps` and persists like canvas
   size. Non-preset rates appear as Custom.
+- **Source monitor** (Avid NewsCutter-style single viewer) — Source / Program toggle on the shared monitor. Double-click Project media or a timeline clip to load Source (timeline loads with that clip’s In/Out window). Transport, I/O marks, Space/JKL, and scrubbing follow the active mode; drag-to-timeline is unchanged.
+- **Insert at playhead** (`,`, or the Source monitor insert icon) — places the Source In→Out window on the timeline at the playhead, splits straddling clips, and ripples everything after; video brings linked audio stems like a bin drop.
+- **Replace at playhead** (`.`, or the Source monitor replace icon) — overwrites onto placement tracks (V1 + A stems); also clears overlapping linked AV stems on A3+ so they don’t stack; V2/V3 overlays and standalone music are left alone; no ripple. When Source was loaded from a timeline clip, Replace instead applies the new In→Out to that instance (and linked stems) and ripples later clips on those tracks if the duration changed.
+- **Ripple delete** — timeline toolbar button or <kbd>⇧Del</kbd> removes the selection and closes the gap on enabled tracks (plain <kbd>Del</kbd> still leaves a gap). Insert/replace ripples, splits, gap-close and ripple delete all keep sync lock: linked AV partners move together even on disabled tracks.
+- **Fix: linked A/V integrity on destructive edits** — Replace punches and IN/OUT trims now apply to linked partners on disabled tracks too, and punch re-pairs the surviving head/tail pieces across tracks (previously the pieces stayed unlinked until a reload).
+- **Insert/replace skip disabled tracks on placement** — source-patching style: a disabled V1 drops the picture, disabled A-lanes drop those stems; when every target lane is disabled the op toasts and does nothing.
 - Preview playback speed — a monitor toolbar toggle plus **J**/**K**/**L** shortcuts cycle the preview player through 1×, 1.5×, 2×, and 4× (L faster, J slower, K play/pause and reset to 1×). It rides on top of each clip's own speed and is forced back to 1× during export, so renders always come out at real time.
   (thanks @ur5fot, #18)
 - **Separate audio and video tracks.** Imported video now shows its audio as
@@ -186,6 +196,9 @@ installs as a Claude Code plugin.
   over an ASCII field.
 - README: ASCII block wordmark, zh-CN / ja / es / pt-BR translations, DeepWiki
   link, community Discord link, and a Trendshift badge.
+
+### Fixed
+- Continuous playback no longer flashes a wrong first frame at hard cuts — upcoming video clips are pre-seeked to their In ~0.85 s before the playhead reaches them (frame-step already waited for seeks, so it looked fine).
 
 ## [1.6.0] - 2026-07-14
 

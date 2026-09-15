@@ -2457,9 +2457,14 @@ function goToNextGap() {
 }
 function splitAtPlayhead() {
   const t = state.time;
+  const onTrack = (c) => isTrackEnabled(c.track);
   let targets = state.selIds.size ? selectedClips() : project.clips;
-  targets = withLinked(targets.filter((c) => t > c.start + MIN_DUR && t < clipEnd(c) - MIN_DUR));
-  if (!targets.length) return;
+  const straddlers = targets.filter((c) => t > c.start + MIN_DUR && t < clipEnd(c) - MIN_DUR);
+  targets = withLinked(straddlers.filter((c) => onTrack(c)));
+  if (!targets.length) {
+    if (straddlers.length) toast("Clip is on a disabled track — enable it to split");
+    return;
+  }
   pushUndo();
   // Pair linked splits so the new right halves stay linked to each other
   const newLink = new Map(); // oldClipId -> newRightId

@@ -702,6 +702,81 @@ body.track-size-s .clip.selected {
 }
 
 /* ── Monitor ── */
+.monitor-mode {
+  display: inline-flex;
+  gap: 2px;
+  text-transform: none;
+  letter-spacing: normal;
+}
+.monitor-mode .btn {
+  min-width: 4.2em;
+  font-weight: 700;
+}
+.monitor-mode .btn.on {
+  background: #7b6cff;
+  border-color: #9a8fff;
+  color: #fff;
+}
+.monitor-clip-name {
+  max-width: 18em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: 11px;
+}
+.panel.monitor[data-mode="source"] .monitor-clip-name:empty::before {
+  content: "No clip loaded";
+  opacity: .55;
+}
+
+.source-scrub {
+  flex: 0 0 auto;
+  padding: 0 14px 6px;
+}
+.source-scrub-track {
+  position: relative;
+  height: 10px;
+  border-radius: 5px;
+  background: #1a1a20;
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+.source-scrub-range {
+  position: absolute;
+  top: 0; bottom: 0;
+  left: 0; width: 0;
+  background: #7b6cff44;
+  border-radius: 4px;
+  pointer-events: none;
+  will-change: transform, width;
+}
+.source-scrub-mark {
+  position: absolute;
+  top: -2px; bottom: -2px;
+  left: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: #ffd166;
+  pointer-events: none;
+  will-change: transform;
+}
+.source-scrub-mark.out { background: #ff8a65; }
+.source-scrub-head {
+  position: absolute;
+  top: -3px; bottom: -3px;
+  left: 0;
+  width: 3px;
+  margin-left: -1.5px;
+  background: #fff;
+  border-radius: 1px;
+  pointer-events: none;
+  box-shadow: 0 0 0 1px #0008;
+  will-change: transform;
+}
+
 .monitor-stage {
   flex: 1;
   display: flex;
@@ -712,6 +787,24 @@ body.track-size-s .clip.selected {
   border-radius: 6px;
   overflow: hidden;
   position: relative;
+}
+@keyframes monitor-flash-border {
+  0%   { opacity: 0; }
+  20%  { opacity: 1; }
+  70%  { opacity: 1; }
+  100% { opacity: 0; }
+}
+/* White ring painted over the preview canvas */
+.monitor-flash-ring {
+  position: absolute;
+  z-index: 30;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 3px #fff;
+  opacity: 0;
+  border-radius: 0;
+}
+.monitor-flash-ring.on {
+  animation: monitor-flash-border 0.35s ease-out forwards;
 }
 
 .monitor-scroll {
@@ -784,6 +877,7 @@ body.track-size-s .clip.selected {
   pointer-events: none;
 }
 .kf-graphs[hidden] { display: none; }
+.kf-graphs.source-hidden { display: none !important; }
 .kf-graph {
   pointer-events: auto;
   flex: 0 0 auto;
@@ -1122,6 +1216,35 @@ body.track-size-s .clip.selected {
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+.transport-end {
+  display: flex;
+  align-items: center;
+  justify-self: end;
+  gap: 10px;
+  min-width: 0;
+}
+
+.transport-end .btn.icon {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+}
+
+.transport-end .btn.icon svg {
+  display: block;
+  flex-shrink: 0;
+}
+
+.transport-end .btn.icon:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .transport-btns .btn.icon {

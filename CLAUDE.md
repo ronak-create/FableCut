@@ -368,13 +368,29 @@ glitch (RGB split + jitter) · pop (overshoot scale — stickers/captions).
   Right-click an empty track header → **Remove track** (disabled if the lane has
   clips or is the last video/audio track).
 - **Audio tracks A1–An** hold both standalone audio files *and* linked companions
-  for imported video. Dropping a video creates the picture on a V track
-  (`props.volume: 0` so it isn't doubled) plus one `kind:"audio"` clip per source
-  channel on consecutive A-tracks that share a `linkGroup` (and the same
-  `mediaId` / timing). Each stem is mono-isolated then placed with `pan` (defaults
-  preserve stereo: L `−1`, R `+1`). Standalone music/SFX also live on A-tracks. Linked partners
-  move/trim/split together — edit timing on any member of the group; do not treat
-  A-tracks as music-only.
+ for imported video. Dropping a video creates the picture on a V track
+ (`props.volume: 0` so it isn't doubled) plus one `kind:"audio"` clip per source
+ channel on consecutive A-tracks that share a `linkGroup` (and the same
+ `mediaId` / timing). Each stem is mono-isolated then placed with `pan` (defaults
+ preserve stereo: L `−1`, R `+1`). Standalone music/SFX also live on A-tracks. Linked partners
+ move/trim/split together — edit timing on any member of the group; do not treat
+ A-tracks as music-only.
+- **Track enable/disable** — the track-header toggle persists to `disabledTracks`.
+  Disabled tracks are omitted from preview and export, and timeline edit ops
+  target enabled tracks only: split at playhead (S), insert ripple (`,`),
+  ripple delete (⇧Del), close gap (⇧G), split/trim at IN/OUT (T / ⇧T) and
+  replace punches all skip disabled lanes. (Ripple delete still *deletes* the
+  selection wherever it sits — clips on disabled tracks are removed too,
+  linked partners included; enablement only controls which later clips shift.)
+  Insert/replace *placement* follows
+  the same rule, source-patching style: a disabled picture lane (V1) skips the
+  picture, disabled stem lanes (A1/A2…) skip those stems; when every target
+  lane is disabled the op no-ops with a toast.
+- **Sync lock** — timeline edits that shift clips (insert ripple, ripple delete,
+  close gap, replace-with-duration-change) target **enabled** tracks only, but
+  linked AV partners always ride along even on a disabled track, so a linked
+  group never desyncs (on reload `relinkClips` rebuilds `linkGroup` from matching
+  start/in/duration — a desynced pair would silently unlink).
 - Media is `fit`-ted to the canvas (default "contain"), then crop → scale/x/y/
   rotation → flips apply.
 - `props` keys are all optional — missing keys get the defaults above.
@@ -387,6 +403,10 @@ glitch (RGB split + jitter) · pop (overshoot scale — stickers/captions).
   `transitionIn: {type:"fade"}`.
 - A cut/split is just two clips: first with `duration: t`, second with
   `start: +t, in: +t×speed, duration: rest`.
+- **Jump to cut** — `↑` / `↓` move the playhead to the previous / next clip
+  In or Out. Selection first (that clip’s start then end); no selection walks
+  enabled-track cuts. Source monitor: 0 / In / Out / duration. Does not change
+  `project.json`.
 - `bgRemove` and `chromaKey` can combine with all filters; heavy pixel work is
   automatic (only runs when those props are set).
 
@@ -484,6 +504,28 @@ obvious cuts were missed, raise it if motion is being misread as cuts.
 
 **Assemble a rough cut**: clips back-to-back on V1; each `start` = running sum
 of previous durations.
+
+**Insert / replace at playhead (3-point editing)**: load media into the Source
+monitor (double-click a bin item or timeline clip), mark the window with I/O,
+then `,` (insert icon) splits straddling clips on enabled tracks at the
+playhead, ripples everything later to the right by the window length, and drops
+the Source window in — video brings its linked audio stems. `.` (replace icon)
+overwrites instead: punches the placement tracks (V1 + linked stems) over
+[playhead, +window) with no ripple. When Source was loaded *from* a timeline
+clip, `.` instead retargets that clip's In/Out (and its linked stems) and
+ripples later clips on its tracks if the duration changed.
+
+**Ripple delete**: select clip(s), then ⇧Del or the timeline-toolbar **Ripple
+delete** — removes the selection (linked partners included) and pulls later
+clips left on each enabled track to close the gap. Plain Del lifts (leaves a
+gap). Sync lock applies: linked partners on disabled tracks move with the
+ripple. An unselected clip that merely *overlaps* the deleted range stays put —
+its overlap ends up bridging the shifted-in clip, so a crossfade across the cut
+survives.
+
+**Jump to cut**: select a clip, then ↑ / ↓ — playhead snaps to its In, then
+Out (further taps walk neighboring cuts). No selection → previous / next cut
+on enabled tracks. Source monitor: same keys jump among 0 / In / Out / duration.
 
 **Title card**: `{kind:"text", mediaId:null, track:"V2", props:{text,fontSize,color}}`.
 
