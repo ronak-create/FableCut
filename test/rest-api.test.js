@@ -164,6 +164,34 @@ test("GET /api/media lists the media folder", async (t) => {
   assert.ok(Array.isArray(await res.json()));
 });
 
+test("GET /api/video-index serves safe H.264 sample ranges for VideoDecoder", async (t) => {
+  const dir = makeDataDir(t);
+  fs.mkdirSync(path.join(dir, "media"), { recursive: true });
+  fs.copyFileSync(path.join(__dirname, "fixtures", "video-index.mp4"),
+    path.join(dir, "media", "indexed.mp4"));
+  const { base } = await startServer(t, dir);
+  const res = await fetch(base + "/api/video-index?src=" +
+    encodeURIComponent("/media/indexed.mp4"));
+  assert.equal(res.status, 200);
+  const index = await res.json();
+  assert.equal(index.src, "/media/indexed.mp4");
+  assert.equal(index.width, 32);
+  assert.equal(index.height, 24);
+  assert.equal(index.samples.length, 2);
+  assert.match(index.codec, /^avc1\./);
+
+  const sample = index.samples[0];
+  const bytes = await fetch(base + index.src, {
+    headers: { Range: `bytes=${sample.offset}-${sample.offset + sample.size - 1}` },
+  });
+  assert.equal(bytes.status, 206);
+  assert.equal((await bytes.arrayBuffer()).byteLength, sample.size);
+
+  const traversal = await fetch(base + "/api/video-index?src=" +
+    encodeURIComponent("/media/../../server.js"));
+  assert.equal(traversal.status, 404);
+});
+
 test("GET /api/export/ffmpeg reports encoder availability", async (t) => {
   const { base } = await boot(t);
   const body = await (await fetch(base + "/api/export/ffmpeg")).json();

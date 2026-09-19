@@ -202,11 +202,15 @@ same time.
   encodes **JPEG frames** via an **encoding profile** from
   `encoding-profiles.json` (keeps rendering if you switch tabs). Encode and
   upload run ahead of the compositor so a fast timeline is not stalled by
-  `toBlob`. The Export dialog has a profile selector; pin a project default
-  with `encodeProfile` in `project.json`
-- WebCodecs export: the browser HW-encodes Annex-B H.264; the server
-  stream-copies and muxes audio. Faster uploads; bitrate/VBR-CBR in the
-  Export dialog. Unavailable while an export frame is set (use Fast)
+  `toBlob`. H.264 MP4 sources use `VideoDecoder` when indexed. The Export
+  dialog has a profile selector; pin a project default with `encodeProfile`
+  in `project.json`
+- WebCodecs export: H.264 MP4 sources are demuxed without dependencies and
+  decoded directly with browser `VideoDecoder`; overlay clips decode
+  concurrently. The browser then HW-encodes Annex-B H.264 and the server
+  stream-copies and muxes audio. Unsupported source formats use the synchronized
+  HTML-video fallback. Bitrate/VBR-CBR are in the Export dialog. Unavailable
+  while an export frame is set (use Fast)
 - Realtime MediaRecorder fallback when ffmpeg or WebCodecs isn't available
 - Export **Range** dropdown: Entire timeline or IN–OUT (defaults to IN–OUT when
   markers are set). Effective IN/OUT export bounds are clamped to `projDur()`.
