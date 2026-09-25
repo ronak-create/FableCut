@@ -444,6 +444,10 @@ obvious cuts were missed, raise it if motion is being misread as cuts.
   Append `?force=1` to overwrite unconditionally. Writes are atomic (tmp file +
   rename), so a crashed write never corrupts the file.
 - `GET  /api/media`   — list files in ./media (name, src, size)
+- `GET  /api/video-index?src=/media/foo.mp4` — H.264 MP4 sample table used by
+  direct browser `VideoDecoder` export (codec config, timestamps, durations,
+  keyframe flags and byte ranges). Sample bytes come from the normal
+  Range-capable `/media/` URL; unsupported containers/codecs return 415.
 - `GET  /api/library?dir=sfx|elements|svg|fonts` — list library assets
 - `POST /api/upload?name=foo.mp4` — raw body saved into ./media, returns `{src}`.
   MP4/MOV/M4V uploads are auto-remuxed with `+faststart` (needs ffmpeg on PATH).
@@ -607,11 +611,16 @@ Export is user-driven (Export button → dialog). Three engines:
 1. **Fast** — browser renders each frame with the normal compositor (SVG, keys,
    AI masks), streams JPEGs + an offline WAV mix to the server; a single ffmpeg
    pass encodes them via an **encoding profile** into `./exports/`. Quality /
-   software path; keeps rendering if you switch tabs.
-2. **WebCodecs** — same frame-accurate compositor loop, but the browser’s
-   `VideoEncoder` produces Annex-B H.264 (Main 4:2:0) and the server stream-copies
-   (`-c:v copy`) while muxing the WAV. Faster uploads, less server CPU. Requires
-   Chromium-class `VideoEncoder` with `avc: { format: "annexb" }` plus ffmpeg.
+   software path; keeps rendering if you switch tabs. H.264 MP4 sources decode
+   through `VideoDecoder` when indexed (same path as WebCodecs); unsupported
+   media uses synchronized HTML video stepping.
+2. **WebCodecs** — source H.264 MP4 samples are demuxed by the server’s
+   zero-dependency sample index and decoded directly with browser `VideoDecoder`;
+   the same frame-accurate compositor then feeds `VideoEncoder`, which produces
+   Annex-B H.264 (Main 4:2:0) for server stream-copy (`-c:v copy`) while muxing
+   the WAV. This avoids realtime `HTMLVideoElement` play/seek waits and decodes
+   overlay clips concurrently. Unsupported sources fall back to synchronized
+   HTML video stepping. Requires Chromium-class WebCodecs plus ffmpeg.
    Encoding profiles do not apply (the bitstream is already encoded). No ffmpeg-style
    CRF — quality is bitrate + VBR/CBR (export dialog; remembered in localStorage).
    Optional `bitrateMode: "quantizer"` (fixed QP) exists in the spec but is rarely

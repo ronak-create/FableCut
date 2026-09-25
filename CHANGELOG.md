@@ -77,7 +77,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `currentTime` ran ahead of the presented picture.
 - `waitForPresentedFrame` no longer treats a presentation timeout (or an rvfc
   callback without `mediaTime`) as success — `hardSeekVideo` retries up to three
-  times instead of recording `currentTime` as the presented frame.
+  times instead of recording `currentTime` as the presented frame. A callback
+  that arrives without a `mediaTime` re-arms the request instead of burning the
+  attempt, and once `seeked` has fired the clock is accepted as a last resort so
+  a slow `requestVideoFrameCallback` cannot fail the whole export.
+- Export no longer re-seeks for a frame the decoder is already showing. Each
+  presented frame owns the interval until the next one, so 25 fps footage on a
+  50 fps timeline now holds for both ticks instead of pulling the following
+  picture a frame early and hard-seeking back — the case that made export crawl.
+  The source frame duration is measured from consecutive presented frames rather
+  than assumed from a frame-rate table.
 - Fast / WebCodecs export no longer throws “tainted canvases may not be exported”
   for animated SVG overlays (rasterized via a same-origin blob instead of a
   `data:` URL) or for other-origin footage that sends CORS (reload with

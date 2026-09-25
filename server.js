@@ -6,6 +6,7 @@
      • persistent project      ./project.json      (GET/PUT /api/project)
      • media library folder    ./media/            (served at /media/*, POST /api/upload,
                                                     POST /api/import-url)
+     • VideoDecoder sample index                  (GET /api/video-index)
      • live reload             GET /api/events     (SSE: event "change" for
                                                     project/media/library;
                                                     event "profiles" for
@@ -32,6 +33,7 @@ const {
   dryRunProfile,
 } = require("./encode-profiles");
 const { downloadImportUrl, maybeFaststart } = require("./import-url");
+const { parseVideoIndex } = require("./video-index");
 
 const {
   APP_DIR, DATA_DIR, MEDIA_DIR, EXPORTS_DIR, ANALYSIS_DIR, LIBRARY_DIR,
@@ -171,6 +173,31 @@ function run(cmd, args) {
     execFile(cmd, args, { maxBuffer: 1 << 24 }, (err, _out, stderr) =>
       err ? reject(new Error((stderr || String(err)).slice(-800))) : resolve());
   });
+}
+
+/* H.264 sample tables for browser VideoDecoder export. The index contains
+   byte ranges + PTS/durations only; encoded bytes continue to use the normal
+   Range-capable /media route. Cache until the source file changes. */
+const videoIndexCache = new Map();
+function indexedMedia(src) {
+  if (typeof src !== "string" || !src.startsWith("/media/"))
+    throw new Error("src must name an existing file under /media/");
+  const name = path.basename(decodeURIComponent(src));
+  const file = path.join(MEDIA_DIR, name);
+  if (!name || !fs.existsSync(file) || !fs.statSync(file).isFile())
+    throw new Error("src must name an existing file under /media/");
+  return { file, src: "/media/" + encodeURIComponent(name) };
+}
+function getVideoIndex(src) {
+  const { file, src: canonicalSrc } = indexedMedia(src);
+  const st = fs.statSync(file);
+  const key = `${st.size}:${st.mtimeMs}`;
+  let cached = videoIndexCache.get(file);
+  if (!cached || cached.key !== key) {
+    cached = { key, value: { ...parseVideoIndex(file), src: canonicalSrc } };
+    videoIndexCache.set(file, cached);
+  }
+  return cached.value;
 }
 
 /* Remux MP4-family uploads with `+faststart` so the moov atom leads the file —
@@ -429,6 +456,19 @@ const server = http.createServer(async (req, res) => {
         .map((f) => ({ name: f, src: "/media/" + encodeURIComponent(f), size: fs.statSync(path.join(MEDIA_DIR, f)).size }));
       sendJSON(res, 200, files);
     } catch (e) { sendJSON(res, 500, { error: String(e) }); }
+    return;
+  }
+
+  /* API: MP4 video sample index for direct browser VideoDecoder export.
+     Encoded sample bytes are fetched from the returned src with HTTP Range. */
+  if (p === "/api/video-index" && req.method === "GET") {
+    try {
+      sendJSON(res, 200, getVideoIndex(url.searchParams.get("src") || ""));
+    } catch (e) {
+      const unsupported = /supports H\.264 MP4|does not yet support|does not support|no moov box|no video track/.test(e.message || "");
+      const missing = /existing file under/.test(e.message || "");
+      sendJSON(res, missing ? 404 : unsupported ? 415 : 400, { error: String(e.message || e) });
+    }
     return;
   }
 
