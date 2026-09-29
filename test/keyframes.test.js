@@ -596,14 +596,16 @@ test("syncInspectorPlayhead: off the clip, keyframed fields lock, statics stay e
 const BACKOUT = lift(/const backOut = (\(u\) => \{[^\n]*\});/);
 const TRANS = slice("function evalProps(", "function shiftKF(");
 
-function makeTransSandbox({ W = 1280, H = 720 } = {}) {
+function makeTransSandbox({ W = 1280, H = 720, previewW = 640, previewH = 360 } = {}) {
+  const composeCanvas = { width: W, height: H };
   return new Function(
-    "DEFAULT_PROPS", "EASE", "FILTER_PRESETS", "backOut", "clamp", "els",
-    `${TRANS}\nreturn { evalProps, applyTransition, transOffsetAt };`
+    "DEFAULT_PROPS", "EASE", "FILTER_PRESETS", "backOut", "clamp", "els", "composeCanvas",
+    `${TRANS}\nreturn { evalProps, applyTransition, transOffsetAt, composeCanvas };`
   )(
     DEFAULT_PROPS, EASE, { none: {} }, BACKOUT,
     (v, a, b) => Math.min(b, Math.max(a, v)), // clamp, as in app.js
-    { preview: { width: W, height: H } },
+    { preview: { width: previewW, height: previewH } },
+    composeCanvas,
   );
 }
 
@@ -635,7 +637,10 @@ test("transOffsetAt: no transitions, or outside their windows, is zero", () => {
 });
 
 test("transOffsetAt: mirrors the compositor envelope for every transition type", () => {
-  const { evalProps, transOffsetAt } = makeTransSandbox();
+  const W = 1280, H = 720, previewW = 640, previewH = 360;
+  const { evalProps, transOffsetAt, composeCanvas } = makeTransSandbox({ W, H, previewW, previewH });
+  assert.notEqual(composeCanvas.width, previewW);
+  assert.notEqual(composeCanvas.height, previewH);
   const types = ["fade", "slide-left", "slide-right", "slide-up", "slide-down",
     "zoom", "wipe", "wipe-right", "wipe-up", "wipe-down", "iris", "spin",
     "blur", "whip", "glitch", "pop"];
@@ -653,25 +658,42 @@ test("transOffsetAt: mirrors the compositor envelope for every transition type",
       }
     }
   }
+  // slide-left/up at mid-in: easeOut(0.5) → k=0.25. Must scale with composeCanvas, not preview.
+  const k = 0.25, tIn = 10.5;
+  const slideX = transOffsetAt(transClip({
+    keyframes: undefined, transitionIn: { type: "slide-left", duration: 1 },
+  }), tIn);
+  assert.equal(slideX.x, k * W, "slide-left uses composeCanvas.width");
+  assert.notEqual(slideX.x, k * previewW, "slide-left must not use preview.width");
+  const slideY = transOffsetAt(transClip({
+    keyframes: undefined, transitionIn: { type: "slide-up", duration: 1 },
+  }), tIn);
+  assert.equal(slideY.y, k * H, "slide-up uses composeCanvas.height");
+  assert.notEqual(slideY.y, k * previewH, "slide-up must not use preview.height");
 });
 
 test("box drag during a transition: the box lands where the pointer left it", () => {
-  const { evalProps, transOffsetAt } = makeTransSandbox({ W: 1280, H: 720 });
+  const W = 1280, H = 720, previewW = 640, previewH = 360;
+  const { evalProps, transOffsetAt } = makeTransSandbox({ W, H, previewW, previewH });
   const c = transClip({ keyframes: undefined, transitionIn: { type: "slide-left", duration: 1 } });
-  const t = 10.5; // mid-transition: easeOut(0.5) → k=0.25 → envelope x = +320
+  const t = 10.5; // mid-transition: easeOut(0.5) → k=0.25 → envelope x = +W/4
   const env = transOffsetAt(c, t);
-  assert.ok(env.x > 100, "the envelope really is displacing the box");
-  // The user drags the displayed box until its center sits at canvas
+  assert.equal(env.x, 0.25 * W, "slide envelope uses composeCanvas.width");
+  assert.notEqual(env.x, 0.25 * previewW, "slide envelope must not use preview.width");
+  assert.equal(env.y, 0);
+  // The user drags the displayed box until its center sits at compose-canvas
   // (900, 500) and releases. The drag stores the resting center:
   // displayed midpoint − canvas center − envelope (app.js box branch).
-  c.props.x = Math.round(900 - 1280 / 2 - env.x);
-  c.props.y = Math.round(500 - 720 / 2 - env.y);
-  assert.ok(Math.abs(1280 / 2 + evalProps(c, t).x - 900) < 1, "displayed center x ≈ release point");
-  assert.ok(Math.abs(720 / 2 + evalProps(c, t).y - 500) < 1, "displayed center y ≈ release point");
+  c.props.x = Math.round(900 - W / 2 - env.x);
+  c.props.y = Math.round(500 - H / 2 - env.y);
+  assert.ok(Math.abs(W / 2 + evalProps(c, t).x - 900) < 1, "displayed center x ≈ release point");
+  assert.ok(Math.abs(H / 2 + evalProps(c, t).y - 500) < 1, "displayed center y ≈ release point");
+  assert.ok(Math.abs(previewW / 2 + evalProps(c, t).x - 900) > 1,
+    "preview center would miss the release point");
   // The pre-fix write (no envelope subtraction) displaced the box by the
   // envelope on the spot, and left it there for good once the transition ended.
   const buggy = transClip({ keyframes: undefined, transitionIn: { type: "slide-left", duration: 1 } });
-  buggy.props.x = Math.round(900 - 1280 / 2);
-  assert.ok(Math.abs(1280 / 2 + evalProps(buggy, t).x - 900) > 100,
+  buggy.props.x = Math.round(900 - W / 2);
+  assert.ok(Math.abs(W / 2 + evalProps(buggy, t).x - 900) > 100,
     "without the probe the box is off by the full envelope");
 });
