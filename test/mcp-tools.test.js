@@ -285,3 +285,80 @@ test("fablecut_import_media rejects http and loopback https URLs", async (t) => 
   assert.match(loop.text, /blocked/i);
   assert.equal(readProject(dir).media.length, 1, "a rejected import must not add media");
 });
+
+test("setTrack sets an audio lane's fader / pan; setProject master sets the master fader", async (t) => {
+  const { dir, mcp } = await boot(t);
+  const ok = await mcp.callTool("fablecut_patch_project", {
+    ops: [
+      { op: "setTrack", id: "A2", set: { gain: -6, pan: -0.5 } },
+      { op: "setProject", set: { master: { gain: -1.5 } } },
+    ],
+  });
+  assert.equal(ok.isError, false, ok.text);
+  const doc = readProject(dir);
+  assert.deepEqual(doc.tracks.find((x) => x.id === "A2"), { id: "A2", kind: "audio", gain: -6, pan: -0.5 });
+  assert.equal(doc.tracks.length, 7, "a project with no tracks list gets the default lanes");
+  assert.deepEqual(doc.master, { gain: -1.5 });
+
+  const { text } = await mcp.callTool("fablecut_get_project", { compact: true });
+  assert.match(text, /MIX: A2 -6dB pan:-0\.5 · master -1\.5dB/);
+
+  // 0 / null reset, out-of-range and video lanes are refused (and nothing is saved)
+  await mcp.callTool("fablecut_patch_project", { ops: [{ op: "setTrack", id: "A2", set: { gain: 0, pan: null } }] });
+  assert.deepEqual(readProject(dir).tracks.find((x) => x.id === "A2"), { id: "A2", kind: "audio" });
+  const before = readProject(dir);
+  for (const [op, re] of [
+    [{ op: "setTrack", id: "V1", set: { gain: -3 } }, /audio track/],
+    [{ op: "setTrack", id: "A1", set: { gain: 30 } }, /gain must be a number/],
+    [{ op: "setTrack", id: "A1", set: { mute: true } }, /not settable/],
+    [{ op: "setProject", set: { master: { gain: "loud" } } }, /master is \{gain\}/],
+  ]) {
+    const bad = await mcp.callTool("fablecut_patch_project", { ops: [op] });
+    assert.ok(bad.isError, JSON.stringify(op));
+    assert.match(bad.text, re);
+  }
+  assert.deepEqual(readProject(dir), before);
+});
+
+test("fablecut_normalize_audio measures with ffmpeg and sets one gain per linked group", async (t) => {
+  const { spawnSync } = require("node:child_process");
+  const has = (b) => { try { return spawnSync(b, ["-version"], { stdio: "ignore" }).status === 0; } catch { return false; } };
+  if (!has("ffmpeg") || !has("ffprobe")) { t.skip("ffmpeg / ffprobe not installed"); return; }
+  const project = seedProject({
+    media: [{ id: "m_t", name: "tone.wav", kind: "audio", src: "/media/tone.wav", duration: 4 }],
+    clips: [
+      // a stereo pair of linked stems, and a standalone clip on A3
+      { id: "c_l", mediaId: "m_t", kind: "audio", track: "A1", start: 0, in: 0, duration: 4, linkGroup: "lg1", props: { audioChannel: 0, pan: -1 } },
+      { id: "c_r", mediaId: "m_t", kind: "audio", track: "A2", start: 0, in: 0, duration: 4, linkGroup: "lg1", props: { audioChannel: 1, pan: 1 } },
+      { id: "c_s", mediaId: "m_t", kind: "audio", track: "A3", start: 0, in: 1, duration: 2, props: {} },
+      { id: "c_x", mediaId: "m_t", kind: "audio", track: "A4", start: 0, in: 0, duration: 4, locked: true, props: {} },
+    ],
+  });
+  const { dir, mcp } = await boot(t, project);
+  fs.mkdirSync(path.join(dir, "media"), { recursive: true });
+  // 1 kHz at −23 dBFS on both channels = −23 LUFS (EBU Tech 3341)
+  // (lavfi "sine" is fixed at 1/8 amplitude, so build the tone with aevalsrc)
+  const wave = "0.0707946*sin(2*PI*1000*t)"; // −23 dBFS
+  const gen = spawnSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", `aevalsrc=${wave}|${wave}:s=48000:d=4`,
+    "-c:a", "pcm_f32le", path.join(dir, "media", "tone.wav")]);
+  assert.equal(gen.status, 0, String(gen.stderr));
+
+  const res = await mcp.callTool("fablecut_normalize_audio", { clipIds: ["c_l", "c_s", "c_x"], target: -14 });
+  assert.equal(res.isError, false, res.text);
+  const doc = readProject(dir);
+  const gain = (id) => doc.clips.find((c) => c.id === id).props.gain;
+  assert.ok(Math.abs(gain("c_l") - 9) <= 0.2, `stereo pair → +9 dB, got ${gain("c_l")}`);
+  assert.equal(gain("c_r"), gain("c_l"), "linked stems share one gain");
+  assert.ok(Math.abs(gain("c_s") - 9) <= 0.2, `standalone stereo clip → +9 dB, got ${gain("c_s")}`);
+  assert.equal(gain("c_x"), undefined, "a locked clip is left alone");
+  assert.match(res.text, /c_x.*locked/);
+  assert.equal(doc.revision, 2);
+
+  const peak = await mcp.callTool("fablecut_normalize_audio", { clipIds: ["c_s"], mode: "peak", target: -1 });
+  assert.equal(peak.isError, false, peak.text);
+  const pg = readProject(dir).clips.find((c) => c.id === "c_s").props.gain;
+  assert.ok(Math.abs(pg - 22) <= 0.2, `peak −23 → −1 dBFS is +22 dB, got ${pg}`);
+
+  const miss = await mcp.callTool("fablecut_normalize_audio", { clipIds: ["nope"] });
+  assert.ok(miss.isError);
+});

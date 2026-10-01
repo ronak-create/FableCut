@@ -46,6 +46,8 @@ const TIMELINE_FIT_FILL = 0.95; // ⇧Z / Fit — clip content fills this fracti
 
 const DEFAULT_PROPS = {
   x: 0, y: 0, scale: 1, rotation: 0, opacity: 1, volume: 1, pan: 0,
+  gain: 0,                                     // clip gain, dB — applied before volume
+  channelMode: "stereo",                       // stereo | mono | left | right | swap
   speed: 1,                                    // playback rate (video/audio)
   brightness: 100, contrast: 100, saturation: 100, hue: 0,
   blur: 0, grayscale: 0, sepia: 0, invert: 0,
@@ -149,13 +151,44 @@ const EXPORT_FRAME_ASPECTS = [
   { label: "1:1 Square", w: 1, h: 1 },
 ];
 const WAVE_PEAKS_PER_SEC = 50;
+/* ── Mixer levels (dB). Clip gain is a trim before volume; track and master
+   faders sit on the buses. A fader at its floor is silence, not −60 dB. ── */
+const CLIP_GAIN_MIN = -60, CLIP_GAIN_MAX = 24;
+const FADER_DB_MIN = -60, FADER_DB_MAX = 12;
+const CHANNEL_MODES = ["stereo", "mono", "left", "right", "swap"];
+function dbToGain(db) {
+  db = +db;
+  if (!Number.isFinite(db)) return 1;
+  return db <= FADER_DB_MIN ? 0 : Math.pow(10, db / 20);
+}
+function clampFaderDb(db) { return clamp(+db || 0, FADER_DB_MIN, FADER_DB_MAX); }
+function clipGainDb(c) { return clamp(+c?.props?.gain || 0, CLIP_GAIN_MIN, CLIP_GAIN_MAX); }
+function clipChannelMode(c) {
+  const m = c?.props?.channelMode;
+  return CHANNEL_MODES.includes(m) ? m : "stereo";
+}
+function trackGainDb(id) { return clampFaderDb(TRACKS.find((t) => t.id === id)?.gain); }
+function trackPanValue(id) { return clipPan(TRACKS.find((t) => t.id === id)?.pan); }
+function masterGainDb() { return clampFaderDb(project.master?.gain); }
+/** project.master on disk: written only when off-default. */
+function normalizeMaster(raw) {
+  const gain = clampFaderDb(raw?.gain);
+  return gain ? { gain } : null;
+}
 const TRACK_IDS = new Set(TRACKS.map((t) => t.id));
 function syncTrackIds() {
   TRACK_IDS.clear();
   for (const t of TRACKS) TRACK_IDS.add(t.id);
 }
 function serializeTracks() {
-  return TRACKS.map(({ id, kind }) => ({ id, kind }));
+  // Mixer settings are written only when off-default, so untouched projects
+  // stay byte-identical.
+  return TRACKS.map(({ id, kind, gain, pan }) => {
+    const d = { id, kind };
+    if (kind === "audio" && +gain) d.gain = +gain;
+    if (kind === "audio" && +pan) d.pan = +pan;
+    return d;
+  });
 }
 function sortTracksInPlace() {
   const vids = TRACKS.filter((t) => t.kind === "video")
@@ -177,7 +210,14 @@ function applyTracksFromProject(defs) {
     return true;
   });
   TRACKS.length = 0;
-  for (const d of list) TRACKS.push(makeTrack(d.id, d.kind === "audio" ? "audio" : "video"));
+  for (const d of list) {
+    const t = makeTrack(d.id, d.kind === "audio" ? "audio" : "video");
+    if (t.kind === "audio") {
+      if (+d.gain) t.gain = clampFaderDb(d.gain);
+      if (+d.pan) t.pan = clipPan(d.pan);
+    }
+    TRACKS.push(t);
+  }
   sortTracksInPlace();
   applyTrackHeights();
 }
@@ -429,7 +469,8 @@ const project = {
   untargetedTracks: [], // track ids edits skip (split, insert, ripple, close gap…)
   exportFrame: null, // optional {x,y,w,h} delivery crop inside width×height canvas
   encodeProfile: null, // optional fast-export profile id (overrides browser setting)
-  tracks: null, // optional [{id, kind}] — null means default V3…V1 + A1…A4
+  tracks: null, // optional [{id, kind, gain?, pan?}] — null means default V3…V1 + A1…A4
+  master: null, // optional {gain} — master bus fader (dB)
   panSchema: 1, // 1 = pan-aware; gates one-time L/R stem migration on load
 };
 /** Sole runtime FPS source — always the loaded project’s `fps`. */
@@ -547,6 +588,7 @@ function syncTrackDisabledUI(id) {
     row.classList.toggle("solo", solo);
     row.classList.toggle("locked", locked);
   }
+  syncMixerStrip(id);
 }
 function syncAllTrackDisabledUI() {
   for (const t of TRACKS) syncTrackDisabledUI(t.id);
@@ -613,7 +655,7 @@ const runtime = {
   googleLoaded: new Set(),   // loaded from Google Fonts (the font picker lists them)
   fontReq: new Map(),   // font name -> Promise<boolean> (ensureFont)
   undo: [], redo: [],
-  audio: null,          // {ctx, master, recDest, meter?, meterReady?}
+  audio: null,          // {ctx, master (sum), masterOut (fader), trackBus, recDest, meter?, meterReady?}
   saveTimer: null, pendingSync: false,
   sfxPreview: null,     // <audio> element for library sound previews
   importUrlAbort: null, // AbortController for an in-flight /api/import-url
@@ -658,6 +700,8 @@ const els = {
   sourceScrubOut: $("sourceScrubOut"), sourceScrubHead: $("sourceScrubHead"),
   btnInsert: $("btnInsert"), btnReplace: $("btnReplace"),
   vuMeter: $("vuMeter"),
+  sideTabs: $("sideTabs"),
+  mixer: $("mixer"),
   exportSetup: $("exportSetup"), engineFast: $("engineFast"), engineRealtime: $("engineRealtime"),
   exportProfileRow: $("exportProfileRow"),
   exportProfileSel: $("exportProfileSel"), exportProfileNote: $("exportProfileNote"),
@@ -1293,6 +1337,7 @@ function applyProject(data) {
     outPoint: wa.outPoint,
     exportFrame: normalizeExportFrame(data.exportFrame, data.width || 1280, data.height || 720),
     encodeProfile: data.encodeProfile || null,
+    master: normalizeMaster(data.master),
   });
   applyTracksFromProject(data.tracks);
   ensureTracksCoverClips();
@@ -1405,6 +1450,8 @@ function projectJSON() {
   const ef = getExportFrame();
   if (ef) out.exportFrame = ef;
   if (encodeProfile) out.encodeProfile = encodeProfile;
+  const master = normalizeMaster(project.master);
+  if (master) out.master = master;
   return out;
 }
 function listenSSE() {
@@ -2264,16 +2311,6 @@ function attachLinkedAudioChannels(videoClip, m, nCh) {
   }
   return out;
 }
-/** Tap one source channel into a mono gain (pan places it in the stereo field). */
-function connectIsolatedChannel(ctx, srcNode, gainNode, ch, nCh) {
-  const outputs = Math.max(2, nCh | 0, (ch | 0) + 1);
-  const splitter = ctx.createChannelSplitter(outputs);
-  srcNode.connect(splitter);
-  splitter.connect(gainNode, ch);
-  gainNode._fcSplit = splitter;
-  gainNode._fcChannel = ch;
-}
-
 function addClipFromMedia(m, trackId, at) {
   const kind = m.kind;
   trackId = trackId || defaultTrackFor(kind);
@@ -3704,6 +3741,7 @@ function buildTrackDOM() {
     els.tracks.appendChild(row);
   }
   syncAllTrackDisabledUI(); // lock / target state on the fresh headers
+  renderMixer(); // strips follow the A-track list
 }
 /* keep track headers vertically aligned with the (scrollable) track rows */
 els.timelineScroll.addEventListener("scroll", () => {
@@ -5167,8 +5205,16 @@ function renderInspector(lite) {
   }
   if (c.kind === "video" || c.kind === "audio") {
     const chLabel = audioChannelLong(c.props?.audioChannel);
+    const nt = normalizeTarget();
     html += `<div class="insp-section"><h3>Audio / Time</h3>
-      ${chLabel ? row("Channel", `<span style="opacity:.75">${chLabel}</span>`) : ""}
+      ${chLabel ? row("Channel", `<span style="opacity:.75">${chLabel}</span>`)
+        : row("Channels", `<select data-k="channelMode" title="Stereo: as recorded · Mono: fold L+R to one channel · Left / Right: use one side only · Swap: exchange L and R">${CHANNEL_MODES.map((o) =>
+          `<option value="${o}" ${o === clipChannelMode(c) ? "selected" : ""}>${o[0].toUpperCase() + o.slice(1)}</option>`).join("")}</select>`, "", "channelMode")}
+      ${row("Gain", `<input type="range" data-k="gain" min="-24" max="24" step="0.1" value="${fmtInspNum(clipGainDb(c), 0.1)}" title="Clip gain, applied before volume — Ctrl/Cmd-click: reset">
+         <span class="val" data-val="gain" data-unit=" dB">${fmtInspNum(clipGainDb(c), 0.1)} dB</span>`, "", "gain")}
+      ${row("Normalize", `<span class="insp-ctrls"><select data-norm-target title="Loudness target">${NORMALIZE_TARGETS.map((t) =>
+        `<option value="${t.id}" ${t.id === nt.id ? "selected" : ""}>${t.label}</option>`).join("")}</select>
+        <button type="button" class="btn tiny" data-norm-run title="Measure the selected clips and set their gain to hit this target (linked stems share one gain)">Apply</button></span>`)}
       ${slider("volume", 0, 2, 0.01, p.volume)}
       ${slider("pan", -1, 1, 0.01, p.pan)}
       ${slider("speed", 0.25, 4, 0.05, p.speed, "×")}
@@ -5316,6 +5362,13 @@ function renderInspector(lite) {
       scheduleSave(); renderInspector();
     });
   });
+  els.inspector.querySelector("[data-norm-target]")?.addEventListener("change", (e) => {
+    try { localStorage.setItem(NORMALIZE_KEY, e.target.value); } catch { }
+  });
+  els.inspector.querySelector("[data-norm-run]")?.addEventListener("click", () => {
+    const sel = selectedClips();
+    normalizeClips(sel.length ? sel : [c]);
+  });
   els.inspector.querySelectorAll("[data-style-open]").forEach((btn) => {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -5413,7 +5466,7 @@ function syncInspectorOffClip(c) {
     if (input === active) continue; // don't yank focus mid-edit
     input.disabled = locked || (ANIMATABLE.includes(k) && off && !!(c.keyframes?.[k]?.length));
   }
-  for (const btn of els.inspector.querySelectorAll("[data-kfclear], [data-action], [data-style-open], [data-media-open]"))
+  for (const btn of els.inspector.querySelectorAll("[data-kfclear], [data-action], [data-style-open], [data-media-open], [data-norm-run]"))
     btn.disabled = locked;
   for (const btn of els.inspector.querySelectorAll("[data-kf]")) {
     btn.disabled = off || locked;
@@ -6349,85 +6402,163 @@ function getClipEl(c) {
 function releaseClipEl(id) {
   const el = runtime.clipEls.get(id);
   if (el) { try { el.pause(); el.src = ""; } catch { } runtime.clipEls.delete(id); }
-  const g = runtime.clipGain.get(id);
-  if (g) {
-    const out = g._fcOut || g;
-    try { out.disconnect(); } catch {}
-    out._fcBus = null;
-    if (g._fcPanner && g._fcPanner !== out) { try { g._fcPanner.disconnect(); } catch {} }
-    try { g.disconnect(); } catch {}
-    if (g._fcSplit) { try { g._fcSplit.disconnect(); } catch {} }
-    if (g._fcSrc) { try { g._fcSrc.disconnect(); } catch {} }
-    g._fcOut = g._fcPanner = g._fcSplit = g._fcSrc = null;
+  const chain = runtime.clipGain.get(id);
+  if (chain) {
+    disposeClipChain(chain);
     runtime.clipGain.delete(id);
   }
 }
-/** Configure an A-track bus so stereo panner output stays L/R through the meter. */
+
+/* ═══ Audio mixer — one graph for preview and export ═══
+   clip:   src → [channel routing] → trim (clip gain) → vol (volume, fades,
+           keyframes) → pan ─→ its A-track bus (V-track audio → master sum)
+   track:  bus (fader) → pan ─→ meter worklet input, or the master sum
+   master: sum → masterOut (fader) → speakers + recorder
+   Preview (AudioContext) and the export mix (OfflineAudioContext) are built
+   from these same helpers, so what plays is what renders. */
+
+/** Configure a bus so stereo panner output stays L/R through the meter. */
 function configureTrackBus(g) {
   g.channelCount = 2;
   g.channelCountMode = "explicit";
   g.channelInterpretation = "discrete";
 }
-/** Master spill bus (V-track / direct video audio) — same stereo rules as A-buses. */
+/** Master sum / fader — same stereo rules as the A-buses. */
 function configureMasterBus(g) {
   configureTrackBus(g);
+}
+/** Route `src` into `dest` per the clip's channel settings and return the
+ *  routing nodes created (for disposal). An isolated stem (audioChannel) or a
+ *  mono mode feeds `dest` one channel, so the clip's pan places it with equal
+ *  power; stereo passes through and swap crosses L/R. */
+function wireClipInput(ctx, src, dest, c, nCh) {
+  const ch = c.props?.audioChannel;
+  const mode = clipChannelMode(c);
+  const stem = Number.isInteger(ch) && ch >= 0;
+  // left/right on a mono source would pick a silent channel — play it as is.
+  const iso = stem ? ch : nCh >= 2 && mode === "left" ? 0 : nCh >= 2 && mode === "right" ? 1 : -1;
+  if (iso >= 0) {
+    try { src.channelInterpretation = "discrete"; } catch { }
+    const split = ctx.createChannelSplitter(Math.max(2, nCh | 0, iso + 1));
+    src.connect(split);
+    split.connect(dest, iso);
+    return [split];
+  }
+  if (!stem && mode === "mono") {
+    const down = ctx.createGain(); // speakers downmix: stereo → ½(L+R)
+    down.channelCount = 1;
+    down.channelCountMode = "explicit";
+    down.channelInterpretation = "speakers";
+    src.connect(down);
+    down.connect(dest);
+    return [down];
+  }
+  if (!stem && mode === "swap" && nCh >= 2) {
+    const split = ctx.createChannelSplitter(Math.max(2, nCh | 0));
+    const merge = ctx.createChannelMerger(2);
+    src.connect(split);
+    split.connect(merge, 0, 1);
+    split.connect(merge, 1, 0);
+    merge.connect(dest);
+    return [split, merge];
+  }
+  src.connect(dest);
+  return [];
+}
+function clipWiringKey(c) { return `${c.props?.audioChannel ?? ""}|${clipChannelMode(c)}`; }
+/** One clip's chain: src → routing → trim → vol → pan. `out` goes to a bus;
+ *  vol and pan are driven per frame (preview) or by curves (export). */
+function buildClipChain(ctx, src, c, nCh) {
+  const trim = ctx.createGain();
+  const vol = ctx.createGain();
+  const chain = { ctx, src, trim, vol, pan: null, out: vol, inNodes: [], nCh, wiring: "", bus: null };
+  chain.inNodes = wireClipInput(ctx, src, trim, c, nCh);
+  chain.wiring = clipWiringKey(c);
+  trim.gain.value = dbToGain(clipGainDb(c));
+  trim.connect(vol);
+  try {
+    chain.pan = ctx.createStereoPanner();
+    vol.connect(chain.pan);
+    chain.out = chain.pan;
+  } catch { chain.pan = null; } // no StereoPanner: vol is the output
+  return chain;
+}
+/** Re-route a live chain after the clip's audioChannel / channelMode changed. */
+function rewireClipChain(chain, c) {
+  if (!chain || !chain.trim || chain.wiring === clipWiringKey(c)) return;
+  try { chain.src.disconnect(); } catch { }
+  for (const n of chain.inNodes) { try { n.disconnect(); } catch { } }
+  chain.inNodes = wireClipInput(chain.ctx, chain.src, chain.trim, c, chain.nCh);
+  chain.wiring = clipWiringKey(c);
+}
+function disposeClipChain(chain) {
+  if (!chain) return;
+  for (const n of [chain.out, chain.pan, chain.vol, chain.trim, ...(chain.inNodes || []), chain.src]) {
+    if (n) { try { n.disconnect(); } catch { } }
+  }
+  chain.bus = null;
+}
+/** An A-track bus: the GainNode is the fader, `_fcPan` its pan, `_fcOut` what
+ *  feeds the meter / master. Clips connect to the bus itself. */
+function makeTrackBus(ctx) {
+  const bus = ctx.createGain();
+  configureTrackBus(bus);
+  let pan = null;
+  try { pan = ctx.createStereoPanner(); bus.connect(pan); } catch { pan = null; }
+  bus._fcPan = pan;
+  bus._fcOut = pan || bus;
+  return bus;
+}
+function busOut(bus) { return bus._fcOut || bus; }
+/** Track buses + master sum + master fader, wired track → sum → fader. */
+function buildMixBuses(ctx, ids) {
+  const master = ctx.createGain();
+  configureMasterBus(master);
+  const masterOut = ctx.createGain();
+  configureMasterBus(masterOut);
+  master.connect(masterOut);
+  const trackBus = {};
+  for (const id of ids) {
+    trackBus[id] = makeTrackBus(ctx);
+    busOut(trackBus[id]).connect(master);
+  }
+  return { master, masterOut, trackBus };
+}
+/** Push track / master fader + pan values into a mix. `smooth` glides live
+ *  changes (no zipper noise from a dragged fader); export sets them flat. */
+function applyMixLevels(mix, smooth = false) {
+  if (!mix) return;
+  const set = (param, v) => {
+    if (smooth && mix.ctx) param.setTargetAtTime(v, mix.ctx.currentTime, 0.015);
+    else param.value = v;
+  };
+  for (const [id, bus] of Object.entries(mix.trackBus)) {
+    set(bus.gain, dbToGain(trackGainDb(id)));
+    if (bus._fcPan) set(bus._fcPan.pan, trackPanValue(id));
+  }
+  if (mix.masterOut) set(mix.masterOut.gain, dbToGain(masterGainDb()));
 }
 function ensureAudio() {
   if (runtime.audio) return runtime.audio;
   const ctx = new (window.AudioContext || window.webkitAudioContext)();
-  const master = ctx.createGain();
-  configureMasterBus(master);
-  const recDest = ctx.createMediaStreamDestination();
   const ids = audioTrackIds();
-  const trackBus = {};
-  for (const id of ids) {
-    trackBus[id] = ctx.createGain();
-    configureTrackBus(trackBus[id]);
-  }
-  // Until the worklet is ready, audio-track buses and master both feed speakers.
-  master.connect(ctx.destination);
-  master.connect(recDest);
-  for (const id of Object.keys(trackBus)) {
-    trackBus[id].connect(master);
-  }
+  const mix = buildMixBuses(ctx, ids);
+  const recDest = ctx.createMediaStreamDestination();
+  // Until the meter worklet is ready, track buses feed the master sum directly.
+  mix.masterOut.connect(ctx.destination);
+  mix.masterOut.connect(recDest);
   runtime.audio = {
-    ctx, master, recDest, trackBus,
+    ctx, master: mix.master, masterOut: mix.masterOut, recDest, trackBus: mix.trackBus,
     audioTrackIds: ids.slice(),
     meter: null, meterReady: false,
   };
+  applyMixLevels(runtime.audio);
   installMeterWorklet(runtime.audio).catch(() => {});
   for (const [id, el] of runtime.clipEls) {
     const c = getClip(id);
     if (c) hookAudio(c, el);
   }
   return runtime.audio;
-}
-/** Route `src → gain → (optional channel split) → stereoPanner → bus`.
- * When `ch` is set, only that source channel feeds the gain (mono); pan places
- * it in the stereo field. Returns split node when used (for dispose). */
-function connectChannelIsolated(ctx, src, g, ch, nCh) {
-  if (Number.isInteger(ch) && ch >= 0) {
-    connectIsolatedChannel(ctx, src, g, ch, nCh);
-    return { split: g._fcSplit };
-  }
-  src.connect(g);
-  return { split: null };
-}
-/** Gain → StereoPanner; panner becomes `_fcOut` for routing.
- * Falls back to gain-as-out when StereoPannerNode is unavailable.
- * Keep default `speakers` interpretation — `discrete` leaves mono on L at pan 0. */
-function attachClipPanner(ctx, g) {
-  try {
-    const panner = ctx.createStereoPanner();
-    g.connect(panner);
-    g._fcPanner = panner;
-    g._fcOut = panner;
-    return panner;
-  } catch {
-    g._fcPanner = null;
-    g._fcOut = g;
-    return null;
-  }
 }
 /** Create missing A-track buses and rebuild the meter when the track list changes. */
 function syncAudioGraphTracks() {
@@ -6438,12 +6569,13 @@ function syncAudioGraphTracks() {
   // Drop buses for removed A-tracks (independent of meter state).
   for (const id of Object.keys(audio.trackBus)) {
     if (idSet.has(id)) continue;
-    try { audio.trackBus[id].disconnect(); } catch { }
+    const bus = audio.trackBus[id];
+    try { busOut(bus).disconnect(); } catch { }
+    try { bus.disconnect(); } catch { }
     delete audio.trackBus[id];
   }
   for (const id of ids) {
-    if (!audio.trackBus[id]) audio.trackBus[id] = audio.ctx.createGain();
-    configureTrackBus(audio.trackBus[id]);
+    if (!audio.trackBus[id]) audio.trackBus[id] = makeTrackBus(audio.ctx);
   }
   audio.audioTrackIds = ids.slice();
   // Tear down meter so installMeterWorklet can rebuild with the new input count.
@@ -6457,12 +6589,13 @@ function syncAudioGraphTracks() {
   meterState._reloadMeter = true;
   // Always wire current buses → master so re-added tracks stay audible if meter install fails.
   for (const id of ids) {
-    const g = audio.trackBus[id];
-    try { g.disconnect(); } catch { }
-    try { g.connect(audio.master); } catch { }
+    const out = busOut(audio.trackBus[id]);
+    try { out.disconnect(); } catch { }
+    try { out.connect(audio.master); } catch { }
   }
+  applyMixLevels(audio);
   installMeterWorklet(audio).catch(() => {});
-  // Re-route clip gains onto (possibly new) buses
+  // Re-route clip chains onto (possibly new) buses
   for (const c of project.clips) {
     if (c.kind === "audio" || c.kind === "video") routeClipGain(c);
   }
@@ -6470,42 +6603,315 @@ function syncAudioGraphTracks() {
 function hookAudio(c, el) {
   if (!runtime.audio || runtime.clipGain.has(c.id)) return;
   if (c.kind !== "video" && c.kind !== "audio") return;
+  const ctx = runtime.audio.ctx;
+  // createMediaElementSource irreversibly diverts element audio into the
+  // graph — register a stub first so releaseClipEl can always tear it down
+  // even if building the chain throws.
+  let src;
+  try { src = ctx.createMediaElementSource(el); } catch { return; }
+  runtime.clipGain.set(c.id, { src, inNodes: [] });
   try {
-    const ctx = runtime.audio.ctx;
-    // createMediaElementSource irreversibly diverts element audio into the
-    // graph — register the gain first so releaseClipEl can always tear it down
-    // even if a later step throws.
-    const src = ctx.createMediaElementSource(el);
-    const g = ctx.createGain();
-    g._fcSrc = src;
-    runtime.clipGain.set(c.id, g);
+    const m = getMedia(c.mediaId);
     const ch = c.props?.audioChannel;
-    if (Number.isInteger(ch) && ch >= 0) {
-      const m = getMedia(c.mediaId);
-      const nCh = Math.max(m?.channels || 0, ch + 1, 2);
-      try { src.channelInterpretation = "discrete"; } catch { }
-      connectChannelIsolated(ctx, src, g, ch, nCh);
-    } else {
-      src.connect(g);
-    }
-    attachClipPanner(ctx, g); // degrades to gain-as-out if StereoPanner fails
+    const nCh = Math.max(m?.channels > 0 ? m.channels : 2, Number.isInteger(ch) ? ch + 1 : 0);
+    runtime.clipGain.set(c.id, buildClipChain(ctx, src, c, nCh));
     routeClipGain(c);
-  } catch {
-    // Element source was created but graph setup failed — keep the map entry
-    // so a later releaseClipEl can disconnect whatever did get wired.
+  } catch { }
+}
+/** Reconnect a clip's chain to the correct track bus (or master for video tracks). */
+function routeClipGain(c) {
+  const chain = runtime.clipGain.get(c.id);
+  if (!chain?.out || !runtime.audio) return;
+  const bus = runtime.audio.trackBus[c.track] || runtime.audio.master;
+  if (chain.bus === bus) return;
+  try { chain.out.disconnect(); } catch { }
+  chain.bus = null;
+  chain.out.connect(bus);
+  chain.bus = bus;
+}
+/** Drive a live clip chain from the clip's evaluated props at this frame. */
+function driveClipChain(chain, c, p) {
+  if (!chain?.vol) return;
+  // The element may have been hooked before its channel count was probed.
+  const nCh = getMedia(c.mediaId)?.channels;
+  if (nCh > 0 && nCh !== chain.nCh && !Number.isInteger(c.props?.audioChannel)) {
+    chain.nCh = nCh;
+    chain.wiring = "";
+  }
+  rewireClipChain(chain, c);
+  chain.trim.gain.value = dbToGain(clipGainDb(c));
+  chain.vol.gain.value = clamp(+p.volume || 0, 0, 4);
+  if (chain.pan) chain.pan.pan.value = clipPan(p.pan);
+}
+function muteClipChain(chain) {
+  if (chain?.vol) chain.vol.gain.value = 0;
+}
+
+/* ── Normalize: measure what each clip feeds its gain stage over its source
+   window (loudness.js — same math as fablecut_normalize_audio) and set clip
+   gain to hit the target. Linked stems are measured together and share one
+   gain, so a stereo pair stays balanced. Volume keyframes are left alone. ── */
+const NORMALIZE_TARGETS = [
+  { id: "lufs-14", label: "−14 LUFS (streaming)", mode: "lufs", value: -14 },
+  { id: "lufs-16", label: "−16 LUFS (podcast)", mode: "lufs", value: -16 },
+  { id: "lufs-23", label: "−23 LUFS (broadcast)", mode: "lufs", value: -23 },
+  { id: "peak-1", label: "−1 dBFS peak", mode: "peak", value: -1 },
+];
+const NORMALIZE_KEY = "fablecut-normalize-target";
+function normalizeTarget() {
+  let id = null;
+  try { id = localStorage.getItem(NORMALIZE_KEY); } catch { }
+  return NORMALIZE_TARGETS.find((t) => t.id === id) || NORMALIZE_TARGETS[0];
+}
+/** Clips that actually sound for this selection: a linked group's audio stems
+ *  (its picture is muted), or the clip itself. One array per gain decision. */
+function normalizeGroups(clips) {
+  const groups = new Map();
+  for (const c of withLinked(clips)) {
+    if (c.kind !== "audio" && c.kind !== "video") continue;
+    const key = c.linkGroup || c.linkedId && [c.id, c.linkedId].sort().join("|") || c.id;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(c);
+  }
+  const out = [];
+  for (const list of groups.values()) {
+    const stems = list.filter((c) => c.kind === "audio");
+    out.push(stems.length ? stems : list);
+  }
+  return out;
+}
+/** Integrated loudness + sample peak of a group of clips, played together. */
+async function measureClipGroup(clips) {
+  const chans = [];
+  let sr = 0;
+  for (const c of clips) {
+    const m = getMedia(c.mediaId);
+    if (!m) continue;
+    const buf = await getAudioBuffer(m);
+    sr = sr || buf.sampleRate;
+    const a = clamp(Math.floor(c.in * buf.sampleRate), 0, buf.length);
+    const b = clamp(Math.ceil(mediaTimeAt(c, c.start + c.duration) * buf.sampleRate), a, buf.length);
+    const src = [];
+    for (let ch = 0; ch < buf.numberOfChannels; ch++) src.push(buf.getChannelData(ch).subarray(a, b));
+    chans.push(...FableCutLoudness.routeChannels(src, c.props || {}));
+  }
+  if (!chans.length) return null;
+  const n = Math.min(...chans.map((x) => x.length));
+  return FableCutLoudness.measure(chans.map((x) => x.subarray(0, n)), sr);
+}
+async function normalizeClips(clips, target = normalizeTarget()) {
+  if (typeof FableCutLoudness === "undefined") { toast("Loudness module missing — reload the editor"); return; }
+  const groups = normalizeGroups(clips).filter((g) => !g.some(isGroupLocked));
+  if (!groups.length) { toast("Select an audio or video clip to normalize"); return; }
+  toast(`Measuring ${groups.length} clip${groups.length > 1 ? "s" : ""}…`);
+  const results = [];
+  for (const g of groups) {
+    try { results.push({ g, m: await measureClipGroup(g) }); } catch { results.push({ g, m: null }); }
+  }
+  pushUndo();
+  let done = 0, silent = 0;
+  for (const { g, m } of results) {
+    const db = m && FableCutLoudness.normalizeGainDb(m, target);
+    if (db == null) { silent++; continue; }
+    const gain = Math.round(clamp(db, CLIP_GAIN_MIN, CLIP_GAIN_MAX) * 10) / 10;
+    for (const c of g) { if (getClip(c.id)) c.props.gain = gain; }
+    done++;
+  }
+  scheduleSave();
+  renderInspector();
+  refreshAudioHold();
+  const what = done === 1 && results.length === 1
+    ? `gain ${fmtDb(results[0].g[0].props.gain)}` : `${done} clip${done === 1 ? "" : "s"}`;
+  toast(`Normalized to ${target.label}: ${what}${silent ? ` · ${silent} silent, skipped` : ""}`);
+}
+function fmtDb(db) {
+  if (!Number.isFinite(db) || db <= FADER_DB_MIN) return "−∞ dB";
+  const v = Math.round(db * 10) / 10;
+  return (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v).toFixed(1) + " dB";
+}
+
+/* ── Mixer (side-panel tab): a strip per A-track — fader, pan, mute, solo,
+   meter — plus the master fader. Faders live on project.tracks[].gain/pan and
+   project.master.gain; meters read the same ballistics as the monitor VU. ── */
+const SIDE_TAB_KEY = "fablecut-side-tab";
+const MIXER_MASTER = "master";
+const mixerState = { open: false, strips: {} };
+/* Console-style taper: unity sits at 3/4 of the throw, the bottom is −∞. */
+const FADER_TAPER = [[0, FADER_DB_MIN], [0.25, -30], [0.5, -12], [0.75, 0], [1, FADER_DB_MAX]];
+function faderPosToDb(pos) {
+  pos = clamp(+pos || 0, 0, 1);
+  for (let i = 1; i < FADER_TAPER.length; i++) {
+    const [p1, d1] = FADER_TAPER[i], [p0, d0] = FADER_TAPER[i - 1];
+    if (pos <= p1) return d0 + (d1 - d0) * (pos - p0) / (p1 - p0);
+  }
+  return FADER_DB_MAX;
+}
+function faderDbToPos(db) {
+  db = clampFaderDb(db);
+  for (let i = 1; i < FADER_TAPER.length; i++) {
+    const [p1, d1] = FADER_TAPER[i], [p0, d0] = FADER_TAPER[i - 1];
+    if (db <= d1) return p0 + (p1 - p0) * (db - d0) / (d1 - d0);
+  }
+  return 1;
+}
+function fmtPan(v) {
+  const n = Math.round(clipPan(v) * 100);
+  return n === 0 ? "C" : n < 0 ? `L${-n}` : `R${n}`;
+}
+/** Parse a typed fader value: "-6", "+3.5 dB", "-inf". */
+function parseDbInput(s) {
+  const t = String(s).trim().toLowerCase().replace("−", "-");
+  if (/^-?∞|^-?inf/.test(t)) return FADER_DB_MIN;
+  const v = parseFloat(t);
+  return Number.isFinite(v) ? clampFaderDb(v) : null;
+}
+function setSideTab(tab) {
+  const mixer = tab === "mixer";
+  mixerState.open = mixer;
+  for (const b of els.sideTabs.querySelectorAll("[data-side]"))
+    b.classList.toggle("on", b.dataset.side === tab);
+  els.inspector.classList.toggle("hidden", mixer);
+  els.mixer.classList.toggle("hidden", !mixer);
+  try { localStorage.setItem(SIDE_TAB_KEY, tab); } catch { }
+  if (mixer) renderMixer();
+  else renderInspector();
+}
+/** Write a track's fader / pan, push it into the live graph, persist. */
+function setTrackMix(id, { gain, pan } = {}) {
+  const t = TRACKS.find((x) => x.id === id && x.kind === "audio");
+  if (!t) return;
+  if (gain !== undefined) { const g = Math.round(clampFaderDb(gain) * 10) / 10; if (g) t.gain = g; else delete t.gain; }
+  if (pan !== undefined) { const p = clipPan(pan); if (p) t.pan = p; else delete t.pan; }
+  project.tracks = serializeTracks();
+  if (runtime.audio) applyMixLevels(runtime.audio, true);
+  scheduleSave();
+  syncMixerStrip(id);
+}
+function setMasterGain(db) {
+  project.master = normalizeMaster({ gain: Math.round(clampFaderDb(db) * 10) / 10 });
+  if (runtime.audio) applyMixLevels(runtime.audio, true);
+  scheduleSave();
+  syncMixerStrip(MIXER_MASTER);
+}
+function mixerStripDb(id) { return id === MIXER_MASTER ? masterGainDb() : trackGainDb(id); }
+function renderMixer() {
+  if (!mixerState.open || !els.mixer) return;
+  const root = els.mixer;
+  root.innerHTML = "";
+  mixerState.strips = {};
+  const row = document.createElement("div");
+  row.className = "mixer-strips";
+  const strip = (id, label, color, isMaster) => {
+    const s = document.createElement("div");
+    s.className = "mix-strip" + (isMaster ? " master" : "");
+    s.dataset.strip = id;
+    if (color) s.style.setProperty("--strip-color", color);
+    s.innerHTML = `
+      <div class="mix-name" title="${isMaster ? "Master bus — everything you hear and export" : `Track ${id}`}">${label}</div>
+      ${isMaster ? `<div class="mix-pan-row mix-lufs" title="Momentary loudness of the mix (post-fader)">— LUFS</div>`
+        : `<div class="mix-pan-row"><input type="range" class="mix-pan" min="-1" max="1" step="0.01" title="Track pan — double-click: center"><span class="mix-pan-val"></span></div>`}
+      <div class="mix-body">
+        <canvas class="mix-meter"></canvas>
+        <input type="range" class="mix-fader" min="0" max="1" step="0.001" title="${isMaster ? "Master" : "Track"} fader — double-click: 0 dB">
+      </div>
+      <input type="text" class="mix-db" spellcheck="false" title="Type a level in dB (e.g. -6, +2, -inf)">
+      ${isMaster ? "" : `<div class="mix-btns"><button type="button" class="mix-m" title="Mute (track output on/off)">M</button><button type="button" class="mix-s" title="Solo">S</button></div>`}`;
+    const fader = s.querySelector(".mix-fader");
+    const dbIn = s.querySelector(".mix-db");
+    const setDb = (db) => isMaster ? setMasterGain(db) : setTrackMix(id, { gain: db });
+    fader.addEventListener("input", () => setDb(faderPosToDb(fader.value)));
+    fader.addEventListener("dblclick", () => setDb(0));
+    dbIn.addEventListener("change", () => {
+      const v = parseDbInput(dbIn.value);
+      if (v == null) syncMixerStrip(id); else setDb(v);
+    });
+    dbIn.addEventListener("keydown", (e) => { e.stopPropagation(); if (e.key === "Enter") dbIn.blur(); });
+    if (!isMaster) {
+      const pan = s.querySelector(".mix-pan");
+      pan.addEventListener("input", () => setTrackMix(id, { pan: +pan.value }));
+      pan.addEventListener("dblclick", () => setTrackMix(id, { pan: 0 }));
+      s.querySelector(".mix-m").addEventListener("click", () => toggleTrackEnabled(id));
+      s.querySelector(".mix-s").addEventListener("click", () => toggleTrackSolo(id));
+    }
+    row.appendChild(s);
+    const cv = s.querySelector(".mix-meter");
+    mixerState.strips[id] = { el: s, cv, ctx: cv.getContext("2d"), w: 0, h: 0, master: isMaster };
+  };
+  for (const t of TRACKS) if (t.kind === "audio") strip(t.id, t.id, t.color, false);
+  strip(MIXER_MASTER, "Master", null, true);
+  root.appendChild(row);
+  for (const id of Object.keys(mixerState.strips)) syncMixerStrip(id);
+  sizeMixerMeters();
+}
+/** Size meter canvases to their laid-out box (device pixels). */
+function sizeMixerMeters() {
+  const dpr = window.devicePixelRatio || 1;
+  for (const st of Object.values(mixerState.strips)) {
+    const w = st.cv.clientWidth, h = st.cv.clientHeight;
+    if (!w || !h || (st.w === w && st.h === h)) continue;
+    st.w = w; st.h = h;
+    st.cv.width = Math.round(w * dpr);
+    st.cv.height = Math.round(h * dpr);
+    st.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  paintMixerMeters();
+}
+function syncMixerStrip(id) {
+  const st = mixerState.strips[id];
+  if (!st) return;
+  const s = st.el;
+  const db = mixerStripDb(id);
+  const fader = s.querySelector(".mix-fader");
+  // Leave a fader being dragged alone (the taper round-trip would nudge it).
+  if (document.activeElement !== fader || Math.abs(+fader.value - faderDbToPos(db)) > 0.002) fader.value = faderDbToPos(db);
+  const dbIn = s.querySelector(".mix-db");
+  if (document.activeElement !== dbIn) dbIn.value = fmtDb(db);
+  if (st.master) return;
+  const pan = s.querySelector(".mix-pan");
+  pan.value = trackPanValue(id);
+  s.querySelector(".mix-pan-val").textContent = fmtPan(trackPanValue(id));
+  const on = isTrackEnabled(id), solo = state.soloId === id;
+  s.classList.toggle("muted", !on);
+  s.querySelector(".mix-m").classList.toggle("on", !on);
+  s.querySelector(".mix-m").setAttribute("aria-pressed", on ? "false" : "true");
+  s.querySelector(".mix-s").classList.toggle("on", solo);
+  s.querySelector(".mix-s").setAttribute("aria-pressed", solo ? "true" : "false");
+}
+function paintMixerBar(ctx, x, w, h, db, holdDb) {
+  const frac = (v) => clamp((v - METER_DB_MIN) / (METER_DB_MAX - METER_DB_MIN), 0, 1);
+  ctx.fillStyle = "#2a2a33";
+  ctx.fillRect(x, 0, w, h);
+  const f = frac(db);
+  if (f > 0) {
+    const g = ctx.createLinearGradient(0, h, 0, 0);
+    g.addColorStop(0, "#3dd68c"); g.addColorStop(0.6, "#3dd68c");
+    g.addColorStop(0.75, "#f0c14a"); g.addColorStop(0.9, "#e5484d");
+    ctx.fillStyle = g;
+    ctx.fillRect(x, h * (1 - f), w, h * f);
+  }
+  const hf = frac(holdDb);
+  if (hf > 0 && f > 0) {
+    ctx.fillStyle = hf > 0.9 ? "#e5484d" : "#d7d7dc";
+    ctx.fillRect(x, Math.max(0, h * (1 - hf) - 1), w, 2);
   }
 }
-/** Reconnect a clip's gain to the correct track bus (or master for video tracks). */
-function routeClipGain(c) {
-  const g = runtime.clipGain.get(c.id);
-  if (!g || !runtime.audio) return;
-  const bus = runtime.audio.trackBus[c.track] || runtime.audio.master;
-  const out = g._fcOut || g;
-  if (out._fcBus === bus) return;
-  try { out.disconnect(); } catch {}
-  out._fcBus = null;
-  out.connect(bus);
-  out._fcBus = bus;
+function paintMixerMeters() {
+  for (const [id, st] of Object.entries(mixerState.strips)) {
+    if (!st.w || !st.h) continue;
+    const { ctx, w, h } = st;
+    ctx.clearRect(0, 0, w, h);
+    if (st.master) {
+      const m = meterState.master, half = (w - 2) / 2;
+      paintMixerBar(ctx, 0, half, h, m.dispL, m.peakHoldL);
+      paintMixerBar(ctx, half + 2, half, h, m.dispR, m.peakHoldR);
+      const lufs = st.el.querySelector(".mix-lufs");
+      const playing = state.playing || state.source.playing || state.audioHold;
+      const txt = playing && m.lufs > -70 ? `${m.lufs.toFixed(1)} LUFS` : "— LUFS";
+      if (lufs.textContent !== txt) lufs.textContent = txt;
+    } else {
+      paintMixerBar(ctx, 0, w, h, meterState.disp[id] ?? METER_DB_MIN, meterState.peakHold[id] ?? METER_DB_MIN);
+    }
+  }
 }
 
 /* ── Per-track meters: RMS / LUFS-M / Peak (AudioWorklet) ── */
@@ -6569,12 +6975,12 @@ function resetMasterMeterBallistics() {
 /** Tap the post-meter stereo bus for true L/R master readings (matches headphones). */
 function disposeMasterAnalysers(audio) {
   if (!audio?.masterSplit) return;
-  try { audio.meter?.disconnect(audio.masterSplit); } catch {}
+  try { audio.masterOut.disconnect(audio.masterSplit); } catch {}
   try { audio.masterSplit.disconnect(); } catch {}
   audio.masterSplit = null;
   audio.masterAnalysers = null;
 }
-/** Disconnect meter + analysers; restore buses→master→speakers fallback. */
+/** Disconnect meter + analysers; restore the master sum → fader path. */
 function teardownMeterNode(audio) {
   if (!audio) return;
   disposeMasterAnalysers(audio);
@@ -6583,8 +6989,7 @@ function teardownMeterNode(audio) {
     try { audio.meter.disconnect(); } catch {}
   }
   try { audio.master.disconnect(); } catch {}
-  try { audio.master.connect(audio.ctx.destination); } catch {}
-  try { audio.master.connect(audio.recDest); } catch {}
+  try { audio.master.connect(audio.masterOut); } catch {}
 }
 function installMasterAnalysers(audio, meterNode) {
   disposeMasterAnalysers(audio);
@@ -6599,7 +7004,7 @@ function installMasterAnalysers(audio, meterNode) {
   aR.fftSize = n;
   aL.smoothingTimeConstant = 0;
   aR.smoothingTimeConstant = 0;
-  meter.connect(split);
+  audio.masterOut.connect(split); // post-fader: the meter shows what leaves the mix
   split.connect(aL, 0);
   split.connect(aR, 1);
   audio.masterSplit = split;
@@ -6732,22 +7137,23 @@ async function installMeterWorklet(audio) {
         meterState.peak[id] = msg.peak[i] || 0;
         meterState.lufs[id] = msg.lufs[i] != null ? msg.lufs[i] : -70;
       }
-      if (msg.masterLufs != null) meterState.master.lufs = msg.masterLufs;
+      // The worklet measures the pre-fader sum; the master fader is a static
+      // gain, so post-fader loudness is that reading plus the fader.
+      if (msg.masterLufs != null)
+        meterState.master.lufs = msg.masterLufs > -70 ? msg.masterLufs + masterGainDb() : msg.masterLufs;
     };
 
-    // Connect outputs first so a wiring error never leaves the graph silent.
-    meter.connect(audio.ctx.destination);
-    meter.connect(audio.recDest);
+    // Connect the output first so a wiring error never leaves the graph silent.
+    meter.connect(audio.masterOut);
 
     // Full mix: A-buses + master spill → meter (single summed path).
     for (let i = 0; i < trackIds.length; i++) {
       const bus = audio.trackBus[trackIds[i]];
       if (!bus) continue;
-      try { bus.disconnect(); } catch {}
-      bus.connect(meter, 0, i);
+      try { busOut(bus).disconnect(); } catch {}
+      busOut(bus).connect(meter, 0, i);
     }
-    try { audio.master.disconnect(audio.ctx.destination); } catch {}
-    try { audio.master.disconnect(audio.recDest); } catch {}
+    try { audio.master.disconnect(audio.masterOut); } catch {}
     audio.master.connect(meter, 0, nAudio);
 
     installMasterAnalysers(audio, meter);
@@ -6776,12 +7182,11 @@ async function installMeterWorklet(audio) {
     for (const id of trackIds) {
       const bus = audio.trackBus[id];
       if (!bus) continue;
-      try { bus.disconnect(); } catch {}
-      try { bus.connect(audio.master); } catch {}
+      try { busOut(bus).disconnect(); } catch {}
+      try { busOut(bus).connect(audio.master); } catch {}
     }
     try { audio.master.disconnect(); } catch {}
-    try { audio.master.connect(audio.ctx.destination); } catch {}
-    try { audio.master.connect(audio.recDest); } catch {}
+    try { audio.master.connect(audio.masterOut); } catch {}
   } finally {
     meterState._loading = false;
     if (meterState._reloadMeter && !audio.meterReady) {
@@ -7011,6 +7416,7 @@ function updateMeterUI(dt) {
     const target = metering ? meterReadingDb(id) : floor;
     updateMeterChannel(id, target, dt, attack, release, now);
   }
+  if (mixerState.open) paintMixerMeters();
 }
 
 function play() {
@@ -7056,6 +7462,7 @@ function disposeAudioHoldNode(n) {
   if (n.panner) { try { n.panner.disconnect(); } catch { } }
   if (n.panners) { for (const p of n.panners) try { p.disconnect(); } catch { } }
   if (n.split) { try { n.split.disconnect(); } catch { } }
+  if (n.chain) disposeClipChain(n.chain);
 }
 function stopAudioHoldNodes() {
   audioHoldGen++;
@@ -7133,7 +7540,7 @@ function refreshAudioHold() {
 
   // Keep media-element preview silent while holding (BufferSource owns the sound).
   for (const el of runtime.clipEls.values()) { if (!el.paused) el.pause(); }
-  for (const g of runtime.clipGain.values()) g.gain.value = 0;
+  for (const chain of runtime.clipGain.values()) muteClipChain(chain);
 
   for (const c of project.clips) {
     if (c.kind !== "audio" && c.kind !== "video") continue;
@@ -7153,18 +7560,10 @@ function refreshAudioHold() {
       const src = audio.ctx.createBufferSource();
       src.buffer = slice;
       src.loop = true;
-      const g = audio.ctx.createGain();
-      g.gain.value = vol;
-      const ch = c.props?.audioChannel;
-      const nCh = Math.max(buf.numberOfChannels, Number.isInteger(ch) ? ch + 1 : 0, 2);
-      const { split } = connectChannelIsolated(audio.ctx, src, g, ch, nCh);
-      const panner = audio.ctx.createStereoPanner();
-      panner.pan.value = clipPan(p.pan);
-      g.connect(panner);
-      const bus = audio.trackBus[c.track] || audio.master;
-      panner.connect(bus);
-      const node = { src, gain: g, panner, split };
-      commitAudioHoldNode(node, gen, state.playing);
+      const chain = buildClipChain(audio.ctx, src, c, buf.numberOfChannels);
+      driveClipChain(chain, c, p);
+      chain.out.connect(audio.trackBus[c.track] || audio.master);
+      commitAudioHoldNode({ src, chain }, gen, state.playing);
     }).catch(() => { });
   }
 }
@@ -7250,17 +7649,12 @@ function syncMedia() {
       if (el.playbackRate !== eff) { try { el.playbackRate = eff; } catch {} }
       if (el.paused) el.play().catch(() => {});
       if (Math.abs(el.currentTime - mt) > 0.25 * eff) { try { el.currentTime = mt; } catch {} }
-      const vol = clamp(p.volume, 0, 4);
-      const g = runtime.clipGain.get(c.id);
-      if (g) {
-        g.gain.value = vol;
-        if (g._fcPanner) g._fcPanner.pan.value = clipPan(p.pan);
-      }
-      else el.volume = clamp(vol, 0, 1);
+      const chain = runtime.clipGain.get(c.id);
+      if (chain?.vol) driveClipChain(chain, c, p);
+      else el.volume = clamp(p.volume, 0, 1);
     } else {
       if (!el.paused) el.pause();
-      const g = runtime.clipGain.get(c.id);
-      if (g) g.gain.value = 0;
+      muteClipChain(runtime.clipGain.get(c.id));
       // Paused preview: keep decode head on the frame under the playhead.
       // Needed when clips move/trim without setTime (drag does not scrub time).
       if ((!state.playing || reversing) && enabled && c.kind === "video" && activeAt(c, t) &&
@@ -9549,8 +9943,8 @@ async function seekVideosTo(t, { queueBusy } = {}) {
         try { el.muted = el._fcPrevMuted; } catch { }
         el._fcPrevMuted = null;
       }
-      const g = runtime.clipGain.get(c.id);
-      if (g) g.gain.value = clamp(evalProps(c, t).volume, 0, 4);
+      const chain = runtime.clipGain.get(c.id);
+      if (chain?.vol) driveClipChain(chain, c, evalProps(c, t));
       continue;
     }
     const mt = mediaTimeAt(c, t);
@@ -9570,9 +9964,9 @@ async function seekVideosTo(t, { queueBusy } = {}) {
       continue;
     }
 
-    const g = runtime.clipGain.get(c.id);
-    if (g) {
-      g.gain.value = 0;
+    const chain = runtime.clipGain.get(c.id);
+    if (chain?.vol) {
+      muteClipChain(chain);
       restoreGain.push(c);
     }
 
@@ -9591,8 +9985,8 @@ async function seekVideosTo(t, { queueBusy } = {}) {
   }
   await Promise.all(waits);
   for (const c of restoreGain) {
-    const g = runtime.clipGain.get(c.id);
-    if (g) g.gain.value = clamp(evalProps(c, t).volume, 0, 4);
+    const chain = runtime.clipGain.get(c.id);
+    if (chain?.vol) driveClipChain(chain, c, evalProps(c, t));
   }
   prefetchExportVideos(t);
 }
@@ -9614,8 +10008,9 @@ function encodeWAV(buf) {
   }
   return new Blob([ab], { type: "audio/wav" });
 }
-/* Mix all audio-bearing clips offline, honoring volume keyframes + fades.
-   t0/t1 are timeline seconds (export window); mix time 0 is t0. */
+/* Mix all audio-bearing clips offline through the same graph as preview
+   (clip chains → track buses → master fader), honoring volume / pan keyframes
+   and fades. t0/t1 are timeline seconds (export window); mix time 0 is t0. */
 async function renderAudioMix(t0, t1) {
   const jobs = [];
   for (const c of project.clips) {
@@ -9630,6 +10025,9 @@ async function renderAudioMix(t0, t1) {
   if (dur <= 0) return null;
   const sr = 48000;
   const off = new OfflineAudioContext(2, Math.ceil(dur * sr) + 1, sr);
+  const mix = buildMixBuses(off, audioTrackIds());
+  applyMixLevels(mix);
+  mix.masterOut.connect(off.destination);
   let scheduled = false;
   for (const { c, buf } of sources) {
     const a = Math.max(c.start, t0), b = Math.min(c.start + c.duration, t1);
@@ -9638,9 +10036,7 @@ async function renderAudioMix(t0, t1) {
     const mixDur = b - a;
     const local0 = a - c.start;
     const src = off.createBufferSource(); src.buffer = buf;
-    const g = off.createGain();
-    const panner = off.createStereoPanner();
-    g.connect(panner);
+    const chain = buildClipChain(off, src, c, buf.numberOfChannels);
     const n = Math.max(2, Math.ceil(mixDur * 30));
     const volCurve = new Float32Array(n);
     const panCurve = new Float32Array(n);
@@ -9649,17 +10045,15 @@ async function renderAudioMix(t0, t1) {
       volCurve[i] = clamp(ep.volume, 0, 4);
       panCurve[i] = clipPan(ep.pan);
     }
-    g.gain.setValueCurveAtTime(volCurve, mixWhen, Math.max(0.01, mixDur));
-    try {
-      panner.pan.setValueCurveAtTime(panCurve, mixWhen, Math.max(0.01, mixDur));
-    } catch {
-      panner.pan.value = panCurve[0] ?? 0;
+    chain.vol.gain.setValueCurveAtTime(volCurve, mixWhen, Math.max(0.01, mixDur));
+    if (chain.pan) {
+      try {
+        chain.pan.pan.setValueCurveAtTime(panCurve, mixWhen, Math.max(0.01, mixDur));
+      } catch {
+        chain.pan.pan.value = panCurve[0] ?? 0;
+      }
     }
-    const ch = c.props?.audioChannel;
-    if (Number.isInteger(ch) && ch >= 0)
-      connectChannelIsolated(off, src, g, ch, Math.max(buf.numberOfChannels, ch + 1, 2));
-    else src.connect(g);
-    panner.connect(off.destination);
+    chain.out.connect(mix.trackBus[c.track] || mix.master);
     if (hasSpeedRamp(c)) {
       const rc = new Float32Array(n);
       for (let i = 0; i < n; i++)
@@ -10820,7 +11214,7 @@ window.addEventListener("keydown", (e) => {
   else if ((e.ctrlKey || e.metaKey) && (k === "y" || k === "Y")) { e.preventDefault(); redo(); }
 });
 
-window.addEventListener("resize", () => { state.dirtyTimeline = true; clampTimelineHeight(); });
+window.addEventListener("resize", () => { state.dirtyTimeline = true; clampTimelineHeight(); if (mixerState.open) sizeMixerMeters(); });
 
 /* ── Resizable upper / timeline split ── */
 const TL_H_KEY = "fablecut-timeline-h";
@@ -10955,5 +11349,8 @@ renderBin();
 syncTrimIOButton();
 syncMonitorModeUI();
 buildMeterDOM();
+for (const b of els.sideTabs.querySelectorAll("[data-side]"))
+  b.addEventListener("click", () => setSideTab(b.dataset.side));
+try { if (localStorage.getItem(SIDE_TAB_KEY) === "mixer") setSideTab("mixer"); } catch { }
 connectServer().then(loadLibraryFonts);
 requestAnimationFrame(loop);

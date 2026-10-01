@@ -44,6 +44,11 @@ const PAGES = [
     parts: [["project.json schema", "props reference"]], promote: true,
   },
   {
+    slug: "audio", nav: "Audio mix", title: "Audio mix", group: "The timeline",
+    lede: "How clips reach the speakers and the export: clip gain, channels, track faders, the master, and loudness normalize.",
+    parts: [["project.json schema", "Audio mix"]],
+  },
+  {
     slug: "editing", nav: "Editing rules", title: "Editing rules", group: "The timeline",
     lede: "How tracks, links, locks, targeting and the trim tools behave, for people and agents alike.",
     parts: [["project.json schema", "Semantics"]],

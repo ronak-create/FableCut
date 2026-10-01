@@ -167,10 +167,14 @@
 
     <!-- Inspector -->
     <aside class="panel inspector">
-      <div class="panel-head"><span>Inspector</span></div>
+      <div class="bin-tabs side-tabs" id="sideTabs" role="tablist">
+        <button type="button" data-side="inspector" class="on" title="Selected clip: transform, effects &amp; audio">Inspector</button>
+        <button type="button" data-side="mixer" title="Track and master faders, pan, mute / solo, meters">Mixer</button>
+      </div>
       <div class="inspector-body" id="inspector">
         <div class="inspector-empty">Select a clip to edit its<br>transform, effects &amp; audio.</div>
       </div>
+      <div class="mixer hidden" id="mixer"></div>
     </aside>
   </div>
 
@@ -387,6 +391,7 @@
 
 <div id="toast"></div>
 
+<script src="loudness.js"></script>
 <script src="static-shim.js"></script>
 <script src="app.js"></script>
 </body>

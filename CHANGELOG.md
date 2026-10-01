@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Mixer.** A **Mixer** tab beside the Inspector: one strip per audio track
+  with a fader (console taper, unity at ¾ throw, double-click for 0 dB, or
+  type a level), pan, mute, solo and a meter, plus a master fader with a
+  live LUFS readout. Levels are saved as `tracks[].gain` / `tracks[].pan` and
+  `master.gain` in `project.json`, written only when they differ from 0.
+- **Clip gain** (`props.gain`, dB): a trim before volume, so volume
+  keyframes and fades keep working on top of it.
+- **Channels** (`props.channelMode`): stereo, mono (L+R folded to one
+  channel), left, right or swap, per clip.
+- **Normalize.** In the inspector, pick a target (−14 LUFS streaming, −16
+  LUFS podcast, −23 LUFS broadcast, −1 dBFS peak) and **Apply**: the selected
+  clips are measured (ITU-R BS.1770 integrated loudness with EBU R128
+  gating, or sample peak) and their clip gain set to hit it. Linked stems
+  are measured together and share one gain.
+- MCP: `fablecut_normalize_audio` does the same from an agent (needs ffmpeg),
+  with the same measurement as the editor. `fablecut_patch_project` gains a
+  `setTrack` op for track faders / pan and a `master` field on
+  `setProject`; the compact project view shows a `MIX:` line when any
+  level is off 0.
+
+### Changed
+- Preview and export now mix audio through the same graph: each clip feeds
+  its track, each track the master. Before, the export mix sent every clip
+  straight to the output, so anything set on a track or the master could not
+  reach the exported file.
+
 ### Fixed
 - **Titles draw in their own fonts again.** Every title style (Anton, Playfair
   Display, Bebas Neue, Caveat, …) was falling back to the system sans-serif:

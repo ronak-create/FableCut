@@ -1374,6 +1374,170 @@ body.track-size-s .clip.selected {
   padding-top: 40px;
 }
 
+/* ── Mixer (side-panel tab) ── */
+.side-tabs {
+  flex: none;
+}
+
+.mixer {
+  flex: 1;
+  min-height: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 10px 8px;
+}
+
+.mixer-strips {
+  display: flex;
+  gap: 6px;
+  width: max-content;
+  min-width: 100%;
+  height: 100%;
+  min-height: 220px;
+}
+
+.mix-strip {
+  --strip-color: var(--border);
+  flex: none;
+  width: 54px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 6px 5px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-top: 3px solid var(--strip-color);
+  border-radius: 6px;
+}
+
+/* Master stays in view while many A-tracks scroll under it. */
+.mix-strip.master {
+  width: 66px;
+  margin-left: auto;
+  position: sticky;
+  right: 0;
+  z-index: 1;
+  border-top-color: var(--accent);
+  box-shadow: -6px 0 8px -4px #0008;
+}
+
+.mix-strip.muted .mix-body {
+  opacity: .45;
+}
+
+.mix-name {
+  font: 600 11px/1.2 "Segoe UI", sans-serif;
+  color: var(--text);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mix-pan-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  height: 30px;
+  justify-content: center;
+}
+
+.mix-pan {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.mix-pan-val,
+.mix-lufs {
+  font: 10px/1 Consolas, monospace;
+  color: var(--dim);
+  text-align: center;
+}
+
+.mix-lufs {
+  white-space: nowrap;
+}
+
+.mix-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+}
+
+.mix-meter {
+  width: 8px;
+  height: 100%;
+  border-radius: 2px;
+}
+
+.mix-strip.master .mix-meter {
+  width: 18px;
+}
+
+.mix-body .mix-fader {
+  writing-mode: vertical-lr;
+  direction: rtl;
+  width: 20px;
+  height: auto;
+  align-self: stretch;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: ns-resize;
+}
+
+.mix-db {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font: 11px/1 Consolas, monospace;
+  text-align: center;
+  padding: 3px 0;
+  user-select: text;
+}
+
+.mix-db:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.mix-btns {
+  display: flex;
+  gap: 4px;
+}
+
+.mix-btns button {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--dim);
+  font: 600 11px/1 "Segoe UI", sans-serif;
+  padding: 4px 0;
+  cursor: pointer;
+}
+
+.mix-btns button:hover {
+  color: var(--text);
+}
+
+.mix-btns .mix-m.on {
+  background: #4a2326;
+  border-color: var(--danger);
+  color: #ffb4b6;
+}
+
+.mix-btns .mix-s.on {
+  background: #4a4020;
+  border-color: #f0c14a;
+  color: #ffe6a3;
+}
+
 /* Enable / lock / link toggles at the top of the inspector. */
 .clip-flags {
   display: flex;

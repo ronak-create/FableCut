@@ -85,6 +85,15 @@ same time.
 - Beat & cue markers (tap <kbd>m</kbd> on the beat during playback) — name and colour them, drag them on the ruler, jump with <kbd>⇧m</kbd> / <kbd>Alt+⇧m</kbd> or the **Markers** list; snapping targets (clip edges, playhead, markers, IN/OUT, keyframes, frame grid) are picked from the **▾** beside Snap
 - Press <kbd>Alt+t</kbd> to add an in/out transition based on the playhead position over the selected clip. The last used transition is remembered as the default. Drag the overlay triangle to adjust duration; <kbd>Delete</kbd> clears the focused transition.
 - Real decoded audio waveforms on clips
+- **Mixer** — the **Mixer** tab beside the Inspector has a strip per audio
+  track (fader, pan, mute, solo, meter) and a master fader with a live LUFS
+  readout. Preview and export run through the same mix, so what you hear is
+  what renders.
+- **Clip gain, channels and Normalize** — each audio clip has a **Gain** (dB,
+  before volume and keyframes), a **Channels** mode (stereo, mono, left,
+  right, swap) and **Normalize**: measure the selected clips (ITU-R BS.1770
+  loudness or sample peak) and set their gain to hit −14 / −16 / −23 LUFS or
+  −1 dBFS. Linked stems share one gain so a stereo pair stays balanced.
 - **Project bin folders** — tree view with expand/collapse; drag media or folders to nest; right-click the **Project** tab → New folder; drop files onto a folder to import into it
 - **Import from URL** — **+ URL** downloads an HTTPS video/audio/image into
   `./media/` (same-origin after import). Remote SVG is refused. Agents use
@@ -314,7 +323,7 @@ Three equivalent control surfaces:
    Tools: `fablecut_status` (auto-starts the editor), `fablecut_docs`,
    `fablecut_get_project`, `fablecut_set_project`, `fablecut_patch_project`,
    `fablecut_import_media`, `fablecut_analyze_reference`,
-   `fablecut_encode_profiles`.
+   `fablecut_encode_profiles`, `fablecut_normalize_audio`.
 
    FableCut is also published on the **official MCP registry** as
    [`io.github.ronak-create/fablecut`](https://registry.modelcontextprotocol.io/v0/servers?search=fablecut)

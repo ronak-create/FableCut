@@ -70,7 +70,7 @@
 <div class="wrap docs" id="main">
   <nav class="docs-side" aria-label="Docs">
     <button class="docs-menu" type="button" aria-expanded="false" aria-controls="docsNav"><svg class="i" aria-hidden="true"><use href="#i-menu"/></svg><span>project.json</span></button>
-    <div class="docs-nav" id="docsNav"><p class="docs-group">Start</p><a href="../">Overview</a><a href="../mcp/">MCP tools</a><p class="docs-group">The timeline</p><a href="../project-json/" aria-current="page">project.json</a><a href="../props/">Clip props</a><a href="../editing/">Editing rules</a><a href="../library/">Asset library</a><p class="docs-group">Guides</p><a href="../recipes/">Recipes</a><a href="../remake/">Remake a reference</a><p class="docs-group">Reference</p><a href="../rest-api/">REST API</a><a href="../export/">Export</a></div>
+    <div class="docs-nav" id="docsNav"><p class="docs-group">Start</p><a href="../">Overview</a><a href="../mcp/">MCP tools</a><p class="docs-group">The timeline</p><a href="../project-json/" aria-current="page">project.json</a><a href="../props/">Clip props</a><a href="../audio/">Audio mix</a><a href="../editing/">Editing rules</a><a href="../library/">Asset library</a><p class="docs-group">Guides</p><a href="../recipes/">Recipes</a><a href="../remake/">Remake a reference</a><p class="docs-group">Reference</p><a href="../rest-api/">REST API</a><a href="../export/">Export</a></div>
   </nav>
   <article class="docs-main prose">
     <h1>project.json</h1>
@@ -102,11 +102,13 @@
   <span class="tk-k">"untargetedTracks"</span>: [ <span class="tk-s">"V2"</span> ],
   <span class="tk-c">// ^ optional — lanes edits skip (split, insert, ripple, close gap…); default: all targeted</span>
   <span class="tk-k">"encodeProfile"</span>: <span class="tk-s">"hq"</span>,  <span class="tk-c">// optional — fast-export profile id (see encoding-profiles.json)</span>
+  <span class="tk-k">"master"</span>: { <span class="tk-k">"gain"</span>: <span class="tk-n">-1.5</span> },  <span class="tk-c">// optional — master fader, dB (−60 = silence … +12); omit = 0 dB</span>
   <span class="tk-k">"tracks"</span>: [                          <span class="tk-c">// optional — timeline lanes (default V3…V1 + A1…A4)</span>
     { <span class="tk-k">"id"</span>: <span class="tk-s">"V3"</span>, <span class="tk-k">"kind"</span>: <span class="tk-s">"video"</span> },   <span class="tk-c">// video: higher number drawn on top (V1 under V2 under V3…)</span>
     { <span class="tk-k">"id"</span>: <span class="tk-s">"V2"</span>, <span class="tk-k">"kind"</span>: <span class="tk-s">"video"</span> },
     { <span class="tk-k">"id"</span>: <span class="tk-s">"V1"</span>, <span class="tk-k">"kind"</span>: <span class="tk-s">"video"</span> },
-    { <span class="tk-k">"id"</span>: <span class="tk-s">"A1"</span>, <span class="tk-k">"kind"</span>: <span class="tk-s">"audio"</span> },   <span class="tk-c">// audio: A1…An top→bottom; +V/+A in the UI appends Vn+1 / An+1</span>
+    { <span class="tk-k">"id"</span>: <span class="tk-s">"A1"</span>, <span class="tk-k">"kind"</span>: <span class="tk-s">"audio"</span>, <span class="tk-k">"gain"</span>: <span class="tk-n">-6</span>, <span class="tk-k">"pan"</span>: <span class="tk-n">0</span> },   <span class="tk-c">// audio: A1…An top→bottom; +V/+A appends Vn+1 / An+1</span>
+    <span class="tk-c">// ^ gain = track fader in dB (−60 = silence … +12), pan = −1…1; both optional, written only when ≠ 0</span>
     { <span class="tk-k">"id"</span>: <span class="tk-s">"A2"</span>, <span class="tk-k">"kind"</span>: <span class="tk-s">"audio"</span> },
     { <span class="tk-k">"id"</span>: <span class="tk-s">"A3"</span>, <span class="tk-k">"kind"</span>: <span class="tk-s">"audio"</span> },
     { <span class="tk-k">"id"</span>: <span class="tk-s">"A4"</span>, <span class="tk-k">"kind"</span>: <span class="tk-s">"audio"</span> }
@@ -146,7 +148,7 @@
   ]
 }</code></pre><button class="copy" type="button" aria-label="Copy this example"><svg class="i i-cp" aria-hidden="true"><use href="#i-copy"/></svg><svg class="i i-ok" aria-hidden="true"><use href="#i-check"/></svg></button></div>
     <div class="docs-end">
-      <a class="more" href="https://github.com/ronak-create/FableCut/blob/main/CLAUDE.md#L173" rel="noopener" target="_blank">Edit this in CLAUDE.md <svg class="i i-ne" aria-hidden="true"><use href="#i-ne"/></svg></a>
+      <a class="more" href="https://github.com/ronak-create/FableCut/blob/main/CLAUDE.md#L175" rel="noopener" target="_blank">Edit this in CLAUDE.md <svg class="i i-ne" aria-hidden="true"><use href="#i-ne"/></svg></a>
       <a class="more" href="https://raw.githubusercontent.com/ronak-create/FableCut/main/CLAUDE.md" rel="noopener" target="_blank">The whole manual as Markdown <svg class="i i-ne" aria-hidden="true"><use href="#i-ne"/></svg></a>
     </div>
     <nav class="docs-pn" aria-label="Previous and next page"><a class="docs-pn-prev" href="../mcp/"><span>Previous</span><b>MCP tools</b></a><a class="docs-pn-next" href="../props/"><span>Next</span><b>Clip props</b></a></nav>

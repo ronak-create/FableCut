@@ -110,7 +110,7 @@ const TOOLS = [
   },
   {
     name: "fablecut_patch_project",
-    description: "Apply targeted edits to the FableCut project WITHOUT round-tripping the whole document — PREFER THIS over get+set for every edit (it is ~10-100x cheaper in tokens and merge-safe by design: it re-reads the latest document from disk, applies your ops in order, bumps revision once, saves atomically). Ops: {op:'addClip', clip:{…}} (id auto-generated if omitted) · {op:'updateClip', id, set:{…}} · {op:'removeClip', id} · {op:'addMedia', media:{…}} · {op:'removeMedia', id} · {op:'setProject', set:{name|width|height|fps|background|markers|disabledTracks|lockedTracks|untargetedTracks|encodeProfile}} (markers = the full list [{t, label?, color?}], color: gold|red|orange|green|cyan|blue|purple|pink). updateClip merge rules: top-level keys are replaced (keyframes/transitionIn/transitionOut wholesale), `props` merges key-by-key, and setting any key to null deletes it. LOCKS: the user can lock clips (`locked:true`) and tracks (`lockedTracks`); updateClip / removeClip on a locked clip — or on a clip linked to one — and addClip onto a locked track are refused. Leave locked material alone; only if the user asked you to change it, pass force:true on that op (or unlock first: updateClip set:{locked:null}, which is always allowed). All-or-nothing: an invalid op aborts the whole patch unsaved.",
+    description: "Apply targeted edits to the FableCut project WITHOUT round-tripping the whole document — PREFER THIS over get+set for every edit (it is ~10-100x cheaper in tokens and merge-safe by design: it re-reads the latest document from disk, applies your ops in order, bumps revision once, saves atomically). Ops: {op:'addClip', clip:{…}} (id auto-generated if omitted) · {op:'updateClip', id, set:{…}} · {op:'removeClip', id} · {op:'addMedia', media:{…}} · {op:'removeMedia', id} · {op:'setProject', set:{name|width|height|fps|background|markers|disabledTracks|lockedTracks|untargetedTracks|encodeProfile|master}} (markers = the full list [{t, label?, color?}], color: gold|red|orange|green|cyan|blue|purple|pink; master = {gain}, the master fader in dB) · {op:'setTrack', id:'A1', set:{gain?, pan?}} (audio-track fader in dB −60…+12 and pan −1…1; null or 0 resets). updateClip merge rules: top-level keys are replaced (keyframes/transitionIn/transitionOut wholesale), `props` merges key-by-key, and setting any key to null deletes it. LOCKS: the user can lock clips (`locked:true`) and tracks (`lockedTracks`); updateClip / removeClip on a locked clip — or on a clip linked to one — and addClip onto a locked track are refused. Leave locked material alone; only if the user asked you to change it, pass force:true on that op (or unlock first: updateClip set:{locked:null}, which is always allowed). All-or-nothing: an invalid op aborts the whole patch unsaved.",
     inputSchema: {
       type: "object",
       properties: {
@@ -168,7 +168,111 @@ const TOOLS = [
       },
     },
   },
+  {
+    name: "fablecut_normalize_audio",
+    description: "Loudness-normalize clips: measures each clip's source audio (ITU-R BS.1770 integrated LUFS, or sample peak) after its channel routing and sets `props.gain` (clip gain, dB) so it lands on the target — the same measurement as the editor's Normalize button. Linked stems (a video's per-channel audio clips) are measured together and get one shared gain, so a stereo pair stays balanced; passing a video clip normalizes its stems. Volume keyframes / fades are untouched (they ride on top). Typical targets: -14 LUFS streaming/social, -16 LUFS podcast/dialogue, -23 LUFS broadcast, or mode 'peak' at -1 dBFS. Needs ffmpeg + ffprobe on PATH. Refuses locked clips unless force:true.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        clipIds: { type: "array", items: { type: "string" }, description: "Clips to normalize (audio, or video with audio)" },
+        mode: { type: "string", enum: ["lufs", "peak"], description: "Measure integrated loudness (default) or sample peak" },
+        target: { type: "number", description: "Target level: LUFS for mode lufs (default -14), dBFS for mode peak (default -1)" },
+        force: { type: "boolean", description: "Also change clips the user locked (only when they asked)" },
+      },
+      required: ["clipIds"],
+    },
+  },
 ];
+
+/* ── Loudness normalize (fablecut_normalize_audio) ──
+   Decodes each clip's source window with ffmpeg and measures it with the same
+   loudness.js the editor uses, so agent and UI land on identical gains. */
+const DEFAULT_TRACKS = [
+  { id: "V3", kind: "video" }, { id: "V2", kind: "video" }, { id: "V1", kind: "video" },
+  { id: "A1", kind: "audio" }, { id: "A2", kind: "audio" }, { id: "A3", kind: "audio" }, { id: "A4", kind: "audio" },
+];
+const NORM_SR = 48000;
+function mediaFile(src) {
+  const p = decodeURIComponent(String(src || "").split("?")[0]);
+  const [root, rel] = p.startsWith("/media/") ? [MEDIA_DIR, p.slice(7)]
+    : p.startsWith("/library/") ? [LIBRARY_DIR, p.slice(9)] : [null, null];
+  if (!root) return null;
+  const file = path.normalize(path.join(root, rel));
+  return file.startsWith(path.normalize(root + path.sep)) && fs.existsSync(file) ? file : null;
+}
+/** Source seconds a clip consumes: duration × speed, integrating speed keyframes. */
+function clipSourceLen(c) {
+  const base = Math.min(8, Math.max(0.1, +c.props?.speed || 1));
+  const kf = c.keyframes?.speed;
+  if (!Array.isArray(kf) || !kf.length) return c.duration * base;
+  const at = (t) => {
+    if (t <= kf[0].t) return kf[0].v;
+    for (let i = 1; i < kf.length; i++)
+      if (t <= kf[i].t) return kf[i - 1].v + (kf[i].v - kf[i - 1].v) * (t - kf[i - 1].t) / ((kf[i].t - kf[i - 1].t) || 1);
+    return kf[kf.length - 1].v;
+  };
+  let sum = 0;
+  const n = Math.max(2, Math.ceil(c.duration * 60));
+  for (let i = 0; i < n; i++) sum += Math.min(8, Math.max(0.1, at((i + 0.5) * c.duration / n))) * c.duration / n;
+  return sum;
+}
+function probeChannels(file) {
+  const r = spawnSync("ffprobe", ["-v", "error", "-select_streams", "a:0", "-show_entries", "stream=channels",
+    "-of", "csv=p=0", file], { encoding: "utf8" });
+  if (r.error) throw new Error("ffprobe not found on PATH — needed to measure audio");
+  const n = parseInt(String(r.stdout).trim(), 10);
+  return n > 0 ? n : 0;
+}
+/** Measure clips that play together (one linked group: same file + window). */
+function measureClipGroup(proj, clips) {
+  const L = require("./loudness.js");
+  const c0 = clips[0];
+  const media = proj.media.find((m) => m.id === c0.mediaId);
+  const file = media && mediaFile(media.src);
+  if (!file) return Promise.reject(new Error(`clip ${c0.id}: media file not found`));
+  const nCh = probeChannels(file);
+  if (!nCh) return Promise.resolve(null); // no audio stream
+  const routedCount = clips.reduce((n, c) =>
+    n + L.routeChannels(Array.from({ length: nCh }, () => new Float32Array(0)), c.props || {}).length, 0);
+  if (!routedCount) return Promise.resolve(null);
+  const meter = new L.LoudnessMeter(routedCount, NORM_SR);
+  return new Promise((resolve, reject) => {
+    const proc = spawn("ffmpeg", ["-v", "error", "-ss", String(Math.max(0, +c0.in || 0)),
+      "-t", String(Math.max(0.01, clipSourceLen(c0))), "-i", file, "-vn", "-map", "0:a:0",
+      "-ar", String(NORM_SR), "-f", "f32le", "-acodec", "pcm_f32le", "-"]);
+    let rest = Buffer.alloc(0), err = "";
+    const frameBytes = 4 * nCh;
+    proc.stdout.on("data", (chunk) => {
+      const buf = rest.length ? Buffer.concat([rest, chunk]) : chunk;
+      const frames = Math.floor(buf.length / frameBytes);
+      rest = buf.subarray(frames * frameBytes);
+      if (!frames) return;
+      const chs = Array.from({ length: nCh }, () => new Float32Array(frames));
+      for (let i = 0; i < frames; i++)
+        for (let c = 0; c < nCh; c++) chs[c][i] = buf.readFloatLE((i * nCh + c) * 4);
+      meter.push(clips.flatMap((c) => L.routeChannels(chs, c.props || {})));
+    });
+    proc.stderr.on("data", (d) => { err += d; });
+    proc.on("error", () => reject(new Error("ffmpeg not found on PATH — needed to measure audio")));
+    proc.on("close", (code) => code === 0 ? resolve(meter.result())
+      : reject(new Error(`ffmpeg failed measuring ${c0.id}: ${err.trim().split("\n").pop() || code}`)));
+  });
+}
+/** The clips that sound for a selection: a linked group's audio stems, else the clip. */
+function normalizeGroups(proj, ids) {
+  const groups = new Map();
+  for (const id of ids) {
+    const c = proj.clips.find((x) => x.id === id);
+    if (!c) throw new Error("no clip " + id);
+    if (c.kind !== "audio" && c.kind !== "video") throw new Error(`clip ${id} is ${c.kind} — no audio to normalize`);
+    const key = c.linkGroup || c.id;
+    if (groups.has(key)) continue;
+    const members = c.linkGroup ? proj.clips.filter((x) => x.linkGroup === c.linkGroup) : [c];
+    const stems = members.filter((x) => x.kind === "audio");
+    groups.set(key, stems.length ? stems : members);
+  }
+  return [...groups.values()];
+}
 
 /* ── Tool implementations ── */
 async function callTool(name, args) {
@@ -232,6 +336,7 @@ async function callTool(name, args) {
       // compact view only shows what actually deviates
       const DEFAULTS = {
         x: 0, y: 0, scale: 1, rotation: 0, opacity: 1, volume: 1, pan: 0, speed: 1,
+        gain: 0, channelMode: "stereo",
         blend: "normal", fit: "contain", cropL: 0, cropR: 0, cropT: 0, cropB: 0,
         cornerRadius: 0, flipH: false, flipV: false, filterPreset: "none",
         brightness: 100, contrast: 100, saturation: 100, hue: 0, temperature: 0,
@@ -262,6 +367,15 @@ async function callTool(name, args) {
         }
         return Object.keys(kept).length ? " " + JSON.stringify(kept) : "";
       };
+      // Mixer: only off-default faders / pans, so a fresh project adds no line.
+      const signed = (v) => (v > 0 ? "+" : "") + v;
+      const mixLine = (d) => {
+        const parts = (Array.isArray(d.tracks) ? d.tracks : [])
+          .filter((t) => t && (+t.gain || +t.pan))
+          .map((t) => t.id + (+t.gain ? ` ${signed(+t.gain)}dB` : "") + (+t.pan ? ` pan:${+t.pan}` : ""));
+        if (d.master && +d.master.gain) parts.push(`master ${signed(+d.master.gain)}dB`);
+        return parts.length ? [`MIX: ${parts.join(" · ")}`] : [];
+      };
       const lines = [
         `"${doc.name}" ${doc.width}x${doc.height}@${doc.fps} rev:${doc.revision}` +
         (doc.panSchema >= 1 ? " panSchema:1" : "") +
@@ -270,6 +384,7 @@ async function callTool(name, args) {
         (doc.lockedTracks?.length ? ` lockedTracks:[${doc.lockedTracks.join(",")}]` : "") +
         (doc.untargetedTracks?.length ? ` untargetedTracks:[${doc.untargetedTracks.join(",")}]` : "") +
         (doc.disabledTracks?.length ? ` disabledTracks:[${doc.disabledTracks.join(",")}]` : ""),
+        ...mixLine(doc),
         `MEDIA (${doc.media.length}):`,
         ...doc.media.map((m) => `  ${m.id} ${m.kind} "${m.name}"${m.duration ? " " + m.duration + "s" : ""}`),
         `CLIPS (${doc.clips.length}), by track/time:`,
@@ -379,12 +494,35 @@ async function callTool(name, args) {
             notes.push("-" + op.id);
             break;
           }
+          case "setTrack": {
+            // Mixer settings on one lane: {op:"setTrack", id:"A1", set:{gain:-6, pan:0.2}}.
+            if (!/^A\d+$/.test(String(op.id || ""))) throw new Error("setTrack: id must be an audio track (A1, A2, …)");
+            if (!Array.isArray(proj.tracks) || !proj.tracks.length) proj.tracks = DEFAULT_TRACKS.map((t) => ({ ...t }));
+            let t = proj.tracks.find((x) => x.id === op.id);
+            if (!t) { t = { id: op.id, kind: "audio" }; proj.tracks.push(t); }
+            for (const [k, v] of Object.entries(op.set || {})) {
+              const range = k === "gain" ? [-60, 12] : k === "pan" ? [-1, 1] : null;
+              if (!range) throw new Error(`setTrack: '${k}' not settable (gain, pan)`);
+              if (v === null || v === 0) { delete t[k]; continue; }
+              if (typeof v !== "number" || !Number.isFinite(v) || v < range[0] || v > range[1])
+                throw new Error(`setTrack: ${k} must be a number ${range[0]}…${range[1]}`);
+              t[k] = v;
+            }
+            notes.push("~" + op.id);
+            break;
+          }
           case "setProject": {
-            const allowed = ["name", "width", "height", "fps", "background", "markers", "disabledTracks", "lockedTracks", "untargetedTracks", "exportFrame", "encodeProfile"];
+            const allowed = ["name", "width", "height", "fps", "background", "markers", "disabledTracks", "lockedTracks", "untargetedTracks", "exportFrame", "encodeProfile", "master"];
             for (const [k, v] of Object.entries(op.set || {})) {
               if (!allowed.includes(k)) throw new Error(`setProject: '${k}' not settable (allowed: ${allowed.join(", ")})`);
               if (k === "encodeProfile" && v != null) {
                 resolveProfile(String(v)); // validate id exists
+              }
+              if (k === "master" && v != null) {
+                const g = v.gain;
+                if (typeof v !== "object" || Object.keys(v).some((x) => x !== "gain") ||
+                    (g != null && (typeof g !== "number" || !Number.isFinite(g) || g < -60 || g > 12)))
+                  throw new Error("setProject: master is {gain} — master fader in dB, -60…+12");
               }
               if (v === null) delete proj[k]; else proj[k] = v;
             }
@@ -392,7 +530,7 @@ async function callTool(name, args) {
             break;
           }
           default:
-            throw new Error("Unknown op: " + op.op + " (addClip|updateClip|removeClip|addMedia|removeMedia|setProject)");
+            throw new Error("Unknown op: " + op.op + " (addClip|updateClip|removeClip|addMedia|removeMedia|setProject|setTrack)");
         }
       }
       proj.revision = (proj.revision || 0) + 1;
@@ -434,6 +572,44 @@ async function callTool(name, args) {
       writeProject(doc);
       lastReadRevision = doc.revision;
       return `Saved (revision ${doc.revision}). ${doc.clips.length} clip(s). The editor UI (if open at ${BASE}) has hot-reloaded.`;
+    }
+    case "fablecut_normalize_audio": {
+      const ids = Array.isArray(args.clipIds) ? args.clipIds.map(String) : [];
+      if (!ids.length) throw new Error("`clipIds` must list at least one clip");
+      const mode = args.mode === "peak" ? "peak" : "lufs";
+      const target = Number.isFinite(args.target) ? args.target : mode === "peak" ? -1 : -14;
+      if (mode === "lufs" && (target < -60 || target > 0)) throw new Error("target LUFS must be -60…0");
+      if (mode === "peak" && (target < -60 || target > 0)) throw new Error("target peak must be -60…0 dBFS");
+      const L = require("./loudness.js");
+      const groups = normalizeGroups(readProject(), ids);
+      const measured = [];
+      for (const g of groups) measured.push({ ids: g.map((c) => c.id), m: await measureClipGroup(readProject(), g) });
+      // Re-read after the (slow) measuring so concurrent UI edits are kept.
+      const proj = readProject();
+      const locked = new Set(Array.isArray(proj.lockedTracks) ? proj.lockedTracks : []);
+      const report = [];
+      let changed = 0;
+      for (const { ids: gIds, m } of measured) {
+        const clips = gIds.map((id) => proj.clips.find((x) => x.id === id)).filter(Boolean);
+        const lockedBy = clips.find((c) => c.locked === true || locked.has(c.track));
+        if (lockedBy && args.force !== true) {
+          report.push(`${gIds.join("+")}: skipped — ${lockedBy.id} is locked (pass force:true if the user asked)`);
+          continue;
+        }
+        const db = m && L.normalizeGainDb(m, { mode, value: target });
+        if (db == null) { report.push(`${gIds.join("+")}: silent — left alone`); continue; }
+        const gain = Math.round(Math.min(24, Math.max(-60, db)) * 10) / 10;
+        for (const c of clips) { c.props = c.props || {}; c.props.gain = gain; }
+        changed++;
+        const level = mode === "peak" ? `${m.peakDb.toFixed(1)} dBFS peak` : `${m.lufs.toFixed(1)} LUFS`;
+        report.push(`${gIds.join("+")}: ${level} → gain ${gain > 0 ? "+" : ""}${gain} dB`);
+      }
+      if (changed) {
+        proj.revision = (proj.revision || 0) + 1;
+        writeProject(proj);
+        lastReadRevision = proj.revision;
+      }
+      return `Normalize to ${target} ${mode === "peak" ? "dBFS peak" : "LUFS"}${changed ? ` (revision ${proj.revision})` : " — nothing changed"}:\n` + report.join("\n");
     }
     case "fablecut_analyze_reference": {
       let src = args.path || "";

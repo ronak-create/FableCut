@@ -27,6 +27,8 @@ Every Claude Code session then has these tools:
   (shots, beats, BPM, energy, drop) + extract its music. See "Remake a reference video".
 - `fablecut_encode_profiles` — list export presets from `encoding-profiles.json` (each is a
   raw ffmpeg args list). Set `project.encodeProfile` via patch to pin a project default.
+- `fablecut_normalize_audio` — measure clips (BS.1770 LUFS or sample peak, via ffmpeg) and
+  set their clip gain to a loudness target. See "Audio mix" below.
 
 ### Token-efficient editing (important for agents)
 
@@ -200,11 +202,13 @@ Examples in `library/svg/`: `sparkles.svg` (loop), `lower-third.svg`,
   "untargetedTracks": [ "V2" ],
   // ^ optional — lanes edits skip (split, insert, ripple, close gap…); default: all targeted
   "encodeProfile": "hq",  // optional — fast-export profile id (see encoding-profiles.json)
+  "master": { "gain": -1.5 },  // optional — master fader, dB (−60 = silence … +12); omit = 0 dB
   "tracks": [                          // optional — timeline lanes (default V3…V1 + A1…A4)
     { "id": "V3", "kind": "video" },   // video: higher number drawn on top (V1 under V2 under V3…)
     { "id": "V2", "kind": "video" },
     { "id": "V1", "kind": "video" },
-    { "id": "A1", "kind": "audio" },   // audio: A1…An top→bottom; +V/+A in the UI appends Vn+1 / An+1
+    { "id": "A1", "kind": "audio", "gain": -6, "pan": 0 },   // audio: A1…An top→bottom; +V/+A appends Vn+1 / An+1
+    // ^ gain = track fader in dB (−60 = silence … +12), pan = −1…1; both optional, written only when ≠ 0
     { "id": "A2", "kind": "audio" },
     { "id": "A3", "kind": "audio" },
     { "id": "A4", "kind": "audio" }
@@ -294,7 +298,9 @@ Examples in `library/svg/`: `sparkles.svg` (loop), `lower-third.svg`,
 **Audio / time** (video/audio):
 | prop | default | notes |
 |---|---|---|
-| `volume` | 1 | 0–2 |
+| `volume` | 1 | 0–2 (linear; animatable — fades, ducking) |
+| `gain` | 0 | clip gain in dB (−60…+24), applied **before** `volume`, so keyframes and fades ride on top. Set by Normalize. |
+| `channelMode` | "stereo" | stereo · mono (L+R folded to one channel) · left · right (use one side) · swap (exchange L/R). Ignored on linked stems — `audioChannel` already picks their channel. |
 | `pan` | 0 | −1 (full left) … 0 (center) … +1 (full right). Linked stems default L `−1` / R `+1` / other `0`. Projects saved before pan migrate once on load (`panSchema`); keep `panSchema: 1` (and explicit `pan` on stems) when rewriting the document so a centered stem is not re-hard-panned. |
 | `speed` | 1 | 0.25–4× playback rate. **Keyframable → speed ramps**: with `keyframes.speed` the engine time-remaps (media time = `in` + ∫speed dt), in preview and in the export audio mix. Static case: source window consumed = `duration × speed`, so `in + duration×speed ≤ media.duration`. |
 
@@ -368,6 +374,30 @@ fontSize, letterSpacing, glow.
 **Transition types**: fade · slide-left/right/up/down · zoom · wipe (=wipe-left)
 · wipe-right/up/down · iris (circular) · spin · blur · whip (whip-pan) ·
 glitch (RGB split + jitter) · pop (overshoot scale — stickers/captions).
+
+### Audio mix
+
+Every clip runs through the same chain in preview **and** export:
+`source → channels (audioChannel / channelMode) → gain (dB) → volume (keyframes, fades) → pan → its A-track → master`.
+A track has a fader (`tracks[].gain`, dB) and a pan (`tracks[].pan`); the master
+has a fader (`master.gain`). Audio on a video lane (a clip with `volume > 0` on
+V1…) goes straight to the master. In the UI these are the strips in the
+**Mixer** tab beside the Inspector; mute / solo are the existing track switches
+(`disabledTracks`).
+
+- Set a track fader / pan: `{op:"setTrack", id:"A2", set:{gain:-8, pan:0}}`
+  (`null` or `0` resets). Master: `{op:"setProject", set:{master:{gain:-1}}}`.
+- **Normalize** — `fablecut_normalize_audio {clipIds, mode?:"lufs"|"peak", target?}`
+  measures each clip's source window after its channel routing (ITU-R BS.1770
+  integrated loudness with EBU R128 gating, or sample peak) and sets
+  `props.gain` to hit the target. Linked stems are measured together and share
+  one gain; passing a video clip normalizes its stems. Targets: **−14 LUFS**
+  streaming / social, **−16 LUFS** podcast / dialogue, **−23 LUFS** broadcast,
+  or `mode:"peak", target:-1`. Locked clips are skipped unless `force:true`.
+  The inspector's **Normalize** in the editor does the same measurement.
+- Use **gain** for "this clip is too quiet / loud", **volume keyframes** for
+  movement (fades, ducking), and the **track fader** to balance whole lanes
+  (dialogue against the music bed).
 
 ### Semantics
 
@@ -599,6 +629,11 @@ To try an alternative without deleting a clip, disable it (⇧E / `disabled:true
 **Title card**: `{kind:"text", mediaId:null, track:"V2", props:{text,fontSize,color}}`.
 
 **Music bed**: audio file on A1, `props.volume: 0.3`, trim with `in`/`duration`.
+
+**Level a voice-over edit**: `fablecut_normalize_audio {clipIds:[…every VO clip…], target:-16}`
+so all takes sit at one loudness, then keep the music on its own lane and pull
+that lane down: `{op:"setTrack", id:"A3", set:{gain:-14}}`. Fades and ducks stay
+`volume` keyframes on the music clip.
 
 **Center a mono stem**: linked or standalone audio clip with `props.pan: 0` (inspector **Pan** slider, −1…+1). Stereo video stems default to L `−1` / R `+1`; set A1 to `0` to center that channel in the mix.
 
