@@ -409,3 +409,51 @@ test("fablecut_auto_duck writes duck keys on the music where the voice speaks, a
   assert.ok(none.isError);
   assert.match(none.text, /nothing to duck for/);
 });
+
+test("setFx puts validated chains or presets on clips (with their stems), tracks and the master", async (t) => {
+  const project = seedProject({
+    media: [{ id: "m_v", name: "v.mp4", kind: "video", src: "/media/v.mp4", duration: 10 }],
+    clips: [
+      { id: "c_v", mediaId: "m_v", kind: "video", track: "V1", start: 0, in: 0, duration: 5, linkGroup: "g" },
+      { id: "c_l", mediaId: "m_v", kind: "audio", track: "A1", start: 0, in: 0, duration: 5, linkGroup: "g", props: { audioChannel: 0 } },
+      { id: "c_r", mediaId: "m_v", kind: "audio", track: "A2", start: 0, in: 0, duration: 5, linkGroup: "g", props: { audioChannel: 1 } },
+    ],
+  });
+  const { dir, mcp } = await boot(t, project);
+  const ok = await mcp.callTool("fablecut_patch_project", { ops: [
+    { op: "setFx", target: "clip", id: "c_l", preset: "podcast" },
+    { op: "setFx", target: "track", id: "A3", fx: [{ type: "highpass", freq: 60 }] },
+    { op: "setFx", target: "track", id: "A3", fx: [{ type: "limiter" }], append: true },
+    { op: "setFx", target: "master", fx: [{ type: "limiter", ceiling: -1.5 }] },
+  ] });
+  assert.equal(ok.isError, false, ok.text);
+  let doc = readProject(dir);
+  const fx = (id) => doc.clips.find((c) => c.id === id).fx;
+  assert.equal(fx("c_l").map((e) => e.type).join(","), "highpass,gate,eq,compressor,limiter");
+  assert.deepEqual(fx("c_r"), fx("c_l"), "the stereo partner gets the same chain");
+  assert.equal(fx("c_v"), undefined, "the picture clip carries no audio fx");
+  assert.deepEqual(doc.tracks.find((x) => x.id === "A3").fx.map((e) => e.type), ["highpass", "limiter"], "append adds to the end");
+  assert.equal(doc.master.fx[0].ceiling, -1.5);
+  assert.equal(doc.master.fx[0].release, 80, "defaults filled in");
+
+  const { text } = await mcp.callTool("fablecut_get_project", { compact: true });
+  assert.match(text, /c_l .*fx:highpass·gate·eq·compressor·limiter/);
+  assert.match(text, /MIX: A3 fx:highpass·limiter · master fx:limiter/);
+
+  await mcp.callTool("fablecut_patch_project", { ops: [{ op: "setFx", target: "clip", id: "c_r", fx: null }] });
+  doc = readProject(dir);
+  assert.equal(fx("c_l"), undefined, "fx:null clears the whole stereo pair");
+
+  const before = readProject(dir);
+  for (const [op, re] of [
+    [{ op: "setFx", target: "clip", id: "c_l", fx: [{ type: "flanger" }] }, /unknown effect "flanger"/],
+    [{ op: "setFx", target: "clip", id: "c_l", preset: "loud" }, /unknown preset/],
+    [{ op: "setFx", target: "clip", id: "c_v", preset: "podcast" }, /effects go on audio clips/],
+    [{ op: "setFx", target: "track", id: "V1", preset: "wide" }, /audio track/],
+  ]) {
+    const bad = await mcp.callTool("fablecut_patch_project", { ops: [op] });
+    assert.ok(bad.isError, JSON.stringify(op));
+    assert.match(bad.text, re);
+  }
+  assert.deepEqual(readProject(dir), before, "a refused op saves nothing");
+});

@@ -34,13 +34,13 @@ const CODE = [
 const EXPORTS = ["dbToGain", "clampFaderDb", "normalizeMaster", "serializeTracks", "applyTracksFromProject",
   "wireClipInput", "buildClipChain", "rewireClipChain", "buildMixBuses", "applyMixLevels", "busOut",
   "driveClipChain", "faderPosToDb", "faderDbToPos", "fmtPan", "parseDbInput",
-  "audioFadeGain", "clipAudioGain", "volToPos", "posToVol"];
+  "audioFadeGain", "clipAudioGain", "volToPos", "posToVol", "syncFxSlot"];
 
 function world({ tracks = [{ id: "A1", kind: "audio" }, { id: "A2", kind: "audio" }], master = null, media = [] } = {}) {
   const TRACKS = [];
   const project = { master, media };
   const env = {
-    TRACKS, project, TRACK_IDS: new Set(),
+    TRACKS, project, TRACK_IDS: new Set(), FableCutFx: require("../audio-fx.js"),
     clamp: (v, a, b) => Math.min(b, Math.max(a, v)),
     applyTrackHeights() {}, syncTrackIds() {},
     getMedia: (id) => media.find((m) => m.id === id),
@@ -48,7 +48,7 @@ function world({ tracks = [{ id: "A1", kind: "audio" }, { id: "A2", kind: "audio
   const names = Object.keys(env);
   const fns = new Function(...names, `${CODE}\nreturn { ${EXPORTS.join(", ")} };`)(...names.map((k) => env[k]));
   fns.applyTracksFromProject(tracks);
-  return { ...fns, TRACKS, project };
+  return { ...fns, TRACKS, project, FableCutFx: env.FableCutFx };
 }
 
 /* A context that records every connect(): edges are [from, to, output, input]. */
@@ -71,6 +71,14 @@ function fakeCtx() {
     createStereoPanner: () => node("pan", { pan: param(0) }),
     createChannelSplitter: (k) => node("split", { outputs: k }),
     createChannelMerger: (k) => node("merge", { inputs: k }),
+    createBiquadFilter: () => node("biquad", { type: "lowpass", frequency: param(350), gain: param(0), Q: param(1) }),
+    createDynamicsCompressor: () => node("comp", { threshold: param(-24), ratio: param(12), knee: param(30), attack: param(0.003), release: param(0.25) }),
+    createDelay: () => node("delay", { delayTime: param(0) }),
+    createConvolver: () => node("conv", { buffer: null }),
+    createWaveShaper: () => node("shaper", { curve: null, oversample: "none" }),
+    createBuffer: (ch, n, sr) => ({ numberOfChannels: ch, length: n, sampleRate: sr,
+      _d: Array.from({ length: ch }, () => new Float32Array(n)), getChannelData(c) { return this._d[c]; } }),
+    sampleRate: 48000,
     source: () => node("src"),
     outs: (from) => edges.filter((e) => e[0] === from),
   };
@@ -154,7 +162,7 @@ test("track mixer settings round-trip through project.tracks, written only off-d
   ]);
 });
 
-test("one graph: clip → trim → vol → pan → track fader → track pan → master sum → master fader", () => {
+test("one graph: clip → trim → vol → pan → track input → track fader → track pan → master sum → master fader", () => {
   const w = world({ tracks: [{ id: "A1", kind: "audio", gain: -6, pan: 0.25 }], master: { gain: 3 } });
   const ctx = fakeCtx();
   const mix = w.buildMixBuses(ctx, ["A1"]);
@@ -163,9 +171,10 @@ test("one graph: clip → trim → vol → pan → track fader → track pan →
   const c = { id: "c1", track: "A1", props: { gain: -12 } };
   const chain = w.buildClipChain(ctx, src, c, 2);
   chain.out.connect(mix.trackBus.A1);
-  assert.deepEqual(walk(ctx, src, mix.masterOut), ["src", "gain", "gain", "pan", "gain", "pan", "gain", "gain"]);
+  assert.deepEqual(walk(ctx, src, mix.masterOut), ["src", "gain", "gain", "pan", "gain", "gain", "pan", "gain", "gain"]);
   assert.equal(chain.trim.gain.value, w.dbToGain(-12), "clip gain lands on the trim");
-  assert.equal(mix.trackBus.A1.gain.value, w.dbToGain(-6), "track fader");
+  assert.equal(mix.trackBus.A1.gain.value, 1, "the track input is a plain sum");
+  assert.equal(mix.trackBus.A1._fcFader.gain.value, w.dbToGain(-6), "track fader");
   assert.equal(mix.trackBus.A1._fcPan.pan.value, 0.25, "track pan");
   assert.equal(mix.masterOut.gain.value, w.dbToGain(3), "master fader");
   assert.equal(w.busOut(mix.trackBus.A1), mix.trackBus.A1._fcPan, "the bus output is its pan");
@@ -211,6 +220,47 @@ test("channel modes: what each one wires in front of the clip's trim", () => {
   const s6 = ctx.outs(src)[0][1];
   assert.equal(s6.outputs, 6);
   assert.deepEqual(ctx.outs(s6).map((e) => [e[1], e[2]]), [[trim, 4]]);
+});
+
+test("fx slot: effects sit between gain and volume; tweaks update in place, shape changes rebuild", () => {
+  const w = world();
+  const ctx = fakeCtx();
+  const src = ctx.source();
+  const c = { props: {}, fx: [{ type: "highpass", freq: 100 }, { type: "compressor", threshold: -20, makeup: 6 }] };
+  c.fx = w.FableCutFx.normalizeFx(c.fx);
+  const chain = w.buildClipChain(ctx, src, c, 2);
+  assert.deepEqual(walk(ctx, chain.trim, chain.vol), ["gain", "biquad", "comp", "gain", "gain"], "trim → hp → comp → makeup → vol");
+  const hp = ctx.outs(chain.trim)[0][1];
+  assert.equal(hp.type, "highpass");
+  assert.equal(hp.frequency.value, 100);
+  // parameter tweak (a fresh array, same shape): the same nodes, new values
+  c.fx = c.fx.map((e) => e.type === "highpass" ? { ...e, freq: 250 } : e);
+  w.driveClipChain(chain, c, { volume: 1, pan: 0 });
+  assert.equal(ctx.outs(chain.trim)[0][1], hp, "no rebuild for a tweak");
+  assert.equal(hp.frequency.value, 250);
+  // bypass one: rebuilt without it
+  c.fx = c.fx.map((e) => e.type === "highpass" ? { ...e, on: false } : e);
+  w.driveClipChain(chain, c, { volume: 1, pan: 0 });
+  assert.deepEqual(walk(ctx, chain.trim, chain.vol), ["gain", "comp", "gain", "gain"]);
+  // cleared: straight through again, nothing left dangling off the trim
+  c.fx = undefined;
+  w.driveClipChain(chain, c, { volume: 1, pan: 0 });
+  assert.deepEqual(walk(ctx, chain.trim, chain.vol), ["gain", "gain"]);
+});
+
+test("track and master fx: before the faders; gate/limiter pass through until the worklet loads", () => {
+  const w = world({ tracks: [{ id: "A1", kind: "audio", gain: -6, fx: [{ type: "eq", lowGain: 3 }] }],
+    master: { fx: [{ type: "limiter", ceiling: -1 }] } });
+  assert.equal(w.TRACKS[0].fx[0].midFreq, 1000, "track fx normalized on load");
+  const ctx = fakeCtx();
+  const mix = w.buildMixBuses(ctx, ["A1"]);
+  w.applyMixLevels(mix);
+  const bus = mix.trackBus.A1;
+  assert.deepEqual(walk(ctx, bus, mix.masterOut), ["gain", "biquad", "biquad", "biquad", "gain", "pan", "gain", "gain", "gain"],
+    "input → eq (3 bands) → fader → pan → master sum → limiter (pass-through) → master fader");
+  assert.ok(mix.masterFxSlot.chain.pending, "the limiter waits for its worklet");
+  assert.deepEqual(w.serializeTracks()[0].fx, w.TRACKS[0].fx, "track fx are saved");
+  assert.deepEqual(Object.keys(w.normalizeMaster({ fx: [{ type: "limiter" }] })), ["fx"]);
 });
 
 test("changing channelMode re-routes a live chain in place", () => {

@@ -1506,6 +1506,143 @@ body.track-size-s .clip.selected {
   border-color: var(--accent);
 }
 
+.mix-fx {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--dim);
+  font: 600 10px/1 "Segoe UI", sans-serif;
+  padding: 4px 0;
+  cursor: pointer;
+}
+
+.mix-fx:hover {
+  color: var(--text);
+}
+
+.mix-fx.on {
+  border-color: var(--accent);
+  color: #cfc8ff;
+}
+
+.mixer-fx {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  width: 100%;
+}
+
+.mixer-fx-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 8px;
+  font: 600 12px/1.2 "Segoe UI", sans-serif;
+  color: var(--text);
+}
+
+.mixer-fx-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+/* ── Effect chains (inspector + mixer) ── */
+.fx-tools-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.fx-tools-row select {
+  flex: 1;
+  min-width: 0;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 4px;
+  padding: 4px 6px;
+  font: inherit;
+}
+
+.fx-card {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-2);
+  padding: 6px 8px;
+  margin-bottom: 6px;
+}
+
+.fx-card.off {
+  opacity: .55;
+}
+
+.fx-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 4px;
+  font: 600 11.5px/1.2 "Segoe UI", sans-serif;
+  color: var(--text);
+}
+
+.fx-head label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.fx-btns {
+  display: flex;
+  gap: 2px;
+}
+
+.fx-btns button {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--dim);
+  font-size: 10px;
+  line-height: 1;
+  padding: 3px 5px;
+  cursor: pointer;
+}
+
+.fx-btns button:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.fx-btns button:disabled {
+  opacity: .3;
+  cursor: default;
+}
+
+.fx-param {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr) 58px;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.fx-param input[type=range] {
+  width: 100%;
+}
+
+.fx-val {
+  text-align: right;
+  font: 10.5px/1 Consolas, monospace;
+  color: var(--text);
+  white-space: nowrap;
+}
+
 .mix-btns {
   display: flex;
   gap: 4px;

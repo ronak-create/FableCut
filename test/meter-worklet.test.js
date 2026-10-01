@@ -102,3 +102,14 @@ test("output is the sum of inputs", () => {
   assert.ok(Math.abs(outL[0] - 0.4) < 0.001, `outL[0] was ${outL[0]}`);
   assert.ok(Math.abs(outR[0] - 0.6) < 0.001, `outR[0] was ${outR[0]}`);
 });
+
+test("programInput: only the program reaches the output; the other inputs are meter taps", () => {
+  const p = makeProcessor({ programInput: 1 });
+  const size = 128;
+  const L = new Float32Array(size).fill(0.5);   // track tap
+  const spillL = new Float32Array(size).fill(0.1); // the finished program
+  const { messages, outL } = runHop(p, { L, spillL });
+  assert.ok(Math.abs(outL[0] - 0.1) < 1e-6, `output was ${outL[0]} — a tap leaked into the program`);
+  assert.ok(Math.abs(messages[0].rms[0] - 0.5) < 0.001, "the track tap is still metered");
+  assert.ok(messages[0].masterLufs < messages[0].lufs[0], "master LUFS follows the program, not the tap");
+});

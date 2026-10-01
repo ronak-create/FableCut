@@ -176,10 +176,15 @@ function clipChannelMode(c) {
 function trackGainDb(id) { return clampFaderDb(TRACKS.find((t) => t.id === id)?.gain); }
 function trackPanValue(id) { return clipPan(TRACKS.find((t) => t.id === id)?.pan); }
 function masterGainDb() { return clampFaderDb(project.master?.gain); }
-/** project.master on disk: written only when off-default. */
+/** project.master on disk: {gain?, fx?}, written only when off-default. */
 function normalizeMaster(raw) {
   const gain = clampFaderDb(raw?.gain);
-  return gain ? { gain } : null;
+  const fx = normFx(raw?.fx);
+  if (!gain && !fx) return null;
+  const out = {};
+  if (gain) out.gain = gain;
+  if (fx) out.fx = fx;
+  return out;
 }
 const TRACK_IDS = new Set(TRACKS.map((t) => t.id));
 function syncTrackIds() {
@@ -189,10 +194,11 @@ function syncTrackIds() {
 function serializeTracks() {
   // Mixer settings are written only when off-default, so untouched projects
   // stay byte-identical.
-  return TRACKS.map(({ id, kind, gain, pan }) => {
+  return TRACKS.map(({ id, kind, gain, pan, fx }) => {
     const d = { id, kind };
     if (kind === "audio" && +gain) d.gain = +gain;
     if (kind === "audio" && +pan) d.pan = +pan;
+    if (kind === "audio" && fx?.length) d.fx = fx;
     return d;
   });
 }
@@ -221,6 +227,8 @@ function applyTracksFromProject(defs) {
     if (t.kind === "audio") {
       if (+d.gain) t.gain = clampFaderDb(d.gain);
       if (+d.pan) t.pan = clipPan(d.pan);
+      const fx = normFx(d.fx);
+      if (fx) t.fx = fx;
     }
     TRACKS.push(t);
   }
@@ -1370,6 +1378,8 @@ function applyProject(data) {
   // does not re-hard-pan a deliberately centered stem.
   const migratePan = !(data.panSchema >= 1);
   for (const c of project.clips) {
+    c.fx = normFx(c.fx);
+    if (!c.fx) delete c.fx;
     const raw = c.props || {};
     c.props = { ...DEFAULT_PROPS, ...raw };
     if (migratePan && !Object.hasOwn(raw, "pan") && Number.isInteger(raw.audioChannel) && raw.audioChannel >= 0)
@@ -1438,8 +1448,9 @@ function projectJSON() {
     tracks: serializeTracks(),
     media: media.filter((m) => !m.transient).map(({ id, name, kind, src, duration, width, height, folderId }) =>
       ({ id, name, kind, src, duration, width, height, folderId: folderId || null })),
-    clips: clips.map(({ id, mediaId, kind, track, start, in: inn, duration, name, props, keyframes, transitionIn, transitionOut, linkedId, linkGroup, locked, disabled, unlinked }) => {
+    clips: clips.map(({ id, mediaId, kind, track, start, in: inn, duration, name, props, keyframes, transitionIn, transitionOut, linkedId, linkGroup, locked, disabled, unlinked, fx }) => {
       const clipOut = { id, mediaId, kind, track, start, in: inn, duration, name, props, keyframes, transitionIn, transitionOut };
+      if (fx?.length) clipOut.fx = fx;
       if (linkGroup) clipOut.linkGroup = linkGroup;
       if (linkedId) clipOut.linkedId = linkedId;
       // Written only when set, so untouched projects stay byte-identical.
@@ -5603,6 +5614,9 @@ function renderInspector(lite) {
       ${slider("speed", 0.25, 4, 0.05, p.speed, "×")}
     </div>`;
   }
+  if (c.kind === "audio" && typeof FableCutFx !== "undefined") {
+    html += `<div class="insp-section" data-fx-section><h3>Audio effects</h3>${fxEditorHtml(c.fx)}</div>`;
+  }
   if (c.kind === "audio") {
     const duckN = c.keyframes?.duck?.length || 0;
     const lanes = audioTrackIds().filter((id) => id !== c.track);
@@ -5773,6 +5787,20 @@ function renderInspector(lite) {
       scheduleSave(); renderInspector();
     });
   });
+  const fxSection = els.inspector.querySelector("[data-fx-section]");
+  if (fxSection) {
+    let undone = false;
+    bindFxEditor(fxSection, () => c.fx, (fx) => {
+      if (!undone) { pushUndo(); undone = true; } // one undo step per edit burst
+      for (const x of volGroup(c)) { // a stereo pair shares one chain
+        if (fx?.length) x.fx = fx.map((e) => ({ ...e })); else delete x.fx;
+      }
+      c.fx = fx; // keep c's array identity = what was just set
+      if (!fx?.length) delete c.fx;
+      scheduleSave();
+      refreshAudioHold();
+    }, () => renderInspector());
+  }
   els.inspector.querySelector("[data-duck-amount]")?.addEventListener("change", (e) => {
     try { localStorage.setItem(DUCK_KEY, String(clamp(+e.target.value || -12, -40, -1))); } catch { }
   });
@@ -6900,7 +6928,8 @@ function buildClipChain(ctx, src, c, nCh) {
   chain.inNodes = wireClipInput(ctx, src, trim, c, nCh);
   chain.wiring = clipWiringKey(c);
   trim.gain.value = dbToGain(clipGainDb(c));
-  trim.connect(vol);
+  chain.fxSlot = makeFxSlot(ctx, trim, vol); // clip effects sit between gain and volume
+  syncFxSlot(chain.fxSlot, c.fx);
   try {
     chain.pan = ctx.createStereoPanner();
     vol.connect(chain.pan);
@@ -6921,36 +6950,220 @@ function disposeClipChain(chain) {
   for (const n of [chain.out, chain.pan, chain.vol, chain.trim, ...(chain.inNodes || []), chain.src]) {
     if (n) { try { n.disconnect(); } catch { } }
   }
+  disposeFxChain(chain.fxSlot?.chain);
   chain.bus = null;
 }
-/** An A-track bus: the GainNode is the fader, `_fcPan` its pan, `_fcOut` what
- *  feeds the meter / master. Clips connect to the bus itself. */
+/* ── Audio effects: the node side. A chain (audio-fx.js data) becomes a run
+   of Web Audio nodes between two fixed points — an "fx slot". Clips have a
+   slot between gain and volume, tracks between their input and fader, the
+   master between its sum and fader. A slot rebuilds only when the chain's
+   shape changes; parameter tweaks update the live nodes in place. Gate and
+   limiter come from fx-worklet.js and pass audio through until it loads. */
+const fxWorklets = new WeakMap(); // ctx → Promise (resolved = loaded)
+const fxWorkletReady = new WeakSet();
+function loadFxWorklet(ctx) {
+  if (!ctx.audioWorklet) return Promise.resolve(false);
+  let p = fxWorklets.get(ctx);
+  if (!p) {
+    p = ctx.audioWorklet.addModule("fx-worklet.js?v=1")
+      .then(() => { fxWorkletReady.add(ctx); return true; })
+      .catch((err) => { console.warn("[FableCut] fx worklet unavailable:", err); return false; });
+    fxWorklets.set(ctx, p);
+  }
+  return p;
+}
+const FX_WORKLET_TYPES = { limiter: "fablecut-limiter", gate: "fablecut-gate" };
+function normFx(list) {
+  if (!Array.isArray(list) || !list.length) return undefined;
+  const out = typeof FableCutFx !== "undefined" ? FableCutFx.normalizeFx(list) : list;
+  return out.length ? out : undefined;
+}
+/** Seeded so preview and every export get the same impulse response. */
+function reverbIR(ctx, decay) {
+  const cache = reverbIR.cache || (reverbIR.cache = new WeakMap());
+  let byDecay = cache.get(ctx);
+  if (!byDecay) cache.set(ctx, byDecay = new Map());
+  const key = decay.toFixed(2);
+  if (byDecay.has(key)) return byDecay.get(key);
+  const sr = ctx.sampleRate, n = Math.max(1, Math.round(sr * decay));
+  const buf = ctx.createBuffer(2, n, sr);
+  let s = Math.round(decay * 1000) >>> 0;
+  const rnd = () => { // mulberry32
+    s = (s + 0x6D2B79F5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  for (let ch = 0; ch < 2; ch++) {
+    const d = buf.getChannelData(ch);
+    for (let i = 0; i < n; i++) d[i] = (rnd() * 2 - 1) * Math.exp(-6.91 * i / n); // −60 dB at `decay`
+  }
+  byDecay.set(key, buf);
+  return buf;
+}
+function shaperCurve(drive) {
+  const k = drive * 40, n = 1024, curve = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const x = i * 2 / (n - 1) - 1;
+    curve[i] = (1 + k) * x / (1 + k * Math.abs(x));
+  }
+  return curve;
+}
+/** One effect as {input, output, nodes, set(e)}. */
+function makeFxUnit(ctx, e) {
+  const g = (v = 1) => { const n = ctx.createGain(); n.gain.value = v; return n; };
+  const bq = (type) => { const n = ctx.createBiquadFilter(); n.type = type; return n; };
+  const eqPow = (mix) => [Math.cos(mix * Math.PI / 2), Math.sin(mix * Math.PI / 2)];
+  switch (e.type) {
+    case "eq": {
+      const lo = bq("lowshelf"), mid = bq("peaking"), hi = bq("highshelf");
+      lo.connect(mid); mid.connect(hi);
+      return { input: lo, output: hi, nodes: [lo, mid, hi], set(p) {
+        lo.frequency.value = p.lowFreq; lo.gain.value = p.lowGain;
+        mid.frequency.value = p.midFreq; mid.gain.value = p.midGain; mid.Q.value = p.midQ;
+        hi.frequency.value = p.highFreq; hi.gain.value = p.highGain;
+      } };
+    }
+    case "highpass": case "lowpass": {
+      const f = bq(e.type);
+      return { input: f, output: f, nodes: [f], set(p) { f.frequency.value = p.freq; f.Q.value = p.q; } };
+    }
+    case "compressor": {
+      const c = ctx.createDynamicsCompressor(), mk = g();
+      c.connect(mk);
+      return { input: c, output: mk, nodes: [c, mk], set(p) {
+        c.threshold.value = p.threshold; c.ratio.value = p.ratio; c.knee.value = p.knee;
+        c.attack.value = p.attack / 1000; c.release.value = p.release / 1000;
+        mk.gain.value = dbToGain(p.makeup);
+      } };
+    }
+    case "limiter": case "gate": {
+      if (!fxWorkletReady.has(ctx)) { const pass = g(); return { input: pass, output: pass, nodes: [pass], pending: true, set() { } }; }
+      const w = new AudioWorkletNode(ctx, FX_WORKLET_TYPES[e.type]);
+      return { input: w, output: w, nodes: [w], set(p) {
+        for (const k of Object.keys(FableCutFx.FX_DEFS[e.type].params)) w.parameters.get(k).value = p[k];
+      } };
+    }
+    case "delay": {
+      const inp = g(), out = g(), dry = g(1), wet = g(), fb = g(), d = ctx.createDelay(2);
+      inp.connect(dry); dry.connect(out);
+      inp.connect(d); d.connect(wet); wet.connect(out); d.connect(fb); fb.connect(d);
+      return { input: inp, output: out, nodes: [inp, out, dry, wet, fb, d], set(p) {
+        d.delayTime.value = p.time; fb.gain.value = p.feedback; wet.gain.value = p.mix;
+      } };
+    }
+    case "reverb": {
+      const inp = g(), out = g(), dry = g(), wet = g(), pre = ctx.createDelay(0.5), conv = ctx.createConvolver();
+      inp.connect(dry); dry.connect(out);
+      inp.connect(pre); pre.connect(conv); conv.connect(wet); wet.connect(out);
+      let decay = null;
+      return { input: inp, output: out, nodes: [inp, out, dry, wet, pre, conv], set(p) {
+        const [d, w] = eqPow(p.mix);
+        dry.gain.value = d; wet.gain.value = w; pre.delayTime.value = p.predelay / 1000;
+        if (decay !== p.decay) { decay = p.decay; conv.buffer = reverbIR(ctx, p.decay); }
+      } };
+    }
+    case "distortion": {
+      const inp = g(), out = g(), dry = g(), wet = g(), sh = ctx.createWaveShaper();
+      sh.oversample = "4x";
+      inp.connect(dry); dry.connect(out); inp.connect(sh); sh.connect(wet); wet.connect(out);
+      let drive = null;
+      return { input: inp, output: out, nodes: [inp, out, dry, wet, sh], set(p) {
+        const [d, w] = eqPow(p.mix);
+        dry.gain.value = d; wet.gain.value = w;
+        if (drive !== p.drive) { drive = p.drive; sh.curve = shaperCurve(p.drive); }
+      } };
+    }
+    case "widener": { // mid/side width: 0 = mono, 1 = as is, 2 = twice the side
+      const up = g(); // mono in → both sides, so a mono clip widens sanely
+      up.channelCount = 2; up.channelCountMode = "explicit"; up.channelInterpretation = "speakers";
+      const sp = ctx.createChannelSplitter(2), mg = ctx.createChannelMerger(2);
+      const ll = g(), lr = g(), rr = g(), rl = g();
+      up.connect(sp);
+      sp.connect(ll, 0); sp.connect(rl, 0); sp.connect(rr, 1); sp.connect(lr, 1);
+      ll.connect(mg, 0, 0); lr.connect(mg, 0, 0); rr.connect(mg, 0, 1); rl.connect(mg, 0, 1);
+      return { input: up, output: mg, nodes: [up, sp, mg, ll, lr, rr, rl], set(p) {
+        const a = (1 + p.width) / 2, b = (1 - p.width) / 2;
+        ll.gain.value = a; rr.gain.value = a; lr.gain.value = b; rl.gain.value = b;
+      } };
+    }
+  }
+  const pass = g();
+  return { input: pass, output: pass, nodes: [pass], set() { } };
+}
+function buildFxChain(ctx, fx) {
+  const units = fx.map((e) => { const u = makeFxUnit(ctx, e); u.set(e); return u; });
+  for (let i = 1; i < units.length; i++) units[i - 1].output.connect(units[i].input);
+  return { units, input: units[0].input, output: units[units.length - 1].output, pending: units.some((u) => u.pending) };
+}
+function disposeFxChain(chain) {
+  if (!chain) return;
+  for (const u of chain.units) for (const n of u.nodes) { try { n.disconnect(); } catch { } }
+}
+/** An fx insert between `from` and `to`; `from` must feed nothing else. */
+function makeFxSlot(ctx, from, to) {
+  from.connect(to);
+  return { ctx, from, to, chain: null, ref: null, shape: "" };
+}
+/** Bring a slot in line with an effects list (bypassed effects left out). */
+function syncFxSlot(slot, list) {
+  if (!slot) return;
+  if (slot.ref === list && !slot.chain?.pending) return;
+  slot.ref = list;
+  const fx = (list || []).filter((e) => e && e.on !== false);
+  const shape = fx.map((e) => e.type).join(",");
+  if (slot.chain && shape === slot.shape && !slot.chain.pending) {
+    fx.forEach((e, i) => slot.chain.units[i].set(e));
+    return;
+  }
+  try { slot.from.disconnect(); } catch { }
+  disposeFxChain(slot.chain);
+  slot.chain = null;
+  slot.shape = shape;
+  if (!fx.length) { slot.from.connect(slot.to); return; }
+  slot.chain = buildFxChain(slot.ctx, fx);
+  slot.from.connect(slot.chain.input);
+  slot.chain.output.connect(slot.to);
+}
+function trackFx(id) { return TRACKS.find((t) => t.id === id)?.fx; }
+function masterFx() { return project.master?.fx; }
+/** An A-track bus: clips connect to the bus (its input sum), then fx →
+ *  fader (`_fcFader`) → pan (`_fcPan`); `_fcOut` feeds the master sum. */
 function makeTrackBus(ctx) {
   const bus = ctx.createGain();
   configureTrackBus(bus);
+  const fader = ctx.createGain();
+  configureTrackBus(fader);
+  bus._fcFx = makeFxSlot(ctx, bus, fader);
   let pan = null;
-  try { pan = ctx.createStereoPanner(); bus.connect(pan); } catch { pan = null; }
+  try { pan = ctx.createStereoPanner(); fader.connect(pan); } catch { pan = null; }
+  bus._fcFader = fader;
   bus._fcPan = pan;
-  bus._fcOut = pan || bus;
+  bus._fcOut = pan || fader;
   return bus;
 }
 function busOut(bus) { return bus._fcOut || bus; }
-/** Track buses + master sum + master fader, wired track → sum → fader. */
+function disposeTrackBus(bus) {
+  for (const n of [busOut(bus), bus._fcFader, bus]) { try { n.disconnect(); } catch { } }
+  disposeFxChain(bus._fcFx?.chain);
+}
+/** Track buses + master sum → master fx → master fader. */
 function buildMixBuses(ctx, ids) {
   const master = ctx.createGain();
   configureMasterBus(master);
   const masterOut = ctx.createGain();
   configureMasterBus(masterOut);
-  master.connect(masterOut);
+  const masterFxSlot = makeFxSlot(ctx, master, masterOut);
   const trackBus = {};
   for (const id of ids) {
     trackBus[id] = makeTrackBus(ctx);
     busOut(trackBus[id]).connect(master);
   }
-  return { master, masterOut, trackBus };
+  return { ctx, master, masterOut, masterFxSlot, trackBus };
 }
-/** Push track / master fader + pan values into a mix. `smooth` glides live
- *  changes (no zipper noise from a dragged fader); export sets them flat. */
+/** Push track / master faders, pans and effects into a mix. `smooth` glides
+ *  live fader moves (no zipper noise); export sets them flat. */
 function applyMixLevels(mix, smooth = false) {
   if (!mix) return;
   const set = (param, v) => {
@@ -6958,10 +7171,12 @@ function applyMixLevels(mix, smooth = false) {
     else param.value = v;
   };
   for (const [id, bus] of Object.entries(mix.trackBus)) {
-    set(bus.gain, dbToGain(trackGainDb(id)));
+    set((bus._fcFader || bus).gain, dbToGain(trackGainDb(id)));
     if (bus._fcPan) set(bus._fcPan.pan, trackPanValue(id));
+    syncFxSlot(bus._fcFx, trackFx(id));
   }
   if (mix.masterOut) set(mix.masterOut.gain, dbToGain(masterGainDb()));
+  syncFxSlot(mix.masterFxSlot, masterFx());
 }
 function ensureAudio() {
   if (runtime.audio) return runtime.audio;
@@ -6969,15 +7184,18 @@ function ensureAudio() {
   const ids = audioTrackIds();
   const mix = buildMixBuses(ctx, ids);
   const recDest = ctx.createMediaStreamDestination();
-  // Until the meter worklet is ready, track buses feed the master sum directly.
+  // Until the meter worklet is ready the master fader feeds the speakers directly.
   mix.masterOut.connect(ctx.destination);
   mix.masterOut.connect(recDest);
   runtime.audio = {
-    ctx, master: mix.master, masterOut: mix.masterOut, recDest, trackBus: mix.trackBus,
-    audioTrackIds: ids.slice(),
+    ctx, master: mix.master, masterOut: mix.masterOut, masterFxSlot: mix.masterFxSlot, recDest,
+    trackBus: mix.trackBus, audioTrackIds: ids.slice(),
     meter: null, meterReady: false,
   };
   applyMixLevels(runtime.audio);
+  // Gate / limiter slots built before the worklet loaded pass audio through;
+  // rebuild them once it is in (clip slots catch up on their next frame).
+  loadFxWorklet(ctx).then(() => { if (runtime.audio?.ctx === ctx) applyMixLevels(runtime.audio); });
   installMeterWorklet(runtime.audio).catch(() => {});
   for (const [id, el] of runtime.clipEls) {
     const c = getClip(id);
@@ -6994,9 +7212,7 @@ function syncAudioGraphTracks() {
   // Drop buses for removed A-tracks (independent of meter state).
   for (const id of Object.keys(audio.trackBus)) {
     if (idSet.has(id)) continue;
-    const bus = audio.trackBus[id];
-    try { busOut(bus).disconnect(); } catch { }
-    try { bus.disconnect(); } catch { }
+    disposeTrackBus(audio.trackBus[id]);
     delete audio.trackBus[id];
   }
   for (const id of ids) {
@@ -7064,6 +7280,7 @@ function driveClipChain(chain, c, p) {
     chain.wiring = "";
   }
   rewireClipChain(chain, c);
+  syncFxSlot(chain.fxSlot, c.fx);
   chain.trim.gain.value = dbToGain(clipGainDb(c));
   chain.vol.gain.value = clipAudioGain(p);
   if (chain.pan) chain.pan.pan.value = clipPan(p.pan);
@@ -7309,6 +7526,7 @@ function renderMixer() {
   const root = els.mixer;
   root.innerHTML = "";
   mixerState.strips = {};
+  if (mixerState.fxTarget) { renderMixerFx(root, mixerState.fxTarget); return; }
   const row = document.createElement("div");
   row.className = "mixer-strips";
   const strip = (id, label, color, isMaster) => {
@@ -7325,7 +7543,9 @@ function renderMixer() {
         <input type="range" class="mix-fader" min="0" max="1" step="0.001" title="${isMaster ? "Master" : "Track"} fader — double-click: 0 dB">
       </div>
       <input type="text" class="mix-db" spellcheck="false" title="Type a level in dB (e.g. -6, +2, -inf)">
+      <button type="button" class="mix-fx" title="${isMaster ? "Master" : `Track ${id}`} effects">FX</button>
       ${isMaster ? "" : `<div class="mix-btns"><button type="button" class="mix-m" title="Mute (track output on/off)">M</button><button type="button" class="mix-s" title="Solo">S</button></div>`}`;
+    s.querySelector(".mix-fx").addEventListener("click", () => { mixerState.fxTarget = id; renderMixer(); });
     const fader = s.querySelector(".mix-fader");
     const dbIn = s.querySelector(".mix-db");
     const setDb = (db) => isMaster ? setMasterGain(db) : setTrackMix(id, { gain: db });
@@ -7376,6 +7596,10 @@ function syncMixerStrip(id) {
   if (document.activeElement !== fader || Math.abs(+fader.value - faderDbToPos(db)) > 0.002) fader.value = faderDbToPos(db);
   const dbIn = s.querySelector(".mix-db");
   if (document.activeElement !== dbIn) dbIn.value = fmtDb(db);
+  const nFx = ((st.master ? masterFx() : trackFx(id)) || []).filter((e) => e.on !== false).length;
+  const fxBtn = s.querySelector(".mix-fx");
+  fxBtn.textContent = nFx ? `FX ${nFx}` : "FX";
+  fxBtn.classList.toggle("on", nFx > 0);
   if (st.master) return;
   const pan = s.querySelector(".mix-pan");
   pan.value = trackPanValue(id);
@@ -7386,6 +7610,101 @@ function syncMixerStrip(id) {
   s.querySelector(".mix-m").setAttribute("aria-pressed", on ? "false" : "true");
   s.querySelector(".mix-s").classList.toggle("on", solo);
   s.querySelector(".mix-s").setAttribute("aria-pressed", solo ? "true" : "false");
+}
+/* ── Effects panel: the same editor for a clip (inspector), a track and the
+   master (mixer). `get` returns the current chain, `set` applies a new one
+   (always a fresh array, so live audio slots notice the change). ── */
+function fxFmt(v, d) {
+  if (d.unit === "Hz") return v >= 1000 ? `${(v / 1000).toFixed(v >= 10000 ? 1 : 2)} kHz` : `${Math.round(v)} Hz`;
+  if (d.unit === "") return d.max <= 1 ? `${Math.round(v * 100)}%` : (+v).toFixed(2);
+  if (d.unit === "ms") return `${Math.round(v)} ms`;
+  if (d.unit === "s") return `${(+v).toFixed(2)} s`;
+  if (d.unit === ":1") return `${(+v).toFixed(1)}:1`;
+  if (d.unit === "×") return `${(+v).toFixed(2)}×`;
+  return `${(+v).toFixed(1)} ${d.unit}`;
+}
+/* Frequency sliders move on a log scale (0…1000 ↔ min…max Hz). */
+const fxToSlider = (v, d) => d.unit === "Hz" ? Math.round(1000 * Math.log(v / d.min) / Math.log(d.max / d.min)) : v;
+const fxFromSlider = (s, d) => d.unit === "Hz" ? d.min * Math.pow(d.max / d.min, s / 1000) : +s;
+function fxEditorHtml(list) {
+  const F = FableCutFx;
+  const groups = {};
+  for (const [id, p] of Object.entries(F.PRESETS)) (groups[p.group] = groups[p.group] || []).push([id, p.label]);
+  let html = `<div class="fx-tools-row">
+    <select data-fx-preset title="Replace the chain with a preset — tweak it afterwards"><option value="">Preset…</option>${Object.entries(groups).map(([g, items]) =>
+      `<optgroup label="${g}">${items.map(([id, label]) => `<option value="${id}">${label}</option>`).join("")}</optgroup>`).join("")}</select>
+    <select data-fx-add title="Add an effect to the end of the chain"><option value="">+ Add effect…</option>${F.FX_TYPES.map((t) =>
+      `<option value="${t}">${F.FX_DEFS[t].label}</option>`).join("")}</select>
+    ${list?.length ? `<button type="button" class="btn tiny" data-fx-clear title="Remove every effect">Clear</button>` : ""}
+  </div>`;
+  if (!list?.length) return html + `<div class="insp-note">No effects. Pick a preset or add one.</div>`;
+  list.forEach((e, i) => {
+    const def = F.FX_DEFS[e.type];
+    html += `<div class="fx-card${e.on === false ? " off" : ""}" data-fx-i="${i}">
+      <div class="fx-head"><label title="On / bypass"><input type="checkbox" data-fx-on ${e.on === false ? "" : "checked"}> ${def.label}</label>
+        <span class="fx-btns"><button type="button" data-fx-move="-1" title="Earlier in the chain" ${i ? "" : "disabled"}>▲</button><button type="button" data-fx-move="1" title="Later in the chain" ${i < list.length - 1 ? "" : "disabled"}>▼</button><button type="button" data-fx-del title="Remove">✕</button></span></div>
+      ${Object.entries(def.params).map(([k, d]) => `<div class="fx-param"><span>${d.label}</span>
+        <input type="range" data-fx-p="${k}" min="${d.unit === "Hz" ? 0 : d.min}" max="${d.unit === "Hz" ? 1000 : d.max}" step="${d.unit === "Hz" ? 1 : d.step}" value="${fxToSlider(e[k], d)}" title="Double-click: default">
+        <span class="fx-val">${fxFmt(e[k], d)}</span></div>`).join("")}
+    </div>`;
+  });
+  return html;
+}
+function bindFxEditor(root, get, set, onStructure) {
+  const F = FableCutFx;
+  const list = () => (get() || []).map((e) => ({ ...e }));
+  const restructure = (next) => { set(next.length ? next : undefined); onStructure(); };
+  root.querySelector("[data-fx-preset]")?.addEventListener("change", (ev) => {
+    if (ev.target.value) restructure(F.presetChain(ev.target.value));
+  });
+  root.querySelector("[data-fx-add]")?.addEventListener("change", (ev) => {
+    if (ev.target.value) restructure([...list(), F.normalizeEffect({ type: ev.target.value })]);
+  });
+  root.querySelector("[data-fx-clear]")?.addEventListener("click", () => restructure([]));
+  for (const card of root.querySelectorAll(".fx-card")) {
+    const i = +card.dataset.fxI;
+    card.querySelector("[data-fx-on]").addEventListener("change", (ev) => {
+      const next = list();
+      if (ev.target.checked) delete next[i].on; else next[i].on = false;
+      restructure(next);
+    });
+    card.querySelector("[data-fx-del]").addEventListener("click", () => restructure(list().filter((_, j) => j !== i)));
+    for (const b of card.querySelectorAll("[data-fx-move]")) b.addEventListener("click", () => {
+      const next = list(), j = i + +b.dataset.fxMove;
+      if (j < 0 || j >= next.length) return;
+      [next[i], next[j]] = [next[j], next[i]];
+      restructure(next);
+    });
+    for (const inp of card.querySelectorAll("[data-fx-p]")) {
+      const k = inp.dataset.fxP;
+      const d = F.FX_DEFS[list()[i].type].params[k];
+      const apply = (v) => {
+        const next = list();
+        next[i][k] = Math.round(v * 1000) / 1000;
+        set(next);
+        inp.nextElementSibling.textContent = fxFmt(next[i][k], d);
+      };
+      inp.addEventListener("input", () => apply(fxFromSlider(inp.value, d)));
+      inp.addEventListener("dblclick", () => { inp.value = fxToSlider(d.def, d); apply(d.def); });
+    }
+  }
+}
+/** Mixer: the effects of one track (or the master), replacing the strips. */
+function renderMixerFx(root, id) {
+  const isMaster = id === MIXER_MASTER;
+  const t = TRACKS.find((x) => x.id === id);
+  if (!isMaster && !t) { mixerState.fxTarget = null; renderMixer(); return; }
+  root.innerHTML = `<div class="mixer-fx">
+    <div class="mixer-fx-head"><button type="button" class="btn tiny" data-fx-back>← Mixer</button>
+      <span>${isMaster ? "Master" : id} effects</span></div>
+    <div class="mixer-fx-body">${fxEditorHtml(isMaster ? masterFx() : t.fx)}</div></div>`;
+  root.querySelector("[data-fx-back]").addEventListener("click", () => { mixerState.fxTarget = null; renderMixer(); });
+  bindFxEditor(root, () => isMaster ? masterFx() : t.fx, (fx) => {
+    if (isMaster) project.master = normalizeMaster({ ...(project.master || {}), fx });
+    else { if (fx?.length) t.fx = fx; else delete t.fx; project.tracks = serializeTracks(); }
+    if (runtime.audio) applyMixLevels(runtime.audio, true);
+    scheduleSave();
+  }, () => renderMixer());
 }
 function paintMixerBar(ctx, x, w, h, db, holdDb) {
   const frac = (v) => clamp((v - METER_DB_MIN) / (METER_DB_MAX - METER_DB_MIN), 0, 1);
@@ -7490,7 +7809,8 @@ function disposeMasterAnalysers(audio) {
   audio.masterSplit = null;
   audio.masterAnalysers = null;
 }
-/** Disconnect meter + analysers; restore the master sum → fader path. */
+/** Disconnect meter + analysers; the master fader feeds the speakers again.
+ *  (Bus taps into the old meter are rewired by syncAudioGraphTracks.) */
 function teardownMeterNode(audio) {
   if (!audio) return;
   disposeMasterAnalysers(audio);
@@ -7498,8 +7818,9 @@ function teardownMeterNode(audio) {
     try { audio.meter.port.onmessage = null; } catch {}
     try { audio.meter.disconnect(); } catch {}
   }
-  try { audio.master.disconnect(); } catch {}
-  try { audio.master.connect(audio.masterOut); } catch {}
+  try { audio.masterOut.disconnect(); } catch {}
+  try { audio.masterOut.connect(audio.ctx.destination); } catch {}
+  try { audio.masterOut.connect(audio.recDest); } catch {}
 }
 function installMasterAnalysers(audio, meterNode) {
   disposeMasterAnalysers(audio);
@@ -7625,7 +7946,7 @@ async function installMeterWorklet(audio) {
   const nInputs = Math.max(1, nAudio + 1); // +1 = video/other spill on master
   let meter = null;
   try {
-    await audio.ctx.audioWorklet.addModule("meter-worklet.js?v=8");
+    await audio.ctx.audioWorklet.addModule("meter-worklet.js?v=9");
     // Aborted by syncAudioGraphTracks while we were loading — retry fresh.
     if (meterState._reloadMeter) return;
     meter = new AudioWorkletNode(audio.ctx, "fablecut-meter", {
@@ -7635,7 +7956,9 @@ async function installMeterWorklet(audio) {
       channelCount: 2,
       channelCountMode: "explicit",
       channelInterpretation: "discrete",
-      processorOptions: { hopBlocks: 8, nTracks: nInputs, nAudioTracks: nAudio, trackIds },
+      // The last input is the finished program (after master fx and fader):
+      // it alone is passed through and measured for master loudness.
+      processorOptions: { hopBlocks: 8, nTracks: nInputs, nAudioTracks: nAudio, trackIds, programInput: nAudio },
     });
     meter.port.onmessage = (ev) => {
       const msg = ev.data;
@@ -7647,24 +7970,22 @@ async function installMeterWorklet(audio) {
         meterState.peak[id] = msg.peak[i] || 0;
         meterState.lufs[id] = msg.lufs[i] != null ? msg.lufs[i] : -70;
       }
-      // The worklet measures the pre-fader sum; the master fader is a static
-      // gain, so post-fader loudness is that reading plus the fader.
-      if (msg.masterLufs != null)
-        meterState.master.lufs = msg.masterLufs > -70 ? msg.masterLufs + masterGainDb() : msg.masterLufs;
+      if (msg.masterLufs != null) meterState.master.lufs = msg.masterLufs;
     };
 
     // Connect the output first so a wiring error never leaves the graph silent.
-    meter.connect(audio.masterOut);
+    meter.connect(audio.ctx.destination);
+    meter.connect(audio.recDest);
 
-    // Full mix: A-buses + master spill → meter (single summed path).
+    // Each A-bus is tapped for its own meter (it keeps feeding the master sum);
+    // the program after master fx + fader goes through the meter to the speakers.
     for (let i = 0; i < trackIds.length; i++) {
       const bus = audio.trackBus[trackIds[i]];
-      if (!bus) continue;
-      try { busOut(bus).disconnect(); } catch {}
-      busOut(bus).connect(meter, 0, i);
+      if (bus) busOut(bus).connect(meter, 0, i);
     }
-    try { audio.master.disconnect(audio.masterOut); } catch {}
-    audio.master.connect(meter, 0, nAudio);
+    try { audio.masterOut.disconnect(audio.ctx.destination); } catch {}
+    try { audio.masterOut.disconnect(audio.recDest); } catch {}
+    audio.masterOut.connect(meter, 0, nAudio);
 
     installMasterAnalysers(audio, meter);
 
@@ -7688,15 +8009,16 @@ async function installMeterWorklet(audio) {
       try { meter.port.onmessage = null; } catch {}
       try { meter.disconnect(); } catch {}
     }
-    // Buses were disconnected above — restore direct master path.
+    // Drop any meter taps and send the master fader straight to the speakers.
     for (const id of trackIds) {
       const bus = audio.trackBus[id];
       if (!bus) continue;
       try { busOut(bus).disconnect(); } catch {}
       try { busOut(bus).connect(audio.master); } catch {}
     }
-    try { audio.master.disconnect(); } catch {}
-    try { audio.master.connect(audio.masterOut); } catch {}
+    try { audio.masterOut.disconnect(); } catch {}
+    try { audio.masterOut.connect(audio.ctx.destination); } catch {}
+    try { audio.masterOut.connect(audio.recDest); } catch {}
   } finally {
     meterState._loading = false;
     if (meterState._reloadMeter && !audio.meterReady) {
@@ -10551,6 +10873,7 @@ async function renderAudioMix(t0, t1) {
   if (dur <= 0) return null;
   const sr = 48000;
   const off = new OfflineAudioContext(2, Math.ceil(dur * sr) + 1, sr);
+  await loadFxWorklet(off); // gate / limiter render in the export too
   const mix = buildMixBuses(off, audioTrackIds());
   applyMixLevels(mix);
   mix.masterOut.connect(off.destination);

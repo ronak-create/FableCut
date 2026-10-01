@@ -20,6 +20,7 @@ const {
   APP_DIR, DATA_DIR, MEDIA_DIR, ANALYSIS_DIR, LIBRARY_DIR, PROJECT_FILE, ensureDirs,
 } = require("./paths");
 const { downloadImportUrl, kindFromName, maybeFaststart } = require("./import-url");
+const FX = require("./audio-fx");
 
 /* ROOT is where the code lives (server.js, CLAUDE.md); the user's timeline and
    media live under DATA_DIR. Identical unless FABLECUT_DATA_DIR is set. */
@@ -110,7 +111,7 @@ const TOOLS = [
   },
   {
     name: "fablecut_patch_project",
-    description: "Apply targeted edits to the FableCut project WITHOUT round-tripping the whole document — PREFER THIS over get+set for every edit (it is ~10-100x cheaper in tokens and merge-safe by design: it re-reads the latest document from disk, applies your ops in order, bumps revision once, saves atomically). Ops: {op:'addClip', clip:{…}} (id auto-generated if omitted) · {op:'updateClip', id, set:{…}} · {op:'removeClip', id} · {op:'addMedia', media:{…}} · {op:'removeMedia', id} · {op:'setProject', set:{name|width|height|fps|background|markers|disabledTracks|lockedTracks|untargetedTracks|encodeProfile|master}} (markers = the full list [{t, label?, color?}], color: gold|red|orange|green|cyan|blue|purple|pink; master = {gain}, the master fader in dB) · {op:'setTrack', id:'A1', set:{gain?, pan?}} (audio-track fader in dB −60…+12 and pan −1…1; null or 0 resets). updateClip merge rules: top-level keys are replaced (keyframes/transitionIn/transitionOut wholesale), `props` merges key-by-key, and setting any key to null deletes it. LOCKS: the user can lock clips (`locked:true`) and tracks (`lockedTracks`); updateClip / removeClip on a locked clip — or on a clip linked to one — and addClip onto a locked track are refused. Leave locked material alone; only if the user asked you to change it, pass force:true on that op (or unlock first: updateClip set:{locked:null}, which is always allowed). All-or-nothing: an invalid op aborts the whole patch unsaved.",
+    description: "Apply targeted edits to the FableCut project WITHOUT round-tripping the whole document — PREFER THIS over get+set for every edit (it is ~10-100x cheaper in tokens and merge-safe by design: it re-reads the latest document from disk, applies your ops in order, bumps revision once, saves atomically). Ops: {op:'addClip', clip:{…}} (id auto-generated if omitted) · {op:'updateClip', id, set:{…}} · {op:'removeClip', id} · {op:'addMedia', media:{…}} · {op:'removeMedia', id} · {op:'setProject', set:{name|width|height|fps|background|markers|disabledTracks|lockedTracks|untargetedTracks|encodeProfile|master}} (markers = the full list [{t, label?, color?}], color: gold|red|orange|green|cyan|blue|purple|pink; master = {gain}, the master fader in dB) · {op:'setTrack', id:'A1', set:{gain?, pan?}} (audio-track fader in dB −60…+12 and pan −1…1; null or 0 resets) · {op:'setFx', target:'clip'|'track'|'master', id?, preset?:'podcast'|… OR fx:[{type,…params}], append?:true} (audio effects — validated; presets: clean-voice, podcast, radio, deep-voice, telephone, cinematic, wide, muffled; fx:null clears; on a clip it applies to its linked stems too; see the 'Audio mix' docs section). updateClip merge rules: top-level keys are replaced (keyframes/transitionIn/transitionOut wholesale), `props` merges key-by-key, and setting any key to null deletes it. LOCKS: the user can lock clips (`locked:true`) and tracks (`lockedTracks`); updateClip / removeClip on a locked clip — or on a clip linked to one — and addClip onto a locked track are refused. Leave locked material alone; only if the user asked you to change it, pass force:true on that op (or unlock first: updateClip set:{locked:null}, which is always allowed). All-or-nothing: an invalid op aborts the whole patch unsaved.",
     inputSchema: {
       type: "object",
       properties: {
@@ -408,11 +409,13 @@ async function callTool(name, args) {
       };
       // Mixer: only off-default faders / pans, so a fresh project adds no line.
       const signed = (v) => (v > 0 ? "+" : "") + v;
+      const fxTag = (fx) => Array.isArray(fx) && fx.length ? ` fx:${FX.summarizeFx(fx)}` : "";
       const mixLine = (d) => {
         const parts = (Array.isArray(d.tracks) ? d.tracks : [])
-          .filter((t) => t && (+t.gain || +t.pan))
-          .map((t) => t.id + (+t.gain ? ` ${signed(+t.gain)}dB` : "") + (+t.pan ? ` pan:${+t.pan}` : ""));
-        if (d.master && +d.master.gain) parts.push(`master ${signed(+d.master.gain)}dB`);
+          .filter((t) => t && (+t.gain || +t.pan || t.fx?.length))
+          .map((t) => t.id + (+t.gain ? ` ${signed(+t.gain)}dB` : "") + (+t.pan ? ` pan:${+t.pan}` : "") + fxTag(t.fx));
+        if (d.master && (+d.master.gain || d.master.fx?.length))
+          parts.push("master" + (+d.master.gain ? ` ${signed(+d.master.gain)}dB` : "") + fxTag(d.master.fx));
         return parts.length ? [`MIX: ${parts.join(" · ")}`] : [];
       };
       const lines = [
@@ -439,7 +442,7 @@ async function callTool(name, args) {
               (c.mediaId ? `(${c.mediaId}${c.in ? ` in:${r3(c.in)}` : ""})` : "") +
               (c.name ? ` "${c.name}"` : "") + fmtProps(c.props, c.kind) + kf + tr +
               (c.locked === true ? " [locked]" : "") + (c.disabled === true ? " [disabled]" : "") +
-              (c.unlinked === true ? " [unlinked]" : "");
+              (c.unlinked === true ? " [unlinked]" : "") + fxTag(c.fx);
           }),
         `(compact view — full JSON: fablecut_get_project without compact; edit via fablecut_patch_project)`,
       ];
@@ -533,6 +536,40 @@ async function callTool(name, args) {
             notes.push("-" + op.id);
             break;
           }
+          case "setFx": {
+            // {op:"setFx", target:"clip"|"track"|"master", id?, fx?:[…] | preset?:"podcast", append?:true}
+            const target = op.target || (op.id && /^A\d+$/.test(op.id) ? "track" : op.id ? "clip" : "master");
+            let chain;
+            if (op.preset != null) chain = FX.presetChain(String(op.preset));
+            else if (op.fx === null) chain = [];
+            else chain = FX.normalizeFx(op.fx, true);
+            const merge = (cur) => op.append ? [...FX.normalizeFx(cur), ...chain] : chain;
+            if (target === "clip") {
+              const c = proj.clips.find((x) => x.id === op.id);
+              if (!c) throw new Error("setFx: no clip " + op.id);
+              if (c.kind !== "audio") throw new Error(`setFx: clip ${op.id} is ${c.kind} — effects go on audio clips (a video's sound is on its linked A-track clips)`);
+              refuseLocked("setFx", lockReason(c), op);
+              const group = c.linkGroup ? proj.clips.filter((x) => x.linkGroup === c.linkGroup && x.kind === "audio") : [c];
+              const next = merge(c.fx);
+              for (const x of group) { if (next.length) x.fx = next.map((e) => ({ ...e })); else delete x.fx; }
+              notes.push("~" + group.map((x) => x.id).join("+") + ".fx");
+            } else if (target === "track") {
+              if (!/^A\d+$/.test(String(op.id || ""))) throw new Error("setFx: track id must be an audio track (A1, A2, …)");
+              if (!Array.isArray(proj.tracks) || !proj.tracks.length) proj.tracks = DEFAULT_TRACKS.map((t) => ({ ...t }));
+              let t = proj.tracks.find((x) => x.id === op.id);
+              if (!t) { t = { id: op.id, kind: "audio" }; proj.tracks.push(t); }
+              const next = merge(t.fx);
+              if (next.length) t.fx = next; else delete t.fx;
+              notes.push("~" + op.id + ".fx");
+            } else if (target === "master") {
+              const m = proj.master && typeof proj.master === "object" ? proj.master : {};
+              const next = merge(m.fx);
+              if (next.length) m.fx = next; else delete m.fx;
+              if (Object.keys(m).length) proj.master = m; else delete proj.master;
+              notes.push("~master.fx");
+            } else throw new Error("setFx: target must be clip, track or master");
+            break;
+          }
           case "setTrack": {
             // Mixer settings on one lane: {op:"setTrack", id:"A1", set:{gain:-6, pan:0.2}}.
             if (!/^A\d+$/.test(String(op.id || ""))) throw new Error("setTrack: id must be an audio track (A1, A2, …)");
@@ -569,7 +606,7 @@ async function callTool(name, args) {
             break;
           }
           default:
-            throw new Error("Unknown op: " + op.op + " (addClip|updateClip|removeClip|addMedia|removeMedia|setProject|setTrack)");
+            throw new Error("Unknown op: " + op.op + " (addClip|updateClip|removeClip|addMedia|removeMedia|setProject|setTrack|setFx)");
         }
       }
       proj.revision = (proj.revision || 0) + 1;

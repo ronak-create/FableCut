@@ -27,6 +27,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `setTrack` op for track faders / pan and a `master` field on
   `setProject`; the compact project view shows a `MIX:` line when any
   level is off 0.
+- **Audio effects.** Effect chains on audio clips (Inspector → Audio effects),
+  tracks and the master (Mixer → FX): EQ (3-band), high-pass, low-pass,
+  compressor, limiter (brickwall, 5 ms lookahead), noise gate, delay, reverb,
+  distortion and stereo width. Reorder, bypass or tweak each effect; preview
+  and export run the same chain. Saved as `fx` on clips, `tracks[].fx` and
+  `master.fx`.
+- **Audio presets.** Voice: Clean voice, Podcast, Radio, Deep voice (EQ-based),
+  Telephone. Music: Cinematic, Wide, Muffled. A preset writes ordinary effects
+  into the chain, so it can be adjusted afterwards.
+- MCP: `fablecut_patch_project` gains `setFx` (a chain or a preset on a clip
+  and its linked stems, a track or the master; validated). The compact view
+  lists chains. The MCPB bundle manifest now lists every tool
+  (`fablecut_encode_profiles` was missing).
 - **Volume line.** Audio clips draw their volume as a line: drag it to change
   the level (with keyframes, the two around the pointer move together),
   Ctrl/Cmd-click to add a keyframe, drag a point to move it, Alt-click or
@@ -48,6 +61,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `fablecut_auto_duck`, same detection as the editor.
 
 ### Changed
+- The master loudness readout is measured on the finished mix, after master
+  effects and the master fader.
 - Preview and export now mix audio through the same graph: each clip feeds
   its track, each track the master. Before, the export mix sent every clip
   straight to the output, so anything set on a track or the master could not

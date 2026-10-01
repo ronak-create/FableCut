@@ -204,13 +204,14 @@ Examples in `library/svg/`: `sparkles.svg` (loop), `lower-third.svg`,
   "untargetedTracks": [ "V2" ],
   // ^ optional — lanes edits skip (split, insert, ripple, close gap…); default: all targeted
   "encodeProfile": "hq",  // optional — fast-export profile id (see encoding-profiles.json)
-  "master": { "gain": -1.5 },  // optional — master fader, dB (−60 = silence … +12); omit = 0 dB
+  "master": { "gain": -1.5, "fx": [ { "type": "limiter", "ceiling": -1 } ] },
+  // ^ optional — master fader, dB (−60 = silence … +12; omit = 0 dB) and master effects (see "Audio mix")
   "tracks": [                          // optional — timeline lanes (default V3…V1 + A1…A4)
     { "id": "V3", "kind": "video" },   // video: higher number drawn on top (V1 under V2 under V3…)
     { "id": "V2", "kind": "video" },
     { "id": "V1", "kind": "video" },
     { "id": "A1", "kind": "audio", "gain": -6, "pan": 0 },   // audio: A1…An top→bottom; +V/+A appends Vn+1 / An+1
-    // ^ gain = track fader in dB (−60 = silence … +12), pan = −1…1; both optional, written only when ≠ 0
+    // ^ gain = track fader in dB (−60 = silence … +12), pan = −1…1, fx = track effects; all optional
     { "id": "A2", "kind": "audio" },
     { "id": "A3", "kind": "audio" },
     { "id": "A4", "kind": "audio" }
@@ -243,6 +244,8 @@ Examples in `library/svg/`: `sparkles.svg` (loop), `lower-third.svg`,
         "scale":   [ { "t": 0, "v": 1 }, { "t": 5, "v": 1.25, "ease": "linear" } ],
         "opacity": [ { "t": 0, "v": 0 }, { "t": 0.8, "v": 1 } ]
       },
+      // OPTIONAL — audio effects (audio clips), processed in order. See "Audio mix".
+      "fx": [ { "type": "highpass", "freq": 80 }, { "type": "compressor", "threshold": -20, "ratio": 4 } ],
       // OPTIONAL — transitions at the clip's head/tail.
       "transitionIn":  { "type": "fade", "duration": 0.8 },
       "transitionOut": { "type": "slide-left", "duration": 0.6 }
@@ -381,12 +384,40 @@ glitch (RGB split + jitter) · pop (overshoot scale — stickers/captions).
 ### Audio mix
 
 Every clip runs through the same chain in preview **and** export:
-`source → channels (audioChannel / channelMode) → gain (dB) → volume (keyframes, fades) → pan → its A-track → master`.
-A track has a fader (`tracks[].gain`, dB) and a pan (`tracks[].pan`); the master
-has a fader (`master.gain`). Audio on a video lane (a clip with `volume > 0` on
-V1…) goes straight to the master. In the UI these are the strips in the
-**Mixer** tab beside the Inspector; mute / solo are the existing track switches
-(`disabledTracks`).
+`source → channels (audioChannel / channelMode) → gain (dB) → clip fx → volume (keyframes, fades, duck) → pan → its A-track`,
+then `track fx → track fader → track pan → master sum → master fx → master fader`.
+A track has a fader (`tracks[].gain`, dB), a pan (`tracks[].pan`) and effects
+(`tracks[].fx`); the master has a fader (`master.gain`) and effects (`master.fx`).
+Audio on a video lane (a clip with `volume > 0` on V1…) goes straight to the
+master. In the UI these are the strips in the **Mixer** tab beside the
+Inspector (its **FX** button edits that track's or the master's effects);
+mute / solo are the existing track switches (`disabledTracks`).
+
+**Effects** (`fx` — an array processed in order; every parameter optional, out-of-range
+values are clamped; `on:false` bypasses one without losing its settings):
+
+| type | parameters (default) |
+|---|---|
+| `eq` | `lowFreq` 120 Hz, `lowGain` 0 dB (low shelf) · `midFreq` 1000, `midGain` 0, `midQ` 1 (peak) · `highFreq` 8000, `highGain` 0 (high shelf); gains −18…+18 |
+| `highpass` / `lowpass` | `freq` (80 / 8000 Hz), `q` 0.71 |
+| `compressor` | `threshold` −20 dB, `ratio` 4, `attack` 10 ms, `release` 200 ms, `knee` 6 dB, `makeup` 0 dB |
+| `limiter` | `ceiling` −1 dB, `release` 80 ms — brickwall, 5 ms lookahead; nothing passes the ceiling |
+| `gate` | `threshold` −50 dB, `range` −40 dB (how far it closes), `attack` 2, `hold` 80, `release` 150 ms |
+| `delay` | `time` 0.3 s, `feedback` 0.35, `mix` 0.25 |
+| `reverb` | `decay` 2 s, `predelay` 20 ms, `mix` 0.25 |
+| `distortion` | `drive` 0.3, `mix` 1 |
+| `widener` | `width` 1.5 (0 = mono, 1 = as is, 2 = extra wide) |
+
+**Presets** fill the chain with tweakable effects: Voice — `clean-voice`, `podcast`,
+`radio`, `deep-voice` (EQ-only: lower, warmer — not a pitch shift), `telephone`;
+Music — `cinematic`, `wide`, `muffled` (next room). Agents apply them (or any chain)
+with the patch op `setFx`:
+`{op:"setFx", target:"clip", id:"c_vo", preset:"podcast"}` ·
+`{op:"setFx", target:"track", id:"A3", fx:[{type:"eq", highGain:-3}]}` ·
+`{op:"setFx", target:"master", fx:[{type:"limiter", ceiling:-1}], append:true}` ·
+`fx:null` clears. On a clip it applies to its linked stems too; chains are
+validated (unknown effect or preset → the whole patch is refused). The compact
+project view shows chains as `fx:highpass·eq·…`.
 
 - Set a track fader / pan: `{op:"setTrack", id:"A2", set:{gain:-8, pan:0}}`
   (`null` or `0` resets). Master: `{op:"setProject", set:{master:{gain:-1}}}`.

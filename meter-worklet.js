@@ -49,6 +49,10 @@ class FableCutMeterProcessor extends AudioWorkletProcessor {
     this._hopBlocks = Math.max(1, opts.hopBlocks || 8);
     this._nTracks = Math.max(1, opts.nTracks || 1);
     this._nAudio = Math.max(0, opts.nAudioTracks ?? opts.nTracks ?? 1);
+    // When set, that input is the finished program: only it reaches the
+    // output (and the master LUFS); the others are metering taps. Unset =
+    // every input is summed (the original layout).
+    this._program = Number.isInteger(opts.programInput) ? opts.programInput : -1;
     this._block = 0;
     this._sumSqL = new Float64Array(this._nTracks);
     this._sumSqR = new Float64Array(this._nTracks);
@@ -132,8 +136,10 @@ class FableCutMeterProcessor extends AudioWorkletProcessor {
         const fr = biquadStep(hR, biquadStep(sR, r));
         sumK += fl * fl + fr * fr;
 
-        if (outL) outL[i] += l;
-        if (outR) outR[i] += r;
+        if (this._program < 0 || t === this._program) {
+          if (outL) outL[i] += l;
+          if (outR) outR[i] += r;
+        }
       }
       this._sumSqL[t] = sumL;
       this._sumSqR[t] = sumR;

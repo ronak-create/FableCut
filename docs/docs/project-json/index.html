@@ -102,13 +102,14 @@
   <span class="tk-k">"untargetedTracks"</span>: [ <span class="tk-s">"V2"</span> ],
   <span class="tk-c">// ^ optional — lanes edits skip (split, insert, ripple, close gap…); default: all targeted</span>
   <span class="tk-k">"encodeProfile"</span>: <span class="tk-s">"hq"</span>,  <span class="tk-c">// optional — fast-export profile id (see encoding-profiles.json)</span>
-  <span class="tk-k">"master"</span>: { <span class="tk-k">"gain"</span>: <span class="tk-n">-1.5</span> },  <span class="tk-c">// optional — master fader, dB (−60 = silence … +12); omit = 0 dB</span>
+  <span class="tk-k">"master"</span>: { <span class="tk-k">"gain"</span>: <span class="tk-n">-1.5</span>, <span class="tk-k">"fx"</span>: [ { <span class="tk-k">"type"</span>: <span class="tk-s">"limiter"</span>, <span class="tk-k">"ceiling"</span>: <span class="tk-n">-1</span> } ] },
+  <span class="tk-c">// ^ optional — master fader, dB (−60 = silence … +12; omit = 0 dB) and master effects (see "Audio mix")</span>
   <span class="tk-k">"tracks"</span>: [                          <span class="tk-c">// optional — timeline lanes (default V3…V1 + A1…A4)</span>
     { <span class="tk-k">"id"</span>: <span class="tk-s">"V3"</span>, <span class="tk-k">"kind"</span>: <span class="tk-s">"video"</span> },   <span class="tk-c">// video: higher number drawn on top (V1 under V2 under V3…)</span>
     { <span class="tk-k">"id"</span>: <span class="tk-s">"V2"</span>, <span class="tk-k">"kind"</span>: <span class="tk-s">"video"</span> },
     { <span class="tk-k">"id"</span>: <span class="tk-s">"V1"</span>, <span class="tk-k">"kind"</span>: <span class="tk-s">"video"</span> },
     { <span class="tk-k">"id"</span>: <span class="tk-s">"A1"</span>, <span class="tk-k">"kind"</span>: <span class="tk-s">"audio"</span>, <span class="tk-k">"gain"</span>: <span class="tk-n">-6</span>, <span class="tk-k">"pan"</span>: <span class="tk-n">0</span> },   <span class="tk-c">// audio: A1…An top→bottom; +V/+A appends Vn+1 / An+1</span>
-    <span class="tk-c">// ^ gain = track fader in dB (−60 = silence … +12), pan = −1…1; both optional, written only when ≠ 0</span>
+    <span class="tk-c">// ^ gain = track fader in dB (−60 = silence … +12), pan = −1…1, fx = track effects; all optional</span>
     { <span class="tk-k">"id"</span>: <span class="tk-s">"A2"</span>, <span class="tk-k">"kind"</span>: <span class="tk-s">"audio"</span> },
     { <span class="tk-k">"id"</span>: <span class="tk-s">"A3"</span>, <span class="tk-k">"kind"</span>: <span class="tk-s">"audio"</span> },
     { <span class="tk-k">"id"</span>: <span class="tk-s">"A4"</span>, <span class="tk-k">"kind"</span>: <span class="tk-s">"audio"</span> }
@@ -141,6 +142,8 @@
         <span class="tk-k">"scale"</span>:   [ { <span class="tk-k">"t"</span>: <span class="tk-n">0</span>, <span class="tk-k">"v"</span>: <span class="tk-n">1</span> }, { <span class="tk-k">"t"</span>: <span class="tk-n">5</span>, <span class="tk-k">"v"</span>: <span class="tk-n">1.25</span>, <span class="tk-k">"ease"</span>: <span class="tk-s">"linear"</span> } ],
         <span class="tk-k">"opacity"</span>: [ { <span class="tk-k">"t"</span>: <span class="tk-n">0</span>, <span class="tk-k">"v"</span>: <span class="tk-n">0</span> }, { <span class="tk-k">"t"</span>: <span class="tk-n">0.8</span>, <span class="tk-k">"v"</span>: <span class="tk-n">1</span> } ]
       },
+      <span class="tk-c">// OPTIONAL — audio effects (audio clips), processed in order. See "Audio mix".</span>
+      <span class="tk-k">"fx"</span>: [ { <span class="tk-k">"type"</span>: <span class="tk-s">"highpass"</span>, <span class="tk-k">"freq"</span>: <span class="tk-n">80</span> }, { <span class="tk-k">"type"</span>: <span class="tk-s">"compressor"</span>, <span class="tk-k">"threshold"</span>: <span class="tk-n">-20</span>, <span class="tk-k">"ratio"</span>: <span class="tk-n">4</span> } ],
       <span class="tk-c">// OPTIONAL — transitions at the clip's head/tail.</span>
       <span class="tk-k">"transitionIn"</span>:  { <span class="tk-k">"type"</span>: <span class="tk-s">"fade"</span>, <span class="tk-k">"duration"</span>: <span class="tk-n">0.8</span> },
       <span class="tk-k">"transitionOut"</span>: { <span class="tk-k">"type"</span>: <span class="tk-s">"slide-left"</span>, <span class="tk-k">"duration"</span>: <span class="tk-n">0.6</span> }

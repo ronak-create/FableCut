@@ -103,6 +103,12 @@ same time.
   the music dips wherever someone speaks (ramping down just before, back up
   after). It rides on top of the music's own volume, so re-running or clearing
   it never touches your levels. Agents use `fablecut_auto_duck`.
+- **Audio effects and presets** — EQ, high/low-pass, compressor, limiter,
+  noise gate, delay, reverb, distortion and stereo width, chained per clip,
+  per track (Mixer → **FX**) and on the master. Presets: Clean voice, Podcast,
+  Radio, Deep voice, Telephone, Cinematic, Wide and Muffled, all tweakable
+  afterwards. Preview and export run the same effects. Agents use the
+  `setFx` patch op.
 - **Project bin folders** — tree view with expand/collapse; drag media or folders to nest; right-click the **Project** tab → New folder; drop files onto a folder to import into it
 - **Import from URL** — **+ URL** downloads an HTTPS video/audio/image into
   `./media/` (same-origin after import). Remote SVG is refused. Agents use
