@@ -28,10 +28,13 @@ const CODE = [
   slice("function rewireClipChain(", "function disposeClipChain("),
   slice("function driveClipChain(", "function muteClipChain("),
   slice("const FADER_TAPER", "function setSideTab("),
+  slice("/* Audio fade shapes.", "/* Merge a named look"),
+  slice("const VOL_MAX = 2;", "function volBandHtml("),
 ].join("\n");
 const EXPORTS = ["dbToGain", "clampFaderDb", "normalizeMaster", "serializeTracks", "applyTracksFromProject",
   "wireClipInput", "buildClipChain", "rewireClipChain", "buildMixBuses", "applyMixLevels", "busOut",
-  "driveClipChain", "faderPosToDb", "faderDbToPos", "fmtPan", "parseDbInput"];
+  "driveClipChain", "faderPosToDb", "faderDbToPos", "fmtPan", "parseDbInput",
+  "audioFadeGain", "clipAudioGain", "volToPos", "posToVol"];
 
 function world({ tracks = [{ id: "A1", kind: "audio" }, { id: "A2", kind: "audio" }], master = null, media = [] } = {}) {
   const TRACKS = [];
@@ -84,6 +87,32 @@ function walk(ctx, from, stop) {
   }
   return seen;
 }
+
+test("fade curves: constant power crossfades sum to unity power; no curve keeps the old shape", () => {
+  const w = world();
+  for (let u = 0; u <= 1.0001; u += 0.1) {
+    const a = w.audioFadeGain("power", 1 - u), b = w.audioFadeGain("power", u);
+    assert.ok(Math.abs(a * a + b * b - 1) < 1e-9, `power sum at ${u.toFixed(1)}`);
+  }
+  assert.equal(w.audioFadeGain("linear", 0.25), 0.25);
+  assert.equal(w.audioFadeGain("exp", 0), 0);
+  assert.equal(w.audioFadeGain("exp", 1), 1);
+  assert.ok(w.audioFadeGain("exp", 0.5) < 0.1, "exponential starts slow");
+  assert.equal(w.audioFadeGain(undefined, 0.5), null, "legacy fades keep the eased 1 − k");
+});
+
+test("duck multiplies volume; the volume-line taper round-trips", () => {
+  const w = world();
+  assert.equal(w.clipAudioGain({ volume: 0.5 }), 0.5);
+  assert.ok(Math.abs(w.clipAudioGain({ volume: 1, duck: -6 }) - 0.501) < 0.001);
+  assert.equal(w.clipAudioGain({ volume: 1, duck: -60 }), 0, "a full duck is silence");
+  assert.equal(w.clipAudioGain({ volume: 9 }), 4, "volume is clamped");
+  assert.equal(w.volToPos(1), 0.85, "0 dB sits at 85% of the clip height");
+  assert.equal(w.volToPos(0), 0, "silence at the bottom");
+  assert.equal(w.posToVol(1), 2, "+6 dB on top");
+  for (const v of [0.05, 0.25, 0.5, 1, 1.5, 2])
+    assert.ok(Math.abs(w.posToVol(w.volToPos(v)) - v) < 1e-9, `round trip ${v}`);
+});
 
 test("dB helpers: unity, −6 dB, the floor is silence, junk is unity", () => {
   const w = world();

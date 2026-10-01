@@ -29,6 +29,8 @@ Every Claude Code session then has these tools:
   raw ffmpeg args list). Set `project.encodeProfile` via patch to pin a project default.
 - `fablecut_normalize_audio` — measure clips (BS.1770 LUFS or sample peak, via ffmpeg) and
   set their clip gain to a loudness target. See "Audio mix" below.
+- `fablecut_auto_duck` — find where the voice tracks speak and write `duck` keyframes that
+  dip the music under it. See "Audio mix" below.
 
 ### Token-efficient editing (important for agents)
 
@@ -301,6 +303,7 @@ Examples in `library/svg/`: `sparkles.svg` (loop), `lower-third.svg`,
 | `volume` | 1 | 0–2 (linear; animatable — fades, ducking) |
 | `gain` | 0 | clip gain in dB (−60…+24), applied **before** `volume`, so keyframes and fades ride on top. Set by Normalize. |
 | `channelMode` | "stereo" | stereo · mono (L+R folded to one channel) · left · right (use one side) · swap (exchange L/R). Ignored on linked stems — `audioChannel` already picks their channel. |
+| `duck` | 0 | ducking in dB (≤ 0), multiplied into `volume`. Normally keyframed by Auto-duck (`keyframes.duck`), so the clip's own volume, keyframes and fades are untouched. |
 | `pan` | 0 | −1 (full left) … 0 (center) … +1 (full right). Linked stems default L `−1` / R `+1` / other `0`. Projects saved before pan migrate once on load (`panSchema`); keep `panSchema: 1` (and explicit `pan` on stems) when rewriting the document so a centered stem is not re-hard-panned. |
 | `speed` | 1 | 0.25–4× playback rate. **Keyframable → speed ramps**: with `keyframes.speed` the engine time-remaps (media time = `in` + ∫speed dt), in preview and in the export audio mix. Static case: source window consumed = `duration × speed`, so `in + duration×speed ≤ media.duration`. |
 
@@ -367,7 +370,7 @@ footage. Example: 0.3 s impact shake over everything =
 `{kind:"adjust", track:"V3", duration:0.3, props:{shake:18}}`.
 
 **Animatable props** (usable in `keyframes`): x, y, scale, rotation, opacity,
-volume, pan, speed, brightness, contrast, saturation, hue, blur, grayscale, sepia,
+volume, pan, duck, speed, brightness, contrast, saturation, hue, blur, grayscale, sepia,
 invert, temperature, tint, vignette, cornerRadius, shake, rgbSplit, grain,
 fontSize, letterSpacing, glow.
 
@@ -395,9 +398,32 @@ V1…) goes straight to the master. In the UI these are the strips in the
   streaming / social, **−16 LUFS** podcast / dialogue, **−23 LUFS** broadcast,
   or `mode:"peak", target:-1`. Locked clips are skipped unless `force:true`.
   The inspector's **Normalize** in the editor does the same measurement.
+- **Fade curves** — a `fade` transition on an audio clip may carry `curve`:
+  `"power"` (constant power — the crossfade default, no dip in the middle),
+  `"linear"` (constant gain — for crossfading the *same* material, e.g. a split
+  of one take) or `"exp"` (slow start, natural fade to silence). No `curve` keeps
+  the original eased shape. Only the volume follows the curve; picture fades
+  are unchanged. `{transitionOut:{type:"fade", duration:3, curve:"exp"}}`.
+- **Crossfades** — overlap A and B on one track and give A
+  `transitionOut:{type:"fade", duration:d, curve:"power"}` and B
+  `transitionIn` the same, with `d` = the overlap. **Shift+D** in the editor does
+  it for you: it borrows the overlap from spare media on both sides of the cut
+  (half each, or more from the side that has it), so nothing after the cut
+  moves; for a linked shot the stems crossfade and B's picture dissolves in.
+- **Auto-duck** — `fablecut_auto_duck {clipIds:[music…], under?:["A1"], amount?:-12,
+  threshold?:-40, attack?:0.3, release?:0.6}` finds where the voice tracks
+  (default: every other audio track) are above `threshold` dBFS — short gaps are
+  bridged so the music doesn't pump between words — and writes `keyframes.duck`
+  on the music: ramp down `attack` s before speech, hold, back up over
+  `release` s. It replaces earlier ducking; `amount:0` clears it. Same as the
+  inspector's **Auto-duck** section or the clip menu's *Auto-duck under other tracks*.
+- In the editor, each audio clip shows its **volume line** (yellow; dashed =
+  after ducking): drag it to change the level, Ctrl/Cmd-click to add a keyframe,
+  drag a point to move it, Alt-click or double-click to remove one. The corner
+  **fade grips** drag a constant-power fade in or out. Both edit linked stems together.
 - Use **gain** for "this clip is too quiet / loud", **volume keyframes** for
-  movement (fades, ducking), and the **track fader** to balance whole lanes
-  (dialogue against the music bed).
+  shaping, **duck** for dipping under dialogue, and the **track fader** to
+  balance whole lanes (dialogue against the music bed).
 
 ### Semantics
 
@@ -464,7 +490,8 @@ V1…) goes straight to the master. In the UI these are the strips in the
 - Transitions modulate the evaluated props (fade also fades audio); they render
   on top of keyframes, so both can coexist.
 - Same-track overlap IS the crossfade idiom: overlap A and B by ~1 s and give B
-  `transitionIn: {type:"fade"}`.
+  `transitionIn: {type:"fade"}` (for audio also A `transitionOut`, both with
+  `curve:"power"` — see "Audio mix").
 - A cut/split is just two clips: first with `duration: t`, second with
   `start: +t, in: +t×speed, duration: rest`.
 - **Edit tools** (timeline toolbar picker, or V / B / R / Y / U) change what a
@@ -632,8 +659,8 @@ To try an alternative without deleting a clip, disable it (⇧E / `disabled:true
 
 **Level a voice-over edit**: `fablecut_normalize_audio {clipIds:[…every VO clip…], target:-16}`
 so all takes sit at one loudness, then keep the music on its own lane and pull
-that lane down: `{op:"setTrack", id:"A3", set:{gain:-14}}`. Fades and ducks stay
-`volume` keyframes on the music clip.
+that lane down: `{op:"setTrack", id:"A3", set:{gain:-14}}`. Then dip it under the
+voice: `fablecut_auto_duck {clipIds:[<music clip>], under:["A1"], amount:-10}`.
 
 **Center a mono stem**: linked or standalone audio clip with `props.pan: 0` (inspector **Pan** slider, −1…+1). Stereo video stems default to L `−1` / R `+1`; set A1 to `0` to center that channel in the mix.
 
@@ -719,7 +746,9 @@ frame-accurately.
 `keyframes: { scale:[{t:0,v:1},{t:D,v:1.2,ease:"linear"}], x:[{t:0,v:0},{t:D,v:-40,ease:"linear"}] }`.
 
 **Crossfade**: overlap two clips on the same track by ~1 s; later clip gets
-`transitionIn: {type:"fade", duration:1}`.
+`transitionIn: {type:"fade", duration:1}`. For audio give the earlier clip the
+matching `transitionOut` and both `curve:"power"` (or select a clip and press
+Shift+D in the editor).
 
 **Whip-pan cut**: A gets `transitionOut:{type:"whip",duration:0.25}`, B gets
 `transitionIn:{type:"whip",duration:0.25}`.
@@ -733,7 +762,7 @@ can jump between (⇧M / Alt+⇧M, or the Markers list):
 `setProject` replaces the whole list — include the existing markers you want to keep.
 
 **Music fade-out**: audio clip `keyframes: { volume:[{t:D-3,v:0.8},{t:D,v:0}] }`
-or simply `transitionOut: {type:"fade", duration:3}`.
+or simply `transitionOut: {type:"fade", duration:3, curve:"exp"}`.
 
 **Pulse / emphasis**: `keyframes: { scale:[{t:0,v:1},{t:0.3,v:1.12},{t:0.6,v:1}] }`.
 

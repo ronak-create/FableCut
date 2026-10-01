@@ -48,6 +48,7 @@ const DEFAULT_PROPS = {
   x: 0, y: 0, scale: 1, rotation: 0, opacity: 1, volume: 1, pan: 0,
   gain: 0,                                     // clip gain, dB — applied before volume
   channelMode: "stereo",                       // stereo | mono | left | right | swap
+  duck: 0,                                     // ducking, dB (≤ 0) — keyframed by Auto-duck, multiplies volume
   speed: 1,                                    // playback rate (video/audio)
   brightness: 100, contrast: 100, saturation: 100, hue: 0,
   blur: 0, grayscale: 0, sepia: 0, invert: 0,
@@ -73,7 +74,7 @@ const DEFAULT_PROPS = {
   boxFit: false,                               // false = wrap at fixed fontSize; true = scale font to fit box
   vAlign: "middle",                            // top | middle | bottom — vertical align of the text block in the box
 };
-const ANIMATABLE = ["x", "y", "scale", "rotation", "opacity", "volume", "pan", "speed",
+const ANIMATABLE = ["x", "y", "scale", "rotation", "opacity", "volume", "pan", "duck", "speed",
   "brightness", "contrast", "saturation", "hue", "blur", "grayscale", "sepia", "invert",
   "temperature", "tint", "vignette", "cornerRadius", "shake", "rgbSplit", "grain",
   "fontSize", "letterSpacing", "glow"];
@@ -162,6 +163,11 @@ function dbToGain(db) {
   return db <= FADER_DB_MIN ? 0 : Math.pow(10, db / 20);
 }
 function clampFaderDb(db) { return clamp(+db || 0, FADER_DB_MIN, FADER_DB_MAX); }
+/** What a clip's evaluated props send to its vol stage: volume × duck. */
+function clipAudioGain(p) {
+  const vol = clamp(+p.volume || 0, 0, 4);
+  return p.duck < 0 ? vol * dbToGain(p.duck) : vol;
+}
 function clipGainDb(c) { return clamp(+c?.props?.gain || 0, CLIP_GAIN_MIN, CLIP_GAIN_MAX); }
 function clipChannelMode(c) {
   const m = c?.props?.channelMode;
@@ -378,6 +384,10 @@ function showClipCtxMenu(clientX, clientY, c) {
   item(anyEnabled ? "Disable clip" : "Enable clip", "Shift+E", toggleClipsDisabled,
     locked ? "Locked — unlock to change" : null);
   item(anyUnlocked ? "Lock clip" : "Unlock clip", "", toggleClipsLocked);
+  if (group.some((x) => x.kind === "audio")) {
+    item("Crossfade with neighbours", "Shift+D", () => crossfadeSelected(), locked ? "Locked — unlock to change" : null);
+    item("Auto-duck under other tracks", "", () => autoDuckClips(selectedClips()), locked ? "Locked — unlock to change" : null);
+  }
   const linked = selectedClips().some((x) => x.linkGroup || x.linkedId);
   if (linked) item("Unlink audio / video", "Ctrl+L", toggleLinkSelected, locked ? "Locked — unlock to change" : null);
   else if (c.kind === "video" || c.kind === "audio") {
@@ -3557,6 +3567,103 @@ function liftExtract(extract) {
   scheduleSave();
   toast(`${extract ? "Extracted" : "Lifted"} ${(t1 - t0).toFixed(2)}s`);
 }
+/* ── Audio crossfade (Shift+D). A crossfade here is the same-track overlap
+   idiom: A runs on past the cut, B starts before it, A fades out and B fades
+   in over the overlap with constant-power curves. The overlap comes from
+   spare media beyond each clip's edge, split around the cut; picture linked
+   to B dissolves in over A (only B fades, so the frame never dips to black). */
+const CROSSFADE_DUR = 1;
+const XF_EPS = 0.02;
+/** Audio cuts touching `clips`: each pair is {a, b} with a before b on one
+ *  track, b starting at (or before) a's end. */
+function crossfadeCuts(clips) {
+  const pairs = new Map();
+  const audio = (x) => x.kind === "audio";
+  for (const c of clips.filter(audio)) {
+    const lane = project.clips.filter((x) => audio(x) && x !== c && x.track === c.track);
+    const next = lane.filter((x) => x.start > c.start + XF_EPS && x.start <= clipEnd(c) + XF_EPS &&
+      clipEnd(x) > clipEnd(c)).sort((x, y) => x.start - y.start)[0];
+    const prev = lane.filter((x) => x.start < c.start - XF_EPS && clipEnd(x) >= c.start - XF_EPS &&
+      clipEnd(x) < clipEnd(c)).sort((x, y) => clipEnd(y) - clipEnd(x))[0];
+    if (next) pairs.set(c.id + ">" + next.id, { a: c, b: next });
+    if (prev) pairs.set(prev.id + ">" + c.id, { a: prev, b: c });
+  }
+  return [...pairs.values()];
+}
+/** Spare source after a clip's out / before its in, in timeline seconds. */
+function tailRoom(x) {
+  const m = getMedia(x.mediaId), sp = clipSpeed(x);
+  if (!(m?.duration > 0)) return 0;
+  return Math.max(0, (m.duration - (x.in + x.duration * sp)) / sp);
+}
+function headRoom(x) { return Math.max(0, Math.min(x.in / clipSpeed(x), x.start)); }
+/** Crossfade one cut. Returns null, or why it could not. */
+function crossfadeCut(a, b, dur = CROSSFADE_DUR) {
+  if (isGroupLocked(a) || isGroupLocked(b)) return "locked";
+  const ga = withLinked([a]), gb = withLinked([b]);
+  let d = clipEnd(a) - b.start; // already overlapping: fade across what is there
+  if (d < MIN_TRANS_DUR - 1e-6) {
+    const roomA = Math.min(...ga.map(tailRoom)), roomB = Math.min(...gb.map(headRoom));
+    const gap = Math.max(0, b.start - clipEnd(a)); // a hair of gap at the cut is closed too
+    const want = dur + gap;
+    let e1 = Math.min(want / 2, roomA);
+    const e2 = Math.min(want - e1, roomB);
+    e1 = Math.min(want - e2, roomA);
+    d = e1 + e2 - gap;
+    if (d < MIN_TRANS_DUR - 1e-6) return "no spare media beyond the cut";
+    for (const x of ga) x.duration = +(x.duration + e1).toFixed(4);
+    for (const x of gb) {
+      const sp = clipSpeed(x);
+      x.start = +(x.start - e2).toFixed(4);
+      x.in = +Math.max(0, x.in - e2 * sp).toFixed(4);
+      x.duration = +(x.duration + e2).toFixed(4);
+      x.keyframes = shiftKF(x.keyframes, -e2, x.duration);
+    }
+  }
+  d = +Math.min(d, a.duration, b.duration).toFixed(3);
+  for (const x of ga) if (x.kind === "audio") x.transitionOut = { type: "fade", duration: d, curve: "power" };
+  for (const x of gb) {
+    if (x.kind === "audio") x.transitionIn = { type: "fade", duration: d, curve: "power" };
+    else if (x.kind === "video") x.transitionIn = { type: "fade", duration: d };
+  }
+  return null;
+}
+/** Shift+D: crossfade the cuts of the selected audio clips, or — with no
+ *  selection — the audio cut nearest the playhead on each targeted track. */
+function crossfadeSelected(dur = CROSSFADE_DUR) {
+  let pairs = crossfadeCuts(withLinked(selectedClips()));
+  if (!state.selIds.size) {
+    pairs = [];
+    for (const t of TRACKS) {
+      if (t.kind !== "audio" || !isEditTarget(t.id)) continue;
+      const near = crossfadeCuts(project.clips.filter((x) => x.track === t.id))
+        .map((p) => ({ ...p, dist: Math.abs(p.b.start - state.time) }))
+        .filter((p) => p.dist <= 0.5).sort((x, y) => x.dist - y.dist)[0];
+      if (near) pairs.push(near);
+    }
+  }
+  if (!pairs.length) {
+    toast(state.selIds.size ? "No audio cut next to the selection — clips must touch or overlap on one track"
+      : "No audio cut near the playhead on the targeted tracks");
+    return;
+  }
+  pushUndo();
+  let done = 0;
+  const why = new Set();
+  const seen = new Set();
+  for (const { a, b } of pairs) {
+    const key = (a.linkGroup || a.id) + ">" + (b.linkGroup || b.id); // one stereo pair = one cut
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const r = crossfadeCut(a, b, dur);
+    if (r) why.add(r); else done++;
+  }
+  state.dirtyTimeline = true;
+  scheduleSave();
+  renderInspector();
+  if (done) toast(`Crossfaded ${done} cut${done === 1 ? "" : "s"}` + (why.size ? ` · skipped: ${[...why].join(", ")}` : ""));
+  else toast(`Couldn't crossfade: ${[...why].join(", ")}`);
+}
 function hasWorkArea() {
   return project.inPoint != null || project.outPoint != null;
 }
@@ -3771,6 +3878,20 @@ function transitionMarksHtml(c, trackH) {
     const w = Math.max(4, Math.min(dur, c.duration) * state.pps);
     const bot = clipH - r;
     const focused = state.selId === c.id && state.transFocus === side ? " focused" : "";
+    // Audio fades draw their real gain curve instead of a straight ramp.
+    if (c.kind === "audio" && tr.type === "fade") {
+      const N = 24, pts = [`0,0`, `${w},0`];
+      for (let i = N; i >= 0; i--) {
+        const u = side === "in" ? i / N : 1 - i / N;
+        const g = audioFadeGain(tr.curve, u) ?? EASE["ease-out"](u);
+        pts.push(`${(w * i / N).toFixed(1)},${(bot * (1 - g)).toFixed(1)}`);
+      }
+      html += `<div class="trans-mark ${side}${focused}" style="width:${w}px" data-side="${side}">` +
+        `<svg viewBox="0 0 ${w} ${clipH}" preserveAspectRatio="none" aria-hidden="true">` +
+        `<polygon points="${pts.join(" ")}"/></svg>` +
+        `<div class="trans-dur-handle" title="Drag to adjust duration"></div></div>`;
+      return;
+    }
     if (side === "in") {
       html += `<div class="trans-mark in${focused}" style="width:${w}px" data-side="in">` +
         `<svg viewBox="0 0 ${w} ${clipH}" preserveAspectRatio="none" aria-hidden="true">` +
@@ -3792,7 +3913,8 @@ function clipKeyframeGroups(c) {
   if (!c?.keyframes) return [];
   const byT = new Map();
   for (const [channel, arr] of Object.entries(c.keyframes)) {
-    if (!Array.isArray(arr)) continue;
+    // Auto-duck can write dozens of keys; the dashed volume line shows them.
+    if (!Array.isArray(arr) || channel === "duck") continue;
     for (const kf of arr) {
       const t = +kf.t;
       if (!Number.isFinite(t)) continue;
@@ -3858,6 +3980,7 @@ function rebuildClips() {
     body += clipKeyframesHtml(c);
     let inner = `<div class="clip-body">${body}</div>`;
     inner += transitionMarksHtml(c, tr.h);
+    if (c.kind === "audio") inner += volBandHtml(c, tr.h) + fadeGripsHtml(c);
     inner += `<div class="handle l"></div><div class="handle r"></div>`;
     div.innerHTML = inner;
     if (hasWave) div.classList.add("has-wave");
@@ -3886,7 +4009,7 @@ function paintAudioOverlaps() {
       for (let j = i + 1; j < clips.length; j++) {
         const t0 = Math.max(clips[i].start, clips[j].start);
         const t1 = Math.min(clipEnd(clips[i]), clipEnd(clips[j]));
-        if (t1 - t0 > 1e-4) intervals.push([t0, t1]);
+        if (t1 - t0 > 1e-4 && !isCrossfaded(clips[i], clips[j])) intervals.push([t0, t1]);
       }
     }
     if (!intervals.length) continue;
@@ -3907,6 +4030,253 @@ function paintAudioOverlaps() {
       row.appendChild(el);
     }
   }
+}
+
+/* Two overlapping audio clips whose fades cover the overlap are a crossfade,
+   not a mistake — no warning hatch. */
+function isCrossfaded(x, y) {
+  const [a, b] = x.start <= y.start ? [x, y] : [y, x];
+  const ov = Math.min(clipEnd(a), clipEnd(b)) - b.start - 1e-3;
+  return a.transitionOut?.type === "fade" && b.transitionIn?.type === "fade" &&
+    a.transitionOut.duration >= ov && b.transitionIn.duration >= ov;
+}
+
+/* ── Volume line (rubber band) + fade grips on audio clips ──
+   The line is the clip's volume over time on a dB taper (0 dB at 85%, +6 dB
+   on top). Drag it to change the level; with keyframes, dragging moves the
+   two around the pointer. Ctrl/Cmd-click the line adds a keyframe; drag a
+   point to move it; Alt-click or double-click a point removes it. A dashed
+   line shows the level after Auto-duck. Edits mirror onto linked stems. */
+const VOL_MAX = 2; // volume ceiling, +6.02 dB
+const VOL_TAPER = [[0, -60], [0.3, -30], [0.6, -12], [0.85, 0], [1, 20 * Math.log10(VOL_MAX)]];
+function taperPosToDb(taper, pos) {
+  pos = clamp(+pos || 0, 0, 1);
+  for (let i = 1; i < taper.length; i++) {
+    const [p1, d1] = taper[i], [p0, d0] = taper[i - 1];
+    if (pos <= p1) return d0 + (d1 - d0) * (pos - p0) / (p1 - p0);
+  }
+  return taper[taper.length - 1][1];
+}
+function taperDbToPos(taper, db) {
+  db = clamp(+db, taper[0][1], taper[taper.length - 1][1]);
+  for (let i = 1; i < taper.length; i++) {
+    const [p1, d1] = taper[i], [p0, d0] = taper[i - 1];
+    if (db <= d1) return p0 + (p1 - p0) * (db - d0) / (d1 - d0);
+  }
+  return 1;
+}
+function volToDb(v) { return v > 0 ? 20 * Math.log10(v) : FADER_DB_MIN; }
+function dbToVol(db) { return db <= FADER_DB_MIN ? 0 : Math.min(VOL_MAX, Math.pow(10, db / 20)); }
+function volToPos(v) { return taperDbToPos(VOL_TAPER, volToDb(v)); }
+function posToVol(pos) { return dbToVol(taperPosToDb(VOL_TAPER, pos)); }
+function volumeAtLocal(c, local) {
+  return clamp(kfChannel(c, "volume", local, +(c.props?.volume ?? 1)), 0, VOL_MAX);
+}
+function volBandHtml(c, trackH) {
+  const clipH = trackH - 6;
+  if (clipH < 24 || !(c.duration > 0)) return "";
+  const W = Math.max(8, c.duration * state.pps), H = clipH - 6;
+  const y = (v) => (3 + (1 - volToPos(v)) * H).toFixed(1);
+  const kfs = c.keyframes?.volume;
+  const pts = [];
+  if (!kfs?.length) pts.push(`0,${y(volumeAtLocal(c, 0))}`, `${W.toFixed(1)},${y(volumeAtLocal(c, 0))}`);
+  else {
+    pts.push(`0,${y(kfs[0].v)}`);
+    for (let i = 0; i < kfs.length; i++) {
+      const b = kfs[i], a = kfs[i - 1];
+      if (a && (b.ease || "ease-in-out") !== "linear") // eased segment: sample the curve
+        for (let s = 1; s < 12; s++) {
+          const lt = a.t + (b.t - a.t) * s / 12;
+          pts.push(`${(lt * state.pps).toFixed(1)},${y(volumeAtLocal(c, lt))}`);
+        }
+      pts.push(`${(b.t * state.pps).toFixed(1)},${y(b.v)}`);
+    }
+    pts.push(`${W.toFixed(1)},${y(kfs[kfs.length - 1].v)}`);
+  }
+  let duck = "";
+  if (c.keyframes?.duck?.length) {
+    const n = Math.min(600, Math.max(2, Math.ceil(W / 3)));
+    const dp = [];
+    for (let i = 0; i <= n; i++) {
+      const lt = c.duration * i / n;
+      const v = volumeAtLocal(c, lt) * dbToGain(kfChannel(c, "duck", lt, 0));
+      dp.push(`${(W * i / n).toFixed(1)},${y(v)}`);
+    }
+    duck = `<polyline class="vol-duck" points="${dp.join(" ")}"/>`;
+  }
+  const line = pts.join(" ");
+  let html = `<svg class="vol-band" width="${W.toFixed(1)}" height="${clipH}" aria-hidden="true">${duck}` +
+    `<polyline class="vol-line" points="${line}"/>` +
+    `<polyline class="vol-hit" points="${line}"><title>Volume — drag to change · Ctrl/Cmd-click: add keyframe</title></polyline></svg>`;
+  if (kfs?.length) for (let i = 0; i < kfs.length; i++) {
+    const k = kfs[i];
+    html += `<div class="vol-pt" data-i="${i}" style="left:${(k.t * state.pps).toFixed(1)}px;top:${y(k.v)}px" ` +
+      `title="${fmtDb(volToDb(k.v))} @ ${fmt(c.start + k.t)} — drag · Alt-click: remove"></div>`;
+  }
+  return html;
+}
+function fadeGripsHtml(c) {
+  const fin = c.transitionIn?.type === "fade" ? clipTransitionDur(c.transitionIn) : 0;
+  const fout = c.transitionOut?.type === "fade" ? clipTransitionDur(c.transitionOut) : 0;
+  return `<div class="fade-grip l" style="left:${(Math.min(fin, c.duration) * state.pps).toFixed(1)}px" title="Drag to fade in"></div>` +
+    `<div class="fade-grip r" style="right:${(Math.min(fout, c.duration) * state.pps).toFixed(1)}px" title="Drag to fade out"></div>`;
+}
+const volGroup = (c) => withLinked([c]).filter((x) => x.kind === "audio");
+/** Copy c's volume (static + keyframes) onto its linked stems. */
+function mirrorVolume(c) {
+  for (const x of volGroup(c)) {
+    if (x === c) continue;
+    x.props.volume = c.props.volume;
+    if (c.keyframes?.volume?.length) {
+      x.keyframes = x.keyframes || {};
+      x.keyframes.volume = c.keyframes.volume.map((k) => ({ ...k }));
+    } else if (x.keyframes?.volume) {
+      delete x.keyframes.volume;
+      if (!Object.keys(x.keyframes).length) x.keyframes = undefined;
+    }
+  }
+}
+function volBandRect(c) {
+  return els.tracks.querySelector(`.clip[data-id="${c.id}"] .vol-band`)?.getBoundingClientRect() || null;
+}
+function endVolEdit(c) {
+  hideTrimReadout();
+  state.gesture = false;
+  if (c.keyframes?.volume && !c.keyframes.volume.length) {
+    delete c.keyframes.volume;
+    if (!Object.keys(c.keyframes).length) c.keyframes = undefined;
+  }
+  mirrorVolume(c);
+  state.dirtyTimeline = true;
+  scheduleSave();
+  renderInspector();
+  refreshAudioHold();
+}
+function startVolBandGesture(e, c) {
+  e.preventDefault();
+  if (isGroupLocked(c)) { toastLocked(); return; }
+  if (!state.selIds.has(c.id)) selectClip(c.id);
+  const rect = volBandRect(c);
+  if (!rect) return;
+  const H = Math.max(1, rect.height - 6);
+  const local = clamp((e.clientX - rect.left) / state.pps, 0, c.duration);
+  pushUndo();
+  if (e.ctrlKey || e.metaKey) { // add a keyframe where the line is
+    const v = volumeAtLocal(c, local);
+    const t = +local.toFixed(4);
+    c.keyframes = c.keyframes || {};
+    const arr = (c.keyframes.volume || []).filter((k) => Math.abs(k.t - t) > 1e-3);
+    arr.push({ t, v: +v.toFixed(4), ease: "linear" });
+    arr.sort((a, b) => a.t - b.t);
+    c.keyframes.volume = arr;
+    mirrorVolume(c);
+    state.dirtyTimeline = true;
+    rebuildClips();
+    startVolPointGesture(e, c, arr.findIndex((k) => k.t === t), true);
+    return;
+  }
+  state.gesture = true;
+  const kfs = c.keyframes?.volume;
+  let idx = [];
+  if (kfs?.length) {
+    const j = kfs.findIndex((k) => k.t >= local);
+    idx = j < 0 ? [kfs.length - 1] : j === 0 ? [0] : [j - 1, j];
+  }
+  const orig = idx.map((i) => volToDb(kfs[i].v));
+  const v0 = volumeAtLocal(c, local), p0 = volToPos(v0), db0 = volToDb(v0);
+  const y0 = e.clientY;
+  const onMove = (ev) => {
+    const v = posToVol(p0 - (ev.clientY - y0) / H);
+    if (!idx.length) c.props.volume = +v.toFixed(4);
+    else {
+      const d = volToDb(v) - db0;
+      idx.forEach((i, n) => { kfs[i].v = +dbToVol(orig[n] + d).toFixed(4); });
+    }
+    mirrorVolume(c);
+    showTrimReadout(ev, fmtDb(volToDb(v)));
+    state.dirtyTimeline = true;
+    rebuildClips();
+  };
+  const onUp = () => {
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+    endVolEdit(c);
+  };
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp);
+}
+function startVolPointGesture(e, c, i, undoDone = false, remove = e.altKey) {
+  e.preventDefault();
+  if (isGroupLocked(c)) { toastLocked(); return; }
+  const kfs = c.keyframes?.volume;
+  if (!kfs?.[i]) return;
+  if (!state.selIds.has(c.id)) selectClip(c.id);
+  if (!undoDone) pushUndo();
+  if (remove) { // the level it held stays as the clip's volume
+    if (kfs.length === 1) c.props.volume = kfs[0].v;
+    kfs.splice(i, 1);
+    endVolEdit(c);
+    return;
+  }
+  const rect = volBandRect(c);
+  const H = Math.max(1, (rect?.height || 30) - 6);
+  state.gesture = true;
+  const k = kfs[i];
+  const t0 = k.t, p0 = volToPos(k.v), x0 = e.clientX, y0 = e.clientY;
+  const lo = i > 0 ? kfs[i - 1].t + 0.001 : 0;
+  const hi = i < kfs.length - 1 ? kfs[i + 1].t - 0.001 : c.duration;
+  const onMove = (ev) => {
+    if (!ev.shiftKey) k.t = +clamp(t0 + (ev.clientX - x0) / state.pps, lo, hi).toFixed(4); // Shift: level only
+    k.v = +posToVol(p0 - (ev.clientY - y0) / H).toFixed(4);
+    mirrorVolume(c);
+    showTrimReadout(ev, `${fmtDb(volToDb(k.v))} · ${fmt(c.start + k.t)}`);
+    state.dirtyTimeline = true;
+    rebuildClips();
+  };
+  const onUp = () => {
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+    endVolEdit(c);
+  };
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp);
+}
+/** Drag a fade grip: creates / resizes a constant-power fade on the clip and
+ *  its linked stems; dragging it back to the edge removes the fade. */
+function startFadeGripGesture(e, c, side) {
+  e.preventDefault();
+  if (isGroupLocked(c)) { toastLocked(); return; }
+  selectClip(c.id, { transFocus: side });
+  const key = side === "in" ? "transitionIn" : "transitionOut";
+  const group = volGroup(c);
+  const orig = c[key]?.type === "fade" ? clipTransitionDur(c[key]) : 0;
+  const x0 = e.clientX;
+  let moved = false;
+  state.gesture = true;
+  pushUndo();
+  const onMove = (ev) => {
+    const dx = ev.clientX - x0;
+    if (!moved && Math.abs(dx) < 2) return;
+    moved = true;
+    const dur = clamp(orig + (side === "in" ? dx : -dx) / state.pps, 0, c.duration);
+    for (const x of group) {
+      if (dur < MIN_TRANS_DUR) x[key] = undefined;
+      else x[key] = { type: "fade", duration: +dur.toFixed(3), curve: x[key]?.type === "fade" ? x[key].curve || "power" : "power" };
+    }
+    showTrimReadout(ev, dur < MIN_TRANS_DUR ? "no fade" : `fade ${side} ${dur.toFixed(2)}s`);
+    state.dirtyTimeline = true;
+    rebuildClips();
+  };
+  const onUp = () => {
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+    hideTrimReadout();
+    state.gesture = false;
+    if (moved) scheduleSave();
+    renderInspector();
+  };
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp);
 }
 
 /* Render decoded peaks for the [in, in+duration] slice of the clip's media */
@@ -4283,6 +4653,13 @@ els.tracksContent.addEventListener("pointerdown", (e) => {
   }
   const c = getClip(clipDiv.dataset.id);
   if (!c) return;
+  if (c.kind === "audio" && (state.tool || "select") === "select") {
+    const grip = e.target.closest(".fade-grip");
+    if (grip) { startFadeGripGesture(e, c, grip.classList.contains("r") ? "out" : "in"); return; }
+    const pt = e.target.closest(".vol-pt");
+    if (pt) { startVolPointGesture(e, c, +pt.dataset.i); return; }
+    if (e.target.closest(".vol-hit")) { startVolBandGesture(e, c); return; }
+  }
   const kfMark = e.target.closest(".clip-kf");
   if (kfMark) {
     e.preventDefault();
@@ -4328,9 +4705,15 @@ els.tracksContent.addEventListener("pointerdown", (e) => {
 els.tracksContent.addEventListener("dblclick", (e) => {
   const clipDiv = e.target.closest(".clip");
   if (!clipDiv) return;
-  if (e.target.closest(".handle, .trans-mark, .trans-dur-handle, .clip-kf")) return;
   const c = getClip(clipDiv.dataset.id);
   if (!c) return;
+  const pt = e.target.closest(".vol-pt");
+  if (pt) { // double-click a volume point: remove it
+    e.preventDefault();
+    startVolPointGesture(e, c, +pt.dataset.i, false, true);
+    return;
+  }
+  if (e.target.closest(".handle, .trans-mark, .trans-dur-handle, .clip-kf, .fade-grip, .vol-hit")) return;
   e.preventDefault();
   loadSourceFromClip(c, { timelineTime: timeAtEvent(e) });
 });
@@ -5220,15 +5603,32 @@ function renderInspector(lite) {
       ${slider("speed", 0.25, 4, 0.05, p.speed, "×")}
     </div>`;
   }
+  if (c.kind === "audio") {
+    const duckN = c.keyframes?.duck?.length || 0;
+    const lanes = audioTrackIds().filter((id) => id !== c.track);
+    html += `<div class="insp-section"><h3>Auto-duck</h3>
+      ${row("Under", `<select data-duck-under title="Lower this clip wherever there is sound on these tracks (dialogue / VO)">
+        <option value="">All other audio tracks</option>${lanes.map((id) => `<option value="${id}">${id}</option>`).join("")}</select>`)}
+      ${row("Amount", `<span class="insp-ctrls"><input type="number" data-duck-amount min="-40" max="-1" step="1" value="${duckAmount()}" title="How far to dip, dB" style="max-width:64px"> dB
+        <button type="button" class="btn tiny" data-duck-run title="Write duck keyframes on the selected clips">Apply</button>
+        ${duckN ? `<button type="button" class="btn tiny" data-duck-clear title="Remove the ducking">Clear</button>` : ""}</span>`)}
+      ${duckN ? `<div class="insp-note">${duckN} duck keyframe${duckN === 1 ? "" : "s"} — the dashed line on the clip shows the ducked level.</div>` : ""}
+    </div>`;
+  }
   const tsel = (label, key, tr) => {
     const active = state.transFocus === (key === "transIn" ? "in" : "out");
     return `<div class="insp-row${active ? " trans-active" : ""}"><label class="insp-reset" data-reset="${key}" title="Ctrl-click: reset · Shift-click: reset">${label}</label>
       <span class="insp-ctrls"><select data-k="${key}">${TRANSITIONS.map((x) => `<option ${x === (tr?.type || "none") ? "selected" : ""}>${x}</option>`).join("")}</select>
        <input type="number" class="insp-dur" data-k="${key}Dur" step="0.1" min="0.1" value="${tr?.duration ?? 1}"></span></div>`;
   };
+  const curveSel = (label, k, tr) => tr?.type === "fade" && c.kind === "audio"
+    ? row(label, `<select data-k="${k}" title="Fade shape (audio)">${[["", "Smooth (eased)"], ...Object.entries(AUDIO_FADE_CURVES)].map(([v, l]) =>
+      `<option value="${v}" ${(tr.curve || "") === v ? "selected" : ""}>${l}</option>`).join("")}</select>`) : "";
   html += `<div class="insp-section"><h3>Transition</h3>
     ${tsel("In", "transIn", c.transitionIn)}
+    ${curveSel("In curve", "curveIn", c.transitionIn)}
     ${tsel("Out", "transOut", c.transitionOut)}
+    ${curveSel("Out curve", "curveOut", c.transitionOut)}
   </div>`;
   if (c.kind === "text") {
     const fontGroup = (label, fonts) => fonts.length
@@ -5317,6 +5717,17 @@ function renderInspector(lite) {
         if (c[key]) saveLastTransition(side, c[key]);
         state.dirtyTimeline = true;
       }
+      else if (k === "curveIn" || k === "curveOut") {
+        const tr = k === "curveIn" ? c.transitionIn : c.transitionOut;
+        if (tr) {
+          if (v) tr.curve = String(v); else delete tr.curve;
+          for (const x of volGroup(c)) { // stems fade together
+            const xt = k === "curveIn" ? x.transitionIn : x.transitionOut;
+            if (x !== c && xt?.type === "fade") { if (v) xt.curve = String(v); else delete xt.curve; }
+          }
+          state.dirtyTimeline = true;
+        }
+      }
       else if (k === "transInDur" || k === "transOutDur") {
         const key = k === "transInDur" ? "transitionIn" : "transitionOut";
         const side = k === "transInDur" ? "in" : "out";
@@ -5361,6 +5772,20 @@ function renderInspector(lite) {
       }
       scheduleSave(); renderInspector();
     });
+  });
+  els.inspector.querySelector("[data-duck-amount]")?.addEventListener("change", (e) => {
+    try { localStorage.setItem(DUCK_KEY, String(clamp(+e.target.value || -12, -40, -1))); } catch { }
+  });
+  els.inspector.querySelector("[data-duck-run]")?.addEventListener("click", () => {
+    const sel = selectedClips();
+    autoDuckClips(sel.length ? sel : [c], {
+      under: els.inspector.querySelector("[data-duck-under]")?.value || null,
+      amount: clamp(+els.inspector.querySelector("[data-duck-amount]")?.value || -12, -40, -1),
+    });
+  });
+  els.inspector.querySelector("[data-duck-clear]")?.addEventListener("click", () => {
+    const sel = selectedClips();
+    clearDuck(sel.length ? sel : [c]);
   });
   els.inspector.querySelector("[data-norm-target]")?.addEventListener("change", (e) => {
     try { localStorage.setItem(NORMALIZE_KEY, e.target.value); } catch { }
@@ -5466,7 +5891,7 @@ function syncInspectorOffClip(c) {
     if (input === active) continue; // don't yank focus mid-edit
     input.disabled = locked || (ANIMATABLE.includes(k) && off && !!(c.keyframes?.[k]?.length));
   }
-  for (const btn of els.inspector.querySelectorAll("[data-kfclear], [data-action], [data-style-open], [data-media-open], [data-norm-run]"))
+  for (const btn of els.inspector.querySelectorAll("[data-kfclear], [data-action], [data-style-open], [data-media-open], [data-norm-run], [data-duck-run], [data-duck-clear]"))
     btn.disabled = locked;
   for (const btn of els.inspector.querySelectorAll("[data-kf]")) {
     btn.disabled = off || locked;
@@ -5523,7 +5948,7 @@ function syncInspectorPlayhead() {
 /* ── Keyframe graphs (program-monitor left gutter) ── */
 const KF_GRAPH_LABEL = {
   x: "Pos X", y: "Pos Y", scale: "Scale", rotation: "Rotation", opacity: "Opacity",
-  volume: "Volume", pan: "Pan", speed: "Speed", brightness: "Bright", contrast: "Contrast",
+  volume: "Volume", pan: "Pan", duck: "Duck", speed: "Speed", brightness: "Bright", contrast: "Contrast",
   saturation: "Sat", hue: "Hue", blur: "Blur", grayscale: "Gray", sepia: "Sepia",
   invert: "Invert", temperature: "Temp", tint: "Tint", vignette: "Vignette",
   cornerRadius: "Radius", shake: "Shake", rgbSplit: "RGB", grain: "Grain",
@@ -6640,7 +7065,7 @@ function driveClipChain(chain, c, p) {
   }
   rewireClipChain(chain, c);
   chain.trim.gain.value = dbToGain(clipGainDb(c));
-  chain.vol.gain.value = clamp(+p.volume || 0, 0, 4);
+  chain.vol.gain.value = clipAudioGain(p);
   if (chain.pan) chain.pan.pan.value = clipPan(p.pan);
 }
 function muteClipChain(chain) {
@@ -6723,6 +7148,91 @@ async function normalizeClips(clips, target = normalizeTarget()) {
   const what = done === 1 && results.length === 1
     ? `gain ${fmtDb(results[0].g[0].props.gain)}` : `${done} clip${done === 1 ? "" : "s"}`;
   toast(`Normalized to ${target.label}: ${what}${silent ? ` · ${silent} silent, skipped` : ""}`);
+}
+/* ── Auto-duck: find where the voice tracks have sound (ducking.js) and
+   write `duck` keyframes on the selected music clips — the same pipeline as
+   fablecut_auto_duck. The duck rides on top of volume, so the music's own
+   level and fades are left alone and a re-run simply replaces the dips. ── */
+const DUCK_KEY = "fablecut-duck-amount";
+function duckAmount() {
+  let v = -12;
+  try { v = +localStorage.getItem(DUCK_KEY) || -12; } catch { }
+  return clamp(v, -40, -1);
+}
+function setDuckKeys(c, keys) {
+  for (const x of volGroup(c)) {
+    if (keys.length) {
+      x.keyframes = x.keyframes || {};
+      x.keyframes.duck = keys.map((k) => ({ ...k }));
+    } else if (x.keyframes?.duck) {
+      delete x.keyframes.duck;
+      if (!Object.keys(x.keyframes).length) x.keyframes = undefined;
+    }
+  }
+}
+/** Timeline spans with sound on the voice clips (each measured after its
+ *  channel routing, scaled by its clip gain and static volume). */
+async function voiceRegions(voices, threshold) {
+  const lists = [];
+  for (const v of voices) {
+    const m = getMedia(v.mediaId);
+    if (!m) continue;
+    let buf;
+    try { buf = await getAudioBuffer(m); } catch { continue; }
+    const a = clamp(Math.floor(v.in * buf.sampleRate), 0, buf.length);
+    const b = clamp(Math.ceil(mediaTimeAt(v, clipEnd(v)) * buf.sampleRate), a, buf.length);
+    const src = [];
+    for (let ch = 0; ch < buf.numberOfChannels; ch++) src.push(buf.getChannelData(ch).subarray(a, b));
+    const env = FableCutDucking.rmsEnvelope(FableCutLoudness.routeChannels(src, v.props || {}), buf.sampleRate);
+    lists.push(FableCutDucking.activeRegions(env, {
+      t0: v.start, speed: clipSpeed(v), threshold,
+      gain: dbToGain(clipGainDb(v)) * clamp(+(v.props?.volume ?? 1), 0, VOL_MAX),
+    }));
+  }
+  return FableCutDucking.mergeRegions(lists);
+}
+async function autoDuckClips(clips, { under = null, amount = duckAmount(), threshold = -40 } = {}) {
+  if (typeof FableCutDucking === "undefined") { toast("Ducking module missing — reload the editor"); return; }
+  const music = withLinked(clips).filter((x) => x.kind === "audio" && !isGroupLocked(x));
+  if (!music.length) { toast("Select the music clip(s) to duck"); return; }
+  const musicIds = new Set(music.map((x) => x.id));
+  const own = new Set(music.map((x) => x.track));
+  const lanes = under ? [under] : audioTrackIds().filter((id) => !own.has(id));
+  const t0 = Math.min(...music.map((x) => x.start)), t1 = Math.max(...music.map(clipEnd));
+  const voices = project.clips.filter((x) => x.kind === "audio" && lanes.includes(x.track) &&
+    !musicIds.has(x.id) && clipRenders(x) && clipEnd(x) > t0 && x.start < t1);
+  if (!voices.length) {
+    toast(`No audio on ${under || "the other audio tracks"} under these clips to duck for`);
+    return;
+  }
+  toast("Listening for voice…");
+  const regions = await voiceRegions(voices, threshold);
+  pushUndo();
+  let dips = 0;
+  const done = new Set();
+  for (const c of music) {
+    if (done.has(c.linkGroup || c.id)) continue;
+    done.add(c.linkGroup || c.id);
+    const keys = FableCutDucking.duckKeyframes(regions, c, { amount });
+    setDuckKeys(c, keys);
+    dips += keys.filter((k, i) => k.v === amount && (i === 0 || keys[i - 1].v !== amount)).length;
+  }
+  state.dirtyTimeline = true;
+  scheduleSave();
+  renderInspector();
+  refreshAudioHold();
+  toast(regions.length ? `Ducked ${amount} dB under ${lanes.join(", ")} — ${dips} dip${dips === 1 ? "" : "s"}`
+    : `No voice found on ${lanes.join(", ")} — nothing ducked`);
+}
+function clearDuck(clips) {
+  const list = withLinked(clips).filter((x) => x.kind === "audio" && x.keyframes?.duck && !isGroupLocked(x));
+  if (!list.length) return;
+  pushUndo();
+  for (const c of list) setDuckKeys(c, []);
+  state.dirtyTimeline = true;
+  scheduleSave();
+  renderInspector();
+  refreshAudioHold();
 }
 function fmtDb(db) {
   if (!Number.isFinite(db) || db <= FADER_DB_MIN) return "−∞ dB";
@@ -7548,7 +8058,7 @@ function refreshAudioHold() {
     const m = getMedia(c.mediaId);
     if (!m || (m.kind !== "audio" && m.kind !== "video")) continue;
     const p = evalProps(c, t);
-    const vol = clamp(+p.volume || 0, 0, 4);
+    const vol = clipAudioGain(p);
     if (vol <= 1e-4) continue; // skip muted picture track (linked stems carry the sound)
     getAudioBuffer(m).then((buf) => {
       if (audioHoldStale(gen, state.playing)) return;
@@ -7651,7 +8161,7 @@ function syncMedia() {
       if (Math.abs(el.currentTime - mt) > 0.25 * eff) { try { el.currentTime = mt; } catch {} }
       const chain = runtime.clipGain.get(c.id);
       if (chain?.vol) driveClipChain(chain, c, p);
-      else el.volume = clamp(p.volume, 0, 1);
+      else el.volume = clamp(clipAudioGain(p), 0, 1);
     } else {
       if (!el.paused) el.pause();
       muteClipChain(runtime.clipGain.get(c.id));
@@ -7723,12 +8233,27 @@ function evalProps(c, t) {
   applyFilterPreset(p);
   const W = els.preview.width, H = els.preview.height;
   const tin = c.transitionIn, tout = c.transitionOut;
-  if (tin && tin.duration > 0 && local < tin.duration)
-    applyTransition(p, tin.type, 1 - EASE["ease-out"](clamp(local / tin.duration, 0, 1)), W, H, -1);
-  if (tout && tout.duration > 0 && local > c.duration - tout.duration)
-    applyTransition(p, tout.type,
-      EASE["ease-in"](clamp((local - (c.duration - tout.duration)) / tout.duration, 0, 1)), W, H, 1);
+  if (tin && tin.duration > 0 && local < tin.duration) {
+    const u = clamp(local / tin.duration, 0, 1);
+    applyTransition(p, tin.type, 1 - EASE["ease-out"](u), W, H, -1, audioFadeGain(tin.curve, u));
+  }
+  if (tout && tout.duration > 0 && local > c.duration - tout.duration) {
+    const u = clamp((local - (c.duration - tout.duration)) / tout.duration, 0, 1);
+    applyTransition(p, tout.type, EASE["ease-in"](u), W, H, 1, audioFadeGain(tout.curve, 1 - u));
+  }
   return p;
+}
+/* Audio fade shapes. `u` runs 0 (silent edge) → 1 (full level). A fade with
+   no `curve` keeps the original eased shape (applyTransition's 1 − k), so
+   older projects sound the same. Two "power" fades crossing sum to constant
+   power (cos² + sin² = 1): no dip in the middle of a crossfade. */
+const AUDIO_FADE_CURVES = { power: "Constant power", linear: "Constant gain", exp: "Exponential" };
+function audioFadeGain(curve, u) {
+  u = clamp(u, 0, 1);
+  if (curve === "power") return Math.sin(u * Math.PI / 2);
+  if (curve === "linear") return u;
+  if (curve === "exp") return (Math.pow(10, 2 * u) - 1) / 99; // slow start, smooth into full
+  return null;
 }
 /* Merge a named look into evaluated props: % props scale, additive props add. */
 function applyFilterPreset(p) {
@@ -7742,12 +8267,13 @@ function applyFilterPreset(p) {
     else p[k] = (+p[k] || 0) + v;   // hue, temperature, tint, blur
   }
 }
-/* k: 0 = fully visible … 1 = fully transitioned away; dir: -1 = in, +1 = out */
-function applyTransition(p, type, k, W, H, dir) {
+/* k: 0 = fully visible … 1 = fully transitioned away; dir: -1 = in, +1 = out.
+   audioG: the fade's own audio gain when it has a `curve` (else 1 − k). */
+function applyTransition(p, type, k, W, H, dir, audioG = null) {
   if (!(k > 0)) return;
   switch (type) {
     case "fade": case "dissolve":
-      p.opacity *= 1 - k; p.volume *= 1 - k; break;
+      p.opacity *= 1 - k; p.volume *= audioG ?? 1 - k; break;
     case "slide-left": p.x = (+p.x || 0) - dir * k * W; break;
     case "slide-right": p.x = (+p.x || 0) + dir * k * W; break;
     case "slide-up": p.y = (+p.y || 0) - dir * k * H; break;
@@ -10042,7 +10568,7 @@ async function renderAudioMix(t0, t1) {
     const panCurve = new Float32Array(n);
     for (let i = 0; i < n; i++) {
       const ep = evalProps(c, a + (i / (n - 1)) * mixDur);
-      volCurve[i] = clamp(ep.volume, 0, 4);
+      volCurve[i] = clipAudioGain(ep);
       panCurve[i] = clipPan(ep.pan);
     }
     chain.vol.gain.setValueCurveAtTime(volCurve, mixWhen, Math.max(0.01, mixDur));
@@ -11109,6 +11635,10 @@ window.addEventListener("keydown", (e) => {
   else if ((k === "e" || k === "E") && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
     e.preventDefault();
     toggleClipsDisabled();
+  }
+  else if ((k === "d" || k === "D") && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    e.preventDefault();
+    crossfadeSelected();
   }
   else if ((k === "l" || k === "L") && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
     e.preventDefault(); // Ctrl/Cmd+L would otherwise focus the address bar

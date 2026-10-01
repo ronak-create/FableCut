@@ -50,6 +50,7 @@ const EXPORTS = [
   "splitAtPlayhead", "relinkClips", "toggleClipsDisabled", "toggleClipsLocked",
   "toggleLinkSelected", "linkRefusal", "isGroupLocked", "isEditTarget", "clipRenders",
   "rippleTrim", "rollEdit", "slipClip", "slideClip", "liftExtract", "adjacentClip",
+  "crossfadeCuts", "crossfadeCut", "crossfadeSelected",
 ];
 
 const DEFAULT_TRACKS = ["V3", "V2", "V1", "A1", "A2", "A3"];
@@ -74,7 +75,7 @@ function world({
   let n = 0;
   let sourceWindow = () => null;
   const env = {
-    project, TRACKS, state, MIN_DUR,
+    project, TRACKS, state, MIN_DUR, MIN_TRANS_DUR: 0.1,
     DEFAULT_PROPS: { volume: 1 },
     uid: () => "u" + (++n),
     clamp: (v, a, b) => Math.min(b, Math.max(a, v)),

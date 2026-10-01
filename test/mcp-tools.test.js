@@ -362,3 +362,50 @@ test("fablecut_normalize_audio measures with ffmpeg and sets one gain per linked
   const miss = await mcp.callTool("fablecut_normalize_audio", { clipIds: ["nope"] });
   assert.ok(miss.isError);
 });
+
+test("fablecut_auto_duck writes duck keys on the music where the voice speaks, and clears them", async (t) => {
+  const { spawnSync } = require("node:child_process");
+  const has = (b) => { try { return spawnSync(b, ["-version"], { stdio: "ignore" }).status === 0; } catch { return false; } };
+  if (!has("ffmpeg") || !has("ffprobe")) { t.skip("ffmpeg / ffprobe not installed"); return; }
+  const project = seedProject({
+    media: [
+      { id: "m_v", name: "voice.wav", kind: "audio", src: "/media/voice.wav", duration: 6 },
+      { id: "m_m", name: "music.wav", kind: "audio", src: "/media/music.wav", duration: 10 },
+    ],
+    clips: [
+      { id: "c_v", mediaId: "m_v", kind: "audio", track: "A1", start: 2, in: 0, duration: 6, props: {} },
+      { id: "c_m", mediaId: "m_m", kind: "audio", track: "A3", start: 0, in: 0, duration: 10, props: { volume: 0.5 } },
+    ],
+  });
+  const { dir, mcp } = await boot(t, project);
+  fs.mkdirSync(path.join(dir, "media"), { recursive: true });
+  // voice: speech-level tone from 1 s to 3 s of the file (timeline 3 → 5 s), silence around it
+  const voice = "if(between(t,1,3),0.2*sin(2*PI*300*t),0)";
+  const music = "0.1*sin(2*PI*220*t)";
+  for (const [name, expr, d] of [["voice.wav", voice, 6], ["music.wav", music, 10]]) {
+    const r = spawnSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", `aevalsrc='${expr}':s=48000:d=${d}`,
+      "-c:a", "pcm_f32le", path.join(dir, "media", name)]);
+    assert.equal(r.status, 0, String(r.stderr));
+  }
+
+  const res = await mcp.callTool("fablecut_auto_duck", { clipIds: ["c_m"], amount: -10 });
+  assert.equal(res.isError, false, res.text);
+  assert.match(res.text, /under A1 — 1 voice span/);
+  const keys = readProject(dir).clips.find((c) => c.id === "c_m").keyframes.duck;
+  assert.equal(keys.length, 4, JSON.stringify(keys));
+  const [down, low, high, up] = keys;
+  assert.equal(down.v, 0);
+  assert.equal(low.v, -10);
+  assert.ok(Math.abs(low.t - 3) < 0.15, `fully ducked as the voice starts (${low.t})`);
+  assert.ok(Math.abs(high.t - 5) < 0.15, `held to the end of the voice (${high.t})`);
+  assert.ok(Math.abs(up.t - high.t - 0.6) < 1e-6, "0.6 s release");
+  assert.equal(readProject(dir).clips.find((c) => c.id === "c_m").props.volume, 0.5, "volume untouched");
+
+  const cleared = await mcp.callTool("fablecut_auto_duck", { clipIds: ["c_m"], amount: 0 });
+  assert.equal(cleared.isError, false, cleared.text);
+  assert.equal(readProject(dir).clips.find((c) => c.id === "c_m").keyframes, undefined, "amount 0 clears");
+
+  const none = await mcp.callTool("fablecut_auto_duck", { clipIds: ["c_m"], under: ["A2"] });
+  assert.ok(none.isError);
+  assert.match(none.text, /nothing to duck for/);
+});

@@ -94,6 +94,15 @@ same time.
   right, swap) and **Normalize**: measure the selected clips (ITU-R BS.1770
   loudness or sample peak) and set their gain to hit −14 / −16 / −23 LUFS or
   −1 dBFS. Linked stems share one gain so a stereo pair stays balanced.
+- **Volume line, fades and crossfades** — every audio clip shows its volume as
+  a line you drag; Ctrl/Cmd-click adds a keyframe, Alt-click removes one. Corner
+  grips drag fades in and out, drawn with their real curve (constant power,
+  constant gain or exponential). **Shift+D** crossfades the cut next to the
+  selection, borrowing spare media from both sides so nothing else moves.
+- **Auto-duck** — select the music, pick the dialogue track and an amount, and
+  the music dips wherever someone speaks (ramping down just before, back up
+  after). It rides on top of the music's own volume, so re-running or clearing
+  it never touches your levels. Agents use `fablecut_auto_duck`.
 - **Project bin folders** — tree view with expand/collapse; drag media or folders to nest; right-click the **Project** tab → New folder; drop files onto a folder to import into it
 - **Import from URL** — **+ URL** downloads an HTTPS video/audio/image into
   `./media/` (same-origin after import). Remote SVG is refused. Agents use
@@ -323,7 +332,7 @@ Three equivalent control surfaces:
    Tools: `fablecut_status` (auto-starts the editor), `fablecut_docs`,
    `fablecut_get_project`, `fablecut_set_project`, `fablecut_patch_project`,
    `fablecut_import_media`, `fablecut_analyze_reference`,
-   `fablecut_encode_profiles`, `fablecut_normalize_audio`.
+   `fablecut_encode_profiles`, `fablecut_normalize_audio`, `fablecut_auto_duck`.
 
    FableCut is also published on the **official MCP registry** as
    [`io.github.ronak-create/fablecut`](https://registry.modelcontextprotocol.io/v0/servers?search=fablecut)

@@ -1583,6 +1583,12 @@ body.track-size-s .clip.selected {
   opacity: .6;
 }
 
+.insp-note {
+  margin: 2px 0 4px;
+  font-size: 11px;
+  color: var(--dim);
+}
+
 .insp-multi {
   margin-bottom: 12px;
   padding: 7px 9px;
@@ -2290,6 +2296,85 @@ input[type=range] {
 }
 body.track-size-s .clip .clip-kf-n {
   font-size: 6px;
+}
+
+/* ── Volume line + fade grips on audio clips (volBandHtml / fadeGripsHtml) ── */
+.clip .vol-band {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 3;
+}
+
+.clip .vol-line {
+  fill: none;
+  stroke: #ffd166;
+  stroke-width: 1.25;
+  opacity: .85;
+}
+
+.clip .vol-duck {
+  fill: none;
+  stroke: #ffd166;
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  opacity: .7;
+}
+
+/* invisible fat stroke = the grab area for the line */
+.clip .vol-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 9;
+  pointer-events: stroke;
+  cursor: ns-resize;
+}
+
+.clip:hover .vol-line {
+  opacity: 1;
+  stroke-width: 1.5;
+}
+
+.clip .vol-pt {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  margin: -3.5px 0 0 -3.5px;
+  border-radius: 50%;
+  background: #ffd166;
+  border: 1px solid #1a1a22;
+  z-index: 5;
+  cursor: move;
+}
+
+.clip .vol-pt:hover {
+  transform: scale(1.4);
+}
+
+.clip .fade-grip {
+  position: absolute;
+  top: 1px;
+  width: 8px;
+  height: 8px;
+  margin: 0 -4px;
+  background: #ffffffcc;
+  border: 1px solid #1a1a22;
+  border-radius: 2px;
+  z-index: 6;
+  cursor: ew-resize;
+  opacity: 0;
+  transition: opacity .12s;
+}
+
+.clip:hover .fade-grip,
+.clip.selected .fade-grip {
+  opacity: 1;
+}
+
+body.track-size-s .clip .fade-grip {
+  display: none;
 }
 
 /* transition wedges — width from transition duration × pps (see transitionMarksHtml) */

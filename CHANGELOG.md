@@ -27,6 +27,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `setTrack` op for track faders / pan and a `master` field on
   `setProject`; the compact project view shows a `MIX:` line when any
   level is off 0.
+- **Volume line.** Audio clips draw their volume as a line: drag it to change
+  the level (with keyframes, the two around the pointer move together),
+  Ctrl/Cmd-click to add a keyframe, drag a point to move it, Alt-click or
+  double-click to remove one. Edits apply to linked stems too.
+- **Fade grips and fade curves.** Drag the grip in a clip's top corner to fade
+  in or out. Audio fades take a `curve`: constant power, constant gain or
+  exponential (inspector → Transition), drawn as the real curve on the clip.
+  Fades without a `curve` sound exactly as before.
+- **Crossfade (Shift+D, or the clip menu).** Crossfades the audio cut next to
+  the selection, or the one at the playhead: the overlap is borrowed from
+  spare media on both sides of the cut, so nothing downstream moves; linked
+  picture dissolves in. Overlapping audio that is crossfaded no longer shows
+  the overlap warning.
+- **Auto-duck.** In the inspector (or the clip menu): the selected music dips
+  by the chosen amount wherever the dialogue tracks have sound, ramping down
+  just before and back up after, with short pauses bridged. Written as a new
+  `duck` keyframe channel (dB) on top of volume, so the music's own levels are
+  never touched and a re-run replaces the old dips. MCP:
+  `fablecut_auto_duck`, same detection as the editor.
 
 ### Changed
 - Preview and export now mix audio through the same graph: each clip feeds

@@ -182,6 +182,23 @@ const TOOLS = [
       required: ["clipIds"],
     },
   },
+  {
+    name: "fablecut_auto_duck",
+    description: "Duck music under dialogue: finds where the voice tracks have sound (RMS above `threshold`, short gaps bridged so the music doesn't pump between words) and writes `duck` keyframes (dB) on the given music clips — a dip of `amount` dB ramping down `attack` s before speech and back up `release` s after. The duck multiplies the clip's volume, so its own level, volume keyframes and fades are untouched, and re-running replaces the previous dips (amount 0 clears them). Voice = every audio clip on `under` tracks (default: all audio tracks the music isn't on). Linked stems of a music clip get the same keys. The same pipeline as the editor's Auto-duck. Needs ffmpeg + ffprobe on PATH. Refuses locked clips unless force:true.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        clipIds: { type: "array", items: { type: "string" }, description: "The music / bed clips to duck" },
+        under: { type: "array", items: { type: "string" }, description: "Audio tracks holding the voice, e.g. [\"A1\"] (default: every other audio track)" },
+        amount: { type: "number", description: "Dip depth in dB, -40…0 (default -12; 0 removes the ducking)" },
+        threshold: { type: "number", description: "Voice detection level in dBFS (default -40; raise it if room noise triggers ducks)" },
+        attack: { type: "number", description: "Seconds to ramp down before speech (default 0.3)" },
+        release: { type: "number", description: "Seconds to ramp back up after speech (default 0.6)" },
+        force: { type: "boolean", description: "Also change clips the user locked (only when they asked)" },
+      },
+      required: ["clipIds"],
+    },
+  },
 ];
 
 /* ── Loudness normalize (fablecut_normalize_audio) ──
@@ -223,19 +240,14 @@ function probeChannels(file) {
   const n = parseInt(String(r.stdout).trim(), 10);
   return n > 0 ? n : 0;
 }
-/** Measure clips that play together (one linked group: same file + window). */
-function measureClipGroup(proj, clips) {
-  const L = require("./loudness.js");
-  const c0 = clips[0];
+/** Decode a clip's source window with ffmpeg and hand each chunk to
+ *  `onChunk(channels)`. Resolves to the channel count (0 = no audio stream). */
+function streamClipAudio(proj, c0, onStart, onChunk) {
   const media = proj.media.find((m) => m.id === c0.mediaId);
   const file = media && mediaFile(media.src);
   if (!file) return Promise.reject(new Error(`clip ${c0.id}: media file not found`));
   const nCh = probeChannels(file);
-  if (!nCh) return Promise.resolve(null); // no audio stream
-  const routedCount = clips.reduce((n, c) =>
-    n + L.routeChannels(Array.from({ length: nCh }, () => new Float32Array(0)), c.props || {}).length, 0);
-  if (!routedCount) return Promise.resolve(null);
-  const meter = new L.LoudnessMeter(routedCount, NORM_SR);
+  if (!nCh || onStart(nCh) === false) return Promise.resolve(0);
   return new Promise((resolve, reject) => {
     const proc = spawn("ffmpeg", ["-v", "error", "-ss", String(Math.max(0, +c0.in || 0)),
       "-t", String(Math.max(0.01, clipSourceLen(c0))), "-i", file, "-vn", "-map", "0:a:0",
@@ -250,13 +262,40 @@ function measureClipGroup(proj, clips) {
       const chs = Array.from({ length: nCh }, () => new Float32Array(frames));
       for (let i = 0; i < frames; i++)
         for (let c = 0; c < nCh; c++) chs[c][i] = buf.readFloatLE((i * nCh + c) * 4);
-      meter.push(clips.flatMap((c) => L.routeChannels(chs, c.props || {})));
+      onChunk(chs);
     });
     proc.stderr.on("data", (d) => { err += d; });
-    proc.on("error", () => reject(new Error("ffmpeg not found on PATH — needed to measure audio")));
-    proc.on("close", (code) => code === 0 ? resolve(meter.result())
-      : reject(new Error(`ffmpeg failed measuring ${c0.id}: ${err.trim().split("\n").pop() || code}`)));
+    proc.on("error", () => reject(new Error("ffmpeg not found on PATH — needed to read audio")));
+    proc.on("close", (code) => code === 0 ? resolve(nCh)
+      : reject(new Error(`ffmpeg failed reading ${c0.id}: ${err.trim().split("\n").pop() || code}`)));
   });
+}
+/** Measure clips that play together (one linked group: same file + window). */
+async function measureClipGroup(proj, clips) {
+  const L = require("./loudness.js");
+  let meter = null;
+  await streamClipAudio(proj, clips[0], (nCh) => {
+    const routedCount = clips.reduce((n, c) =>
+      n + L.routeChannels(Array.from({ length: nCh }, () => new Float32Array(0)), c.props || {}).length, 0);
+    if (!routedCount) return false;
+    meter = new L.LoudnessMeter(routedCount, NORM_SR);
+  }, (chs) => meter.push(clips.flatMap((c) => L.routeChannels(chs, c.props || {}))));
+  return meter ? meter.result() : null;
+}
+/** Timeline spans with sound on these voice clips (ducking.js pipeline). */
+async function voiceRegions(proj, voices, threshold) {
+  const L = require("./loudness.js"), D = require("./ducking.js");
+  const lists = [];
+  for (const v of voices) {
+    let env = null;
+    await streamClipAudio(proj, v, (nCh) => { env = new D.EnvelopeMeter(nCh, NORM_SR); },
+      (chs) => env.push(L.routeChannels(chs, v.props || {})));
+    if (!env) continue;
+    const sp = Math.min(8, Math.max(0.1, +v.props?.speed || 1));
+    const gain = Math.pow(10, (+v.props?.gain || 0) / 20) * Math.min(2, Math.max(0, +(v.props?.volume ?? 1)));
+    lists.push(D.activeRegions(env.result(), { t0: v.start, speed: sp, gain, threshold }));
+  }
+  return D.mergeRegions(lists);
 }
 /** The clips that sound for a selection: a linked group's audio stems, else the clip. */
 function normalizeGroups(proj, ids) {
@@ -336,7 +375,7 @@ async function callTool(name, args) {
       // compact view only shows what actually deviates
       const DEFAULTS = {
         x: 0, y: 0, scale: 1, rotation: 0, opacity: 1, volume: 1, pan: 0, speed: 1,
-        gain: 0, channelMode: "stereo",
+        gain: 0, channelMode: "stereo", duck: 0,
         blend: "normal", fit: "contain", cropL: 0, cropR: 0, cropT: 0, cropB: 0,
         cornerRadius: 0, flipH: false, flipV: false, filterPreset: "none",
         brightness: 100, contrast: 100, saturation: 100, hue: 0, temperature: 0,
@@ -610,6 +649,75 @@ async function callTool(name, args) {
         lastReadRevision = proj.revision;
       }
       return `Normalize to ${target} ${mode === "peak" ? "dBFS peak" : "LUFS"}${changed ? ` (revision ${proj.revision})` : " — nothing changed"}:\n` + report.join("\n");
+    }
+    case "fablecut_auto_duck": {
+      const ids = Array.isArray(args.clipIds) ? args.clipIds.map(String) : [];
+      if (!ids.length) throw new Error("`clipIds` must list the music clip(s) to duck");
+      const amount = args.amount == null ? -12 : +args.amount;
+      if (!Number.isFinite(amount) || amount < -40 || amount > 0) throw new Error("amount must be -40…0 dB");
+      const threshold = args.threshold == null ? -40 : +args.threshold;
+      const attack = args.attack == null ? 0.3 : Math.max(0, +args.attack || 0);
+      const release = args.release == null ? 0.6 : Math.max(0, +args.release || 0);
+      const D = require("./ducking.js");
+      const doc = readProject();
+      const musicGroups = [];
+      const seen = new Set();
+      for (const id of ids) {
+        const c = doc.clips.find((x) => x.id === id);
+        if (!c) throw new Error("no clip " + id);
+        if (c.kind !== "audio" && c.kind !== "video") throw new Error(`clip ${id} is ${c.kind} — no audio to duck`);
+        const key = c.linkGroup || c.id;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const members = c.linkGroup ? doc.clips.filter((x) => x.linkGroup === c.linkGroup) : [c];
+        const stems = members.filter((x) => x.kind === "audio");
+        if (stems.length) musicGroups.push(stems.map((x) => x.id));
+      }
+      if (!musicGroups.length) throw new Error("none of those clips carry audio on an A-track");
+      const musicIds = new Set(musicGroups.flat());
+      const musicClips = doc.clips.filter((x) => musicIds.has(x.id));
+      const own = new Set(musicClips.map((x) => x.track));
+      const lanes = Array.isArray(args.under) && args.under.length ? args.under.map(String)
+        : [...new Set(doc.clips.filter((x) => x.kind === "audio").map((x) => x.track))].filter((t) => !own.has(t));
+      const t0 = Math.min(...musicClips.map((x) => x.start));
+      const t1 = Math.max(...musicClips.map((x) => x.start + x.duration));
+      const disabled = new Set(Array.isArray(doc.disabledTracks) ? doc.disabledTracks : []);
+      const voices = doc.clips.filter((x) => x.kind === "audio" && lanes.includes(x.track) && !musicIds.has(x.id) &&
+        !disabled.has(x.track) && x.disabled !== true && x.start + x.duration > t0 && x.start < t1);
+      const regions = amount && voices.length ? await voiceRegions(doc, voices, threshold) : [];
+      if (amount && !voices.length) throw new Error(`no audio clips on ${lanes.join(", ") || "other tracks"} under the music — nothing to duck for`);
+      // Re-read after the (slow) analysis so concurrent UI edits are kept.
+      const proj = readProject();
+      const locked = new Set(Array.isArray(proj.lockedTracks) ? proj.lockedTracks : []);
+      const report = [];
+      let changed = 0;
+      for (const g of musicGroups) {
+        const clips = g.map((id) => proj.clips.find((x) => x.id === id)).filter(Boolean);
+        if (!clips.length) continue;
+        const lockedBy = clips.find((c) => c.locked === true || locked.has(c.track));
+        if (lockedBy && args.force !== true) {
+          report.push(`${g.join("+")}: skipped — ${lockedBy.id} is locked (pass force:true if the user asked)`);
+          continue;
+        }
+        const keys = amount ? D.duckKeyframes(regions, clips[0], { amount, attack, release }) : [];
+        for (const c of clips) {
+          if (keys.length) { c.keyframes = c.keyframes || {}; c.keyframes.duck = keys.map((k) => ({ ...k })); }
+          else if (c.keyframes && c.keyframes.duck) {
+            delete c.keyframes.duck;
+            if (!Object.keys(c.keyframes).length) delete c.keyframes;
+          }
+        }
+        changed++;
+        const dips = keys.filter((k, i) => k.v === amount && (i === 0 || keys[i - 1].v !== amount)).length;
+        report.push(`${g.join("+")}: ${amount ? `${dips} dip${dips === 1 ? "" : "s"} of ${amount} dB` : "ducking removed"}`);
+      }
+      if (changed) {
+        proj.revision = (proj.revision || 0) + 1;
+        writeProject(proj);
+        lastReadRevision = proj.revision;
+      }
+      const head = amount ? `Auto-duck under ${lanes.join(", ")} — ${regions.length} voice span${regions.length === 1 ? "" : "s"}` : "Ducking cleared";
+      return `${head}${changed ? ` (revision ${proj.revision})` : " — nothing changed"}:\n` + report.join("\n");
     }
     case "fablecut_analyze_reference": {
       let src = args.path || "";
