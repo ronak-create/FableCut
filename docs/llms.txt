@@ -14,7 +14,8 @@ about 150 ms. A human and an agent can work the same timeline at once.
 - License: MIT. Free for personal and commercial use. No account, no telemetry,
   no paid tier.
 - Requirements: Node.js 18+ and a Chromium-based browser. ffmpeg on PATH is
-  optional but recommended (fast export and upload remuxing).
+  optional but recommended (fast export, upload remuxing, loudness
+  normalization, auto-duck and noise reduction).
 - Install: `git clone https://github.com/ronak-create/FableCut.git`, then
   `node server.js`, then open http://localhost:7777.
 - The server binds 127.0.0.1 only. Media stays in a local folder; nothing is
@@ -24,8 +25,15 @@ about 150 ms. A human and an agent can work the same timeline at once.
 - Editing: multi-track video and audio (up to 16 per kind), per-clip volume,
   stereo pan, speed ramps, keyframes, transitions, titles with kinetic text
   animation, SVG library, chroma key, AI background removal.
+- Audio: a mixer with track faders, pan, mute / solo and meters; submix buses;
+  clip gain; effect chains (EQ, filters, compressor, limiter, gate, delay,
+  reverb, distortion, stereo width, pitch shift) with presets and keyframed
+  parameters; loudness normalization (LUFS); auto-duck; crossfades; noise
+  reduction.
 - Export: fast ffmpeg export via encoding profiles, WebCodecs hardware export
   (browser encodes H.264, server muxes), and a realtime MediaRecorder fallback.
+  Agents can start an export themselves (`fablecut_export`), in the open editor
+  or a headless browser.
 - Also installable as a Claude Code plugin, which registers the MCP server and
   adds `edit-video` and `remake-reel` skills.
 
