@@ -6,6 +6,7 @@
      The audio is delayed by the lookahead; the gain needed for every sample
      in that window is known before the sample plays, so peaks never pass the
      ceiling. Gain recovers with an exponential release.
+   fablecut-pitch — pitch shift (semitones), two-tap delay line (below).
    fablecut-gate — noise gate: opens (attack) when the input peak rises over
      the threshold, stays open for `hold`, then closes (release) down to
      `range` dB. */
@@ -97,5 +98,65 @@ class FableCutGate extends AudioWorkletProcessor {
   }
 }
 
+/* fablecut-pitch — pitch shift without changing speed. A delay line read by
+   two taps half a window apart: each tap's delay sweeps through the window
+   at (1 − ratio) samples per sample, so it plays the input back faster or
+   slower, and a sin² crossfade hides the jump when a tap wraps (the two
+   weights always sum to 1). Adds about half a window (~30 ms) of latency. */
+class FableCutPitch extends AudioWorkletProcessor {
+  static get parameterDescriptors() {
+    const k = "k-rate";
+    return [
+      { name: "semitones", defaultValue: 0, minValue: -12, maxValue: 12, automationRate: k },
+      { name: "mix", defaultValue: 1, minValue: 0, maxValue: 1, automationRate: k },
+    ];
+  }
+  constructor() {
+    super();
+    this.W = Math.max(64, Math.round(0.06 * sampleRate)); // window, samples
+    this.N = this.W * 2 + 4;                              // ring length
+    this.buf = [];
+    this.w = 0;   // write index
+    this.d = 0;   // tap A's delay, 0…W
+  }
+  read(b, delay) {
+    let p = this.w - delay;
+    while (p < 0) p += this.N;
+    const i = Math.floor(p), f = p - i;
+    return b[i % this.N] * (1 - f) + b[(i + 1) % this.N] * f;
+  }
+  process(inputs, outputs, params) {
+    const inp = inputs[0], out = outputs[0];
+    if (!inp || !inp.length) return true;
+    const semi = params.semitones[0], mix = params.mix[0];
+    const nCh = Math.min(inp.length, out.length);
+    while (this.buf.length < nCh) this.buf.push(new Float32Array(this.N));
+    const n = inp[0].length;
+    if (Math.abs(semi) < 0.01 || mix <= 0) { // exact pass-through, keep the line warm
+      for (let i = 0; i < n; i++) {
+        for (let c = 0; c < nCh; c++) { this.buf[c][this.w] = inp[c][i]; out[c][i] = inp[c][i]; }
+        this.w = (this.w + 1) % this.N;
+      }
+      return true;
+    }
+    const step = 1 - Math.pow(2, semi / 12), W = this.W, half = W / 2;
+    for (let i = 0; i < n; i++) {
+      for (let c = 0; c < nCh; c++) this.buf[c][this.w] = inp[c][i];
+      this.d += step;
+      if (this.d >= W) this.d -= W; else if (this.d < 0) this.d += W;
+      const d2 = this.d >= half ? this.d - half : this.d + half;
+      const s = Math.sin(Math.PI * this.d / W), g1 = s * s, g2 = 1 - g1;
+      for (let c = 0; c < nCh; c++) {
+        const b = this.buf[c];
+        const wet = g1 * this.read(b, this.d) + g2 * this.read(b, d2);
+        out[c][i] = inp[c][i] * (1 - mix) + wet * mix;
+      }
+      this.w = (this.w + 1) % this.N;
+    }
+    return true;
+  }
+}
+
 registerProcessor("fablecut-limiter", FableCutLimiter);
 registerProcessor("fablecut-gate", FableCutGate);
+registerProcessor("fablecut-pitch", FableCutPitch);

@@ -77,6 +77,7 @@ function world({
     mediaTimeAt: (c, t) => c.in + Math.min(c.duration, Math.max(0, t - c.start)) * (c.props?.speed || 1),
     getClip: (id) => project.clips.find((c) => c.id === id) || null,
     getMedia: (id) => project.media.find((m) => m.id === id),
+    baseMediaId: (id) => project.media.find((m) => m.id === id)?.derivedFrom || id,
     clipSpeed: (c) => Math.min(8, Math.max(0.1, +(c.props?.speed) || 1)),
     updateWorkArea() {}, syncTrimIOButton() {},
     setTime: (t) => { state.time = t; },

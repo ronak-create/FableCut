@@ -108,17 +108,22 @@
     { <span class="tk-k">"id"</span>: <span class="tk-s">"V3"</span>, <span class="tk-k">"kind"</span>: <span class="tk-s">"video"</span> },   <span class="tk-c">// video: higher number drawn on top (V1 under V2 under V3…)</span>
     { <span class="tk-k">"id"</span>: <span class="tk-s">"V2"</span>, <span class="tk-k">"kind"</span>: <span class="tk-s">"video"</span> },
     { <span class="tk-k">"id"</span>: <span class="tk-s">"V1"</span>, <span class="tk-k">"kind"</span>: <span class="tk-s">"video"</span> },
-    { <span class="tk-k">"id"</span>: <span class="tk-s">"A1"</span>, <span class="tk-k">"kind"</span>: <span class="tk-s">"audio"</span>, <span class="tk-k">"gain"</span>: <span class="tk-n">-6</span>, <span class="tk-k">"pan"</span>: <span class="tk-n">0</span> },   <span class="tk-c">// audio: A1…An top→bottom; +V/+A appends Vn+1 / An+1</span>
-    <span class="tk-c">// ^ gain = track fader in dB (−60 = silence … +12), pan = −1…1, fx = track effects; all optional</span>
+    { <span class="tk-k">"id"</span>: <span class="tk-s">"A1"</span>, <span class="tk-k">"kind"</span>: <span class="tk-s">"audio"</span>, <span class="tk-k">"gain"</span>: <span class="tk-n">-6</span>, <span class="tk-k">"pan"</span>: <span class="tk-n">0</span>, <span class="tk-k">"out"</span>: <span class="tk-s">"B1"</span> },   <span class="tk-c">// audio: A1…An top→bottom; +V/+A appends Vn+1 / An+1</span>
+    <span class="tk-c">// ^ gain = track fader in dB (−60 = silence … +12), pan = −1…1, fx = track effects,</span>
+    <span class="tk-c">//   out = the submix bus it feeds (default: the master); all optional</span>
     { <span class="tk-k">"id"</span>: <span class="tk-s">"A2"</span>, <span class="tk-k">"kind"</span>: <span class="tk-s">"audio"</span> },
     { <span class="tk-k">"id"</span>: <span class="tk-s">"A3"</span>, <span class="tk-k">"kind"</span>: <span class="tk-s">"audio"</span> },
     { <span class="tk-k">"id"</span>: <span class="tk-s">"A4"</span>, <span class="tk-k">"kind"</span>: <span class="tk-s">"audio"</span> }
   ],
+  <span class="tk-k">"buses"</span>: [ { <span class="tk-k">"id"</span>: <span class="tk-s">"B1"</span>, <span class="tk-k">"name"</span>: <span class="tk-s">"Dialogue"</span>, <span class="tk-k">"gain"</span>: <span class="tk-n">-2</span>, <span class="tk-k">"fx"</span>: [ { <span class="tk-k">"type"</span>: <span class="tk-s">"compressor"</span> } ] } ],
+  <span class="tk-c">// ^ optional — submix buses B1…B8: name, gain (dB), pan, mute, fx; tracks route in with `out`</span>
   <span class="tk-k">"media"</span>: [
     { <span class="tk-k">"id"</span>: <span class="tk-s">"m_abc"</span>, <span class="tk-k">"name"</span>: <span class="tk-s">"intro.mp4"</span>, <span class="tk-k">"kind"</span>: <span class="tk-s">"video"</span>,  <span class="tk-c">// video|audio|image|svg</span>
       <span class="tk-k">"src"</span>: <span class="tk-s">"/media/intro.mp4"</span>,             <span class="tk-c">// path under ./media or ./library (never a raw https:// URL)</span>
       <span class="tk-k">"duration"</span>: <span class="tk-n">12.4</span>, <span class="tk-k">"width"</span>: <span class="tk-n">1920</span>, <span class="tk-k">"height"</span>: <span class="tk-n">1080</span>,
-      <span class="tk-k">"folderId"</span>: <span class="tk-n">null</span> }                     <span class="tk-c">// optional: id of a folders[] entry</span>
+      <span class="tk-k">"folderId"</span>: <span class="tk-n">null</span> },                    <span class="tk-c">// optional: id of a folders[] entry</span>
+    { <span class="tk-k">"id"</span>: <span class="tk-s">"m_abd"</span>, <span class="tk-k">"name"</span>: <span class="tk-s">"intro.denoise-medium.flac"</span>, <span class="tk-k">"kind"</span>: <span class="tk-s">"audio"</span>, <span class="tk-k">"src"</span>: <span class="tk-s">"/media/intro.denoise-medium.flac"</span>,
+      <span class="tk-k">"derivedFrom"</span>: <span class="tk-s">"m_abc"</span>, <span class="tk-k">"denoise"</span>: <span class="tk-s">"medium"</span> }  <span class="tk-c">// a noise-reduced copy of m_abc (see "Audio mix")</span>
   ],
   <span class="tk-k">"clips"</span>: [
     {
@@ -151,7 +156,7 @@
   ]
 }</code></pre><button class="copy" type="button" aria-label="Copy this example"><svg class="i i-cp" aria-hidden="true"><use href="#i-copy"/></svg><svg class="i i-ok" aria-hidden="true"><use href="#i-check"/></svg></button></div>
     <div class="docs-end">
-      <a class="more" href="https://github.com/ronak-create/FableCut/blob/main/CLAUDE.md#L210" rel="noopener" target="_blank">Edit this in CLAUDE.md <svg class="i i-ne" aria-hidden="true"><use href="#i-ne"/></svg></a>
+      <a class="more" href="https://github.com/ronak-create/FableCut/blob/main/CLAUDE.md#L212" rel="noopener" target="_blank">Edit this in CLAUDE.md <svg class="i i-ne" aria-hidden="true"><use href="#i-ne"/></svg></a>
       <a class="more" href="https://raw.githubusercontent.com/ronak-create/FableCut/main/CLAUDE.md" rel="noopener" target="_blank">The whole manual as Markdown <svg class="i i-ne" aria-hidden="true"><use href="#i-ne"/></svg></a>
     </div>
     <nav class="docs-pn" aria-label="Previous and next page"><a class="docs-pn-prev" href="../mcp/"><span>Previous</span><b>MCP tools</b></a><a class="docs-pn-next" href="../props/"><span>Next</span><b>Clip props</b></a></nav>

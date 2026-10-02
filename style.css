@@ -1422,6 +1422,43 @@ body.track-size-s .clip.selected {
   box-shadow: -6px 0 8px -4px #0008;
 }
 
+.mix-strip.bus {
+  background: color-mix(in srgb, var(--panel-2) 88%, #c58cff);
+}
+
+.mix-out,
+.mix-rename {
+  width: 100%;
+  min-width: 0;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font: 10px/1.2 "Segoe UI", sans-serif;
+  padding: 2px 1px;
+}
+
+.mix-add {
+  flex: none;
+  align-self: flex-start;
+  background: none;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  color: var(--dim);
+  font: 600 11px/1 "Segoe UI", sans-serif;
+  padding: 8px 6px;
+  cursor: pointer;
+}
+
+.mix-add:hover {
+  color: var(--text);
+  border-color: #c58cff;
+}
+
+.mix-btns .mix-x:hover {
+  color: #e5484d;
+}
+
 .mix-strip.muted .mix-body {
   opacity: .45;
 }
@@ -1625,7 +1662,7 @@ body.track-size-s .clip.selected {
 
 .fx-param {
   display: grid;
-  grid-template-columns: 62px minmax(0, 1fr) 58px;
+  grid-template-columns: 62px minmax(0, 1fr) 58px 26px;
   align-items: center;
   gap: 6px;
   font-size: 11px;
@@ -1634,6 +1671,11 @@ body.track-size-s .clip.selected {
 
 .fx-param input[type=range] {
   width: 100%;
+}
+
+.fx-kf {
+  padding: 2px 3px;
+  justify-self: end;
 }
 
 .fx-val {

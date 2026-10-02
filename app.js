@@ -186,6 +186,38 @@ function normalizeMaster(raw) {
   if (fx) out.fx = fx;
   return out;
 }
+/* Submix buses: project.buses = [{id:"B1", name?, gain?, pan?, mute?, fx?}].
+   An A-track routes into one with tracks[].out = "B1" (default: the master);
+   a bus has its own effects, fader and pan and feeds the master. */
+const BUS_MAX = 8;
+const BUS_COLOR = "#c58cff";
+function normalizeBuses(raw) {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set(), out = [];
+  for (const b of raw) {
+    if (!b || !/^B\d+$/.test(String(b.id)) || seen.has(b.id) || out.length >= BUS_MAX) continue;
+    seen.add(b.id);
+    const d = { id: b.id };
+    if (typeof b.name === "string" && b.name.trim()) d.name = b.name.trim().slice(0, 40);
+    const g = Math.round(clampFaderDb(b.gain) * 10) / 10;
+    if (g) d.gain = g;
+    const pn = clipPan(b.pan);
+    if (pn) d.pan = pn;
+    if (b.mute === true) d.mute = true;
+    const fx = normFx(b.fx);
+    if (fx) d.fx = fx;
+    out.push(d);
+  }
+  return out.sort((a, b) => parseInt(a.id.slice(1), 10) - parseInt(b.id.slice(1), 10));
+}
+function busById(id) { return (project.buses || []).find((b) => b.id === id) || null; }
+function busIdsNow() { return (project.buses || []).map((b) => b.id); }
+function busLabel(b) { return b?.name || b?.id || ""; }
+/** The bus an A-track feeds, or null for the master. */
+function trackOut(id) {
+  const o = TRACKS.find((t) => t.id === id)?.out;
+  return o && busById(o) ? o : null;
+}
 const TRACK_IDS = new Set(TRACKS.map((t) => t.id));
 function syncTrackIds() {
   TRACK_IDS.clear();
@@ -194,11 +226,12 @@ function syncTrackIds() {
 function serializeTracks() {
   // Mixer settings are written only when off-default, so untouched projects
   // stay byte-identical.
-  return TRACKS.map(({ id, kind, gain, pan, fx }) => {
+  return TRACKS.map(({ id, kind, gain, pan, fx, out }) => {
     const d = { id, kind };
     if (kind === "audio" && +gain) d.gain = +gain;
     if (kind === "audio" && +pan) d.pan = +pan;
     if (kind === "audio" && fx?.length) d.fx = fx;
+    if (kind === "audio" && out && busById(out)) d.out = out;
     return d;
   });
 }
@@ -229,6 +262,7 @@ function applyTracksFromProject(defs) {
       if (+d.pan) t.pan = clipPan(d.pan);
       const fx = normFx(d.fx);
       if (fx) t.fx = fx;
+      if (typeof d.out === "string" && /^B\d+$/.test(d.out)) t.out = d.out;
     }
     TRACKS.push(t);
   }
@@ -489,6 +523,7 @@ const project = {
   encodeProfile: null, // optional fast-export profile id (overrides browser setting)
   tracks: null, // optional [{id, kind, gain?, pan?}] — null means default V3…V1 + A1…A4
   master: null, // optional {gain} — master bus fader (dB)
+  buses: [],    // submix buses [{id:"B1", name?, gain?, pan?, mute?, fx?}]; tracks[].out routes into one
   panSchema: 1, // 1 = pan-aware; gates one-time L/R stem migration on load
 };
 /** Sole runtime FPS source — always the loaded project’s `fps`. */
@@ -1373,6 +1408,7 @@ function applyProject(data) {
     exportFrame: normalizeExportFrame(data.exportFrame, data.width || 1280, data.height || 720),
     encodeProfile: data.encodeProfile || null,
     master: normalizeMaster(data.master),
+    buses: normalizeBuses(data.buses),
   });
   applyTracksFromProject(data.tracks);
   ensureTracksCoverClips();
@@ -1463,8 +1499,11 @@ function projectJSON() {
     folders: (folders || []).map(({ id, name, parentId, open }) =>
       ({ id, name, parentId: parentId || null, open: open !== false })),
     tracks: serializeTracks(),
-    media: media.filter((m) => !m.transient).map(({ id, name, kind, src, duration, width, height, folderId }) =>
-      ({ id, name, kind, src, duration, width, height, folderId: folderId || null })),
+    media: media.filter((m) => !m.transient).map(({ id, name, kind, src, duration, width, height, folderId, derivedFrom, denoise }) => {
+      const mo = { id, name, kind, src, duration, width, height, folderId: folderId || null };
+      if (derivedFrom) { mo.derivedFrom = derivedFrom; if (denoise) mo.denoise = denoise; }
+      return mo;
+    }),
     clips: clips.map(({ id, mediaId, kind, track, start, in: inn, duration, name, props, keyframes, transitionIn, transitionOut, linkedId, linkGroup, locked, disabled, unlinked, fx }) => {
       const clipOut = { id, mediaId, kind, track, start, in: inn, duration, name, props, keyframes, transitionIn, transitionOut };
       if (fx?.length) clipOut.fx = fx;
@@ -1490,6 +1529,8 @@ function projectJSON() {
   if (encodeProfile) out.encodeProfile = encodeProfile;
   const master = normalizeMaster(project.master);
   if (master) out.master = master;
+  const buses = normalizeBuses(project.buses);
+  if (buses.length) out.buses = buses;
   return out;
 }
 function listenSSE() {
@@ -2189,7 +2230,7 @@ function linkRefusal(clips) {
   if (clips.some((c) => c.kind !== "video" && c.kind !== "audio")) return "Only video and audio clips can be linked";
   if (clips.filter((c) => c.kind === "video").length !== 1) return "Select exactly one video clip and its audio";
   const v = clips.find((c) => c.kind === "video");
-  if (clips.some((c) => !c.mediaId || c.mediaId !== v.mediaId)) return "Linked clips must come from the same media file";
+  if (clips.some((c) => !c.mediaId || baseMediaId(c.mediaId) !== v.mediaId)) return "Linked clips must come from the same media file";
   if (clips.some((c) => !near(c.start, v.start) || !near(c.in, v.in) || !near(c.duration, v.duration)))
     return "Line the clips up first — same start, in point and length";
   return null;
@@ -4879,13 +4920,17 @@ function renderInspector(lite) {
       ${row("Normalize", `<span class="insp-ctrls"><select data-norm-target title="Loudness target">${NORMALIZE_TARGETS.map((t) =>
         `<option value="${t.id}" ${t.id === nt.id ? "selected" : ""}>${t.label}</option>`).join("")}</select>
         <button type="button" class="btn tiny" data-norm-run title="Measure the selected clips and set their gain to hit this target (linked stems share one gain)">Apply</button></span>`)}
+      ${row("Noise", `<span class="insp-ctrls"><select data-denoise title="${state.connected && state.ffmpeg
+        ? "Noise reduction (ffmpeg FFT denoiser) — renders a cleaned copy of the file; Off switches back to the original"
+        : "Noise reduction needs the server with ffmpeg on PATH"}" ${state.connected && state.ffmpeg ? "" : "disabled"}>${["off", ...DENOISE_LEVELS].map((v) =>
+        `<option value="${v}" ${v === clipDenoise(c) ? "selected" : ""}>${v[0].toUpperCase() + v.slice(1)}</option>`).join("")}</select></span>`)}
       ${slider("volume", 0, 2, 0.01, p.volume)}
       ${slider("pan", -1, 1, 0.01, p.pan)}
       ${slider("speed", 0.25, 4, 0.05, p.speed, "×")}
     </div>`;
   }
   if (c.kind === "audio" && typeof FableCutFx !== "undefined") {
-    html += `<div class="insp-section" data-fx-section><h3>Audio effects</h3>${fxEditorHtml(c.fx)}</div>`;
+    html += `<div class="insp-section" data-fx-section><h3>Audio effects</h3>${fxEditorHtml(c.fx, playheadOverClip(c) ? state.time - c.start : null)}</div>`;
   }
   if (c.kind === "audio") {
     const duckN = c.keyframes?.duck?.length || 0;
@@ -5069,7 +5114,7 @@ function renderInspector(lite) {
       if (!fx?.length) delete c.fx;
       scheduleSave();
       refreshAudioHold();
-    }, () => renderInspector());
+    }, () => renderInspector(), () => playheadOverClip(c) ? state.time - c.start : null);
   }
   els.inspector.querySelector("[data-duck-amount]")?.addEventListener("change", (e) => {
     try { localStorage.setItem(DUCK_KEY, String(clamp(+e.target.value || -12, -40, -1))); } catch { }
@@ -5087,6 +5132,10 @@ function renderInspector(lite) {
   });
   els.inspector.querySelector("[data-norm-target]")?.addEventListener("change", (e) => {
     try { localStorage.setItem(NORMALIZE_KEY, e.target.value); } catch { }
+  });
+  els.inspector.querySelector("[data-denoise]")?.addEventListener("change", (e) => {
+    const sel = selectedClips();
+    denoiseClips(sel.length ? sel : [c], e.target.value);
   });
   els.inspector.querySelector("[data-norm-run]")?.addEventListener("click", () => {
     const sel = selectedClips();
@@ -6113,11 +6162,14 @@ function drawSourceFrame() {
 /* ═══════════════════════════ PLAYBACK ENGINE ═══════════════════════════ */
 function getClipEl(c) {
   let el = runtime.clipEls.get(c.id);
-  if (el) return el;
   const m = getMedia(c.mediaId);
+  // The clip now plays another file (noise reduction, or undoing it): rebuild.
+  if (el && m && el._fcSrc !== m.src) { releaseClipEl(c.id); el = null; }
+  if (el) return el;
   if (!m) return null;
   el = document.createElement(c.kind === "audio" ? "audio" : "video");
   el.preload = "auto"; el.src = m.src; el.playsInline = true;
+  el._fcSrc = m.src;
   runtime.clipEls.set(c.id, el);
   hookAudio(c, el);
   return el;
@@ -6235,14 +6287,14 @@ function loadFxWorklet(ctx) {
   if (!ctx.audioWorklet) return Promise.resolve(false);
   let p = fxWorklets.get(ctx);
   if (!p) {
-    p = ctx.audioWorklet.addModule("fx-worklet.js?v=1")
+    p = ctx.audioWorklet.addModule("fx-worklet.js?v=2")
       .then(() => { fxWorkletReady.add(ctx); return true; })
       .catch((err) => { console.warn("[FableCut] fx worklet unavailable:", err); return false; });
     fxWorklets.set(ctx, p);
   }
   return p;
 }
-const FX_WORKLET_TYPES = { limiter: "fablecut-limiter", gate: "fablecut-gate" };
+const FX_WORKLET_TYPES = { limiter: "fablecut-limiter", gate: "fablecut-gate", pitch: "fablecut-pitch" };
 function normFx(list) {
   if (!Array.isArray(list) || !list.length) return undefined;
   const out = typeof FableCutFx !== "undefined" ? FableCutFx.normalizeFx(list) : list;
@@ -6280,70 +6332,78 @@ function shaperCurve(drive) {
   }
   return curve;
 }
-/** One effect as {input, output, nodes, set(e)}. */
+/** One effect as {input, output, nodes, set(e, smooth)}. `smooth` glides each
+ *  parameter (automation runs ~50 times a second); otherwise it jumps. */
 function makeFxUnit(ctx, e) {
   const g = (v = 1) => { const n = ctx.createGain(); n.gain.value = v; return n; };
+  let smooth = false;
+  const sv = (param, v) => {
+    if (!Number.isFinite(v)) return;
+    if (smooth) param.setTargetAtTime(v, ctx.currentTime, 0.012);
+    else param.value = v;
+  };
+  const unit = (u) => { const set = u.set; u.set = (p, sm = false) => { smooth = sm; set(p); }; return u; };
   const bq = (type) => { const n = ctx.createBiquadFilter(); n.type = type; return n; };
   const eqPow = (mix) => [Math.cos(mix * Math.PI / 2), Math.sin(mix * Math.PI / 2)];
   switch (e.type) {
     case "eq": {
       const lo = bq("lowshelf"), mid = bq("peaking"), hi = bq("highshelf");
       lo.connect(mid); mid.connect(hi);
-      return { input: lo, output: hi, nodes: [lo, mid, hi], set(p) {
-        lo.frequency.value = p.lowFreq; lo.gain.value = p.lowGain;
-        mid.frequency.value = p.midFreq; mid.gain.value = p.midGain; mid.Q.value = p.midQ;
-        hi.frequency.value = p.highFreq; hi.gain.value = p.highGain;
-      } };
+      return unit({ input: lo, output: hi, nodes: [lo, mid, hi], set(p) {
+        sv(lo.frequency, p.lowFreq); sv(lo.gain, p.lowGain);
+        sv(mid.frequency, p.midFreq); sv(mid.gain, p.midGain); sv(mid.Q, p.midQ);
+        sv(hi.frequency, p.highFreq); sv(hi.gain, p.highGain);
+      } });
     }
     case "highpass": case "lowpass": {
       const f = bq(e.type);
-      return { input: f, output: f, nodes: [f], set(p) { f.frequency.value = p.freq; f.Q.value = p.q; } };
+      return unit({ input: f, output: f, nodes: [f], set(p) { sv(f.frequency, p.freq); sv(f.Q, p.q); } });
     }
     case "compressor": {
       const c = ctx.createDynamicsCompressor(), mk = g();
       c.connect(mk);
-      return { input: c, output: mk, nodes: [c, mk], set(p) {
-        c.threshold.value = p.threshold; c.ratio.value = p.ratio; c.knee.value = p.knee;
-        c.attack.value = p.attack / 1000; c.release.value = p.release / 1000;
-        mk.gain.value = dbToGain(p.makeup);
-      } };
+      return unit({ input: c, output: mk, nodes: [c, mk], set(p) {
+        sv(c.threshold, p.threshold); sv(c.ratio, p.ratio); sv(c.knee, p.knee);
+        sv(c.attack, p.attack / 1000); sv(c.release, p.release / 1000);
+        sv(mk.gain, dbToGain(p.makeup));
+      } });
     }
-    case "limiter": case "gate": {
-      if (!fxWorkletReady.has(ctx)) { const pass = g(); return { input: pass, output: pass, nodes: [pass], pending: true, set() { } }; }
+    case "limiter": case "gate": case "pitch": {
+      if (!fxWorkletReady.has(ctx)) { const pass = g(); return unit({ input: pass, output: pass, nodes: [pass], pending: true, set() { } }); }
       const w = new AudioWorkletNode(ctx, FX_WORKLET_TYPES[e.type]);
-      return { input: w, output: w, nodes: [w], set(p) {
-        for (const k of Object.keys(FableCutFx.FX_DEFS[e.type].params)) w.parameters.get(k).value = p[k];
-      } };
+      return unit({ input: w, output: w, nodes: [w], set(p) {
+        for (const k of Object.keys(FableCutFx.FX_DEFS[e.type].params)) sv(w.parameters.get(k), p[k]);
+      } });
     }
     case "delay": {
       const inp = g(), out = g(), dry = g(1), wet = g(), fb = g(), d = ctx.createDelay(2);
       inp.connect(dry); dry.connect(out);
       inp.connect(d); d.connect(wet); wet.connect(out); d.connect(fb); fb.connect(d);
-      return { input: inp, output: out, nodes: [inp, out, dry, wet, fb, d], set(p) {
-        d.delayTime.value = p.time; fb.gain.value = p.feedback; wet.gain.value = p.mix;
-      } };
+      return unit({ input: inp, output: out, nodes: [inp, out, dry, wet, fb, d], set(p) {
+        sv(d.delayTime, p.time); sv(fb.gain, p.feedback); sv(wet.gain, p.mix);
+      } });
     }
     case "reverb": {
       const inp = g(), out = g(), dry = g(), wet = g(), pre = ctx.createDelay(0.5), conv = ctx.createConvolver();
       inp.connect(dry); dry.connect(out);
       inp.connect(pre); pre.connect(conv); conv.connect(wet); wet.connect(out);
       let decay = null;
-      return { input: inp, output: out, nodes: [inp, out, dry, wet, pre, conv], set(p) {
+      return unit({ input: inp, output: out, nodes: [inp, out, dry, wet, pre, conv], set(p) {
         const [d, w] = eqPow(p.mix);
-        dry.gain.value = d; wet.gain.value = w; pre.delayTime.value = p.predelay / 1000;
+        sv(dry.gain, d); sv(wet.gain, w); sv(pre.delayTime, p.predelay / 1000);
         if (decay !== p.decay) { decay = p.decay; conv.buffer = reverbIR(ctx, p.decay); }
-      } };
+      } });
     }
     case "distortion": {
       const inp = g(), out = g(), dry = g(), wet = g(), sh = ctx.createWaveShaper();
       sh.oversample = "4x";
       inp.connect(dry); dry.connect(out); inp.connect(sh); sh.connect(wet); wet.connect(out);
       let drive = null;
-      return { input: inp, output: out, nodes: [inp, out, dry, wet, sh], set(p) {
+      return unit({ input: inp, output: out, nodes: [inp, out, dry, wet, sh], set(p) {
         const [d, w] = eqPow(p.mix);
-        dry.gain.value = d; wet.gain.value = w;
+        sv(dry.gain, d); sv(wet.gain, w);
         if (drive !== p.drive) { drive = p.drive; sh.curve = shaperCurve(p.drive); }
-      } };
+      } });
     }
     case "widener": { // mid/side width: 0 = mono, 1 = as is, 2 = twice the side
       const up = g(); // mono in → both sides, so a mono clip widens sanely
@@ -6353,14 +6413,14 @@ function makeFxUnit(ctx, e) {
       up.connect(sp);
       sp.connect(ll, 0); sp.connect(rl, 0); sp.connect(rr, 1); sp.connect(lr, 1);
       ll.connect(mg, 0, 0); lr.connect(mg, 0, 0); rr.connect(mg, 0, 1); rl.connect(mg, 0, 1);
-      return { input: up, output: mg, nodes: [up, sp, mg, ll, lr, rr, rl], set(p) {
+      return unit({ input: up, output: mg, nodes: [up, sp, mg, ll, lr, rr, rl], set(p) {
         const a = (1 + p.width) / 2, b = (1 - p.width) / 2;
-        ll.gain.value = a; rr.gain.value = a; lr.gain.value = b; rl.gain.value = b;
-      } };
+        sv(ll.gain, a); sv(rr.gain, a); sv(lr.gain, b); sv(rl.gain, b);
+      } });
     }
   }
   const pass = g();
-  return { input: pass, output: pass, nodes: [pass], set() { } };
+  return unit({ input: pass, output: pass, nodes: [pass], set() { } });
 }
 function buildFxChain(ctx, fx) {
   const units = fx.map((e) => { const u = makeFxUnit(ctx, e); u.set(e); return u; });
@@ -6396,6 +6456,14 @@ function syncFxSlot(slot, list) {
   slot.from.connect(slot.chain.input);
   slot.chain.output.connect(slot.to);
 }
+/** Apply automation (`keys`) to a live slot at time t — clip-local for a
+ *  clip's effects, timeline time for a track's, a bus's or the master's. */
+function animateFxSlot(slot, t, smooth = true) {
+  const chain = slot?.chain;
+  if (!chain || chain.pending || !FableCutFx.hasKeys(slot.ref)) return;
+  const fx = slot.ref.filter((e) => e && e.on !== false);
+  fx.forEach((e, i) => { if (e.keys && chain.units[i]) chain.units[i].set(FableCutFx.evalEffect(e, t), smooth); });
+}
 function trackFx(id) { return TRACKS.find((t) => t.id === id)?.fx; }
 function masterFx() { return project.master?.fx; }
 /** An A-track bus: clips connect to the bus (its input sum), then fx →
@@ -6418,19 +6486,43 @@ function disposeTrackBus(bus) {
   for (const n of [busOut(bus), bus._fcFader, bus]) { try { n.disconnect(); } catch { } }
   disposeFxChain(bus._fcFx?.chain);
 }
-/** Track buses + master sum → master fx → master fader. */
-function buildMixBuses(ctx, ids) {
+/** Track buses (→ a submix bus or the master) + submix buses (→ master) +
+ *  master sum → master fx → master fader. */
+function buildMixBuses(ctx, ids, busIds = busIdsNow()) {
   const master = ctx.createGain();
   configureMasterBus(master);
   const masterOut = ctx.createGain();
   configureMasterBus(masterOut);
   const masterFxSlot = makeFxSlot(ctx, master, masterOut);
+  const subBus = {};
+  for (const id of busIds) {
+    subBus[id] = makeTrackBus(ctx);
+    busOut(subBus[id]).connect(master);
+  }
   const trackBus = {};
   for (const id of ids) {
     trackBus[id] = makeTrackBus(ctx);
     busOut(trackBus[id]).connect(master);
+    trackBus[id]._fcDest = master;
   }
-  return { ctx, master, masterOut, masterFxSlot, trackBus };
+  return { ctx, master, masterOut, masterFxSlot, trackBus, subBus };
+}
+/** Point each track bus at its submix bus (tracks[].out) or the master.
+ *  Disconnects only that one edge, so meter taps stay. */
+function routeTrackBuses(mix) {
+  for (const [id, bus] of Object.entries(mix.trackBus)) {
+    const dest = mix.subBus?.[trackOut(id)] || mix.master;
+    if (bus._fcDest === dest) continue;
+    if (bus._fcDest) { try { busOut(bus).disconnect(bus._fcDest); } catch { } }
+    busOut(bus).connect(dest);
+    bus._fcDest = dest;
+  }
+}
+/** Track / master effect automation at timeline time t. */
+function animateMixFx(mix, t, smooth = true) {
+  for (const bus of Object.values(mix.trackBus || {})) animateFxSlot(bus._fcFx, t, smooth);
+  for (const bus of Object.values(mix.subBus || {})) animateFxSlot(bus._fcFx, t, smooth);
+  animateFxSlot(mix.masterFxSlot, t, smooth);
 }
 /** Push track / master faders, pans and effects into a mix. `smooth` glides
  *  live fader moves (no zipper noise); export sets them flat. */
@@ -6445,6 +6537,13 @@ function applyMixLevels(mix, smooth = false) {
     if (bus._fcPan) set(bus._fcPan.pan, trackPanValue(id));
     syncFxSlot(bus._fcFx, trackFx(id));
   }
+  for (const [id, bus] of Object.entries(mix.subBus || {})) {
+    const b = busById(id);
+    set(bus._fcFader.gain, b?.mute ? 0 : dbToGain(clampFaderDb(b?.gain)));
+    if (bus._fcPan) set(bus._fcPan.pan, clipPan(b?.pan));
+    syncFxSlot(bus._fcFx, b?.fx);
+  }
+  routeTrackBuses(mix);
   if (mix.masterOut) set(mix.masterOut.gain, dbToGain(masterGainDb()));
   syncFxSlot(mix.masterFxSlot, masterFx());
 }
@@ -6459,7 +6558,7 @@ function ensureAudio() {
   mix.masterOut.connect(recDest);
   runtime.audio = {
     ctx, master: mix.master, masterOut: mix.masterOut, masterFxSlot: mix.masterFxSlot, recDest,
-    trackBus: mix.trackBus, audioTrackIds: ids.slice(),
+    trackBus: mix.trackBus, audioTrackIds: ids.slice(), subBus: mix.subBus, busIds: busIdsNow(),
     meter: null, meterReady: false,
   };
   applyMixLevels(runtime.audio);
@@ -6489,6 +6588,21 @@ function syncAudioGraphTracks() {
     if (!audio.trackBus[id]) audio.trackBus[id] = makeTrackBus(audio.ctx);
   }
   audio.audioTrackIds = ids.slice();
+  // Submix buses follow project.buses the same way.
+  audio.subBus = audio.subBus || {};
+  const busIds = busIdsNow();
+  for (const id of Object.keys(audio.subBus)) {
+    if (busIds.includes(id)) continue;
+    disposeTrackBus(audio.subBus[id]);
+    delete audio.subBus[id];
+  }
+  for (const id of busIds) {
+    if (!audio.subBus[id]) audio.subBus[id] = makeTrackBus(audio.ctx);
+    const out = busOut(audio.subBus[id]);
+    try { out.disconnect(); } catch { }
+    try { out.connect(audio.master); } catch { }
+  }
+  audio.busIds = busIds;
   // Tear down meter so installMeterWorklet can rebuild with the new input count.
   if (audio.meter) {
     teardownMeterNode(audio);
@@ -6503,8 +6617,9 @@ function syncAudioGraphTracks() {
     const out = busOut(audio.trackBus[id]);
     try { out.disconnect(); } catch { }
     try { out.connect(audio.master); } catch { }
+    audio.trackBus[id]._fcDest = audio.master;
   }
-  applyMixLevels(audio);
+  applyMixLevels(audio); // routes tracks into their submix buses
   installMeterWorklet(audio).catch(() => {});
   // Re-route clip chains onto (possibly new) buses
   for (const c of project.clips) {
@@ -6540,8 +6655,8 @@ function routeClipGain(c) {
   chain.out.connect(bus);
   chain.bus = bus;
 }
-/** Drive a live clip chain from the clip's evaluated props at this frame. */
-function driveClipChain(chain, c, p) {
+/** Drive a live clip chain from the clip's evaluated props at timeline time t. */
+function driveClipChain(chain, c, p, t) {
   if (!chain?.vol) return;
   // The element may have been hooked before its channel count was probed.
   const nCh = getMedia(c.mediaId)?.channels;
@@ -6551,6 +6666,7 @@ function driveClipChain(chain, c, p) {
   }
   rewireClipChain(chain, c);
   syncFxSlot(chain.fxSlot, c.fx);
+  if (t != null) animateFxSlot(chain.fxSlot, t - c.start);
   chain.trim.gain.value = dbToGain(clipGainDb(c));
   chain.vol.gain.value = clipAudioGain(p);
   if (chain.pan) chain.pan.pan.value = clipPan(p.pan);
@@ -6635,6 +6751,72 @@ async function normalizeClips(clips, target = normalizeTarget()) {
   const what = done === 1 && results.length === 1
     ? `gain ${fmtDb(results[0].g[0].props.gain)}` : `${done} clip${done === 1 ? "" : "s"}`;
   toast(`Normalized to ${target.label}: ${what}${silent ? ` · ${silent} silent, skipped` : ""}`);
+}
+/* ── Noise reduction: render and replace (denoise.js on the server). The
+   server writes a cleaned FLAC of the clip's whole source file; the clip's
+   audio stems switch to it (media.derivedFrom points back, so links and
+   "Off" still find the original). The picture keeps its own file. ── */
+const DENOISE_LEVELS = ["light", "medium", "strong"];
+function baseMediaId(id) { return getMedia(id)?.derivedFrom || id; }
+/** The stems a selection's noise reduction applies to (see denoise.js). */
+function denoiseTargets(clips) {
+  const out = new Map();
+  for (const c of clips) {
+    const stems = (c.linkGroup ? withLinked([c]) : [c]).filter((x) => x.kind === "audio" && x.mediaId);
+    for (const s of stems) out.set(s.id, s);
+  }
+  return [...out.values()];
+}
+/** The level the clip plays at now: "off" or a DENOISE_LEVELS entry. */
+function clipDenoise(c) {
+  const stem = denoiseTargets([c])[0];
+  return (stem && getMedia(stem.mediaId)?.denoise) || "off";
+}
+async function denoiseClips(clips, level) {
+  const picked = denoiseTargets(clips);
+  const targets = picked.filter((x) => !isGroupLocked(x));
+  if (!picked.length) { toast("Noise reduction works on audio — this picture has no linked audio stems"); renderInspector(); return; }
+  if (!targets.length) { toastLocked(); renderInspector(); return; }
+  const swap = new Map(); // base media id → the media to play
+  if (level === "off") for (const t of targets) swap.set(baseMediaId(t.mediaId), baseMediaId(t.mediaId));
+  else {
+    const bases = [...new Set(targets.map((t) => baseMediaId(t.mediaId)))];
+    toast(`Reducing noise (${level})…`);
+    for (const id of bases) {
+      const base = getMedia(id);
+      try {
+        const r = await fetch("/api/denoise", { method: "POST", body: JSON.stringify({ src: base.src, amount: level }) })
+          .then(async (x) => { const j = await x.json(); if (!x.ok) throw new Error(j.error || x.status); return j; });
+        let m = project.media.find((x) => x.src === r.src);
+        if (!m) {
+          m = { id: "m_" + uid(), name: r.name, kind: "audio", src: r.src, duration: r.duration, folderId: base.folderId || null,
+            derivedFrom: base.id, denoise: level };
+          if (r.channels) m.channels = r.channels;
+          project.media.push(m);
+        }
+        swap.set(id, m.id);
+      } catch (err) {
+        toast(`Noise reduction failed: ${err.message || err}`);
+        renderInspector();
+        return;
+      }
+    }
+  }
+  pushUndo();
+  for (const t of targets) {
+    const next = swap.get(baseMediaId(t.mediaId));
+    if (!next || next === t.mediaId) continue;
+    t.mediaId = next;
+    releaseClipEl(t.id); // its player and audio chain rebuild on the new file
+    const m = getMedia(next);
+    if (m) ensureWave(m);
+  }
+  state.dirtyTimeline = true;
+  scheduleSave();
+  renderInspector();
+  renderBin();
+  refreshAudioHold();
+  toast(level === "off" ? "Noise reduction off — playing the original" : `Noise reduction: ${level}`);
 }
 /* ── Auto-duck: find where the voice tracks have sound (ducking.js) and
    write `duck` keyframes on the selected music clips — the same pipeline as
@@ -6790,7 +6972,50 @@ function setMasterGain(db) {
   scheduleSave();
   syncMixerStrip(MIXER_MASTER);
 }
-function mixerStripDb(id) { return id === MIXER_MASTER ? masterGainDb() : trackGainDb(id); }
+function mixerStripDb(id) {
+  if (id === MIXER_MASTER) return masterGainDb();
+  const b = busById(id);
+  return b ? clampFaderDb(b.gain) : trackGainDb(id);
+}
+/** Apply a bus list change (add / remove) to the live graph and the panel. */
+function busesChanged() {
+  project.tracks = serializeTracks();
+  if (runtime.audio) syncAudioGraphTracks();
+  scheduleSave();
+  renderMixer();
+}
+function addBus() {
+  const buses = project.buses || (project.buses = []);
+  if (buses.length >= BUS_MAX) { toast(`Up to ${BUS_MAX} buses`); return; }
+  let n = 1;
+  while (buses.some((b) => b.id === "B" + n)) n++;
+  buses.push({ id: "B" + n });
+  project.buses = normalizeBuses(buses);
+  busesChanged();
+}
+function removeBus(id) {
+  project.buses = (project.buses || []).filter((b) => b.id !== id);
+  for (const t of TRACKS) if (t.out === id) delete t.out; // its tracks go back to the master
+  busesChanged();
+}
+/** Write a bus's fader / pan / mute / name and push it into the live graph. */
+function setBusMix(id, patch) {
+  const b = busById(id);
+  if (!b) return;
+  Object.assign(b, patch);
+  project.buses = normalizeBuses(project.buses);
+  if (runtime.audio) applyMixLevels(runtime.audio, true);
+  scheduleSave();
+  syncMixerStrip(id);
+}
+function setTrackOut(id, out) {
+  const t = TRACKS.find((x) => x.id === id && x.kind === "audio");
+  if (!t) return;
+  if (out && busById(out)) t.out = out; else delete t.out;
+  project.tracks = serializeTracks();
+  if (runtime.audio) applyMixLevels(runtime.audio, true);
+  scheduleSave();
+}
 function renderMixer() {
   if (!mixerState.open || !els.mixer) return;
   const root = els.mixer;
@@ -6799,13 +7024,16 @@ function renderMixer() {
   if (mixerState.fxTarget) { renderMixerFx(root, mixerState.fxTarget); return; }
   const row = document.createElement("div");
   row.className = "mixer-strips";
-  const strip = (id, label, color, isMaster) => {
+  const buses = project.buses || [];
+  const strip = (id, label, color, isMaster, isBus = false) => {
     const s = document.createElement("div");
-    s.className = "mix-strip" + (isMaster ? " master" : "");
+    s.className = "mix-strip" + (isMaster ? " master" : "") + (isBus ? " bus" : "");
     s.dataset.strip = id;
     if (color) s.style.setProperty("--strip-color", color);
     s.innerHTML = `
-      <div class="mix-name" title="${isMaster ? "Master bus — everything you hear and export" : `Track ${id}`}">${label}</div>
+      <div class="mix-name" title="${isMaster ? "Master bus — everything you hear and export" : isBus ? `Submix bus ${id} — double-click to rename` : `Track ${id}`}">${escapeHtml(label)}</div>
+      ${!isMaster && !isBus ? `<select class="mix-out" title="Where this track goes: the master, or a submix bus"><option value="">→ Master</option>${buses.map((b) =>
+        `<option value="${b.id}">→ ${escapeHtml(busLabel(b))}</option>`).join("")}</select>` : ""}
       ${isMaster ? `<div class="mix-pan-row mix-lufs" title="Momentary loudness of the mix (post-fader)">— LUFS</div>`
         : `<div class="mix-pan-row"><input type="range" class="mix-pan" min="-1" max="1" step="0.01" title="Track pan — double-click: center"><span class="mix-pan-val"></span></div>`}
       <div class="mix-body">
@@ -6813,12 +7041,13 @@ function renderMixer() {
         <input type="range" class="mix-fader" min="0" max="1" step="0.001" title="${isMaster ? "Master" : "Track"} fader — double-click: 0 dB">
       </div>
       <input type="text" class="mix-db" spellcheck="false" title="Type a level in dB (e.g. -6, +2, -inf)">
-      <button type="button" class="mix-fx" title="${isMaster ? "Master" : `Track ${id}`} effects">FX</button>
-      ${isMaster ? "" : `<div class="mix-btns"><button type="button" class="mix-m" title="Mute (track output on/off)">M</button><button type="button" class="mix-s" title="Solo">S</button></div>`}`;
+      <button type="button" class="mix-fx" title="${isMaster ? "Master" : isBus ? `Bus ${id}` : `Track ${id}`} effects">FX</button>
+      ${isMaster ? "" : isBus ? `<div class="mix-btns"><button type="button" class="mix-m" title="Mute the bus">M</button><button type="button" class="mix-x" title="Remove the bus — its tracks go back to the master">✕</button></div>`
+        : `<div class="mix-btns"><button type="button" class="mix-m" title="Mute (track output on/off)">M</button><button type="button" class="mix-s" title="Solo">S</button></div>`}`;
     s.querySelector(".mix-fx").addEventListener("click", () => { mixerState.fxTarget = id; renderMixer(); });
     const fader = s.querySelector(".mix-fader");
     const dbIn = s.querySelector(".mix-db");
-    const setDb = (db) => isMaster ? setMasterGain(db) : setTrackMix(id, { gain: db });
+    const setDb = (db) => isMaster ? setMasterGain(db) : isBus ? setBusMix(id, { gain: db }) : setTrackMix(id, { gain: db });
     fader.addEventListener("input", () => setDb(faderPosToDb(fader.value)));
     fader.addEventListener("dblclick", () => setDb(0));
     dbIn.addEventListener("change", () => {
@@ -6826,18 +7055,49 @@ function renderMixer() {
       if (v == null) syncMixerStrip(id); else setDb(v);
     });
     dbIn.addEventListener("keydown", (e) => { e.stopPropagation(); if (e.key === "Enter") dbIn.blur(); });
-    if (!isMaster) {
+    if (isBus) {
+      const pan = s.querySelector(".mix-pan");
+      pan.addEventListener("input", () => setBusMix(id, { pan: +pan.value }));
+      pan.addEventListener("dblclick", () => setBusMix(id, { pan: 0 }));
+      s.querySelector(".mix-m").addEventListener("click", () => setBusMix(id, { mute: !busById(id)?.mute }));
+      s.querySelector(".mix-x").addEventListener("click", () => removeBus(id));
+      const nameEl = s.querySelector(".mix-name");
+      nameEl.addEventListener("dblclick", () => {
+        const inp = document.createElement("input");
+        inp.className = "mix-rename";
+        inp.value = busById(id)?.name || "";
+        inp.placeholder = id;
+        nameEl.replaceWith(inp);
+        inp.focus(); inp.select();
+        const done = () => { setBusMix(id, { name: inp.value }); renderMixer(); };
+        inp.addEventListener("keydown", (e) => { e.stopPropagation(); if (e.key === "Enter") inp.blur(); if (e.key === "Escape") { inp.value = busById(id)?.name || ""; inp.blur(); } });
+        inp.addEventListener("blur", done, { once: true });
+      });
+    } else if (!isMaster) {
       const pan = s.querySelector(".mix-pan");
       pan.addEventListener("input", () => setTrackMix(id, { pan: +pan.value }));
       pan.addEventListener("dblclick", () => setTrackMix(id, { pan: 0 }));
       s.querySelector(".mix-m").addEventListener("click", () => toggleTrackEnabled(id));
       s.querySelector(".mix-s").addEventListener("click", () => toggleTrackSolo(id));
+      const out = s.querySelector(".mix-out");
+      out.value = trackOut(id) || "";
+      out.addEventListener("change", () => setTrackOut(id, out.value || null));
     }
     row.appendChild(s);
     const cv = s.querySelector(".mix-meter");
-    mixerState.strips[id] = { el: s, cv, ctx: cv.getContext("2d"), w: 0, h: 0, master: isMaster };
+    mixerState.strips[id] = { el: s, cv, ctx: cv.getContext("2d"), w: 0, h: 0, master: isMaster, bus: isBus };
   };
   for (const t of TRACKS) if (t.kind === "audio") strip(t.id, t.id, t.color, false);
+  for (const b of buses) strip(b.id, busLabel(b), BUS_COLOR, false, true);
+  if (buses.length < BUS_MAX) {
+    const add = document.createElement("button");
+    add.type = "button";
+    add.className = "mix-add";
+    add.title = "Add a submix bus — route tracks into it to process and level them together";
+    add.textContent = "+ Bus";
+    add.addEventListener("click", addBus);
+    row.appendChild(add);
+  }
   strip(MIXER_MASTER, "Master", null, true);
   root.appendChild(row);
   for (const id of Object.keys(mixerState.strips)) syncMixerStrip(id);
@@ -6866,11 +7126,21 @@ function syncMixerStrip(id) {
   if (document.activeElement !== fader || Math.abs(+fader.value - faderDbToPos(db)) > 0.002) fader.value = faderDbToPos(db);
   const dbIn = s.querySelector(".mix-db");
   if (document.activeElement !== dbIn) dbIn.value = fmtDb(db);
-  const nFx = ((st.master ? masterFx() : trackFx(id)) || []).filter((e) => e.on !== false).length;
+  const nFx = ((st.master ? masterFx() : st.bus ? busById(id)?.fx : trackFx(id)) || []).filter((e) => e.on !== false).length;
   const fxBtn = s.querySelector(".mix-fx");
   fxBtn.textContent = nFx ? `FX ${nFx}` : "FX";
   fxBtn.classList.toggle("on", nFx > 0);
   if (st.master) return;
+  if (st.bus) {
+    const b = busById(id);
+    const pan = s.querySelector(".mix-pan");
+    if (document.activeElement !== pan) pan.value = clipPan(b?.pan);
+    s.querySelector(".mix-pan-val").textContent = fmtPan(b?.pan);
+    s.classList.toggle("muted", !!b?.mute);
+    s.querySelector(".mix-m").classList.toggle("on", !!b?.mute);
+    s.querySelector(".mix-m").setAttribute("aria-pressed", b?.mute ? "true" : "false");
+    return;
+  }
   const pan = s.querySelector(".mix-pan");
   pan.value = trackPanValue(id);
   s.querySelector(".mix-pan-val").textContent = fmtPan(trackPanValue(id));
@@ -6896,7 +7166,11 @@ function fxFmt(v, d) {
 /* Frequency sliders move on a log scale (0…1000 ↔ min…max Hz). */
 const fxToSlider = (v, d) => d.unit === "Hz" ? Math.round(1000 * Math.log(v / d.min) / Math.log(d.max / d.min)) : v;
 const fxFromSlider = (s, d) => d.unit === "Hz" ? d.min * Math.pow(d.max / d.min, s / 1000) : +s;
-function fxEditorHtml(list) {
+/** The effects editor. `at` is the time keys are read and written at — the
+ *  playhead in clip-local seconds for a clip's chain, timeline seconds for a
+ *  track's, a bus's or the master's; null while the playhead is off the clip
+ *  (automation is then shown but not editable). */
+function fxEditorHtml(list, at = null) {
   const F = FableCutFx;
   const groups = {};
   for (const [id, p] of Object.entries(F.PRESETS)) (groups[p.group] = groups[p.group] || []).push([id, p.label]);
@@ -6910,20 +7184,68 @@ function fxEditorHtml(list) {
   if (!list?.length) return html + `<div class="insp-note">No effects. Pick a preset or add one.</div>`;
   list.forEach((e, i) => {
     const def = F.FX_DEFS[e.type];
+    const ev = at != null ? F.evalEffect(e, at) : e;
     html += `<div class="fx-card${e.on === false ? " off" : ""}" data-fx-i="${i}">
       <div class="fx-head"><label title="On / bypass"><input type="checkbox" data-fx-on ${e.on === false ? "" : "checked"}> ${def.label}</label>
         <span class="fx-btns"><button type="button" data-fx-move="-1" title="Earlier in the chain" ${i ? "" : "disabled"}>▲</button><button type="button" data-fx-move="1" title="Later in the chain" ${i < list.length - 1 ? "" : "disabled"}>▼</button><button type="button" data-fx-del title="Remove">✕</button></span></div>
       ${Object.entries(def.params).map(([k, d]) => `<div class="fx-param"><span>${d.label}</span>
-        <input type="range" data-fx-p="${k}" min="${d.unit === "Hz" ? 0 : d.min}" max="${d.unit === "Hz" ? 1000 : d.max}" step="${d.unit === "Hz" ? 1 : d.step}" value="${fxToSlider(e[k], d)}" title="Double-click: default">
-        <span class="fx-val">${fxFmt(e[k], d)}</span></div>`).join("")}
+        <input type="range" data-fx-p="${k}" min="${d.unit === "Hz" ? 0 : d.min}" max="${d.unit === "Hz" ? 1000 : d.max}" step="${d.unit === "Hz" ? 1 : d.step}" value="${fxToSlider(ev[k], d)}" title="Double-click: default">
+        <span class="fx-val">${fxFmt(ev[k], d)}</span>${d.fixed ? "<span></span>" : fxKeyBtn(e, k, at)}</div>`).join("")}
     </div>`;
   });
   return html;
 }
-function bindFxEditor(root, get, set, onStructure) {
+/** The ◆ beside an automatable effect parameter (count of keys; lit on one at `at`). */
+function fxKeyBtn(e, k, at) {
+  const ks = e.keys?.[k] || [], n = ks.length;
+  const on = at != null && ks.some((x) => Math.abs(x.t - at) < kfTimeEps());
+  const title = at == null ? "Move the playhead over the clip to automate this"
+    : on ? "Remove the key at the playhead" : "Set a key at the playhead";
+  return `<button type="button" class="kf-btn fx-kf${n ? " has" : ""}${on ? " on" : ""}" data-fx-kf="${k}" title="${title}"${at == null ? " disabled" : ""}>◆${n || ""}</button>`;
+}
+/* Live effects editors, so automated sliders follow the playhead. */
+const fxEditors = new Set();
+let fxEditorsAt = NaN;
+function syncFxEditors() {
+  if (state.time === fxEditorsAt) return;
+  fxEditorsAt = state.time;
+  for (const ed of fxEditors) { if (ed.root.isConnected) ed.sync(); else fxEditors.delete(ed); }
+}
+function bindFxEditor(root, get, set, onStructure, timeOf = () => null) {
   const F = FableCutFx;
   const list = () => (get() || []).map((e) => ({ ...e }));
   const restructure = (next) => { set(next.length ? next : undefined); onStructure(); };
+  const near = (x, at) => Math.abs(x.t - at) < kfTimeEps();
+  /** Put v at time `at` on parameter k of effect i (replacing a key there). */
+  const withKey = (e, k, at, v) => {
+    const arr = (e.keys?.[k] || []).filter((x) => !near(x, at));
+    arr.push({ t: Math.round(at * 1e4) / 1e4, v });
+    arr.sort((a, b) => a.t - b.t);
+    return { ...(e.keys || {}), [k]: arr };
+  };
+  fxEditors.add({ root, sync() {
+    const at = timeOf(), cur = get() || [];
+    for (const card of root.querySelectorAll(".fx-card")) {
+      const e = cur[+card.dataset.fxI];
+      if (!e) continue;
+      const ev = at != null ? F.evalEffect(e, at) : e;
+      for (const inp of card.querySelectorAll("[data-fx-p]")) {
+        const k = inp.dataset.fxP, d = F.FX_DEFS[e.type].params[k];
+        if (!e.keys?.[k] || document.activeElement === inp) continue;
+        inp.value = fxToSlider(ev[k], d);
+        inp.nextElementSibling.textContent = fxFmt(ev[k], d);
+      }
+      for (const btn of card.querySelectorAll("[data-fx-kf]")) {
+        const tmp = document.createElement("span");
+        tmp.innerHTML = fxKeyBtn(e, btn.dataset.fxKf, at);
+        const fresh = tmp.firstElementChild;
+        if (btn.className !== fresh.className || btn.textContent !== fresh.textContent || btn.disabled !== fresh.disabled) {
+          btn.className = fresh.className; btn.textContent = fresh.textContent;
+          btn.disabled = fresh.disabled; btn.title = fresh.title;
+        }
+      }
+    }
+  } });
   root.querySelector("[data-fx-preset]")?.addEventListener("change", (ev) => {
     if (ev.target.value) restructure(F.presetChain(ev.target.value));
   });
@@ -6945,14 +7267,34 @@ function bindFxEditor(root, get, set, onStructure) {
       [next[i], next[j]] = [next[j], next[i]];
       restructure(next);
     });
+    for (const btn of card.querySelectorAll("[data-fx-kf]")) btn.addEventListener("click", () => {
+      const at = timeOf();
+      if (at == null) return;
+      const next = list(), e = next[i], k = btn.dataset.fxKf;
+      const here = (e.keys?.[k] || []).find((x) => near(x, at));
+      let keys;
+      if (here) {
+        keys = { ...e.keys, [k]: e.keys[k].filter((x) => x !== here) };
+        if (!keys[k].length) delete keys[k];
+      } else keys = withKey(e, k, at, F.evalEffect(e, at)[k]);
+      if (Object.keys(keys).length) e.keys = keys; else delete e.keys;
+      restructure(next);
+    });
     for (const inp of card.querySelectorAll("[data-fx-p]")) {
       const k = inp.dataset.fxP;
       const d = F.FX_DEFS[list()[i].type].params[k];
       const apply = (v) => {
-        const next = list();
-        next[i][k] = Math.round(v * 1000) / 1000;
+        const next = list(), e = next[i];
+        v = Math.round(v * 1000) / 1000;
+        if (e.keys?.[k]?.length) { // automated: the slider edits the key at the playhead
+          const at = timeOf();
+          if (at == null) return;
+          e.keys = withKey(e, k, at, v);
+        } else e[k] = v;
         set(next);
-        inp.nextElementSibling.textContent = fxFmt(next[i][k], d);
+        inp.nextElementSibling.textContent = fxFmt(v, d);
+        const b = card.querySelector(`[data-fx-kf="${k}"]`);
+        if (b && e.keys?.[k]) { b.classList.add("has", "on"); b.textContent = "◆" + e.keys[k].length; }
       };
       inp.addEventListener("input", () => apply(fxFromSlider(inp.value, d)));
       inp.addEventListener("dblclick", () => { inp.value = fxToSlider(d.def, d); apply(d.def); });
@@ -6962,19 +7304,36 @@ function bindFxEditor(root, get, set, onStructure) {
 /** Mixer: the effects of one track (or the master), replacing the strips. */
 function renderMixerFx(root, id) {
   const isMaster = id === MIXER_MASTER;
+  const bus = busById(id);
+  if (bus) return renderBusFx(root, bus);
   const t = TRACKS.find((x) => x.id === id);
   if (!isMaster && !t) { mixerState.fxTarget = null; renderMixer(); return; }
   root.innerHTML = `<div class="mixer-fx">
     <div class="mixer-fx-head"><button type="button" class="btn tiny" data-fx-back>← Mixer</button>
       <span>${isMaster ? "Master" : id} effects</span></div>
-    <div class="mixer-fx-body">${fxEditorHtml(isMaster ? masterFx() : t.fx)}</div></div>`;
+    <div class="mixer-fx-body">${fxEditorHtml(isMaster ? masterFx() : t.fx, state.time)}</div></div>`;
   root.querySelector("[data-fx-back]").addEventListener("click", () => { mixerState.fxTarget = null; renderMixer(); });
   bindFxEditor(root, () => isMaster ? masterFx() : t.fx, (fx) => {
     if (isMaster) project.master = normalizeMaster({ ...(project.master || {}), fx });
     else { if (fx?.length) t.fx = fx; else delete t.fx; project.tracks = serializeTracks(); }
     if (runtime.audio) applyMixLevels(runtime.audio, true);
     scheduleSave();
-  }, () => renderMixer());
+  }, () => renderMixer(), () => state.time);
+}
+function renderBusFx(root, bus) {
+  const id = bus.id;
+  root.innerHTML = `<div class="mixer-fx">
+    <div class="mixer-fx-head"><button type="button" class="btn tiny" data-fx-back>← Mixer</button>
+      <span>${escapeHtml(busLabel(bus))} effects</span></div>
+    <div class="mixer-fx-body">${fxEditorHtml(bus.fx, state.time)}</div></div>`;
+  root.querySelector("[data-fx-back]").addEventListener("click", () => { mixerState.fxTarget = null; renderMixer(); });
+  bindFxEditor(root, () => busById(id)?.fx, (fx) => {
+    const b = busById(id);
+    if (!b) return;
+    if (fx?.length) b.fx = fx; else delete b.fx;
+    if (runtime.audio) applyMixLevels(runtime.audio, true);
+    scheduleSave();
+  }, () => renderMixer(), () => state.time);
 }
 function paintMixerBar(ctx, x, w, h, db, holdDb) {
   const frac = (v) => clamp((v - METER_DB_MIN) / (METER_DB_MAX - METER_DB_MIN), 0, 1);
@@ -7212,8 +7571,10 @@ async function installMeterWorklet(audio) {
   meterState._loading = true;
   meterState._reloadMeter = false;
   const trackIds = audio.audioTrackIds.slice();
-  const nAudio = trackIds.length;
-  const nInputs = Math.max(1, nAudio + 1); // +1 = video/other spill on master
+  const busIds = (audio.busIds || []).filter((id) => audio.subBus?.[id]);
+  const meterIds = [...trackIds, ...busIds];
+  const nAudio = meterIds.length;
+  const nInputs = Math.max(1, nAudio + 1); // +1 = the finished program
   let meter = null;
   try {
     await audio.ctx.audioWorklet.addModule("meter-worklet.js?v=9");
@@ -7228,13 +7589,13 @@ async function installMeterWorklet(audio) {
       channelInterpretation: "discrete",
       // The last input is the finished program (after master fx and fader):
       // it alone is passed through and measured for master loudness.
-      processorOptions: { hopBlocks: 8, nTracks: nInputs, nAudioTracks: nAudio, trackIds, programInput: nAudio },
+      processorOptions: { hopBlocks: 8, nTracks: nInputs, nAudioTracks: nAudio, trackIds: meterIds, programInput: nAudio },
     });
     meter.port.onmessage = (ev) => {
       const msg = ev.data;
       if (!msg || msg.type !== "meter") return;
       for (let i = 0; i < nAudio; i++) {
-        const id = trackIds[i];
+        const id = meterIds[i];
         if (!id) continue;
         meterState.rms[id] = msg.rms[i] || 0;
         meterState.peak[id] = msg.peak[i] || 0;
@@ -7249,8 +7610,8 @@ async function installMeterWorklet(audio) {
 
     // Each A-bus is tapped for its own meter (it keeps feeding the master sum);
     // the program after master fx + fader goes through the meter to the speakers.
-    for (let i = 0; i < trackIds.length; i++) {
-      const bus = audio.trackBus[trackIds[i]];
+    for (let i = 0; i < meterIds.length; i++) {
+      const bus = audio.trackBus[meterIds[i]] || audio.subBus?.[meterIds[i]];
       if (bus) busOut(bus).connect(meter, 0, i);
     }
     try { audio.masterOut.disconnect(audio.ctx.destination); } catch {}
@@ -7263,7 +7624,8 @@ async function installMeterWorklet(audio) {
     meter = null; // ownership transferred — catch must not tear down live node
     audio.meterReady = true;
     meterState.trackIds = trackIds;
-    for (const id of trackIds) {
+    meterState.busIds = busIds;
+    for (const id of meterIds) {
       meterState.rms[id] = 0;
       meterState.peak[id] = 0;
       meterState.lufs[id] = -70;
@@ -7514,7 +7876,7 @@ function updateMeterUI(dt) {
   const release = 1 - Math.exp(-dt / relMs);
   const now = performance.now();
   const floor = METER_DB_MIN;
-  for (const id of [...meterState.trackIds, ...MASTER_METER_IDS]) {
+  for (const id of [...meterState.trackIds, ...(meterState.busIds || []), ...MASTER_METER_IDS]) {
     const target = metering ? meterReadingDb(id) : floor;
     updateMeterChannel(id, target, dt, attack, release, now);
   }
@@ -7663,7 +8025,7 @@ function refreshAudioHold() {
       src.buffer = slice;
       src.loop = true;
       const chain = buildClipChain(audio.ctx, src, c, buf.numberOfChannels);
-      driveClipChain(chain, c, p);
+      driveClipChain(chain, c, p, t);
       chain.out.connect(audio.trackBus[c.track] || audio.master);
       commitAudioHoldNode({ src, chain }, gen, state.playing);
     }).catch(() => { });
@@ -7731,6 +8093,7 @@ const VIDEO_PREFETCH_SEC = 0.85;
 function syncMedia() {
   const t = state.time;
   const rate = playRate();
+  if (runtime.audio) animateMixFx(runtime.audio, t);
   // Reverse (J): media can't play backwards, so every clip is parked paused
   // and the one under the playhead is seeked frame by frame, like a scrub.
   const reversing = state.playing && rate < 0;
@@ -7752,7 +8115,7 @@ function syncMedia() {
       if (el.paused) el.play().catch(() => {});
       if (Math.abs(el.currentTime - mt) > 0.25 * eff) { try { el.currentTime = mt; } catch {} }
       const chain = runtime.clipGain.get(c.id);
-      if (chain?.vol) driveClipChain(chain, c, p);
+      if (chain?.vol) driveClipChain(chain, c, p, t);
       else el.volume = clamp(clipAudioGain(p), 0, 1);
     } else {
       if (!el.paused) el.pause();
@@ -9287,6 +9650,7 @@ function loop(ts) {
   if (!isSourceMode()) updateSafeOverlay();
   updateKfGraphs();
   syncInspectorPlayhead();
+  syncFxEditors();
   updateMeterUI(dt);
   updateTimecode(dur);
   if (isSourceMode()) updateSourceScrub();
@@ -10053,7 +10417,7 @@ async function seekVideosTo(t, { queueBusy } = {}) {
         el._fcPrevMuted = null;
       }
       const chain = runtime.clipGain.get(c.id);
-      if (chain?.vol) driveClipChain(chain, c, evalProps(c, t));
+      if (chain?.vol) driveClipChain(chain, c, evalProps(c, t), t);
       continue;
     }
     const mt = mediaTimeAt(c, t);
@@ -10095,7 +10459,7 @@ async function seekVideosTo(t, { queueBusy } = {}) {
   await Promise.all(waits);
   for (const c of restoreGain) {
     const chain = runtime.clipGain.get(c.id);
-    if (chain?.vol) driveClipChain(chain, c, evalProps(c, t));
+    if (chain?.vol) driveClipChain(chain, c, evalProps(c, t), t);
   }
   prefetchExportVideos(t);
 }
@@ -10120,6 +10484,7 @@ function encodeWAV(buf) {
 /* Mix all audio-bearing clips offline through the same graph as preview
    (clip chains → track buses → master fader), honoring volume / pan keyframes
    and fades. t0/t1 are timeline seconds (export window); mix time 0 is t0. */
+const FX_AUTOMATION_STEP = 0.02; // export automation resolution, seconds
 async function renderAudioMix(t0, t1) {
   const jobs = [];
   for (const c of project.clips) {
@@ -10135,10 +10500,11 @@ async function renderAudioMix(t0, t1) {
   const sr = 48000;
   const off = new OfflineAudioContext(2, Math.ceil(dur * sr) + 1, sr);
   await loadFxWorklet(off); // gate / limiter render in the export too
-  const mix = buildMixBuses(off, audioTrackIds());
+  const mix = buildMixBuses(off, audioTrackIds(), busIdsNow());
   applyMixLevels(mix);
   mix.masterOut.connect(off.destination);
   let scheduled = false;
+  const exportChains = [];
   for (const { c, buf } of sources) {
     const a = Math.max(c.start, t0), b = Math.min(c.start + c.duration, t1);
     if (b - a <= 1e-6) continue;
@@ -10147,6 +10513,7 @@ async function renderAudioMix(t0, t1) {
     const local0 = a - c.start;
     const src = off.createBufferSource(); src.buffer = buf;
     const chain = buildClipChain(off, src, c, buf.numberOfChannels);
+    exportChains.push({ chain, c });
     const n = Math.max(2, Math.ceil(mixDur * 30));
     const volCurve = new Float32Array(n);
     const panCurve = new Float32Array(n);
@@ -10179,6 +10546,24 @@ async function renderAudioMix(t0, t1) {
     scheduled = true;
   }
   if (!scheduled) return null;
+  // Effect automation: step the offline render and glide each keyed
+  // parameter, the same way preview drives it every frame.
+  const animated = [];
+  for (const { chain, c } of exportChains) if (FableCutFx.hasKeys(c.fx)) animated.push((t) => animateFxSlot(chain.fxSlot, t - c.start));
+  if (FableCutFx.hasKeys(masterFx()) || Object.keys(mix.trackBus).some((id) => FableCutFx.hasKeys(trackFx(id))) ||
+      (project.buses || []).some((b) => FableCutFx.hasKeys(b.fx)))
+    animated.push((t) => animateMixFx(mix, t));
+  if (animated.length) {
+    for (const run of animated) run(t0);
+    // jump to the first values, then glide
+    for (const { chain, c } of exportChains) if (FableCutFx.hasKeys(c.fx)) animateFxSlot(chain.fxSlot, t0 - c.start, false);
+    animateMixFx(mix, t0, false);
+    const step = FX_AUTOMATION_STEP;
+    for (let k = 1; k * step < dur; k++) {
+      const when = k * step;
+      off.suspend(when).then(() => { for (const run of animated) run(t0 + when); off.resume(); });
+    }
+  }
   return encodeWAV(await off.startRendering());
 }
 /* Frame-exact asset prep for the fast exporter: rasterize the SVG frame for

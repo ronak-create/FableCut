@@ -149,6 +149,8 @@
     function relinkClips() {
       const project = P();
       const near = (a, b) => Math.abs((+a || 0) - (+b || 0)) < 1e-3;
+      // A denoised copy of a file (media.derivedFrom) still pairs with its picture.
+      const baseOf = (id) => getMedia(id)?.derivedFrom || id;
       for (const c of project.clips) {
         delete c.linkGroup;
         delete c.linkedId;
@@ -159,7 +161,7 @@
         if (v.kind !== "video" || !v.mediaId || v.unlinked === true) continue;
         const partners = audios.filter((a) =>
           !used.has(a.id) &&
-          a.mediaId === v.mediaId &&
+          baseOf(a.mediaId) === v.mediaId &&
           near(a.start, v.start) &&
           near(a.in, v.in) &&
           near(a.duration, v.duration)

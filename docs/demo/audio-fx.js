@@ -3,12 +3,18 @@
    dependencies. Loaded by the editor as a plain script (global `FableCutFx`)
    and required by the MCP server, so `setFx` from an agent and the editor's
    effects panel accept exactly the same chains. The audio nodes themselves
-   are built in app.js (buildFxChain) and fx-worklet.js (gate, limiter).
+   are built in app.js (buildFxChain) and fx-worklet.js (gate, limiter, pitch).
 
    A chain is an array, processed in order:
      [{ type: "highpass", freq: 80 }, { type: "compressor", threshold: -20, ratio: 4 }, …]
    Every parameter is optional (defaults below); `on: false` bypasses an
-   effect without losing its settings. */
+   effect without losing its settings.
+
+   Automation: an effect may carry `keys`, keyframes per parameter —
+     { type: "lowpass", freq: 8000, keys: { freq: [{ t: 0, v: 8000 }, { t: 4, v: 400, ease: "linear" }] } }
+   `t` is seconds from the clip's start for a clip's effects, and timeline
+   seconds for a track's, a bus's or the master's. While a parameter has keys
+   they decide its value; the plain value is used again once they are gone. */
 (function (root, factory) {
   const api = factory();
   if (typeof module === "object" && module.exports) module.exports = api;
@@ -66,12 +72,25 @@
       label: "Stereo width",
       params: { width: P(1.5, 0, 2, 0.01, "×", "Width") },
     },
+    pitch: {
+      label: "Pitch shift",
+      params: { semitones: P(0, -12, 12, 0.5, "st", "Pitch"), mix: P(1, 0, 1, 0.01, "", "Mix") },
+    },
+  };
+  // A new impulse response per value — too heavy to sweep, so not automatable.
+  FX_DEFS.reverb.params.decay.fixed = true;
+  const EASES = ["linear", "ease-in", "ease-out", "ease-in-out"];
+  const EASE = {
+    linear: (u) => u,
+    "ease-in": (u) => u * u,
+    "ease-out": (u) => 1 - (1 - u) * (1 - u),
+    "ease-in-out": (u) => (u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2),
   };
   const FX_TYPES = Object.keys(FX_DEFS);
 
   /** A clean copy of one effect: known type, every param present and in
    *  range. Returns null for an unknown type. */
-  function normalizeEffect(raw) {
+  function normalizeEffect(raw, strict = false) {
     if (!raw || typeof raw !== "object" || !FX_DEFS[raw.type]) return null;
     const out = { type: raw.type };
     for (const [k, d] of Object.entries(FX_DEFS[raw.type].params)) {
@@ -79,8 +98,62 @@
       out[k] = Number.isFinite(v) ? Math.min(d.max, Math.max(d.min, v)) : d.def;
     }
     if (raw.on === false) out.on = false;
+    const keys = normalizeKeys(raw.type, raw.keys, strict);
+    if (keys) out.keys = keys;
     return out;
   }
+  /** Clean automation for one effect: known, automatable params only; points
+   *  with numeric t ≥ 0, values clamped to the param's range, sorted, one per
+   *  time. Returns undefined when nothing is left. */
+  function normalizeKeys(type, raw, strict = false) {
+    if (raw == null) return undefined;
+    const bad = (msg) => { if (strict) throw new Error(`${type} keys: ${msg}`); };
+    if (typeof raw !== "object" || Array.isArray(raw)) { bad("must be an object of param → [{t, v}]"); return undefined; }
+    const out = {};
+    for (const [k, list] of Object.entries(raw)) {
+      const d = FX_DEFS[type].params[k];
+      if (!d) { bad(`unknown parameter ${JSON.stringify(k)} (known: ${Object.keys(FX_DEFS[type].params).join(", ")})`); continue; }
+      if (d.fixed) { bad(`${k} cannot be automated`); continue; }
+      if (list == null) continue;
+      if (!Array.isArray(list)) { bad(`${k} must be an array of {t, v}`); continue; }
+      const byT = new Map();
+      for (const kf of list) {
+        const t = +kf?.t, v = +kf?.v;
+        if (!Number.isFinite(t) || t < 0 || !Number.isFinite(v)) { bad(`${k}: every key needs t ≥ 0 and a numeric v`); continue; }
+        const key = { t: Math.round(t * 1e4) / 1e4, v: Math.min(d.max, Math.max(d.min, v)) };
+        if (kf.ease != null) {
+          if (EASES.includes(kf.ease)) key.ease = kf.ease;
+          else bad(`${k}: ease must be one of ${EASES.join(", ")}`);
+        }
+        byT.set(key.t, key);
+      }
+      const arr = [...byT.values()].sort((a, b) => a.t - b.t);
+      if (arr.length) out[k] = arr;
+    }
+    return Object.keys(out).length ? out : undefined;
+  }
+  /** One automated parameter at time t (ease on the destination key, like clip keyframes). */
+  function keyValue(arr, t) {
+    if (t <= arr[0].t) return arr[0].v;
+    const last = arr[arr.length - 1];
+    if (t >= last.t) return last.v;
+    for (let i = 0; i < arr.length - 1; i++) {
+      const a = arr[i], b = arr[i + 1];
+      if (t >= a.t && t <= b.t) {
+        const u = (t - a.t) / Math.max(1e-6, b.t - a.t);
+        return a.v + (b.v - a.v) * (EASE[b.ease || "ease-in-out"] || EASE.linear)(u);
+      }
+    }
+    return last.v;
+  }
+  /** The effect's parameters at time t (keys applied). Same object when it has none. */
+  function evalEffect(e, t) {
+    if (!e.keys) return e;
+    const out = { ...e };
+    for (const [k, arr] of Object.entries(e.keys)) if (arr.length) out[k] = keyValue(arr, t);
+    return out;
+  }
+  const hasKeys = (list) => Array.isArray(list) && list.some((e) => e && e.keys && e.on !== false);
   /** Validate a chain. `strict` throws on the first bad entry (MCP); otherwise
    *  unknown effects are dropped (loading a project from a newer version). */
   function normalizeFx(list, strict = false) {
@@ -91,7 +164,7 @@
     }
     const out = [];
     list.forEach((raw, i) => {
-      const e = normalizeEffect(raw);
+      const e = normalizeEffect(raw, strict);
       if (e) out.push(e);
       else if (strict) throw new Error(`fx[${i}]: unknown effect ${JSON.stringify(raw && raw.type)} (known: ${FX_TYPES.join(", ")})`);
     });
@@ -99,8 +172,7 @@
   }
 
   /* Presets: starting points, written into the chain as plain effects so
-     they can be tweaked afterwards (and read back by an agent). Deep Voice is
-     EQ-only — a lower, warmer tone, not a pitch shift. */
+     they can be tweaked afterwards (and read back by an agent). */
   const PRESETS = {
     "clean-voice": { group: "Voice", label: "Clean voice", fx: [
       { type: "highpass", freq: 80 },
@@ -123,7 +195,8 @@
       { type: "limiter", ceiling: -1 },
     ] },
     "deep-voice": { group: "Voice", label: "Deep voice", fx: [
-      { type: "eq", lowFreq: 140, lowGain: 7, midFreq: 2500, midGain: -3, midQ: 0.8, highFreq: 7000, highGain: -5 },
+      { type: "pitch", semitones: -4 },
+      { type: "eq", lowFreq: 140, lowGain: 5, midFreq: 2500, midGain: -2, midQ: 0.8, highFreq: 7000, highGain: -4 },
       { type: "lowpass", freq: 7500 },
       { type: "compressor", threshold: -20, ratio: 3, makeup: 2 },
       { type: "limiter", ceiling: -1 },
@@ -155,10 +228,14 @@
     if (!p) throw new Error(`unknown preset ${JSON.stringify(id)} (known: ${PRESET_IDS.join(", ")})`);
     return normalizeFx(p.fx);
   }
-  /** Short text for a chain, e.g. "highpass·eq·compressor(off)". */
+  /** Short text for a chain, e.g. "highpass·eq·compressor(off)·lowpass~freq". */
   function summarizeFx(list) {
-    return (list || []).map((e) => e.type + (e.on === false ? "(off)" : "")).join("·");
+    return (list || []).map((e) => e.type + (e.on === false ? "(off)" : "") +
+      (e.keys ? "~" + Object.keys(e.keys).join("~") : "")).join("·");
   }
 
-  return { FX_DEFS, FX_TYPES, PRESETS, PRESET_IDS, normalizeEffect, normalizeFx, presetChain, summarizeFx };
+  return {
+    FX_DEFS, FX_TYPES, PRESETS, PRESET_IDS, EASES,
+    normalizeEffect, normalizeFx, normalizeKeys, presetChain, summarizeFx, keyValue, evalEffect, hasKeys,
+  };
 });

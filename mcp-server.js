@@ -23,6 +23,7 @@ const {
 const { downloadImportUrl, kindFromName, maybeFaststart } = require("./import-url");
 const FX = require("./audio-fx");
 const EditOps = require("./edit-ops");
+const Denoise = require("./denoise");
 
 /* ROOT is where the code lives (server.js, CLAUDE.md); the user's timeline and
    media live under DATA_DIR. Identical unless FABLECUT_DATA_DIR is set. */
@@ -131,7 +132,7 @@ const TOOLS = [
   },
   {
     name: "fablecut_patch_project",
-    description: "Apply targeted edits to the FableCut project WITHOUT round-tripping the whole document — PREFER THIS over get+set for every edit (it is ~10-100x cheaper in tokens and merge-safe by design: it re-reads the latest document from disk, applies your ops in order, bumps revision once, saves atomically). Ops: {op:'addClip', clip:{…}} (id auto-generated if omitted) · {op:'updateClip', id, set:{…}} · {op:'removeClip', id} · {op:'addMedia', media:{…}} · {op:'removeMedia', id} · {op:'setProject', set:{name|width|height|fps|background|markers|disabledTracks|lockedTracks|untargetedTracks|encodeProfile|master}} (markers = the full list [{t, label?, color?}], color: gold|red|orange|green|cyan|blue|purple|pink; master = {gain}, the master fader in dB) · {op:'setTrack', id:'A1', set:{gain?, pan?}} (audio-track fader in dB −60…+12 and pan −1…1; null or 0 resets) · {op:'setFx', target:'clip'|'track'|'master', id?, preset?:'podcast'|… OR fx:[{type,…params}], append?:true} (audio effects — validated; presets: clean-voice, podcast, radio, deep-voice, telephone, cinematic, wide, muffled; fx:null clears; on a clip it applies to its linked stems too; see the 'Audio mix' docs section). TIMELINE EDITS — the editor's own split / ripple / trim code, so linked stems, track targeting (untargetedTracks) and locks behave exactly as in the UI; times in seconds: {op:'split', at, ids?} (no ids: every targeted track) · {op:'rippleDelete', ids} (later clips close the hole) · {op:'closeGap', at} · {op:'lift'|'extract', from?, to?} (remove a range; extract closes it; default = project inPoint/outPoint, which then clear) · {op:'insert'|'overwrite', mediaId, at, in?, duration?} (three-point edit: insert pushes later clips right, overwrite replaces what is there; a video brings one audio stem per channel) · {op:'rippleTrim'|'roll', id, side:'in'|'out', delta} · {op:'slip'|'slide', id, delta} (clamped to the media; the note says what was applied) · {op:'crossfade', ids? | at, duration?} (constant-power audio crossfade, borrowing handles from both sides). Any of these takes tracks:[…] to target lanes for that op only. setProject also takes inPoint / outPoint. updateClip merge rules: top-level keys are replaced (keyframes/transitionIn/transitionOut wholesale), `props` merges key-by-key, and setting any key to null deletes it. LOCKS: the user can lock clips (`locked:true`) and tracks (`lockedTracks`); updateClip / removeClip on a locked clip — or on a clip linked to one — and addClip onto a locked track are refused. Leave locked material alone; only if the user asked you to change it, pass force:true on that op (or unlock first: updateClip set:{locked:null}, which is always allowed). All-or-nothing: an invalid op aborts the whole patch unsaved.",
+    description: "Apply targeted edits to the FableCut project WITHOUT round-tripping the whole document — PREFER THIS over get+set for every edit (it is ~10-100x cheaper in tokens and merge-safe by design: it re-reads the latest document from disk, applies your ops in order, bumps revision once, saves atomically). Ops: {op:'addClip', clip:{…}} (id auto-generated if omitted) · {op:'updateClip', id, set:{…}} · {op:'removeClip', id} · {op:'addMedia', media:{…}} · {op:'removeMedia', id} · {op:'setProject', set:{name|width|height|fps|background|markers|disabledTracks|lockedTracks|untargetedTracks|encodeProfile|master}} (markers = the full list [{t, label?, color?}], color: gold|red|orange|green|cyan|blue|purple|pink; master = {gain}, the master fader in dB) · {op:'setTrack', id:'A1', set:{gain?, pan?, out?}} (audio-track fader in dB −60…+12, pan −1…1, out = a submix bus id or 'master'; null or 0 resets) · {op:'setBus', id:'B1', set:{name?, gain?, pan?, mute?}} (submix bus, created if missing; route tracks into it with setTrack out) · {op:'removeBus', id} · {op:'setFx', target:'clip'|'track'|'bus'|'master', id?, preset?:'podcast'|… OR fx:[{type,…params}], append?:true} (audio effects — validated; presets: clean-voice, podcast, radio, deep-voice, telephone, cinematic, wide, muffled; fx:null clears; on a clip it applies to its linked stems too) · {op:'setFxKeys', target, id?, index?|type?, param, keys:[{t, v, ease?}]|null} (automate one effect parameter: t is clip-local for a clip's effects, timeline seconds otherwise; see the 'Audio mix' docs section). TIMELINE EDITS — the editor's own split / ripple / trim code, so linked stems, track targeting (untargetedTracks) and locks behave exactly as in the UI; times in seconds: {op:'split', at, ids?} (no ids: every targeted track) · {op:'rippleDelete', ids} (later clips close the hole) · {op:'closeGap', at} · {op:'lift'|'extract', from?, to?} (remove a range; extract closes it; default = project inPoint/outPoint, which then clear) · {op:'insert'|'overwrite', mediaId, at, in?, duration?} (three-point edit: insert pushes later clips right, overwrite replaces what is there; a video brings one audio stem per channel) · {op:'rippleTrim'|'roll', id, side:'in'|'out', delta} · {op:'slip'|'slide', id, delta} (clamped to the media; the note says what was applied) · {op:'crossfade', ids? | at, duration?} (constant-power audio crossfade, borrowing handles from both sides). Any of these takes tracks:[…] to target lanes for that op only. setProject also takes inPoint / outPoint. updateClip merge rules: top-level keys are replaced (keyframes/transitionIn/transitionOut wholesale), `props` merges key-by-key, and setting any key to null deletes it. LOCKS: the user can lock clips (`locked:true`) and tracks (`lockedTracks`); updateClip / removeClip on a locked clip — or on a clip linked to one — and addClip onto a locked track are refused. Leave locked material alone; only if the user asked you to change it, pass force:true on that op (or unlock first: updateClip set:{locked:null}, which is always allowed). All-or-nothing: an invalid op aborts the whole patch unsaved.",
     inputSchema: {
       type: "object",
       properties: {
@@ -216,6 +217,19 @@ const TOOLS = [
         attack: { type: "number", description: "Seconds to ramp down before speech (default 0.3)" },
         release: { type: "number", description: "Seconds to ramp back up after speech (default 0.6)" },
         force:{ type: "boolean", description: "Also change clips the user locked (only when they asked)" },
+      },
+      required: ["clipIds"],
+    },
+  },
+  {
+    name: "fablecut_denoise",
+    description: "Reduce background noise (hiss, hum, room tone) on audio clips: ffmpeg's FFT denoiser renders a cleaned FLAC of each clip's whole source file into media/, and the clip — with its linked stems — switches to it (the picture keeps its own file, so links and timing stay intact). The same as the inspector's Noise control. amount 'off' switches back to the original. Re-running reuses a file already rendered. Needs ffmpeg + ffprobe on PATH. Refuses locked clips unless force:true.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        clipIds: { type: "array", items: { type: "string" }, description: "Audio clips, or video clips with linked audio stems" },
+        amount: { type: "string", enum: ["light", "medium", "strong", "off"], description: "How hard to pull the noise down (default medium); off restores the original audio" },
+        force: { type: "boolean", description: "Also change clips the user locked (only when they asked)" },
       },
       required: ["clipIds"],
     },
@@ -458,6 +472,65 @@ function timelineEdit(proj, op, refuseLocked, lockReason) {
   throw new Error("Unknown edit op " + name);
 }
 
+/* ── Noise reduction (fablecut_denoise) — denoise.js, as the editor's Noise control ── */
+async function denoiseTool(args) {
+  const ids = Array.isArray(args.clipIds) ? args.clipIds.map(String) : [];
+  if (!ids.length) throw new Error("`clipIds` must list at least one clip");
+  const amount = args.amount == null ? "medium" : String(args.amount);
+  if (amount !== "off" && !Denoise.AMOUNT_IDS.includes(amount)) throw new Error(`amount must be one of ${Denoise.AMOUNT_IDS.join(", ")}, off`);
+  let doc = readProject();
+  const picked = ids.map((id) => {
+    const c = doc.clips.find((x) => x.id === id);
+    if (!c) throw new Error("no clip " + id);
+    return c;
+  });
+  const targets = Denoise.denoiseTargets(doc, picked);
+  const lockedTracks = new Set(Array.isArray(doc.lockedTracks) ? doc.lockedTracks : []);
+  const isLocked = (c) => (c.linkGroup ? doc.clips.filter((x) => x.linkGroup === c.linkGroup) : [c])
+    .some((x) => x.locked === true || lockedTracks.has(x.track));
+  if (args.force !== true && targets.some(isLocked))
+    throw new Error(`${targets.filter(isLocked).map((c) => c.id).join(", ")} locked — the user locked it. Leave it alone, or pass force:true if they asked you to change it`);
+  const bases = [...new Set(targets.map((c) => Denoise.baseMediaId(doc, c.mediaId)))];
+  const rendered = new Map(); // base id → {r, base}
+  if (amount !== "off") {
+    for (const id of bases) {
+      const base = doc.media.find((m) => m.id === id);
+      const file = base && mediaFile(base.src);
+      if (!file) throw new Error(`media ${id}: file not found`);
+      rendered.set(id, { base, r: await Denoise.denoiseFile(file, MEDIA_DIR, amount) });
+    }
+  }
+  // Re-read after the (slow) render so concurrent UI edits are kept.
+  const proj = readProject();
+  const report = [];
+  const swap = new Map();
+  for (const id of bases) {
+    if (amount === "off") { swap.set(id, id); continue; }
+    const { base, r } = rendered.get(id);
+    const src = "/media/" + encodeURIComponent(r.name);
+    let m = proj.media.find((x) => x.src === src);
+    if (!m) {
+      m = { id: "m_" + uid(), name: r.name, kind: "audio", src, duration: r.duration, folderId: base.folderId || null,
+        derivedFrom: base.id, denoise: amount };
+      proj.media.push(m);
+    }
+    swap.set(id, m.id);
+    report.push(`${id} → ${m.id} "${r.name}"${r.cached ? " (already rendered)" : ""}`);
+  }
+  let changed = 0;
+  for (const t of targets) {
+    const c = proj.clips.find((x) => x.id === t.id);
+    if (!c) continue;
+    const next = swap.get(Denoise.baseMediaId(proj, c.mediaId));
+    if (next && next !== c.mediaId) { c.mediaId = next; changed++; }
+  }
+  proj.revision = (proj.revision || 0) + 1;
+  writeProject(proj);
+  lastReadRevision = proj.revision;
+  return `Noise reduction ${amount} on ${targets.map((c) => c.id).join(", ")} (revision ${proj.revision}, ${changed} clip${changed === 1 ? "" : "s"} switched)` +
+    (report.length ? ":\n" + report.join("\n") : "");
+}
+
 /* ── Export (fablecut_export) ── */
 function describeExportJob(j) {
   const pct = Math.round((j.progress || 0) * 100);
@@ -506,6 +579,8 @@ async function callTool(name, args) {
   switch (name) {
     case "fablecut_export":
       return exportTool(args);
+    case "fablecut_denoise":
+      return denoiseTool(args);
     case "fablecut_status": {
       const up = await ensureUIServer();
       const proj = readProject();
@@ -601,8 +676,11 @@ async function callTool(name, args) {
       const fxTag = (fx) => Array.isArray(fx) && fx.length ? ` fx:${FX.summarizeFx(fx)}` : "";
       const mixLine = (d) => {
         const parts = (Array.isArray(d.tracks) ? d.tracks : [])
-          .filter((t) => t && (+t.gain || +t.pan || t.fx?.length))
-          .map((t) => t.id + (+t.gain ? ` ${signed(+t.gain)}dB` : "") + (+t.pan ? ` pan:${+t.pan}` : "") + fxTag(t.fx));
+          .filter((t) => t && (+t.gain || +t.pan || t.fx?.length || t.out))
+          .map((t) => t.id + (t.out ? `→${t.out}` : "") + (+t.gain ? ` ${signed(+t.gain)}dB` : "") + (+t.pan ? ` pan:${+t.pan}` : "") + fxTag(t.fx));
+        for (const b of Array.isArray(d.buses) ? d.buses : [])
+          parts.push(`bus ${b.id}${b.name ? ` "${b.name}"` : ""}` + (+b.gain ? ` ${signed(+b.gain)}dB` : "") + (+b.pan ? ` pan:${+b.pan}` : "") +
+            (b.mute ? " muted" : "") + fxTag(b.fx));
         if (d.master && (+d.master.gain || d.master.fx?.length))
           parts.push("master" + (+d.master.gain ? ` ${signed(+d.master.gain)}dB` : "") + fxTag(d.master.fx));
         return parts.length ? [`MIX: ${parts.join(" · ")}`] : [];
@@ -618,7 +696,8 @@ async function callTool(name, args) {
         (doc.disabledTracks?.length ? ` disabledTracks:[${doc.disabledTracks.join(",")}]` : ""),
         ...mixLine(doc),
         `MEDIA (${doc.media.length}):`,
-        ...doc.media.map((m) => `  ${m.id} ${m.kind} "${m.name}"${m.duration ? " " + m.duration + "s" : ""}`),
+        ...doc.media.map((m) => `  ${m.id} ${m.kind} "${m.name}"${m.duration ? " " + m.duration + "s" : ""}` +
+          (m.derivedFrom ? ` (${m.denoise ? "denoised " + m.denoise : "derived"} from ${m.derivedFrom})` : "")),
         `CLIPS (${doc.clips.length}), by track/time:`,
         ...doc.clips
           .slice()
@@ -658,6 +737,41 @@ async function callTool(name, args) {
       const refuseLocked = (opName, reason, op) => {
         if (reason && op.force !== true)
           throw new Error(`${opName}: ${reason} — the user locked it. Leave it alone, or pass force:true if they asked you to change it`);
+      };
+      /* The effect chain an op names: a clip (and its linked stems), an
+         A-track, a submix bus or the master → {label, read(), write(list)}. */
+      const fxTarget = (op, name) => {
+        const target = op.target || (op.id && /^A\d+$/.test(op.id) ? "track" : op.id && /^B\d+$/.test(op.id) ? "bus" : op.id ? "clip" : "master");
+        if (target === "clip") {
+          const c = proj.clips.find((x) => x.id === op.id);
+          if (!c) throw new Error(`${name}: no clip ${op.id}`);
+          if (c.kind !== "audio") throw new Error(`${name}: clip ${op.id} is ${c.kind} — effects go on audio clips (a video's sound is on its linked A-track clips)`);
+          refuseLocked(name, lockReason(c), op);
+          const group = c.linkGroup ? proj.clips.filter((x) => x.linkGroup === c.linkGroup && x.kind === "audio") : [c];
+          return { label: group.map((x) => x.id).join("+"), read: () => c.fx, write(next) {
+            for (const x of group) { if (next.length) x.fx = next.map((e) => JSON.parse(JSON.stringify(e))); else delete x.fx; }
+          } };
+        }
+        if (target === "track") {
+          if (!/^A\d+$/.test(String(op.id || ""))) throw new Error(`${name}: track id must be an audio track (A1, A2, …)`);
+          if (!Array.isArray(proj.tracks) || !proj.tracks.length) proj.tracks = DEFAULT_TRACKS.map((t) => ({ ...t }));
+          let t = proj.tracks.find((x) => x.id === op.id);
+          if (!t) { t = { id: op.id, kind: "audio" }; proj.tracks.push(t); }
+          return { label: op.id, read: () => t.fx, write(next) { if (next.length) t.fx = next; else delete t.fx; } };
+        }
+        if (target === "bus") {
+          const b = (proj.buses || []).find((x) => x.id === op.id);
+          if (!b) throw new Error(`${name}: no bus ${JSON.stringify(op.id)} — create it with {op:"setBus", id:"B1"}`);
+          return { label: op.id, read: () => b.fx, write(next) { if (next.length) b.fx = next; else delete b.fx; } };
+        }
+        if (target === "master") {
+          return { label: "master", read: () => proj.master?.fx, write(next) {
+            const m = proj.master && typeof proj.master === "object" ? proj.master : {};
+            if (next.length) m.fx = next; else delete m.fx;
+            if (Object.keys(m).length) proj.master = m; else delete proj.master;
+          } };
+        }
+        throw new Error(`${name}: target must be clip, track, bus or master`);
       };
       const mergeInto = (target, set) => {
         for (const [k, v] of Object.entries(set || {})) {
@@ -727,37 +841,30 @@ async function callTool(name, args) {
             break;
           }
           case "setFx": {
-            // {op:"setFx", target:"clip"|"track"|"master", id?, fx?:[…] | preset?:"podcast", append?:true}
-            const target = op.target || (op.id && /^A\d+$/.test(op.id) ? "track" : op.id ? "clip" : "master");
+            // {op:"setFx", target:"clip"|"track"|"bus"|"master", id?, fx?:[…] | preset?:"podcast", append?:true}
+            const t = fxTarget(op, "setFx");
             let chain;
             if (op.preset != null) chain = FX.presetChain(String(op.preset));
             else if (op.fx === null) chain = [];
             else chain = FX.normalizeFx(op.fx, true);
-            const merge = (cur) => op.append ? [...FX.normalizeFx(cur), ...chain] : chain;
-            if (target === "clip") {
-              const c = proj.clips.find((x) => x.id === op.id);
-              if (!c) throw new Error("setFx: no clip " + op.id);
-              if (c.kind !== "audio") throw new Error(`setFx: clip ${op.id} is ${c.kind} — effects go on audio clips (a video's sound is on its linked A-track clips)`);
-              refuseLocked("setFx", lockReason(c), op);
-              const group = c.linkGroup ? proj.clips.filter((x) => x.linkGroup === c.linkGroup && x.kind === "audio") : [c];
-              const next = merge(c.fx);
-              for (const x of group) { if (next.length) x.fx = next.map((e) => ({ ...e })); else delete x.fx; }
-              notes.push("~" + group.map((x) => x.id).join("+") + ".fx");
-            } else if (target === "track") {
-              if (!/^A\d+$/.test(String(op.id || ""))) throw new Error("setFx: track id must be an audio track (A1, A2, …)");
-              if (!Array.isArray(proj.tracks) || !proj.tracks.length) proj.tracks = DEFAULT_TRACKS.map((t) => ({ ...t }));
-              let t = proj.tracks.find((x) => x.id === op.id);
-              if (!t) { t = { id: op.id, kind: "audio" }; proj.tracks.push(t); }
-              const next = merge(t.fx);
-              if (next.length) t.fx = next; else delete t.fx;
-              notes.push("~" + op.id + ".fx");
-            } else if (target === "master") {
-              const m = proj.master && typeof proj.master === "object" ? proj.master : {};
-              const next = merge(m.fx);
-              if (next.length) m.fx = next; else delete m.fx;
-              if (Object.keys(m).length) proj.master = m; else delete proj.master;
-              notes.push("~master.fx");
-            } else throw new Error("setFx: target must be clip, track or master");
+            t.write(op.append ? [...FX.normalizeFx(t.read()), ...chain] : chain);
+            notes.push("~" + t.label + ".fx");
+            break;
+          }
+          case "setFxKeys": {
+            // {op:"setFxKeys", target, id?, index?|type?, param, keys:[{t, v, ease?}] | null}
+            const t = fxTarget(op, "setFxKeys");
+            const list = FX.normalizeFx(t.read()).map((e) => ({ ...e }));
+            let i = Number.isInteger(op.index) ? op.index : op.type != null ? list.findIndex((e) => e.type === op.type) : list.length === 1 ? 0 : -1;
+            if (!list[i]) throw new Error(`setFxKeys: pick the effect with index (0…${list.length - 1}) or type — ${t.label} has ${FX.summarizeFx(list) || "no effects"}`);
+            const e = list[i];
+            if (!FX.FX_DEFS[e.type].params[op.param]) throw new Error(`setFxKeys: ${e.type} has no parameter ${JSON.stringify(op.param)} (has: ${Object.keys(FX.FX_DEFS[e.type].params).join(", ")})`);
+            const keys = { ...(e.keys || {}) };
+            if (op.keys == null || (Array.isArray(op.keys) && !op.keys.length)) delete keys[op.param];
+            else Object.assign(keys, FX.normalizeKeys(e.type, { [op.param]: op.keys }, true) || {});
+            if (Object.keys(keys).length) e.keys = keys; else delete e.keys;
+            t.write(list);
+            notes.push(`~${t.label}.fx[${i}].${op.param}` + (keys[op.param] ? `(${keys[op.param].length} keys)` : "(keys cleared)"));
             break;
           }
           case "setTrack": {
@@ -767,14 +874,53 @@ async function callTool(name, args) {
             let t = proj.tracks.find((x) => x.id === op.id);
             if (!t) { t = { id: op.id, kind: "audio" }; proj.tracks.push(t); }
             for (const [k, v] of Object.entries(op.set || {})) {
+              if (k === "out") { // route into a submix bus, or back to the master
+                if (v == null || v === "master") { delete t.out; continue; }
+                if (!(proj.buses || []).some((b) => b.id === v)) throw new Error(`setTrack: no bus ${JSON.stringify(v)} — create it first with {op:"setBus", id:"B1"}`);
+                t.out = v;
+                continue;
+              }
               const range = k === "gain" ? [-60, 12] : k === "pan" ? [-1, 1] : null;
-              if (!range) throw new Error(`setTrack: '${k}' not settable (gain, pan)`);
+              if (!range) throw new Error(`setTrack: '${k}' not settable (gain, pan, out)`);
               if (v === null || v === 0) { delete t[k]; continue; }
               if (typeof v !== "number" || !Number.isFinite(v) || v < range[0] || v > range[1])
                 throw new Error(`setTrack: ${k} must be a number ${range[0]}…${range[1]}`);
               t[k] = v;
             }
             notes.push("~" + op.id);
+            break;
+          }
+          case "setBus": {
+            // {op:"setBus", id:"B1", set:{name?, gain?, pan?, mute?}} — creates the bus if needed
+            if (!/^B\d+$/.test(String(op.id || ""))) throw new Error("setBus: id must be B1, B2, …");
+            proj.buses = Array.isArray(proj.buses) ? proj.buses : [];
+            let b = proj.buses.find((x) => x.id === op.id);
+            if (!b) {
+              if (proj.buses.length >= 8) throw new Error("setBus: up to 8 buses");
+              b = { id: op.id };
+              proj.buses.push(b);
+              proj.buses.sort((x, y) => parseInt(x.id.slice(1), 10) - parseInt(y.id.slice(1), 10));
+            }
+            for (const [k, v] of Object.entries(op.set || {})) {
+              if (k === "name") { if (v == null || v === "") delete b.name; else b.name = String(v).slice(0, 40); continue; }
+              if (k === "mute") { if (v === true) b.mute = true; else delete b.mute; continue; }
+              const range = k === "gain" ? [-60, 12] : k === "pan" ? [-1, 1] : null;
+              if (!range) throw new Error(`setBus: '${k}' not settable (name, gain, pan, mute; effects via setFx target:"bus")`);
+              if (v === null || v === 0) { delete b[k]; continue; }
+              if (typeof v !== "number" || !Number.isFinite(v) || v < range[0] || v > range[1])
+                throw new Error(`setBus: ${k} must be a number ${range[0]}…${range[1]}`);
+              b[k] = v;
+            }
+            notes.push("~" + op.id);
+            break;
+          }
+          case "removeBus": {
+            const n = (proj.buses || []).length;
+            proj.buses = (proj.buses || []).filter((b) => b.id !== op.id);
+            if (proj.buses.length === n) throw new Error("removeBus: no bus " + op.id);
+            if (!proj.buses.length) delete proj.buses;
+            for (const t of proj.tracks || []) if (t.out === op.id) delete t.out; // back to the master
+            notes.push("-" + op.id);
             break;
           }
           case "setProject": {
@@ -805,7 +951,7 @@ async function callTool(name, args) {
             notes.push(timelineEdit(proj, op, refuseLocked, lockReason));
             break;
           default:
-            throw new Error("Unknown op: " + op.op + " (addClip|updateClip|removeClip|addMedia|removeMedia|setProject|setTrack|setFx|" +
+            throw new Error("Unknown op: " + op.op + " (addClip|updateClip|removeClip|addMedia|removeMedia|setProject|setTrack|setBus|removeBus|setFx|setFxKeys|" +
               "split|rippleDelete|closeGap|lift|extract|rippleTrim|roll|slip|slide|insert|overwrite|crossfade)");
         }
       }

@@ -31,6 +31,8 @@ Every Claude Code session then has these tools:
   set their clip gain to a loudness target. See "Audio mix" below.
 - `fablecut_auto_duck` — find where the voice tracks speak and write `duck` keyframes that
   dip the music under it. See "Audio mix" below.
+- `fablecut_denoise` — reduce background noise on audio clips (renders a cleaned copy of the
+  file and switches the clip's stems to it). See "Audio mix" below.
 - `fablecut_export` — render the timeline to a file in `exports/` with the editor's own
   Fast export (open tab, or headless Chrome / Edge). See "Export" below.
 
@@ -243,17 +245,22 @@ Examples in `library/svg/`: `sparkles.svg` (loop), `lower-third.svg`,
     { "id": "V3", "kind": "video" },   // video: higher number drawn on top (V1 under V2 under V3…)
     { "id": "V2", "kind": "video" },
     { "id": "V1", "kind": "video" },
-    { "id": "A1", "kind": "audio", "gain": -6, "pan": 0 },   // audio: A1…An top→bottom; +V/+A appends Vn+1 / An+1
-    // ^ gain = track fader in dB (−60 = silence … +12), pan = −1…1, fx = track effects; all optional
+    { "id": "A1", "kind": "audio", "gain": -6, "pan": 0, "out": "B1" },   // audio: A1…An top→bottom; +V/+A appends Vn+1 / An+1
+    // ^ gain = track fader in dB (−60 = silence … +12), pan = −1…1, fx = track effects,
+    //   out = the submix bus it feeds (default: the master); all optional
     { "id": "A2", "kind": "audio" },
     { "id": "A3", "kind": "audio" },
     { "id": "A4", "kind": "audio" }
   ],
+  "buses": [ { "id": "B1", "name": "Dialogue", "gain": -2, "fx": [ { "type": "compressor" } ] } ],
+  // ^ optional — submix buses B1…B8: name, gain (dB), pan, mute, fx; tracks route in with `out`
   "media": [
     { "id": "m_abc", "name": "intro.mp4", "kind": "video",  // video|audio|image|svg
       "src": "/media/intro.mp4",             // path under ./media or ./library (never a raw https:// URL)
       "duration": 12.4, "width": 1920, "height": 1080,
-      "folderId": null }                     // optional: id of a folders[] entry
+      "folderId": null },                    // optional: id of a folders[] entry
+    { "id": "m_abd", "name": "intro.denoise-medium.flac", "kind": "audio", "src": "/media/intro.denoise-medium.flac",
+      "derivedFrom": "m_abc", "denoise": "medium" }  // a noise-reduced copy of m_abc (see "Audio mix")
   ],
   "clips": [
     {
@@ -418,9 +425,12 @@ glitch (RGB split + jitter) · pop (overshoot scale — stickers/captions).
 
 Every clip runs through the same chain in preview **and** export:
 `source → channels (audioChannel / channelMode) → gain (dB) → clip fx → volume (keyframes, fades, duck) → pan → its A-track`,
-then `track fx → track fader → track pan → master sum → master fx → master fader`.
+then `track fx → track fader → track pan → (submix bus fx → fader → pan) → master sum → master fx → master fader`.
 A track has a fader (`tracks[].gain`, dB), a pan (`tracks[].pan`) and effects
 (`tracks[].fx`); the master has a fader (`master.gain`) and effects (`master.fx`).
+**Submix buses** (`buses[]`, B1…B8) group tracks: a track with `out:"B1"` feeds
+that bus instead of the master, and the bus has its own effects, fader, pan and
+mute — e.g. every dialogue lane into one bus with one compressor and one fader.
 Audio on a video lane (a clip with `volume > 0` on V1…) goes straight to the
 master. In the UI these are the strips in the **Mixer** tab beside the
 Inspector (its **FX** button edits that track's or the master's effects);
@@ -440,20 +450,51 @@ values are clamped; `on:false` bypasses one without losing its settings):
 | `reverb` | `decay` 2 s, `predelay` 20 ms, `mix` 0.25 |
 | `distortion` | `drive` 0.3, `mix` 1 |
 | `widener` | `width` 1.5 (0 = mono, 1 = as is, 2 = extra wide) |
+| `pitch` | `semitones` 0 (−12…+12; changes pitch, not speed — about 30 ms of delay), `mix` 1 |
 
 **Presets** fill the chain with tweakable effects: Voice — `clean-voice`, `podcast`,
-`radio`, `deep-voice` (EQ-only: lower, warmer — not a pitch shift), `telephone`;
+`radio`, `deep-voice` (pitch down 4 semitones + a warmer EQ), `telephone`;
 Music — `cinematic`, `wide`, `muffled` (next room). Agents apply them (or any chain)
 with the patch op `setFx`:
 `{op:"setFx", target:"clip", id:"c_vo", preset:"podcast"}` ·
 `{op:"setFx", target:"track", id:"A3", fx:[{type:"eq", highGain:-3}]}` ·
 `{op:"setFx", target:"master", fx:[{type:"limiter", ceiling:-1}], append:true}` ·
+`{op:"setFx", target:"bus", id:"B1", preset:"podcast"}` ·
 `fx:null` clears. On a clip it applies to its linked stems too; chains are
 validated (unknown effect or preset → the whole patch is refused). The compact
-project view shows chains as `fx:highpass·eq·…`.
+project view shows chains as `fx:highpass·eq·…` (`lowpass~freq` = automated).
+
+**Effect automation** — any effect parameter except reverb `decay` can follow
+keyframes: `keys` on the effect, `{param: [{t, v, ease?}]}`. `t` is seconds from
+the clip's start for a clip's effects, and timeline seconds for a track's, a
+bus's or the master's; `ease` (linear · ease-in · ease-out · ease-in-out, default
+ease-in-out) shapes the segment arriving at that key, as with clip keyframes.
+While a parameter has keys they set it. Preview and export follow them the same
+way (export steps every 20 ms with a short glide). In the effects panel each
+parameter has a ◆: set or remove a key at the playhead; with keys, the slider
+edits the key under the playhead. Agents:
+`{op:"setFxKeys", target:"bus", id:"B1", type:"lowpass", param:"freq", keys:[{t:0, v:18000}, {t:8, v:500, ease:"ease-in"}]}`
+(`index` picks the effect when the type repeats; `keys:null` clears) — or write
+`keys` inside a `setFx` chain. Example — a filter sweep into the drop: a
+`lowpass` on the music clip keyed from 400 Hz up to 20000 Hz over the build.
 
 - Set a track fader / pan: `{op:"setTrack", id:"A2", set:{gain:-8, pan:0}}`
   (`null` or `0` resets). Master: `{op:"setProject", set:{master:{gain:-1}}}`.
+- Buses: `{op:"setBus", id:"B1", set:{name:"Dialogue", gain:-2, pan?, mute?}}`
+  creates or updates one; route a track in with `{op:"setTrack", id:"A1", set:{out:"B1"}}`
+  (`out:"master"` or `null` routes it back); `{op:"removeBus", id:"B1"}` sends
+  its tracks back to the master. In the Mixer: **+ Bus**, the **→** menu under a
+  track's name, double-click a bus name to rename it.
+- **Noise reduction** — `fablecut_denoise {clipIds, amount?:"light"|"medium"|"strong"|"off"}`
+  (default medium; the inspector's **Noise** control does the same). The file's
+  noise floor is measured (its quietest 50 ms windows), then ffmpeg's FFT
+  denoiser pulls everything near it down (10 / 18 / 30 dB) into a FLAC copy of
+  the **whole** source file in `media/`, registered with `derivedFrom` (the
+  original) and `denoise` (the amount). The clip and its linked audio stems
+  switch to that copy; the picture keeps its own file, so links, `in` points
+  and timing stay as they were. `off` switches back; a level already rendered
+  is reused. Works on audio clips (a video's sound is on its linked stems).
+  Needs ffmpeg. Use it before normalizing — the measured loudness changes.
 - **Normalize** — `fablecut_normalize_audio {clipIds, mode?:"lufs"|"peak", target?}`
   measures each clip's source window after its channel routing (ITU-R BS.1770
   integrated loudness with EBU R128 gating, or sample peak) and sets
@@ -486,8 +527,9 @@ project view shows chains as `fx:highpass·eq·…`.
   drag a point to move it, Alt-click or double-click to remove one. The corner
   **fade grips** drag a constant-power fade in or out. Both edit linked stems together.
 - Use **gain** for "this clip is too quiet / loud", **volume keyframes** for
-  shaping, **duck** for dipping under dialogue, and the **track fader** to
-  balance whole lanes (dialogue against the music bed).
+  shaping, **duck** for dipping under dialogue, the **track fader** to
+  balance whole lanes (dialogue against the music bed), and a **bus** when
+  several lanes need the same processing or one fader.
 
 ### Semantics
 
@@ -654,6 +696,9 @@ obvious cuts were missed, raise it if motion is being misread as cuts.
   port) in `media.src`: canvas CORS would taint the compositor and Fast /
   WebCodecs export cannot JPEG-encode. Import into `./media` so `src` is
   `/media/…`, or serve the remote with `Access-Control-Allow-Origin`.
+- `POST /api/denoise` — body `{src:"/media/…", amount:"light"|"medium"|"strong"}`: writes a
+  noise-reduced FLAC of the whole file into `./media/` (reused if it exists) and returns
+  `{src, name, duration, channels}`. Does not touch `project.json` (see "Audio mix").
 - `POST /api/analyze` — body `{src:"/media/ref.mp4", threshold?, music?}`: analyze a
   reference video into an edit blueprint (see "Remake a reference video"); extracts
   its music into ./media. `GET /api/analyze?src=…` returns the cached blueprint.

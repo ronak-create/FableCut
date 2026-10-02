@@ -72,6 +72,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   same linked-stem sync, track targeting and locks as the keyboard shortcuts.
   `setProject` takes `inPoint` / `outPoint`, and the compact view shows them.
 
+- **Pitch shift** effect (±12 semitones, speed unchanged). The **Deep voice**
+  preset now lowers the pitch (−4 semitones) instead of only EQ-ing the tone.
+- **Effect automation.** Any effect parameter (except reverb decay) can follow
+  keyframes: a ◆ beside each slider sets or removes a key at the playhead, and
+  the slider then edits the key under the playhead. Clip, track, bus and master
+  effects; preview and export follow the same curve. Saved as `keys` on the
+  effect. MCP: the `setFxKeys` patch op, or `keys` inside a `setFx` chain.
+- **Submix buses.** **+ Bus** in the Mixer adds a bus with its own effects,
+  fader, pan, mute and meter; the menu under a track's name routes it into a
+  bus instead of the master. Saved as `buses` and `tracks[].out`. MCP: `setBus`,
+  `removeBus`, `setTrack {out}`, and `setFx` / `setFxKeys` on a bus.
+- **Noise reduction.** The inspector's **Noise** control (Light / Medium /
+  Strong / Off) measures the file's noise floor and renders a cleaned copy with
+  ffmpeg's FFT denoiser; the clip's audio stems switch to it, and Off switches
+  back. MCP: `fablecut_denoise`; REST: `POST /api/denoise`. Needs ffmpeg.
+
 ### Changed
 - The editor's split, ripple, insert, trim and crossfade code moved into
   `edit-ops.js`, which the editor and the MCP server both load.

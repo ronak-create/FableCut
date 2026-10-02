@@ -33,6 +33,7 @@ const {
 } = require("./encode-profiles");
 const { downloadImportUrl, maybeFaststart } = require("./import-url");
 const { createExportJobs } = require("./export-jobs");
+const { denoiseFile, AMOUNT_IDS: DENOISE_AMOUNTS } = require("./denoise");
 
 const {
   APP_DIR, DATA_DIR, MEDIA_DIR, EXPORTS_DIR, ANALYSIS_DIR, LIBRARY_DIR,
@@ -659,6 +660,28 @@ const server = http.createServer(async (req, res) => {
         JSON.stringify(bp, null, 2));
       sendJSON(res, 200, bp);
     } catch (e) { sendJSON(res, 500, { error: String(e) }); }
+    return;
+  }
+
+  /* API: noise reduction — POST {src:"/media/…"|"/library/…", amount:"light"|"medium"|"strong"}
+     writes a denoised FLAC of the whole file into media/ (reused if it exists)
+     and returns {src, name, duration, channels}. Registering it is the caller's job. */
+  if (p === "/api/denoise" && req.method === "POST") {
+    if (!HAS_FFMPEG) { sendJSON(res, 400, { error: "ffmpeg not found on PATH — noise reduction needs it" }); return; }
+    try {
+      const opts = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+      if (!DENOISE_AMOUNTS.includes(opts.amount)) { sendJSON(res, 400, { error: `amount must be one of ${DENOISE_AMOUNTS.join(", ")}` }); return; }
+      const src = decodeURIComponent(String(opts.src || "").split("?")[0]);
+      const [root, rel] = src.startsWith("/media/") ? [MEDIA_DIR, src.slice(7)]
+        : src.startsWith("/library/") ? [LIBRARY_DIR, src.slice(9)] : [null, null];
+      const file = root && path.normalize(path.join(root, rel));
+      if (!file || !file.startsWith(path.normalize(root + path.sep)) || !fs.existsSync(file)) {
+        sendJSON(res, 404, { error: "src must name an existing file under /media/ or /library/" });
+        return;
+      }
+      const r = await denoiseFile(file, MEDIA_DIR, opts.amount);
+      sendJSON(res, 200, { src: "/media/" + encodeURIComponent(r.name), name: r.name, duration: r.duration, channels: r.channels, cached: r.cached });
+    } catch (e) { sendJSON(res, 500, { error: String(e.message || e) }); }
     return;
   }
 
