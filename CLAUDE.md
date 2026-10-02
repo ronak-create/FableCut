@@ -31,6 +31,8 @@ Every Claude Code session then has these tools:
   set their clip gain to a loudness target. See "Audio mix" below.
 - `fablecut_auto_duck` — find where the voice tracks speak and write `duck` keyframes that
   dip the music under it. See "Audio mix" below.
+- `fablecut_export` — render the timeline to a file in `exports/` with the editor's own
+  Fast export (open tab, or headless Chrome / Edge). See "Export" below.
 
 ### Token-efficient editing (important for agents)
 
@@ -47,6 +49,37 @@ Editing via full get→modify→set costs thousands of tokens per change. Cheape
 4. **Media questions** (duration, fps, size): read them from the registered media
    entries — don't shell out to ffprobe; the browser probes and writes them back.
 5. Batch related changes into ONE patch call (ops apply in order, one revision bump).
+6. **Cut and trim with the edit ops** (next section) rather than recomputing
+   `start` / `in` / `duration` by hand — they keep linked stems in sync.
+
+### Timeline edit ops (`fablecut_patch_project`)
+
+The editor's own split / ripple / trim code (`edit-ops.js`), run on the
+document — so linked audio stems ride along, edits land on the **targeted**
+tracks (`untargetedTracks`, see Semantics), and locked clips stay put, exactly
+as with the keyboard shortcuts. Times are seconds.
+
+| op | does |
+|---|---|
+| `{op:"split", at, ids?}` | cut at `at` — the named clips (and their stems), or every targeted track |
+| `{op:"rippleDelete", ids}` | remove clips; later clips on those tracks close the hole |
+| `{op:"closeGap", at}` | close the gap under `at` on every targeted track |
+| `{op:"lift" \| "extract", from?, to?}` | remove a range (default: `inPoint`→`outPoint`, which then clear); extract also closes it |
+| `{op:"insert" \| "overwrite", mediaId, at, in?, duration?}` | three-point edit: place `in`→`in+duration` of the media at `at` (default: the rest of the media). Insert pushes later clips right; overwrite replaces what is under it. A video brings one linked audio stem per channel. |
+| `{op:"rippleTrim", id, side:"in"\|"out", delta}` | move a head / tail; everything after follows |
+| `{op:"roll", id, side, delta}` | move the cut between two clips; nothing else moves |
+| `{op:"slip", id, delta}` · `{op:"slide", id, delta}` | new source window in place · move a clip between its neighbors |
+| `{op:"crossfade", ids? \| at, duration?}` | constant-power audio crossfade at the cuts touching `ids`, or the cut nearest `at` (handles borrowed from both sides) |
+
+Trims are clamped to the source media, the free room and `MIN_DUR`; the result
+note shows the applied delta (`… (asked +5, clamped)`). Any edit op takes
+`tracks:[…]` to target lanes for that op only, and `force:true` to edit locked
+material (only when the user asked). A refused op (nothing under `at`, a
+locked clip, a media window past the file's end) aborts the whole patch unsaved.
+`setProject` also sets `inPoint` / `outPoint` (`null` clears).
+
+Example — cut the 2 s from 10 s to 12 s out of the edit, then crossfade the new cut:
+`{ops:[{op:"extract", from:10, to:12}, {op:"crossfade", at:10, duration:0.5}]}`
 
 **`fablecut_set_project` is conflict-checked.** The MCP server remembers the
 `revision` from the most recent `fablecut_get_project` call. If `project.json`
@@ -526,8 +559,8 @@ project view shows chains as `fx:highpass·eq·…`.
 - A cut/split is just two clips: first with `duration: t`, second with
   `start: +t, in: +t×speed, duration: rest`.
 - **Edit tools** (timeline toolbar picker, or V / B / R / Y / U) change what a
-  clip drag does. They are editor gestures — agents get the same results by
-  patching `start` / `in` / `duration` directly, keeping linked partners equal.
+  clip drag does. Agents run the same edits with the patch ops `rippleTrim`,
+  `roll`, `slip` and `slide` (see "Timeline edit ops").
   - **Selection (V)** — move and trim, as always.
   - **Ripple edit (B)** — drag a clip edge; everything after it on the targeted
     tracks (and the clip's own lanes) moves with it, so no gap opens or closes.
@@ -640,6 +673,14 @@ obvious cuts were missed, raise it if motion is being misread as cuts.
   or AUs. Must be after audio; ffmpeg is spawned on the first frame in both modes)
   · `POST /api/export/audio?id=` (WAV body — must be sent before the first frame)
   · `POST /api/export/end?id=[&discard=1]` → `{src}` under `/exports/`
+- Export jobs (what `fablecut_export` drives): `POST /api/export/request`
+  `{range?, profile?, where?:"auto"|"tab"|"headless"}` → `{id, status, via, …}`
+  (409 if one is already running, or nothing can render it) · `GET /api/export/job?id=`
+  → `{status: pending|running|done|failed|cancelled, progress 0–1, src, error}` ·
+  `POST /api/export/job/cancel?id=`. The editor tab side: SSE event `export`
+  (a ticket), `GET /api/export/job/ticket?id=`, `POST /api/export/job/claim?id=`
+  (first tab wins, else 409), `POST /api/export/job/report?id=`
+  `{progress} | {status:"done", src} | {status:"failed", error}` → `{cancel}`.
 
 ## Recipes
 
@@ -813,7 +854,7 @@ WebCodecs / Realtime export, and `/api/export/begin` all use this value; pass th
 
 ## Export
 
-Export is user-driven (Export button → dialog). Three engines:
+Export is the Export button → dialog, or `fablecut_export` from an agent (below). Three engines:
 
 1. **Fast** — browser renders each frame with the normal compositor (SVG, keys,
    AI masks), streams JPEGs + an offline WAV mix to the server; a single ffmpeg
@@ -843,9 +884,21 @@ cannot produce a one-frame black file.
 3. IN–OUT, OUT only → from the start to `outPoint`
 4. IN–OUT, both → the range between them
 
-Claude cannot trigger export headlessly — the compositor lives in the browser;
-ask the user to click Export, or render with ffmpeg directly from `media/`
-sources if a file is needed.
+**Agents export with `fablecut_export`** (or `POST /api/export/request`). It is
+the same Fast export as the button — same compositor, audio mix and encoding
+profile — so it needs ffmpeg on PATH. The job goes to an open editor tab (the
+user sees the progress bar), or, with none open, the server starts a headless
+Chrome / Edge on the editor and closes it when the file is written
+(`FABLECUT_CHROME` picks the browser). The tab first loads the revision the
+agent last wrote, so an export right after a patch includes that patch.
+
+- `fablecut_export {}` — waits, then returns the file path under `exports/`.
+  Range: `inPoint`→`outPoint` when either is set, else the whole timeline;
+  `range:"entire"|"in-out"` overrides. `profile:"hq"` picks an encoding profile.
+- `where:"headless"` renders in the background and leaves the user's tab alone;
+  `where:"tab"` refuses if no tab is open.
+- Long edits: `wait:false` returns a job id at once; poll with `{job:"x_…"}`
+  and stop one with `{cancel:"x_…"}`. One export runs at a time.
 
 ### Encoding profiles (`encoding-profiles.json`)
 

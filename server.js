@@ -32,6 +32,7 @@ const {
   dryRunProfile,
 } = require("./encode-profiles");
 const { downloadImportUrl, maybeFaststart } = require("./import-url");
+const { createExportJobs } = require("./export-jobs");
 
 const {
   APP_DIR, DATA_DIR, MEDIA_DIR, EXPORTS_DIR, ANALYSIS_DIR, LIBRARY_DIR,
@@ -95,8 +96,8 @@ if (!fs.existsSync(PROJECT_FILE)) {
 
 /* ── SSE clients + file watching ── */
 const sseClients = new Set();
-function broadcast(event = "change") {
-  const payload = `event: ${event}\ndata: ${event}\n\n`;
+function broadcast(event = "change", data = event) {
+  const payload = `event: ${event}\ndata: ${data}\n\n`;
   for (const res of sseClients) res.write(payload);
 }
 let debounce = null;
@@ -348,6 +349,14 @@ function stopExportSweep() {
   exportSweepTimer = null;
 }
 
+/* Agent-requested exports: handed to an open editor tab over SSE, or to a
+   headless browser the server starts (export-jobs.js). */
+const exportJobs = createExportJobs({
+  url: (id) => `http://localhost:${PORT}/?exportJob=${encodeURIComponent(id)}`,
+  broadcast,
+  editors: () => sseClients.size,
+});
+
 /* Static file with HTTP Range support (required for <video> seeking) */
 function serveFile(req, res, filePath) {
   fs.stat(filePath, (err, st) => {
@@ -497,6 +506,42 @@ const server = http.createServer(async (req, res) => {
       const code = /must be https|invalid URL|blocked:|credentials|unsupported|too large|did not return/i.test(msg) ? 400 : 502;
       sendJSON(res, code, { error: msg });
     }
+    return;
+  }
+
+  /* API: agent-requested export jobs (see export-jobs.js).
+     POST /api/export/request {range?, profile?, where?} → job; GET /api/export/job?id=
+     polls it; the editor tab claims, reports and finishes it. */
+  if (p === "/api/export/request" && req.method === "POST") {
+    try {
+      const opts = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+      if (!HAS_FFMPEG) { sendJSON(res, 400, { error: "ffmpeg not found on PATH — export needs it" }); return; }
+      if (opts.profile) resolveProfile(String(opts.profile));
+      let revision = null;
+      try { revision = JSON.parse(fs.readFileSync(PROJECT_FILE, "utf8").replace(/^\uFEFF/, "")).revision ?? null; } catch {}
+      sendJSON(res, 200, exportJobs.request({ range: opts.range, profile: opts.profile, where: opts.where, revision }));
+    } catch (e) {
+      const code = e.code === 409 || e.code === 400 ? e.code : /^Unknown encoding profile/.test(e.message || "") ? 400 : 500;
+      sendJSON(res, code, { error: String(e.message || e) });
+    }
+    return;
+  }
+  if (p.startsWith("/api/export/job")) {
+    const id = url.searchParams.get("id") || "";
+    const action = p.slice("/api/export/job".length);
+    let got = false;
+    try {
+      got = action === "" && req.method === "GET" ? exportJobs.get(id)
+        : action === "/ticket" && req.method === "GET" ? exportJobs.ticket(id)
+        : action === "/claim" && req.method === "POST" ? (exportJobs.claim(id) ? { ok: true } : undefined)
+        : action === "/report" && req.method === "POST" ? exportJobs.report(id, JSON.parse((await readBody(req)).toString("utf8") || "{}"))
+        : action === "/cancel" && req.method === "POST" ? exportJobs.cancel(id)
+        : false;
+    } catch (e) { sendJSON(res, 400, { error: String(e.message || e) }); return; }
+    if (got === false) { sendJSON(res, 404, { error: "unknown export job endpoint" }); return; }
+    if (got === undefined) { sendJSON(res, 409, { error: "job is not pending — another tab took it, or it ended" }); return; }
+    if (got === null) { sendJSON(res, 404, { error: "no such export job" }); return; }
+    sendJSON(res, 200, got);
     return;
   }
 
@@ -679,6 +724,7 @@ function shutdown() {
   shuttingDown = true;
   stopExportSweep();
   for (const id of [...exportSessions.keys()]) cleanupExport(id);
+  exportJobs.shutdown();
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 2000).unref?.();
 }

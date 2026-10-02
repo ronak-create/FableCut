@@ -613,7 +613,7 @@ test("syncInspectorOffClip: a locked clip's fields and ◆ buttons are read-only
    evalProps — including glitch's deterministic jitter — so the probe is
    tested against the compositor itself, type by type. */
 const BACKOUT = lift(/const backOut = (\(u\) => \{[^\n]*\});/);
-const TRANS = slice("function evalProps(", "function shiftKF(");
+const TRANS = slice("function evalProps(", "/* Rebase clip-local keyframe times by -offset");
 
 function makeTransSandbox({ W = 1280, H = 720 } = {}) {
   return new Function(

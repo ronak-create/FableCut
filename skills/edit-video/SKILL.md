@@ -47,14 +47,16 @@ re-read after a moment instead of shelling out to ffprobe.
 
 ## Things that trip people up
 
-- A cut is just two clips: the first with `duration: t`, the second with
-  `start: +t, in: +t×speed, duration: rest`.
+- Cut, ripple, trim and insert with the `fablecut_patch_project` edit ops
+  (`split`, `rippleDelete`, `extract`, `insert`, `rippleTrim`, `roll`,
+  `slip`, `slide`, `crossfade`) instead of recomputing `start` / `in` by
+  hand — they keep linked audio stems in sync and respect the user's locks.
 - Video and audio clips must satisfy `in + duration×speed ≤ media.duration`.
 - Crossfades are same-track overlap plus `transitionIn: {type:"fade"}` on the
   later clip — not a separate object.
 - Vary the font per title. Reusing one typeface across a whole edit is the
   single clearest tell of a machine-made cut; `fablecut_docs {section:"Text"}`
   lists the built-in title styles.
-- **Export is user-driven.** The compositor lives in the browser, so you cannot
-  render headlessly. Ask the user to click Export, or run ffmpeg directly
-  against the source files if they just need a file.
+- **Export** with `fablecut_export` — the editor's own Fast export, in the
+  user's open tab or a headless Chrome / Edge. It needs ffmpeg on PATH; it
+  waits for the file and returns its path.

@@ -12,6 +12,7 @@ const assert = require("node:assert/strict");
 const path = require("node:path");
 const fs = require("node:fs");
 const { ROOT } = require("./helpers");
+const FableCutEdit = require("../edit-ops.js");
 
 const SRC = fs.readFileSync(path.join(ROOT, "app.js"), "utf8");
 
@@ -29,19 +30,11 @@ const CODE = [
   slice("function isTrackEnabled(", "function syncTrackDisabledUI("),
   slice("function audioTrackIds(", "function nextTrackId("),
   slice("function defaultTrackFor(", "function syncLinkedTiming("),
-  slice("function relinkClips(", "/* Discrete-channel labels"),
-  slice("function sourceEditTracks(", "/** Place Source window clips"),
-  slice("function placeSourceWindowClips(", "/** Open a hole on one track"),
-  slice("function punchTrackRange(", "/** Premiere-style Insert"),
-  slice("function insertSourceAtPlayhead(", "/** Premiere-style Overwrite"),
-  slice("function replaceSourceAtPlayhead(", "/** Apply Source In→Out to a timeline clip"),
-  slice("function deleteSelected(", "/** Delete selection and pull later clips"),
-  slice("function rippleDeleteSelected(", "/* Gap under playhead"),
+  slice("function toastNoSourceTarget(", "/** Apply Source In→Out to a timeline clip"),
+  slice("function deleteSelected(", "const GAP_EPS = "),
   slice("const GAP_EPS = ", "function clearFocusedTransition("),
-  slice("function splitAtPlayhead(", "/* Cut a clip at timeline time t"),
-  slice("function splitClipAt(", "/* Split every targeted-track clip"),
-  slice("function shiftKF(", "/* ═════════════════ SVG CLIPS"),
-  slice("/* ── Trim tools: ripple, roll, slip, slide", "function hasWorkArea("),
+  slice("function splitAtPlayhead(", "function trimToPlayhead("),
+  slice("/** Lift (;) removes IN→OUT", "function hasWorkArea("),
 ].join("\n");
 
 const EXPORTS = [
@@ -94,6 +87,7 @@ function world({
     ensureWave() {}, reconcileAudioChannels() {}, pause() {}, pauseSource() {},
     ensurePlayheadVisible() {}, toastSourceWindowMissing() {},
     defaultPanForChannel: (ch) => (ch === 0 ? -1 : ch === 1 ? 1 : 0),
+    FableCutEdit, shiftKF: FableCutEdit.shiftKF, undoSnapshot: () => null,
     pushUndo: () => { calls.undo++; },
     toast: (msg) => { calls.toast.push(msg); },
     applySourceWindowToClip: () => { calls.applyWindow++; },

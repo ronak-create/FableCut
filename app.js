@@ -551,12 +551,29 @@ function isTrackEnabled(id) {
    any locked member counts as locked as a whole, so sync lock never splits it. */
 function isTrackTargeted(id) { return !state.untargetedTracks.has(id); }
 function isTrackLocked(id) { return state.lockedTracks.has(id); }
-/** Lanes an edit may touch: targeted and not locked. */
-function isEditTarget(id) { return isTrackTargeted(id) && !isTrackLocked(id); }
-function isClipLocked(c) { return !!c && (c.locked === true || isTrackLocked(c.track)); }
-function isGroupLocked(c) { return withLinked([c]).some(isClipLocked); }
-/** Drop every clip whose linked group is locked. */
-function withoutLocked(clips) { return clips.filter((c) => !isGroupLocked(c)); }
+/* Timeline edit ops (split, ripple, insert, trims, crossfade…) live in
+   edit-ops.js, shared with the MCP server so an agent's patch op and the
+   editor's shortcut run the same code. The wrappers below add undo,
+   selection, toasts and saving. */
+const EDIT = FableCutEdit.create({
+  doc: () => project,
+  tracks: () => TRACKS,
+  trackLocked: (id) => isTrackLocked(id),
+  trackTargeted: (id) => isTrackTargeted(id),
+  uid: () => uid(),
+  mediaTimeAt: (c, t) => mediaTimeAt(c, t),
+  onRemove: (c) => releaseClipEl(c.id),
+  onPlace: (m, c) => {
+    if (m.kind === "video" || m.kind === "audio") ensureWave(m);
+    if (m.kind === "video" && c) reconcileAudioChannels(c, true);
+  },
+  defaultProps: () => DEFAULT_PROPS,
+});
+const {
+  isEditTarget, isClipLocked, isGroupLocked, withoutLocked, editTargetTracks, withLinked, relinkClips,
+  splitClipAt, relinkSplitRights, sourceEditTracks, placeSourceWindowClips, punchTrackRange,
+  listAlignedGaps, adjacentClip, rippleTrim, rollEdit, slipClip, slideClip, crossfadeCuts, crossfadeCut,
+} = EDIT;
 /** Does this clip reach the picture / the mix? Track output and clip enable. */
 function clipRenders(c) { return isTrackEnabled(c.track) && c.disabled !== true; }
 function toastLocked(partial = false) {
@@ -1479,6 +1496,9 @@ function listenSSE() {
   const es = new EventSource("/api/events");
   // Named events: "change" = project/media/library; "profiles" = encoding-profiles.json only
   es.addEventListener("change", () => syncFromServer());
+  es.addEventListener("export", (e) => {
+    try { runExportJob(JSON.parse(e.data)); } catch { }
+  });
   es.addEventListener("profiles", () => {
     fetchEncodeProfiles().then(() => {
       if (els.exportSetup && !els.exportSetup.classList.contains("hidden"))
@@ -2106,8 +2126,10 @@ function setBinTab(tab) {
 function undoSnapshot() {
   return JSON.stringify({ clips: project.clips, markers: project.markers || [] });
 }
-function pushUndo() {
-  runtime.undo.push(undoSnapshot());
+/** Record an undo step — `snap` lets an edit snapshot first and record only
+ *  once it knows it changed something. */
+function pushUndo(snap = undoSnapshot()) {
+  runtime.undo.push(snap);
   if (runtime.undo.length > 100) runtime.undo.shift();
   runtime.redo.length = 0;
 }
@@ -2133,29 +2155,6 @@ function redo() {
 
 function defaultTrackFor(kind) {
   return kind === "audio" ? "A1" : kind === "svg" ? "V3" : "V1";
-}
-function linkedClip(c) {
-  return c?.linkedId ? getClip(c.linkedId) : null;
-}
-/* Expand a clip list so each AV-linked partner is included once.
-   Supports N-way `linkGroup` (video + per-channel stems) and legacy pairwise `linkedId`. */
-function withLinked(clips) {
-  const out = new Map();
-  const groups = new Set();
-  for (const c of clips) {
-    out.set(c.id, c);
-    if (c.linkGroup) groups.add(c.linkGroup);
-    else {
-      const L = linkedClip(c);
-      if (L) out.set(L.id, L);
-    }
-  }
-  if (groups.size) {
-    for (const x of project.clips) {
-      if (x.linkGroup && groups.has(x.linkGroup)) out.set(x.id, x);
-    }
-  }
-  return [...out.values()];
 }
 /* ── Clip enable / lock / link ── Each acts on the selection's whole linked
    group, so picture and stems never end up in different states. */
@@ -2229,37 +2228,6 @@ function syncLinkedTiming(c) {
     }
   }
 }
-/* Rebuild AV linkGroups after load: video + audio clips that share mediaId and
-   the same start/in/duration belong together (e.g. picture + L/R/C stems from
-   one file). A clip the user unlinked carries `unlinked: true` and is never
-   re-paired. Legacy pairwise linkedId is cleared in favor of linkGroup. */
-function relinkClips() {
-  const near = (a, b) => Math.abs((+a || 0) - (+b || 0)) < 1e-3;
-  for (const c of project.clips) {
-    delete c.linkGroup;
-    delete c.linkedId;
-  }
-  const audios = project.clips.filter((c) => c.kind === "audio" && c.mediaId && c.unlinked !== true);
-  const used = new Set();
-  for (const v of project.clips) {
-    if (v.kind !== "video" || !v.mediaId || v.unlinked === true) continue;
-    const partners = audios.filter((a) =>
-      !used.has(a.id) &&
-      a.mediaId === v.mediaId &&
-      near(a.start, v.start) &&
-      near(a.in, v.in) &&
-      near(a.duration, v.duration)
-    );
-    if (!partners.length) continue;
-    const lg = "lg_" + uid();
-    v.linkGroup = lg;
-    for (const a of partners) {
-      a.linkGroup = lg;
-      used.add(a.id);
-    }
-  }
-}
-
 /* Discrete-channel labels for linked stems (WAV / Web Audio order). */
 const CHANNEL_SHORT = ["L", "R", "C", "LFE", "Ls", "Rs", "Lb", "Rb"];
 const CHANNEL_LONG = ["Left", "Right", "Center", "LFE", "Surround L", "Surround R", "Back L", "Back R"];
@@ -2396,162 +2364,11 @@ function toastSourceWindowMissing() {
   else
     toast("Mark a Source range (I / O) — or load media with a known duration");
 }
-/** Lanes that receive newly placed Source clips: [picture, ...stems].
- *  Source patching follows track targeting — the preferred lane (V1 / A1 / V3
- *  for SVG) when it is targeted and unlocked, else the lowest-numbered lane
- *  that is. Resolved against the live track list, since any lane can be
- *  removed. For video, `picture` is null when no video lane is a target (the
- *  edit lands audio-only); for other media an empty list means nowhere to go. */
-function sourceEditTracks(m) {
-  const byNum = (x, y) => (parseInt(x.slice(1), 10) || 0) - (parseInt(y.slice(1), 10) || 0);
-  const targets = (kind) => TRACKS.filter((t) => t.kind === kind && isEditTarget(t.id))
-    .map((t) => t.id).sort(byNum);
-  const lanes = targets(m.kind === "audio" ? "audio" : "video");
-  const preferred = defaultTrackFor(m.kind);
-  const pictureTrack = lanes.includes(preferred) ? preferred : lanes[0] || null;
-  if (m.kind === "video") return [pictureTrack, ...targets("audio").slice(0, 2)];
-  return pictureTrack ? [pictureTrack] : [];
-}
 function toastNoSourceTarget() {
   toast("No targeted track for this media — click a track name to target it (and unlock it)");
 }
-/** Tracks punched by Replace: placement lanes, plus any overlapping linked
- *  AV stems on A3+ (`audioChannel` set). Leaves V2/V3 and standalone music alone. */
-function sourceReplacePunchTracks(m, t0, t1) {
-  const eps = 1e-6;
-  const tracks = new Set(sourceEditTracks(m).filter(Boolean));
-  if (m.kind === "video") {
-    for (const c of project.clips) {
-      if (c.kind !== "audio" || c.props?.audioChannel == null) continue;
-      if (clipEnd(c) <= t0 + eps || c.start >= t1 - eps) continue;
-      if (isEditTarget(c.track)) tracks.add(c.track);
-    }
-  }
-  return [...tracks];
-}
-/** Place Source window clips at `at` (no undo / no timeline surgery) on the
-   lanes sourceEditTracks picked. With no targeted video lane the picture is
-   dropped and only the stems land. Returns the main clip, or the first stem
-   when only audio landed, or null. */
-function placeSourceWindowClips(m, inn, duration, at) {
-  const [pictureTrack, ...stemTracks] = sourceEditTracks(m);
-  const name = m.name.replace(/\.[^.]+$/, "");
-  const start = +at.toFixed(4);
-  const innR = +inn.toFixed(4);
-  const durR = +duration.toFixed(4);
-  const lg = "lg_" + uid();
-  let c = null;
-  if (pictureTrack) {
-    c = {
-      id: "c_" + uid(), mediaId: m.id, kind: m.kind, track: pictureTrack,
-      start, in: innR, duration: durR, name,
-      props: { ...DEFAULT_PROPS },
-    };
-    project.clips.push(c);
-  }
-  if (m.kind === "video") {
-    if (c) { c.props.volume = 0; c.linkGroup = lg; }
-    let firstStem = null;
-    for (let ch = 0; ch < stemTracks.length; ch++) {
-      const stem = {
-        id: "c_" + uid(), mediaId: m.id, kind: "audio", track: stemTracks[ch],
-        start, in: innR, duration: durR, name,
-        props: { ...DEFAULT_PROPS, audioChannel: ch, pan: defaultPanForChannel(ch) },
-        linkGroup: lg,
-      };
-      project.clips.push(stem);
-      firstStem = firstStem || stem;
-    }
-    ensureWave(m);
-    if (c) reconcileAudioChannels(c, true);
-    return c || firstStem;
-  }
-  if (m.kind === "audio") ensureWave(m);
-  return c;
-}
-/** Open a hole on one track over [t0, t1) — trim / split / delete overlaps.
- *  Sync lock: linked partners are punched too, even on untargeted tracks.
- *  Locked groups are left whole (the new clip overlaps them).
- *  Caller must relinkClips() afterwards — split pieces lose their linkGroup. */
-function punchTrackRange(trackId, t0, t1) {
-  const eps = 1e-6;
-  if (!(t1 > t0 + eps)) return;
-  const victims = withLinked(project.clips.filter((x) => x.track === trackId));
-  for (const c of victims) {
-    if (!project.clips.includes(c)) continue; // already removed this pass
-    if (isGroupLocked(c)) continue; // locked clips are never trimmed or removed
-    const end = clipEnd(c);
-    if (end <= t0 + eps || c.start >= t1 - eps) continue;
-    // Fully inside the replace window
-    if (c.start >= t0 - eps && end <= t1 + eps) {
-      releaseClipEl(c.id);
-      project.clips = project.clips.filter((x) => x !== c);
-      continue;
-    }
-    // Spans both edges → keep head + tail, drop middle
-    if (c.start < t0 - eps && end > t1 + eps) {
-      const right = splitClipAt(c, t0);
-      if (!right) {
-        // Split refused — an edge sits within MIN_DUR of t0. Don't leave the
-        // clip covering the punched range; keep the substantial side.
-        if (t0 - c.start > MIN_DUR) {
-          // Tail past t0 is the stub → keep the head, end it at t0.
-          c.duration = +(t0 - c.start).toFixed(4);
-          c.transitionOut = undefined;
-          c.keyframes = shiftKF(c.keyframes, 0, c.duration);
-        } else if (end - t1 >= MIN_DUR) {
-          // Head is the stub → keep the tail, start it at t1.
-          const oldStart = c.start;
-          c.in = +(mediaTimeAt(c, t1)).toFixed(4);
-          c.duration = +(end - t1).toFixed(4);
-          c.start = +t1.toFixed(4);
-          c.transitionIn = undefined;
-          c.keyframes = shiftKF(c.keyframes, t1 - oldStart, c.duration);
-        } else {
-          // Stubs on both sides → effectively inside the window.
-          releaseClipEl(c.id);
-          project.clips = project.clips.filter((x) => x !== c);
-        }
-        continue;
-      }
-      if (clipEnd(right) <= t1 + eps) {
-        releaseClipEl(right.id);
-        project.clips = project.clips.filter((x) => x !== right);
-      } else {
-        const tail = splitClipAt(right, t1);
-        if (tail) {
-          releaseClipEl(right.id);
-          project.clips = project.clips.filter((x) => x !== right);
-        } else {
-          right.duration = +(t1 - right.start).toFixed(4);
-          right.transitionOut = undefined;
-          right.keyframes = shiftKF(right.keyframes, 0, right.duration);
-        }
-      }
-      continue;
-    }
-    // Head overhang: ends inside the window → trim Out to t0
-    if (c.start < t0 - eps && end > t0 + eps) {
-      const cut = t0 - c.start;
-      c.duration = +cut.toFixed(4);
-      c.transitionOut = undefined;
-      c.keyframes = shiftKF(c.keyframes, 0, c.duration);
-      continue;
-    }
-    // Tail overhang: starts inside the window → trim In to t1
-    if (c.start < t1 - eps && end > t1 + eps) {
-      const oldStart = c.start;
-      c.in = +(mediaTimeAt(c, t1)).toFixed(4);
-      c.duration = +(end - t1).toFixed(4);
-      c.start = +t1.toFixed(4);
-      c.transitionIn = undefined;
-      c.keyframes = shiftKF(c.keyframes, t1 - oldStart, c.duration);
-    }
-  }
-}
 /** Premiere-style Insert: place Source In→Out at the timeline playhead and
- *  ripple later clips on targeted tracks. Splits straddling clips on those
- *  tracks first (linked partners split too). */
+ *  ripple later clips on targeted tracks (EDIT.insertAt). */
 function insertSourceAtPlayhead() {
   const win = sourceInsertWindow();
   if (!win) { toastSourceWindowMissing(); return; }
@@ -2559,41 +2376,8 @@ function insertSourceAtPlayhead() {
   if (!sourceEditTracks(m).some(Boolean)) { toastNoSourceTarget(); return; }
   if (state.playing) pause();
   if (state.source.playing) pauseSource();
-  let at = Math.max(0, state.time);
-
-  const onTrack = (c) => isEditTarget(c.track);
-  const eps = 1e-6;
-
-  // Snap `at` to nearby cuts if it falls in the unsplittable MIN_DUR dead zone.
-  for (const c of project.clips) {
-    if (!onTrack(c)) continue;
-    if (at > c.start - eps && at <= c.start + MIN_DUR) {
-      at = c.start; break;
-    }
-    if (at >= clipEnd(c) - MIN_DUR && at < clipEnd(c) + eps) {
-      at = clipEnd(c); break;
-    }
-  }
-
   pushUndo();
-  // Open a seam at the playhead so the ripple can push the right halves.
-  const toSplit = withoutLocked(withLinked(project.clips.filter((c) =>
-    onTrack(c) && at > c.start + MIN_DUR && at < clipEnd(c) - MIN_DUR
-  )));
-  if (toSplit.length) {
-    const newLink = new Map();
-    for (const c of toSplit) {
-      const right = splitClipAt(c, at);
-      if (right) newLink.set(c.id, right);
-    }
-    relinkSplitRights(toSplit, newLink);
-  }
-  // Sync lock: linked partners ride along even on untargeted tracks; locked
-  // groups stay put.
-  const movers = withoutLocked(withLinked(project.clips.filter((c) => onTrack(c) && c.start >= at - eps)));
-  for (const c of movers) c.start = +(c.start + duration).toFixed(4);
-
-  const c = placeSourceWindowClips(m, inn, duration, at);
+  const { clip: c, at } = EDIT.insertAt(m, inn, duration, state.time);
   if (c) selectClip(c.id);
   state.time = +(at + duration).toFixed(4);
   state.dirtyTimeline = true;
@@ -2619,16 +2403,11 @@ function replaceSourceAtPlayhead() {
   if (!sourceEditTracks(m).some(Boolean)) { toastNoSourceTarget(); return; }
   if (state.playing) pause();
   if (state.source.playing) pauseSource();
-  const at = Math.max(0, state.time);
-  const t1 = at + duration;
-
   pushUndo();
-  for (const tid of sourceReplacePunchTracks(m, at, t1)) punchTrackRange(tid, at, t1);
-  relinkClips(); // re-pair head/tail pieces across tracks after punch splits
+  const { clip: c, at } = EDIT.overwriteAt(m, inn, duration, state.time);
   pruneSelection();
-  const c = placeSourceWindowClips(m, inn, duration, at);
   if (c) selectClip(c.id);
-  state.time = +t1.toFixed(4);
+  state.time = +(at + duration).toFixed(4);
   state.dirtyTimeline = true;
   scheduleSave();
   ensurePlayheadVisible();
@@ -2966,140 +2745,33 @@ function addAdjust() {
   selectClip(c.id); scheduleSave();
 }
 function deleteSelected() {
-  const picked = withLinked(selectedClips());
-  const doomed = withoutLocked(picked);
-  if (doomed.length < picked.length) toastLocked(doomed.length > 0);
-  if (!doomed.length) return;
-  pushUndo();
-  const ids = new Set(doomed.map((c) => c.id));
-  for (const c of doomed) releaseClipEl(c.id);
-  project.clips = project.clips.filter((x) => !ids.has(x.id));
+  const snap = undoSnapshot();
+  const { removed, blocked } = EDIT.removeClips(selectedClips());
+  if (blocked) toastLocked(removed.length > 0);
+  if (!removed.length) return;
+  pushUndo(snap);
   setSelection([]);
   scheduleSave(); renderInspector();
 }
 /** Delete selection and pull later clips left on targeted tracks (per-track ripple). */
 function rippleDeleteSelected() {
-  const picked = withLinked(selectedClips());
-  const doomed = withoutLocked(picked);
-  if (doomed.length < picked.length) toastLocked(doomed.length > 0);
-  if (!doomed.length) return;
-  const byTrack = new Map();
-  for (const c of doomed) {
-    if (!byTrack.has(c.track)) byTrack.set(c.track, []);
-    byTrack.get(c.track).push(c);
-  }
-  pushUndo();
-  const ids = new Set(doomed.map((c) => c.id));
-  for (const c of doomed) releaseClipEl(c.id);
-  project.clips = project.clips.filter((x) => !ids.has(x.id));
-  const eps = 1e-6;
-  // Merged removed ranges per targeted, unlocked track.
-  const rangesByTrack = new Map();
-  for (const [trackId, removed] of byTrack) {
-    if (!isEditTarget(trackId)) continue;
-    const ranges = removed.map((c) => [c.start, clipEnd(c)]).sort((a, b) => a[0] - b[0]);
-    const merged = [];
-    for (const [s, e] of ranges) {
-      const last = merged[merged.length - 1];
-      if (last && s <= last[1] + eps) last[1] = Math.max(last[1], e);
-      else merged.push([s, e]);
-    }
-    rangesByTrack.set(trackId, merged);
-  }
-  const shiftFor = (ranges, p) => {
-    let d = 0;
-    for (const [s, e] of ranges) if (e <= p + eps) d += e - s;
-    return d;
-  };
-  // Sync lock: a linked group shifts ONCE by the union of its member tracks'
-  // ranges (partners on untargeted tracks ride along) — never once per track.
-  // Unlinked clips use their own track's ranges.
-  const grouped = new Map(), groups = [], solo = [];
-  for (const c of project.clips) {
-    if (grouped.has(c.id)) continue;
-    const members = withLinked([c]);
-    if (members.length === 1) { solo.push(c); continue; }
-    const g = { tracks: new Set(members.map((x) => x.track)), clips: members };
-    groups.push(g);
-    for (const x of members) grouped.set(x.id, g);
-  }
-  for (const c of solo) {
-    if (isClipLocked(c)) continue; // locked clips stay put
-    const d = shiftFor(rangesByTrack.get(c.track) || [], c.start);
-    if (d > 0) c.start = Math.max(0, +(c.start - d).toFixed(4));
-  }
-  for (const g of groups) {
-    if (g.clips.some(isClipLocked)) continue; // a locked member pins the whole group
-    const all = [];
-    for (const tid of g.tracks) {
-      const r = rangesByTrack.get(tid);
-      if (r) all.push(...r);
-    }
-    if (!all.length) continue;
-    all.sort((a, b) => a[0] - b[0]);
-    const merged = [];
-    for (const [s, e] of all) {
-      const last = merged[merged.length - 1];
-      if (last && s <= last[1] + eps) last[1] = Math.max(last[1], e);
-      else merged.push([s, e]);
-    }
-    for (const c of g.clips) {
-      const d = shiftFor(merged, c.start);
-      if (d > 0) c.start = Math.max(0, +(c.start - d).toFixed(4));
-    }
-  }
+  const snap = undoSnapshot();
+  const { removed, blocked } = EDIT.rippleDelete(selectedClips());
+  if (blocked) toastLocked(removed.length > 0);
+  if (!removed.length) return;
+  pushUndo(snap);
   setSelection([]);
   state.dirtyTimeline = true;
   scheduleSave(); renderInspector();
 }
-/* Gap under playhead on one track, or null if a clip covers t.
-   Empty track → [0, +Infinity]. Trailing void → gapEnd = +Infinity. */
-const GAP_EPS = 1e-4;
-function gapAtPlayhead(trackId, t) {
-  const clips = project.clips.filter((c) => c.track === trackId).sort((a, b) => a.start - b.start);
-  for (const c of clips) {
-    if (c.start <= t && t < clipEnd(c)) return null;
-  }
-  let gapStart = 0;
-  for (const c of clips) {
-    if (clipEnd(c) <= t) gapStart = Math.max(gapStart, clipEnd(c));
-  }
-  let gapEnd = Infinity;
-  for (const c of clips) {
-    if (c.start > t) gapEnd = Math.min(gapEnd, c.start);
-  }
-  return { gapStart, gapEnd };
-}
-/* Sync-safe close: every targeted track must have a gap at the playhead; close
-   the intersection of those gaps by shifting later clips on those tracks.
-   Locked tracks are not targets, and locked clips stay put. */
-function editTargetTracks() {
-  return TRACKS.filter((tr) => isEditTarget(tr.id));
-}
+const GAP_EPS = FableCutEdit.GAP_EPS;
+/* Sync-safe close (EDIT.closeGapAt): every targeted track must have a gap at
+   the playhead; their intersection closes. Locked clips stay put. */
 function closeGapAtPlayhead() {
-  const t = state.time;
-  const enabled = editTargetTracks();
-  if (!enabled.length) { toast("No targeted tracks — click a track name to target it"); return; }
-  let L = 0, R = Infinity;
-  for (const tr of enabled) {
-    const g = gapAtPlayhead(tr.id, t);
-    if (!g) {
-      toast(`No gap on ${tr.id} — untarget the track or move the playhead`);
-      return;
-    }
-    L = Math.max(L, g.gapStart);
-    R = Math.min(R, g.gapEnd);
-  }
-  const G = R - L;
-  if (!isFinite(R) || G <= GAP_EPS) {
-    toast("Nothing to close at playhead");
-    return;
-  }
-  // Sync lock: linked partners ride along even on untargeted tracks.
-  const movers = withoutLocked(withLinked(project.clips.filter((c) => isEditTarget(c.track) && c.start >= R - GAP_EPS)));
-  if (!movers.length) { toast("Nothing to close at playhead"); return; }
-  pushUndo();
-  for (const c of movers) c.start = Math.max(0, c.start - G);
+  const snap = undoSnapshot();
+  const G = EDIT.closeGapAt(state.time);
+  if (typeof G === "string") { toast(G); return; }
+  pushUndo(snap);
   state.dirtyTimeline = true;
   scheduleSave();
   const label = G >= 1 ? G.toFixed(2) : G.toFixed(3);
@@ -3162,44 +2834,6 @@ function gapSearchRange() {
   }
   return { t0: 0, t1: Math.max(projDur(), 0) };
 }
-/* Aligned gaps on targeted tracks inside [t0, t1] — same notion as closeGapAtPlayhead. */
-function listAlignedGaps(t0, t1) {
-  const enabled = editTargetTracks();
-  if (!enabled.length || t1 - t0 <= GAP_EPS) return [];
-  const edges = new Set([t0, t1]);
-  for (const c of project.clips) {
-    if (!isEditTarget(c.track)) continue;
-    const s = c.start, e = clipEnd(c);
-    if (s > t0 && s < t1) edges.add(s);
-    if (e > t0 && e < t1) edges.add(e);
-  }
-  const ts = [...edges].sort((a, b) => a - b);
-  const gaps = [];
-  const seen = new Set();
-  for (let i = 0; i < ts.length - 1; i++) {
-    const a = ts[i], b = ts[i + 1];
-    if (b - a <= GAP_EPS) continue;
-    const mid = (a + b) / 2;
-    let L = -Infinity, R = Infinity;
-    let ok = true;
-    for (const tr of enabled) {
-      const g = gapAtPlayhead(tr.id, mid);
-      if (!g) { ok = false; break; }
-      L = Math.max(L, g.gapStart);
-      R = Math.min(R, g.gapEnd);
-    }
-    if (!ok) continue;
-    L = Math.max(L, t0);
-    R = Math.min(isFinite(R) ? R : t1, t1);
-    if (R - L <= GAP_EPS) continue;
-    const key = L.toFixed(5) + ":" + R.toFixed(5);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    gaps.push({ L, R });
-  }
-  gaps.sort((a, b) => a.L - b.L);
-  return gaps;
-}
 function ensurePlayheadVisible() {
   const px = state.time * state.pps, sc = els.timelineScroll;
   if (!sc) return;
@@ -3224,63 +2858,12 @@ function goToNextGap() {
   ensurePlayheadVisible();
 }
 function splitAtPlayhead() {
-  const t = state.time;
   // A selection splits wherever it sits; with none, the targeted tracks do.
-  const pool = state.selIds.size ? selectedClips() : project.clips.filter((c) => isEditTarget(c.track));
-  const straddlers = pool.filter((c) => t > c.start + MIN_DUR && t < clipEnd(c) - MIN_DUR);
-  const targets = withoutLocked(withLinked(straddlers));
-  if (!targets.length) {
-    if (straddlers.length) toastLocked();
-    return;
-  }
-  pushUndo();
-  // Pair linked splits so the new right halves stay linked to each other
-  const newLink = new Map(); // oldClipId -> newRightId
-  for (const c of targets) {
-    const right = splitClipAt(c, t);
-    if (right) newLink.set(c.id, right);
-  }
-  relinkSplitRights(targets, newLink);
+  const snap = undoSnapshot();
+  const { split, blocked } = EDIT.splitAt(state.time, state.selIds.size ? selectedClips() : null);
+  if (!split) { if (blocked) toastLocked(); return; }
+  pushUndo(snap);
   scheduleSave();
-}
-/* Cut a clip at timeline time t (must fall strictly inside the clip). Leaves
-   the left piece as `c` and appends the right piece. */
-function splitClipAt(c, t) {
-  if (!(t > c.start + MIN_DUR && t < clipEnd(c) - MIN_DUR)) return null;
-  const cut = t - c.start;
-  const right = {
-    ...c, id: "c_" + uid(), props: { ...c.props },
-    start: t, in: +(mediaTimeAt(c, t)).toFixed(4), duration: clipEnd(c) - t,
-    keyframes: shiftKF(c.keyframes, cut, clipEnd(c) - t),
-    transitionIn: undefined,
-    linkedId: undefined,
-    linkGroup: undefined,
-  };
-  c.duration = cut;
-  c.keyframes = shiftKF(c.keyframes, 0, cut);
-  c.transitionOut = undefined;
-  project.clips.push(right);
-  return right;
-}
-/* After splitting a set of clips, wire each new right half to its partner's right half. */
-function relinkSplitRights(targets, newLink) {
-  const newGroups = new Map(); // old linkGroup -> new linkGroup for right halves
-  for (const c of targets) {
-    const right = newLink.get(c.id);
-    if (!right) continue;
-    if (c.linkGroup) {
-      if (!newGroups.has(c.linkGroup)) newGroups.set(c.linkGroup, "lg_" + uid());
-      right.linkGroup = newGroups.get(c.linkGroup);
-    } else {
-      const partner = c.linkedId ? newLink.get(c.linkedId) : null;
-      if (partner) {
-        right.linkedId = partner.id;
-        partner.linkedId = right.id;
-      } else {
-        delete right.linkedId;
-      }
-    }
-  }
 }
 /* Split every targeted-track clip that crosses IN and/or OUT (no head/tail removal). */
 function splitAtWorkArea() {
@@ -3289,22 +2872,9 @@ function splitAtWorkArea() {
     toast("Set an IN or OUT marker first (I / O)");
     return;
   }
-  const onTrack = (c) => isEditTarget(c.track);
-  const targets = withoutLocked(withLinked(project.clips.filter((c) =>
-    onTrack(c) && cuts.some((t) => t > c.start + MIN_DUR && t < clipEnd(c) - MIN_DUR)
-  )));
-  if (!targets.length) { toast("Nothing to split at IN/OUT"); return; }
-  pushUndo();
-  // Right-to-left so each successive cut still lands on the left-hand piece
-  for (const t of cuts.slice().sort((a, b) => b - a)) {
-    const atT = targets.filter((c) => t > c.start + MIN_DUR && t < clipEnd(c) - MIN_DUR);
-    const newLink = new Map();
-    for (const c of atT) {
-      const right = splitClipAt(c, t);
-      if (right) newLink.set(c.id, right);
-    }
-    relinkSplitRights(atT, newLink);
-  }
+  const snap = undoSnapshot();
+  if (!EDIT.splitAtTimes(cuts)) { toast("Nothing to split at IN/OUT"); return; }
+  pushUndo(snap);
   scheduleSave();
 }
 function trimToPlayhead(side) {
@@ -3331,244 +2901,22 @@ function trimToWorkArea() {
     toast("Set an IN or OUT marker first (I / O)");
     return;
   }
-  const onTrack = (c) => isEditTarget(c.track) && !isGroupLocked(c);
-  const willChange = project.clips.some((c) => {
-    if (!onTrack(c)) return false;
-    const start = c.start, end = clipEnd(c);
-    let t0 = start, t1 = end;
-    if (inn != null) t0 = Math.max(t0, inn);
-    if (out != null) t1 = Math.min(t1, out);
-    return t1 - t0 < MIN_DUR || t0 > start + 1e-6 || t1 < end - 1e-6;
-  });
-  if (!willChange) { toast("Nothing to trim"); return; }
-
-  pushUndo();
-  const doomed = new Set();
-  // Sync lock: linked partners ride along even on untargeted tracks.
-  const targets = withoutLocked(withLinked(project.clips.filter((c) => onTrack(c))));
-  for (const c of targets) {
-    const start = c.start, end = clipEnd(c);
-    let t0 = start, t1 = end;
-    if (inn != null) t0 = Math.max(t0, inn);
-    if (out != null) t1 = Math.min(t1, out);
-    if (t1 - t0 < MIN_DUR) { doomed.add(c.id); continue; }
-
-    const dIn = t0 - start;
-    if (dIn > 1e-6) {
-      c.start = t0;
-      if (c.kind === "video" || c.kind === "audio") c.in += dIn * clipSpeed(c);
-      else c.in = 0;
-      c.duration -= dIn;
-      c.keyframes = shiftKF(c.keyframes, dIn, c.duration);
-      c.transitionIn = undefined;
-    }
-    if (clipEnd(c) - t1 > 1e-6) {
-      c.duration = Math.max(MIN_DUR, t1 - c.start);
-      c.keyframes = shiftKF(c.keyframes, 0, c.duration);
-      c.transitionOut = undefined;
-    }
-  }
-  for (const id of doomed) releaseClipEl(id);
-  if (doomed.size) project.clips = project.clips.filter((c) => !doomed.has(c.id));
+  const snap = undoSnapshot();
+  if (!EDIT.trimToRange(inn, out)) { toast("Nothing to trim"); return; }
+  pushUndo(snap);
   pruneSelection();
   scheduleSave();
   renderInspector();
-}
-/* ── Trim tools: ripple, roll, slip, slide · range lift / extract ──
-   Each op edits from the current state by `delta` seconds of timeline time and
-   returns the delta it actually applied — clamped to the source media, MIN_DUR
-   and the free room on the track — or a string saying why it refuses (a lock,
-   a clip with no source time). The drag gesture restores its start-of-drag
-   snapshot before every call, so the ops stay stateless and a drag can swing
-   back and forth freely. Sync lock as everywhere else: linked partners take
-   the identical trim, ripples shift the targeted tracks (plus the edited
-   clip's own), and locked groups never move. */
-const TRIM_EPS = 1e-3;
-const TRIM_LOCKED = "Locked — unlock the clip or its track to edit";
-const isMediaClip = (c) => c.kind === "video" || c.kind === "audio";
-
-/** Longest this clip may run before it runs out of source media. */
-function maxClipDur(c) {
-  if (!isMediaClip(c)) return Infinity;
-  const m = getMedia(c.mediaId);
-  if (!m || !(m.duration > 0)) return Infinity;
-  return Math.max(MIN_DUR, (m.duration - c.in) / clipSpeed(c));
-}
-/* A linked group shares its timing, but a partner may run at a different
-   speed (links are inferred from timing alone), so every source limit is the
-   tightest across the whole group, never just the clip that was grabbed. */
-/** Longest c's linked group may run before any member runs out of source. */
-function groupMaxDur(c) {
-  return Math.min(...withLinked([c]).map(maxClipDur));
-}
-/** How far c's group can pull its head back before any member reaches source 0. */
-function groupHeadRoom(c) {
-  return Math.min(...withLinked([c]).map((x) => (isMediaClip(x) ? x.in / clipSpeed(x) : Infinity)));
-}
-/** The clip butting against c's head ("in") or tail ("out") on its track. */
-function adjacentClip(c, side) {
-  const t = side === "in" ? c.start : clipEnd(c);
-  return project.clips.find((x) => x !== c && x.track === c.track &&
-    Math.abs((side === "in" ? clipEnd(x) : x.start) - t) < TRIM_EPS) || null;
-}
-/** Empty room on c's track before its head / after its tail. */
-function freeRoom(c, side) {
-  let room = side === "in" ? c.start : Infinity;
-  for (const x of project.clips) {
-    if (x === c || x.track !== c.track) continue;
-    if (side === "in" && clipEnd(x) <= c.start + TRIM_EPS) room = Math.min(room, c.start - clipEnd(x));
-    if (side === "out" && x.start >= clipEnd(c) - TRIM_EPS) room = Math.min(room, x.start - clipEnd(c));
-  }
-  return Math.max(0, room);
-}
-function clampTransitions(c) {
-  for (const k of ["transitionIn", "transitionOut"])
-    if (c[k] && c[k].duration > c.duration) c[k] = { ...c[k], duration: +c.duration.toFixed(3) };
-}
-/** Set the tail of c and its linked partners (same timing, so same math). */
-function trimGroupTail(c, dur) {
-  for (const x of withLinked([c])) {
-    x.duration = +dur.toFixed(4);
-    x.keyframes = shiftKF(x.keyframes, 0, x.duration);
-    clampTransitions(x);
-  }
-}
-/** Cut `d` seconds off the head of c and its partners (d < 0 extends it).
- *  moveStart: the head edge moves on the timeline (roll / slide); otherwise
- *  the clip keeps its start and only its source In advances (ripple). */
-function trimGroupHead(c, d, moveStart) {
-  for (const x of withLinked([c])) {
-    if (moveStart) x.start = +(x.start + d).toFixed(4);
-    if (isMediaClip(x)) x.in = +(x.in + d * clipSpeed(x)).toFixed(4);
-    x.duration = +(x.duration - d).toFixed(4);
-    x.keyframes = shiftKF(x.keyframes, d, x.duration);
-    clampTransitions(x);
-  }
-}
-const clampD = (d, lo, hi) => Math.min(hi, Math.max(lo, d));
-
-/** Ripple trim (B): move c's head or tail and shift everything after it, so
- *  no gap opens or closes. Tail: delta > 0 lengthens the clip. Head: delta > 0
- *  cuts material off the head — the clip keeps its start and the rest of the
- *  timeline pulls left by the same amount. */
-function rippleTrim(c, side, delta) {
-  const group = withLinked([c]);
-  if (group.some(isClipLocked)) return TRIM_LOCKED;
-  const oldEnd = clipEnd(c);
-  let lo, hi;
-  if (side === "out") { lo = MIN_DUR - c.duration; hi = groupMaxDur(c) - c.duration; }
-  else { lo = -groupHeadRoom(c); hi = c.duration - MIN_DUR; }
-  const groupIds = new Set(group.map((x) => x.id));
-  const lanes = new Set(group.map((x) => x.track));
-  const movers = withoutLocked(withLinked(project.clips.filter((x) => !groupIds.has(x.id) &&
-    (isEditTarget(x.track) || lanes.has(x.track)) && !isTrackLocked(x.track) &&
-    x.start >= oldEnd - TRIM_EPS)));
-  // Pulling left can't push a lane's first mover into what sits before it.
-  const moverIds = new Set(movers.map((x) => x.id));
-  const first = new Map();
-  for (const x of movers) first.set(x.track, Math.min(first.get(x.track) ?? Infinity, x.start));
-  let leftRoom = Infinity;
-  for (const [tr, f] of first) {
-    let blockEnd = 0;
-    for (const x of project.clips)
-      if (x.track === tr && !moverIds.has(x.id) && !groupIds.has(x.id) && x.start < f - TRIM_EPS)
-        blockEnd = Math.max(blockEnd, clipEnd(x));
-    leftRoom = Math.min(leftRoom, Math.max(0, f - blockEnd));
-  }
-  if (side === "out") lo = Math.max(lo, -leftRoom); else hi = Math.min(hi, leftRoom);
-  const d = clampD(delta, lo, hi);
-  if (Math.abs(d) < 1e-9) return 0;
-  if (side === "out") trimGroupTail(c, c.duration + d); else trimGroupHead(c, d, false);
-  const shift = side === "out" ? d : -d;
-  for (const x of movers) x.start = +(x.start + shift).toFixed(4);
-  return d;
-}
-/** Roll edit (R): move the cut on c's head or tail. The clip on the other side
- *  gives or takes the same amount, so nothing downstream moves. With no clip
- *  butting against that edge, it trims into the free room only. */
-function rollEdit(c, side, delta) {
-  const left = side === "out" ? c : adjacentClip(c, "in");
-  const right = side === "out" ? adjacentClip(c, "out") : c;
-  if ([left, right].some((x) => x && isGroupLocked(x))) return TRIM_LOCKED;
-  let lo = -Infinity, hi = Infinity;
-  if (left) { lo = MIN_DUR - left.duration; hi = groupMaxDur(left) - left.duration; }
-  else lo = -freeRoom(right, "in");
-  if (right) {
-    hi = Math.min(hi, right.duration - MIN_DUR);
-    lo = Math.max(lo, -groupHeadRoom(right));
-  } else hi = Math.min(hi, freeRoom(left, "out"));
-  const d = clampD(delta, lo, hi);
-  if (Math.abs(d) < 1e-9) return 0;
-  if (left) trimGroupTail(left, left.duration + d);
-  if (right) trimGroupHead(right, d, true);
-  return d;
-}
-/** Slip (Y): show a different part of the source through the same window.
- *  delta > 0 drags the picture right, i.e. earlier source. Position and
- *  length stay; clip-local keyframes stay put on the timeline. */
-function slipClip(c, delta) {
-  if (!isMediaClip(c)) return "Slip needs a video or audio clip — stills and titles have no source time";
-  if (isGroupLocked(c)) return TRIM_LOCKED;
-  const sp = clipSpeed(c);
-  const group = withLinked([c]);
-  // The shared In may go no later than the tightest member allows: each one
-  // consumes its own span of source (speed can differ across the group).
-  let maxIn = Infinity;
-  for (const x of group) {
-    if (!isMediaClip(x)) continue;
-    const m = getMedia(x.mediaId);
-    if (m && m.duration > 0) maxIn = Math.min(maxIn, Math.max(0, m.duration - (mediaTimeAt(x, clipEnd(x)) - x.in)));
-  }
-  const newIn = clampD(c.in - delta * sp, 0, maxIn);
-  const d = (c.in - newIn) / sp;
-  if (Math.abs(d) < 1e-9) return 0;
-  for (const x of group) x.in = +newIn.toFixed(4);
-  return d;
-}
-/** Slide (U): move c along its track; the clip before it lengthens or
- *  shortens its tail and the clip after it its head, so c's content and the
- *  sequence length stay. Without a neighbor, c slides into the free room. */
-function slideClip(c, delta) {
-  const prev = adjacentClip(c, "in"), next = adjacentClip(c, "out");
-  if ([c, prev, next].some((x) => x && isGroupLocked(x))) return TRIM_LOCKED;
-  let lo = prev ? MIN_DUR - prev.duration : -freeRoom(c, "in");
-  let hi = prev ? groupMaxDur(prev) - prev.duration : Infinity;
-  if (next) {
-    hi = Math.min(hi, next.duration - MIN_DUR);
-    lo = Math.max(lo, -groupHeadRoom(next));
-  } else hi = Math.min(hi, freeRoom(c, "out"));
-  const d = clampD(delta, lo, hi);
-  if (Math.abs(d) < 1e-9) return 0;
-  if (prev) trimGroupTail(prev, prev.duration + d);
-  if (next) trimGroupHead(next, d, true);
-  for (const x of withLinked([c])) x.start = +(x.start + d).toFixed(4);
-  return d;
 }
 /** Lift (;) removes IN→OUT on the targeted tracks and leaves the gap.
  *  Extract (') removes it and closes the gap. Linked partners are cut too,
  *  locked clips stay whole, and IN / OUT clear afterwards (as in Premiere). */
 function liftExtract(extract) {
   const t0 = project.inPoint, t1 = project.outPoint;
-  if (t0 == null || t1 == null || !(t1 - t0 > MIN_DUR)) {
-    toast(`Set IN and OUT first (I / O) to ${extract ? "extract" : "lift"} that range`);
-    return;
-  }
-  const lanes = editTargetTracks().map((t) => t.id);
-  if (!lanes.length) { toast("No targeted tracks — click a track name to target it"); return; }
-  const inside = (c) => clipEnd(c) > t0 + 1e-6 && c.start < t1 - 1e-6;
-  if (!extract && !project.clips.some((c) => lanes.includes(c.track) && inside(c) && !isGroupLocked(c))) {
-    toast("Nothing to lift between IN and OUT");
-    return;
-  }
-  pushUndo();
-  for (const id of lanes) punchTrackRange(id, t0, t1);
-  relinkClips(); // re-pair head / tail pieces across tracks
-  if (extract) {
-    const gap = t1 - t0;
-    const movers = withoutLocked(withLinked(project.clips.filter((c) =>
-      isEditTarget(c.track) && c.start >= t1 - 1e-6)));
-    for (const c of movers) c.start = Math.max(0, +(c.start - gap).toFixed(4));
-  }
+  const snap = undoSnapshot();
+  const why = EDIT.liftRange(t0, t1, extract);
+  if (why) { toast(why); return; }
+  pushUndo(snap);
   project.inPoint = project.outPoint = null;
   updateWorkArea();
   syncTrimIOButton();
@@ -3578,102 +2926,22 @@ function liftExtract(extract) {
   scheduleSave();
   toast(`${extract ? "Extracted" : "Lifted"} ${(t1 - t0).toFixed(2)}s`);
 }
-/* ── Audio crossfade (Shift+D). A crossfade here is the same-track overlap
-   idiom: A runs on past the cut, B starts before it, A fades out and B fades
-   in over the overlap with constant-power curves. The overlap comes from
-   spare media beyond each clip's edge, split around the cut; picture linked
-   to B dissolves in over A (only B fades, so the frame never dips to black). */
-const CROSSFADE_DUR = 1;
-const XF_EPS = 0.02;
-/** Audio cuts touching `clips`: each pair is {a, b} with a before b on one
- *  track, b starting at (or before) a's end. */
-function crossfadeCuts(clips) {
-  const pairs = new Map();
-  const audio = (x) => x.kind === "audio";
-  for (const c of clips.filter(audio)) {
-    const lane = project.clips.filter((x) => audio(x) && x !== c && x.track === c.track);
-    const next = lane.filter((x) => x.start > c.start + XF_EPS && x.start <= clipEnd(c) + XF_EPS &&
-      clipEnd(x) > clipEnd(c)).sort((x, y) => x.start - y.start)[0];
-    const prev = lane.filter((x) => x.start < c.start - XF_EPS && clipEnd(x) >= c.start - XF_EPS &&
-      clipEnd(x) < clipEnd(c)).sort((x, y) => clipEnd(y) - clipEnd(x))[0];
-    if (next) pairs.set(c.id + ">" + next.id, { a: c, b: next });
-    if (prev) pairs.set(prev.id + ">" + c.id, { a: prev, b: c });
-  }
-  return [...pairs.values()];
-}
-/** Spare source after a clip's out / before its in, in timeline seconds. */
-function tailRoom(x) {
-  const m = getMedia(x.mediaId), sp = clipSpeed(x);
-  if (!(m?.duration > 0)) return 0;
-  return Math.max(0, (m.duration - (x.in + x.duration * sp)) / sp);
-}
-function headRoom(x) { return Math.max(0, Math.min(x.in / clipSpeed(x), x.start)); }
-/** Crossfade one cut. Returns null, or why it could not. */
-function crossfadeCut(a, b, dur = CROSSFADE_DUR) {
-  if (isGroupLocked(a) || isGroupLocked(b)) return "locked";
-  const ga = withLinked([a]), gb = withLinked([b]);
-  let d = clipEnd(a) - b.start; // already overlapping: fade across what is there
-  if (d < MIN_TRANS_DUR - 1e-6) {
-    const roomA = Math.min(...ga.map(tailRoom)), roomB = Math.min(...gb.map(headRoom));
-    const gap = Math.max(0, b.start - clipEnd(a)); // a hair of gap at the cut is closed too
-    const want = dur + gap;
-    let e1 = Math.min(want / 2, roomA);
-    const e2 = Math.min(want - e1, roomB);
-    e1 = Math.min(want - e2, roomA);
-    d = e1 + e2 - gap;
-    if (d < MIN_TRANS_DUR - 1e-6) return "no spare media beyond the cut";
-    for (const x of ga) x.duration = +(x.duration + e1).toFixed(4);
-    for (const x of gb) {
-      const sp = clipSpeed(x);
-      x.start = +(x.start - e2).toFixed(4);
-      x.in = +Math.max(0, x.in - e2 * sp).toFixed(4);
-      x.duration = +(x.duration + e2).toFixed(4);
-      x.keyframes = shiftKF(x.keyframes, -e2, x.duration);
-    }
-  }
-  d = +Math.min(d, a.duration, b.duration).toFixed(3);
-  for (const x of ga) if (x.kind === "audio") x.transitionOut = { type: "fade", duration: d, curve: "power" };
-  for (const x of gb) {
-    if (x.kind === "audio") x.transitionIn = { type: "fade", duration: d, curve: "power" };
-    else if (x.kind === "video") x.transitionIn = { type: "fade", duration: d };
-  }
-  return null;
-}
 /** Shift+D: crossfade the cuts of the selected audio clips, or — with no
  *  selection — the audio cut nearest the playhead on each targeted track. */
-function crossfadeSelected(dur = CROSSFADE_DUR) {
-  let pairs = crossfadeCuts(withLinked(selectedClips()));
-  if (!state.selIds.size) {
-    pairs = [];
-    for (const t of TRACKS) {
-      if (t.kind !== "audio" || !isEditTarget(t.id)) continue;
-      const near = crossfadeCuts(project.clips.filter((x) => x.track === t.id))
-        .map((p) => ({ ...p, dist: Math.abs(p.b.start - state.time) }))
-        .filter((p) => p.dist <= 0.5).sort((x, y) => x.dist - y.dist)[0];
-      if (near) pairs.push(near);
-    }
-  }
+function crossfadeSelected(dur = FableCutEdit.CROSSFADE_DUR) {
+  const pairs = state.selIds.size ? crossfadeCuts(withLinked(selectedClips())) : EDIT.crossfadeCutsNear(state.time);
   if (!pairs.length) {
     toast(state.selIds.size ? "No audio cut next to the selection — clips must touch or overlap on one track"
       : "No audio cut near the playhead on the targeted tracks");
     return;
   }
   pushUndo();
-  let done = 0;
-  const why = new Set();
-  const seen = new Set();
-  for (const { a, b } of pairs) {
-    const key = (a.linkGroup || a.id) + ">" + (b.linkGroup || b.id); // one stereo pair = one cut
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const r = crossfadeCut(a, b, dur);
-    if (r) why.add(r); else done++;
-  }
+  const { done, why } = EDIT.crossfadePairs(pairs, dur);
   state.dirtyTimeline = true;
   scheduleSave();
   renderInspector();
-  if (done) toast(`Crossfaded ${done} cut${done === 1 ? "" : "s"}` + (why.size ? ` · skipped: ${[...why].join(", ")}` : ""));
-  else toast(`Couldn't crossfade: ${[...why].join(", ")}`);
+  if (done) toast(`Crossfaded ${done} cut${done === 1 ? "" : "s"}` + (why.length ? ` · skipped: ${why.join(", ")}` : ""));
+  else toast(`Couldn't crossfade: ${why.join(", ")}`);
 }
 function hasWorkArea() {
   return project.inPoint != null || project.outPoint != null;
@@ -3687,9 +2955,11 @@ function playRange() {
 /* Export window. IN/OUT are clamped to the content span so a marker past
    the last clip cannot inflate a 0-length range into a 1-frame black file.
    Mode comes from the Export dialog (Entire timeline / IN–OUT). */
+/** An agent's export job picks its range instead of the dialog. */
+let exportRangeForced = null;
 function exportRangeMode() {
   const sel = $("exportRangeSel");
-  const v = sel && sel.value === "in-out" ? "in-out" : "entire";
+  const v = exportRangeForced || (sel && sel.value === "in-out" ? "in-out" : "entire");
   if (v === "in-out" && !hasWorkArea()) return "entire";
   return v;
 }
@@ -8647,16 +7917,7 @@ function transOffsetAt(c, t) {
   return { x: +p.x || 0, y: +p.y || 0 };
 }
 /* Rebase clip-local keyframe times by -offset, dropping ones outside [0, dur] */
-function shiftKF(kfs, offset, dur) {
-  if (!kfs) return undefined;
-  const out = {};
-  for (const [k, arr] of Object.entries(kfs)) {
-    const a = arr.map((kf) => ({ ...kf, t: +(kf.t - offset).toFixed(4) }))
-      .filter((kf) => kf.t >= -1e-3 && kf.t <= dur + 1e-3);
-    if (a.length) out[k] = a;
-  }
-  return Object.keys(out).length ? out : undefined;
-}
+const shiftKF = FableCutEdit.shiftKF;
 
 /* ═════════════════ SVG CLIPS (Claude-authored animated vectors) ═════════════
    Animated SVGs use CSS @keyframes. The compositor freezes them at any time t
@@ -10932,8 +10193,12 @@ async function prepareFrameAssets(t) {
     }
   }
 }
-async function fastExport() {
+/** opts.job: an agent's export job id — progress and the result go back to
+ *  the server instead of an alert / download (nobody may be watching).
+ *  opts.profile: encoding profile id for this run. */
+async function fastExport(opts = {}) {
   if (state.exporting) return;
+  const job = opts.job || null;
   pause();
   state.exporting = true; state.rendering = true; renderCancelled = false;
   exportAbort = new AbortController();
@@ -10951,7 +10216,8 @@ async function fastExport() {
     els.exportTitle.textContent = "Mixing audio…";
     const wav = await renderAudioMix(t0, t1);
     if (renderCancelled) throw new Error("cancelled");
-    const profileId = els.exportProfileSel?.value || effectiveEncodeProfileId();
+    const profileId = job ? (opts.profile || effectiveEncodeProfileId())
+      : els.exportProfileSel?.value || effectiveEncodeProfileId();
     const jpegQ = exportProfileMeta(profileId).jpegQuality ?? 0.95;
     const begin = await fetch("/api/export/begin", {
       method: "POST",
@@ -11033,6 +10299,7 @@ async function fastExport() {
       const pct = ((f + 1) / frames) * 100;
       els.exportProgress.style.width = pct.toFixed(1) + "%";
       els.exportTitle.textContent = `Rendering… ${pct.toFixed(0)}%`;
+      if (job) reportExportJob(job, { progress: 0.97 * (f + 1) / frames });
     }
     await pixelChain;
     if (uploadError) throw uploadError;
@@ -11044,14 +10311,18 @@ async function fastExport() {
     }
     const end = await fetch("/api/export/end?id=" + sessId, { method: "POST", signal }).then((r) => r.json());
     if (!end.src) throw new Error(end.error || "encode failed");
-    const a = document.createElement("a");
-    a.href = end.src;
-    a.download = decodeURIComponent(end.src.split("/").pop());
-    a.click();
+    if (job) await reportExportJob(job, { status: "done", src: end.src }, true);
+    else {
+      const a = document.createElement("a");
+      a.href = end.src;
+      a.download = decodeURIComponent(end.src.split("/").pop());
+      a.click();
+    }
   } catch (e) {
     if (sessId) fetch("/api/export/end?id=" + sessId + "&discard=1", { method: "POST" }).catch(() => { });
     const msg = e?.name === "AbortError" ? "cancelled" : String(e.message || e);
-    if (msg !== "cancelled") alert("Export failed: " + msg);
+    if (job) await reportExportJob(job, { status: "failed", error: msg }, true);
+    else if (msg !== "cancelled") alert("Export failed: " + msg);
   } finally {
     exportAbort = null;
     restoreExportVideoState();
@@ -11061,6 +10332,61 @@ async function fastExport() {
     els.exportNote.textContent = "Rendering your sequence in real time. Keep this tab focused.";
     if (runtime.pendingSync) syncFromServer();
   }
+}
+
+/* ── Agent-requested export (fablecut_export · POST /api/export/request) ──
+   The server hands a job to an open tab over SSE, or opens a headless one on
+   ?exportJob=<id>. The first tab to claim it waits until it has loaded the
+   revision the agent asked for, then runs Fast export with the job's range
+   and profile and reports back. A cancel from the agent arrives as the reply
+   to a progress report. */
+let exportJobReportAt = 0;
+async function reportExportJob(id, body, force = false) {
+  const now = performance.now();
+  if (!force && now - exportJobReportAt < 1000) return; // a heartbeat, not a stream
+  exportJobReportAt = now;
+  try {
+    const r = await fetch("/api/export/job/report?id=" + encodeURIComponent(id), {
+      method: "POST", body: JSON.stringify(body),
+    }).then((x) => x.json());
+    if (r?.cancel) { renderCancelled = true; exportAbort?.abort(); }
+  } catch { }
+}
+async function runExportJob(ticket) {
+  if (!ticket?.id || state.exporting) return; // a busy tab leaves it for another
+  const claimed = await fetch("/api/export/job/claim?id=" + encodeURIComponent(ticket.id), { method: "POST" })
+    .then((r) => r.ok).catch(() => false);
+  if (!claimed) return;
+  const fail = (error) => reportExportJob(ticket.id, { status: "failed", error }, true);
+  // The agent's last edit may still be on its way here over SSE.
+  for (let i = 0; i < 150 && ticket.revision != null && (project.revision || 0) < ticket.revision; i++)
+    await new Promise((r) => setTimeout(r, 100));
+  if (ticket.revision != null && (project.revision || 0) < ticket.revision) await syncFromServer();
+  if (!state.ffmpeg) {
+    const j = await fetch("/api/export/ffmpeg").then((r) => r.json()).catch(() => ({}));
+    state.ffmpeg = !!j.available;
+  }
+  if (!state.ffmpeg) return fail("ffmpeg not found on PATH — export needs it");
+  if (!project.clips.length) return fail("the timeline is empty");
+  await fetchEncodeProfiles();
+  await probeMissingMeta();
+  if (ticket.range === "in-out" && !hasWorkArea())
+    return fail("range in-out needs the project's inPoint and/or outPoint — set them, or export the entire timeline");
+  exportRangeForced = ticket.range || (hasWorkArea() ? "in-out" : "entire");
+  try {
+    if (exportRange().frames < 1) return fail("the export range is empty — IN/OUT is at or past the end of the timeline");
+    reportExportJob(ticket.id, { progress: 0 }, true);
+    await fastExport({ job: ticket.id, profile: ticket.profile });
+  } finally {
+    exportRangeForced = null;
+  }
+}
+/** A headless page opened for one job (?exportJob=<id>) fetches and runs it. */
+async function runExportJobFromUrl() {
+  const id = new URLSearchParams(location.search).get("exportJob");
+  if (!id || !state.connected) return;
+  const ticket = await fetch("/api/export/job/ticket?id=" + encodeURIComponent(id)).then((r) => r.ok ? r.json() : null).catch(() => null);
+  if (ticket?.status === "pending") runExportJob(ticket);
 }
 
 /* ── WebCodecs export (browser H.264 → server mux) ── */
@@ -12205,5 +11531,5 @@ buildMeterDOM();
 for (const b of els.sideTabs.querySelectorAll("[data-side]"))
   b.addEventListener("click", () => setSideTab(b.dataset.side));
 try { if (localStorage.getItem(SIDE_TAB_KEY) === "mixer") setSideTab("mixer"); } catch { }
-connectServer().then(loadLibraryFonts);
+connectServer().then(() => { loadLibraryFonts(); runExportJobFromUrl(); });
 requestAnimationFrame(loop);

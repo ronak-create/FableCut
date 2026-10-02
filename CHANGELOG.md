@@ -60,7 +60,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   never touched and a re-run replaces the old dips. MCP:
   `fablecut_auto_duck`, same detection as the editor.
 
+- **Agents can export.** `fablecut_export` renders the timeline to a file in
+  `exports/` with the editor's own Fast export and returns its path. An open
+  editor tab takes the job, or the server starts a headless Chrome / Edge
+  (`FABLECUT_CHROME` to choose) and closes it afterwards. Range, encoding
+  profile, waiting, status and cancel are options. REST:
+  `POST /api/export/request` and `GET /api/export/job`.
+- MCP: `fablecut_patch_project` runs the editor's own timeline edits —
+  `split`, `rippleDelete`, `closeGap`, `lift`, `extract`, `insert`,
+  `overwrite`, `rippleTrim`, `roll`, `slip`, `slide` and `crossfade` — with the
+  same linked-stem sync, track targeting and locks as the keyboard shortcuts.
+  `setProject` takes `inPoint` / `outPoint`, and the compact view shows them.
+
 ### Changed
+- The editor's split, ripple, insert, trim and crossfade code moved into
+  `edit-ops.js`, which the editor and the MCP server both load.
 - The master loudness readout is measured on the finished mix, after master
   effects and the master fader.
 - Preview and export now mix audio through the same graph: each clip feeds

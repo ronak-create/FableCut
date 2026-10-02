@@ -338,7 +338,8 @@ Three equivalent control surfaces:
    Tools: `fablecut_status` (auto-starts the editor), `fablecut_docs`,
    `fablecut_get_project`, `fablecut_set_project`, `fablecut_patch_project`,
    `fablecut_import_media`, `fablecut_analyze_reference`,
-   `fablecut_encode_profiles`, `fablecut_normalize_audio`, `fablecut_auto_duck`.
+   `fablecut_encode_profiles`, `fablecut_normalize_audio`, `fablecut_auto_duck`,
+   `fablecut_export`.
 
    FableCut is also published on the **official MCP registry** as
    [`io.github.ronak-create/fablecut`](https://registry.modelcontextprotocol.io/v0/servers?search=fablecut)

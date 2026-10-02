@@ -7,7 +7,8 @@
 
    Tools: fablecut_status, fablecut_docs, fablecut_get_project,
           fablecut_set_project, fablecut_patch_project, fablecut_import_media,
-          fablecut_analyze_reference, fablecut_encode_profiles
+          fablecut_analyze_reference, fablecut_encode_profiles,
+          fablecut_normalize_audio, fablecut_auto_duck, fablecut_export
    ═══════════════════════════════════════════════════════════════════════════ */
 "use strict";
 const fs = require("fs");
@@ -17,10 +18,11 @@ const { spawn, spawnSync } = require("child_process");
 const { loadEncodeProfiles, listProfilesPublic, resolveProfile, profileSummary } = require("./encode-profiles");
 
 const {
-  APP_DIR, DATA_DIR, MEDIA_DIR, ANALYSIS_DIR, LIBRARY_DIR, PROJECT_FILE, ensureDirs,
+  APP_DIR, DATA_DIR, MEDIA_DIR, EXPORTS_DIR, ANALYSIS_DIR, LIBRARY_DIR, PROJECT_FILE, ensureDirs,
 } = require("./paths");
 const { downloadImportUrl, kindFromName, maybeFaststart } = require("./import-url");
 const FX = require("./audio-fx");
+const EditOps = require("./edit-ops");
 
 /* ROOT is where the code lives (server.js, CLAUDE.md); the user's timeline and
    media live under DATA_DIR. Identical unless FABLECUT_DATA_DIR is set. */
@@ -58,6 +60,24 @@ function httpOk(url) {
     const req = http.get(url, (r) => { r.resume(); resolve(r.statusCode < 500); });
     req.on("error", () => resolve(false));
     req.setTimeout(1200, () => { req.destroy(); resolve(false); });
+  });
+}
+/** JSON request to the editor server → {status, body}. */
+function apiJSON(method, urlPath, payload) {
+  return new Promise((resolve, reject) => {
+    const req = http.request(BASE + urlPath, { method, headers: { "Content-Type": "application/json" } }, (r) => {
+      let data = "";
+      r.setEncoding("utf8");
+      r.on("data", (d) => { data += d; });
+      r.on("end", () => {
+        let body = null;
+        try { body = JSON.parse(data); } catch { body = { error: data }; }
+        resolve({ status: r.statusCode, body });
+      });
+    });
+    req.on("error", reject);
+    req.setTimeout(15_000, () => req.destroy(new Error("editor server did not answer")));
+    req.end(payload === undefined ? undefined : JSON.stringify(payload));
   });
 }
 async function ensureUIServer() {
@@ -111,7 +131,7 @@ const TOOLS = [
   },
   {
     name: "fablecut_patch_project",
-    description: "Apply targeted edits to the FableCut project WITHOUT round-tripping the whole document — PREFER THIS over get+set for every edit (it is ~10-100x cheaper in tokens and merge-safe by design: it re-reads the latest document from disk, applies your ops in order, bumps revision once, saves atomically). Ops: {op:'addClip', clip:{…}} (id auto-generated if omitted) · {op:'updateClip', id, set:{…}} · {op:'removeClip', id} · {op:'addMedia', media:{…}} · {op:'removeMedia', id} · {op:'setProject', set:{name|width|height|fps|background|markers|disabledTracks|lockedTracks|untargetedTracks|encodeProfile|master}} (markers = the full list [{t, label?, color?}], color: gold|red|orange|green|cyan|blue|purple|pink; master = {gain}, the master fader in dB) · {op:'setTrack', id:'A1', set:{gain?, pan?}} (audio-track fader in dB −60…+12 and pan −1…1; null or 0 resets) · {op:'setFx', target:'clip'|'track'|'master', id?, preset?:'podcast'|… OR fx:[{type,…params}], append?:true} (audio effects — validated; presets: clean-voice, podcast, radio, deep-voice, telephone, cinematic, wide, muffled; fx:null clears; on a clip it applies to its linked stems too; see the 'Audio mix' docs section). updateClip merge rules: top-level keys are replaced (keyframes/transitionIn/transitionOut wholesale), `props` merges key-by-key, and setting any key to null deletes it. LOCKS: the user can lock clips (`locked:true`) and tracks (`lockedTracks`); updateClip / removeClip on a locked clip — or on a clip linked to one — and addClip onto a locked track are refused. Leave locked material alone; only if the user asked you to change it, pass force:true on that op (or unlock first: updateClip set:{locked:null}, which is always allowed). All-or-nothing: an invalid op aborts the whole patch unsaved.",
+    description: "Apply targeted edits to the FableCut project WITHOUT round-tripping the whole document — PREFER THIS over get+set for every edit (it is ~10-100x cheaper in tokens and merge-safe by design: it re-reads the latest document from disk, applies your ops in order, bumps revision once, saves atomically). Ops: {op:'addClip', clip:{…}} (id auto-generated if omitted) · {op:'updateClip', id, set:{…}} · {op:'removeClip', id} · {op:'addMedia', media:{…}} · {op:'removeMedia', id} · {op:'setProject', set:{name|width|height|fps|background|markers|disabledTracks|lockedTracks|untargetedTracks|encodeProfile|master}} (markers = the full list [{t, label?, color?}], color: gold|red|orange|green|cyan|blue|purple|pink; master = {gain}, the master fader in dB) · {op:'setTrack', id:'A1', set:{gain?, pan?}} (audio-track fader in dB −60…+12 and pan −1…1; null or 0 resets) · {op:'setFx', target:'clip'|'track'|'master', id?, preset?:'podcast'|… OR fx:[{type,…params}], append?:true} (audio effects — validated; presets: clean-voice, podcast, radio, deep-voice, telephone, cinematic, wide, muffled; fx:null clears; on a clip it applies to its linked stems too; see the 'Audio mix' docs section). TIMELINE EDITS — the editor's own split / ripple / trim code, so linked stems, track targeting (untargetedTracks) and locks behave exactly as in the UI; times in seconds: {op:'split', at, ids?} (no ids: every targeted track) · {op:'rippleDelete', ids} (later clips close the hole) · {op:'closeGap', at} · {op:'lift'|'extract', from?, to?} (remove a range; extract closes it; default = project inPoint/outPoint, which then clear) · {op:'insert'|'overwrite', mediaId, at, in?, duration?} (three-point edit: insert pushes later clips right, overwrite replaces what is there; a video brings one audio stem per channel) · {op:'rippleTrim'|'roll', id, side:'in'|'out', delta} · {op:'slip'|'slide', id, delta} (clamped to the media; the note says what was applied) · {op:'crossfade', ids? | at, duration?} (constant-power audio crossfade, borrowing handles from both sides). Any of these takes tracks:[…] to target lanes for that op only. setProject also takes inPoint / outPoint. updateClip merge rules: top-level keys are replaced (keyframes/transitionIn/transitionOut wholesale), `props` merges key-by-key, and setting any key to null deletes it. LOCKS: the user can lock clips (`locked:true`) and tracks (`lockedTracks`); updateClip / removeClip on a locked clip — or on a clip linked to one — and addClip onto a locked track are refused. Leave locked material alone; only if the user asked you to change it, pass force:true on that op (or unlock first: updateClip set:{locked:null}, which is always allowed). All-or-nothing: an invalid op aborts the whole patch unsaved.",
     inputSchema: {
       type: "object",
       properties: {
@@ -195,9 +215,25 @@ const TOOLS = [
         threshold: { type: "number", description: "Voice detection level in dBFS (default -40; raise it if room noise triggers ducks)" },
         attack: { type: "number", description: "Seconds to ramp down before speech (default 0.3)" },
         release: { type: "number", description: "Seconds to ramp back up after speech (default 0.6)" },
-        force: { type: "boolean", description: "Also change clips the user locked (only when they asked)" },
+        force:{ type: "boolean", description: "Also change clips the user locked (only when they asked)" },
       },
       required: ["clipIds"],
+    },
+  },
+  {
+    name: "fablecut_export",
+    description: "Render the timeline to a video file in exports/ — the editor's own Fast export (same compositor, audio mix and encoding profile as the Export button), so the file matches what the user sees. It runs in a browser: an open editor tab takes the job (the user sees the progress bar), or with no tab open the server starts headless Chrome / Edge (set FABLECUT_CHROME to pick one) and closes it afterwards. Waits for the file by default and returns its path. Range: the project's inPoint→outPoint when set, else the whole timeline (or pass range). Needs ffmpeg on PATH. One export at a time. Long edits: pass wait:false, then poll with {job}; {cancel:job} stops one.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        range: { type: "string", enum: ["entire", "in-out"], description: "Whole timeline, or the project's inPoint→outPoint (default: in-out when either is set)" },
+        profile: { type: "string", description: "Encoding profile id (fablecut_encode_profiles); default: project.encodeProfile, else the server default" },
+        where: { type: "string", enum: ["auto", "tab", "headless"], description: "auto (default): an open editor tab, else headless · tab: only an open tab · headless: always a background browser, leaving the user's tab alone" },
+        wait: { type: "boolean", description: "Block until the file is written (default true)" },
+        timeout: { type: "number", description: "Seconds to wait before returning the job's status instead (default 900); the export keeps running" },
+        job: { type: "string", description: "Report on an export started earlier instead of starting one" },
+        cancel: { type: "string", description: "Cancel this export job" },
+      },
     },
   },
 ];
@@ -314,9 +350,162 @@ function normalizeGroups(proj, ids) {
   return [...groups.values()];
 }
 
+/* ── Timeline edits (patch ops split … crossfade) ──
+   The editor's own edit code (edit-ops.js) run against the document, so an
+   agent gets the same targeting (untargetedTracks, or the op's `tracks`), the
+   same sync lock (linked partners ride along) and the same lock rules as the
+   keyboard shortcuts. Returns a short note; throws to abort the patch. */
+const relinkedDocs = new WeakSet();
+function timelineEdit(proj, op, refuseLocked, lockReason) {
+  const name = op.op;
+  const E = EditOps.forDoc(proj, { tracks: op.tracks, force: op.force === true, uid: () => uid() });
+  // Links are rebuilt from timing on every editor load; do the same once per
+  // patch so clips an agent added (without linkGroup) ride along with their stems.
+  if (!relinkedDocs.has(proj)) { E.relinkClips(); relinkedDocs.add(proj); }
+  const r3 = (n) => Math.round(n * 1000) / 1000;
+  const signed = (n) => (n > 0 ? "+" : "") + r3(n);
+  const num = (v, what) => {
+    if (typeof v !== "number" || !Number.isFinite(v)) throw new Error(`${name}: ${what} must be a number (seconds)`);
+    return v;
+  };
+  const clipOf = (id) => {
+    const c = proj.clips.find((x) => x.id === id);
+    if (!c) throw new Error(`${name}: no clip ${id}`);
+    return c;
+  };
+  const named = () => {
+    if (!Array.isArray(op.ids) || !op.ids.length) throw new Error(`${name}: ids must list at least one clip`);
+    const clips = op.ids.map(String).map(clipOf);
+    for (const c of clips) refuseLocked(name, lockReason(c), op);
+    return clips;
+  };
+  const refused = (why) => new Error(`${name}: ${why}` +
+    (/locked/i.test(why) ? " — the user locked it; pass force:true only if they asked" : ""));
+  const trimmed = (c, r, extra = "") => {
+    if (typeof r === "string") throw refused(r);
+    const asked = num(op.delta, "delta");
+    return `${name} ${c.id}${extra} ${signed(r)}s` + (Math.abs(r - asked) > 1e-6 ? ` (asked ${signed(asked)}, clamped)` : "");
+  };
+  switch (name) {
+    case "split": {
+      const at = num(op.at, "at");
+      const r = E.splitAt(at, op.ids ? named() : null);
+      if (!r.split) throw refused(r.blocked ? "only locked clips under that time — left whole" : `no clip runs across ${at}s on the ${op.ids ? "given clips" : "targeted tracks"}`);
+      return `split@${at} +${r.rights.map((x) => x.id).join("+")}` + (r.blocked ? " (locked clips left whole)" : "");
+    }
+    case "rippleDelete": {
+      const r = E.rippleDelete(named());
+      return `-${r.removed.map((x) => x.id).join("-")} (rippled)`;
+    }
+    case "closeGap": {
+      const G = E.closeGapAt(num(op.at, "at"));
+      if (typeof G === "string") throw refused(G.replace("at playhead", `at ${op.at}s`).replace("move the playhead", "pick another time"));
+      return `closed ${r3(G)}s gap @${op.at}`;
+    }
+    case "lift": case "extract": {
+      const usePoints = op.from == null && op.to == null;
+      const t0 = op.from == null ? proj.inPoint : num(op.from, "from");
+      const t1 = op.to == null ? proj.outPoint : num(op.to, "to");
+      if (t0 == null || t1 == null) throw refused("give from and to (seconds), or set the project's inPoint and outPoint");
+      const why = E.liftRange(t0, t1, name === "extract");
+      if (why) throw refused(why.replace("Set IN and OUT first (I / O) to", "from→to must span more than a frame to"));
+      if (usePoints) { delete proj.inPoint; delete proj.outPoint; } // as in the editor
+      return `${name} ${r3(t0)}→${r3(t1)}s`;
+    }
+    case "rippleTrim": case "roll": {
+      const c = clipOf(String(op.id));
+      if (op.side !== "in" && op.side !== "out") throw new Error(`${name}: side must be "in" (head) or "out" (tail)`);
+      const fn = name === "roll" ? E.rollEdit : E.rippleTrim;
+      return trimmed(c, fn(c, op.side, num(op.delta, "delta")), "." + op.side);
+    }
+    case "slip": case "slide": {
+      const c = clipOf(String(op.id));
+      const fn = name === "slip" ? E.slipClip : E.slideClip;
+      return trimmed(c, fn(c, num(op.delta, "delta")));
+    }
+    case "insert": case "overwrite": {
+      const m = proj.media.find((x) => x.id === op.mediaId);
+      if (!m) throw new Error(`${name}: unknown mediaId ${op.mediaId}`);
+      const timed = m.kind === "video" || m.kind === "audio";
+      const inn = op.in == null ? 0 : num(op.in, "in");
+      if (inn < 0) throw new Error(`${name}: in must be ≥ 0`);
+      const dur = op.duration != null ? num(op.duration, "duration")
+        : timed && m.duration > 0 ? m.duration - inn : null;
+      if (dur == null) throw new Error(`${name}: duration is required for ${timed ? "media with no known duration yet" : m.kind}`);
+      if (!(dur >= EditOps.MIN_DUR)) throw new Error(`${name}: duration must be at least ${EditOps.MIN_DUR}s`);
+      if (timed && m.duration > 0 && inn + dur > m.duration + 1e-3)
+        throw new Error(`${name}: in + duration (${r3(inn + dur)}s) runs past the end of ${m.id} (${m.duration}s)`);
+      let stems = 2;
+      if (m.kind === "video") {
+        try { const f = mediaFile(m.src); if (f) stems = probeChannels(f) || 0; } catch { /* no ffprobe: assume stereo */ }
+      }
+      const r = (name === "insert" ? E.insertAt : E.overwriteAt)(m, timed ? inn : 0, dur, num(op.at, "at"), stems);
+      if (typeof r === "string") throw refused(r.replace(" — click a track name to target it (and unlock it)", " — every lane for it is untargeted or locked (pass tracks:[…])"));
+      const placed = r.clip ? (r.clip.linkGroup ? proj.clips.filter((x) => x.linkGroup === r.clip.linkGroup) : [r.clip]) : [];
+      return `${name}@${r3(r.at)} ` + placed.map((x) => `+${x.id}(${x.track})`).join("") + (name === "insert" ? ` · later clips moved +${r3(dur)}s` : "");
+    }
+    case "crossfade": {
+      const dur = op.duration == null ? EditOps.CROSSFADE_DUR : num(op.duration, "duration");
+      if (dur < EditOps.MIN_TRANS_DUR) throw new Error(`${name}: duration must be at least ${EditOps.MIN_TRANS_DUR}s`);
+      const pairs = op.ids ? E.crossfadeCuts(E.withLinked(named())) : E.crossfadeCutsNear(num(op.at, "at"));
+      if (!pairs.length) throw refused(op.ids ? "no audio cut next to those clips — they must touch or overlap on one track"
+        : `no audio cut within 0.5s of ${op.at}s on the targeted audio tracks`);
+      const { done, why } = E.crossfadePairs(pairs, dur);
+      if (!done) throw refused(why.join(", "));
+      return `crossfaded ${done} cut${done === 1 ? "" : "s"}` + (why.length ? ` (skipped: ${why.join(", ")})` : "");
+    }
+  }
+  throw new Error("Unknown edit op " + name);
+}
+
+/* ── Export (fablecut_export) ── */
+function describeExportJob(j) {
+  const pct = Math.round((j.progress || 0) * 100);
+  if (j.status === "done") {
+    const file = path.join(EXPORTS_DIR, path.basename(decodeURIComponent(j.src || "")));
+    let size = "";
+    try { size = ` (${(fs.statSync(file).size / 1048576).toFixed(1)} MB)`; } catch {}
+    return `Export ${j.id} done → ${file}${size}\nServed at ${BASE}${j.src}`;
+  }
+  if (j.status === "failed" || j.status === "cancelled") return `Export ${j.id} ${j.status}: ${j.error || "no reason given"}`;
+  return `Export ${j.id} ${j.status}${j.status === "running" ? ` — ${pct}%` : ""} (in ${j.via === "headless" ? "a headless browser" : "the open editor tab"}). ` +
+    `Check again with fablecut_export {job:"${j.id}"}, or stop it with {cancel:"${j.id}"}.`;
+}
+async function exportTool(args) {
+  if (!(await ensureUIServer())) throw new Error(`the editor server is not running and could not be started on port ${PORT}`);
+  if (args.cancel) {
+    const r = await apiJSON("POST", "/api/export/job/cancel?id=" + encodeURIComponent(args.cancel));
+    if (r.status !== 200) throw new Error(r.body?.error || "cancel failed");
+    return describeExportJob(r.body);
+  }
+  let job;
+  if (args.job) {
+    const r = await apiJSON("GET", "/api/export/job?id=" + encodeURIComponent(args.job));
+    if (r.status !== 200) throw new Error(r.body?.error || "no such export job");
+    job = r.body;
+  } else {
+    const r = await apiJSON("POST", "/api/export/request", { range: args.range, profile: args.profile, where: args.where || "auto" });
+    if (r.status !== 200) throw new Error(r.body?.error || `export request failed (${r.status})`);
+    job = r.body;
+    if (args.wait === false) return describeExportJob(job);
+  }
+  const deadline = Date.now() + 1000 * (Number.isFinite(args.timeout) && args.timeout > 0 ? args.timeout : 900);
+  while (job.status === "pending" || job.status === "running") {
+    if (args.job && args.wait !== true) break; // a status check answers right away
+    if (Date.now() > deadline) break;
+    await sleep(1000);
+    const r = await apiJSON("GET", "/api/export/job?id=" + encodeURIComponent(job.id));
+    if (r.status !== 200) throw new Error(r.body?.error || "lost track of the export job");
+    job = r.body;
+  }
+  return describeExportJob(job);
+}
+
 /* ── Tool implementations ── */
 async function callTool(name, args) {
   switch (name) {
+    case "fablecut_export":
+      return exportTool(args);
     case "fablecut_status": {
       const up = await ensureUIServer();
       const proj = readProject();
@@ -422,6 +611,7 @@ async function callTool(name, args) {
         `"${doc.name}" ${doc.width}x${doc.height}@${doc.fps} rev:${doc.revision}` +
         (doc.panSchema >= 1 ? " panSchema:1" : "") +
         (doc.background ? ` bg:${doc.background}` : "") +
+        (doc.inPoint != null || doc.outPoint != null ? ` in/out:${doc.inPoint ?? "-"}→${doc.outPoint ?? "-"}` : "") +
         (doc.markers?.length ? ` markers:${doc.markers.length} [${doc.markers.slice(0, 12).map((m) => m.t).join(",")}${doc.markers.length > 12 ? ",…" : ""}]` : "") +
         (doc.lockedTracks?.length ? ` lockedTracks:[${doc.lockedTracks.join(",")}]` : "") +
         (doc.untargetedTracks?.length ? ` untargetedTracks:[${doc.untargetedTracks.join(",")}]` : "") +
@@ -588,9 +778,11 @@ async function callTool(name, args) {
             break;
           }
           case "setProject": {
-            const allowed = ["name", "width", "height", "fps", "background", "markers", "disabledTracks", "lockedTracks", "untargetedTracks", "exportFrame", "encodeProfile", "master"];
+            const allowed = ["name", "width", "height", "fps", "background", "markers", "disabledTracks", "lockedTracks", "untargetedTracks", "exportFrame", "encodeProfile", "master", "inPoint", "outPoint"];
             for (const [k, v] of Object.entries(op.set || {})) {
               if (!allowed.includes(k)) throw new Error(`setProject: '${k}' not settable (allowed: ${allowed.join(", ")})`);
+              if ((k === "inPoint" || k === "outPoint") && v != null && (typeof v !== "number" || !Number.isFinite(v) || v < 0))
+                throw new Error(`setProject: ${k} must be seconds ≥ 0 (null clears it)`);
               if (k === "encodeProfile" && v != null) {
                 resolveProfile(String(v)); // validate id exists
               }
@@ -602,11 +794,19 @@ async function callTool(name, args) {
               }
               if (v === null) delete proj[k]; else proj[k] = v;
             }
+            if (proj.inPoint != null && proj.outPoint != null && !(proj.outPoint > proj.inPoint))
+              throw new Error("setProject: outPoint must be after inPoint");
             notes.push("~project");
             break;
           }
+          case "split": case "rippleDelete": case "closeGap": case "lift": case "extract":
+          case "rippleTrim": case "roll": case "slip": case "slide":
+          case "insert": case "overwrite": case "crossfade":
+            notes.push(timelineEdit(proj, op, refuseLocked, lockReason));
+            break;
           default:
-            throw new Error("Unknown op: " + op.op + " (addClip|updateClip|removeClip|addMedia|removeMedia|setProject|setTrack|setFx)");
+            throw new Error("Unknown op: " + op.op + " (addClip|updateClip|removeClip|addMedia|removeMedia|setProject|setTrack|setFx|" +
+              "split|rippleDelete|closeGap|lift|extract|rippleTrim|roll|slip|slide|insert|overwrite|crossfade)");
         }
       }
       proj.revision = (proj.revision || 0) + 1;
