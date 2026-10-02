@@ -134,6 +134,36 @@ de tiempo al mismo tiempo.
   resincronizan con el número de canales del nuevo origen, añadiendo o quitando
   clips y pistas según convenga.
 
+- **Ediciones desde el agente** — dividir, borrado en cascada, extraer / levantar,
+  insertar / sobrescribir, recorte en cascada / rodado / deslizar el contenido /
+  deslizar el clip y fundidos cruzados son operaciones de `fablecut_patch_project`
+  que usan el mismo código que los atajos del editor.
+
+**Audio**
+
+- **Mezclador** — la pestaña **Mixer** junto al Inspector tiene una tira por
+  pista de audio (fader, panorama, silencio, solo y medidor) y un fader maestro
+  con lectura LUFS en vivo. La vista previa y la exportación usan la misma mezcla.
+- **Buses de submezcla** — **+ Bus** añade un bus con sus propios efectos,
+  fader, panorama, silencio y medidor; el menú bajo el nombre de cada pista la
+  envía a un bus (por ejemplo, todos los diálogos por un solo compresor).
+- **Ganancia, canales y Normalizar** — ganancia por clip (dB), modo de canales
+  (estéreo, mono, izquierda, derecha, intercambiar) y **Normalizar** a −14 / −16 /
+  −23 LUFS o −1 dBFS de pico.
+- **Línea de volumen, fundidos y fundidos cruzados** — arrastra la línea de
+  volumen de cada clip, los tiradores de las esquinas crean fundidos y
+  **Shift+D** hace un fundido cruzado en el corte.
+- **Auto-duck** — la música baja sola cuando alguien habla.
+- **Efectos y presets** — EQ, paso alto / bajo, compresor, limitador, puerta de
+  ruido, delay, reverb, distorsión, anchura estéreo y cambio de tono, por clip,
+  pista, bus y en el maestro. Presets: Clean voice, Podcast, Radio, Deep voice,
+  Telephone, Cinematic, Wide y Muffled.
+- **Automatización de efectos** — el ◆ junto a cada parámetro pone una clave en
+  el cabezal, como los fotogramas clave de los clips.
+- **Reducción de ruido** — el control **Noise** del inspector (Light / Medium /
+  Strong) mide el ruido de fondo del archivo y genera una copia limpia con
+  ffmpeg; **Off** vuelve al original.
+
 **Aspecto**
 
 - 14 preajustes de filtro a un clic (cinematic, teal-orange, noir, vintage,
@@ -225,6 +255,8 @@ de tiempo al mismo tiempo.
 
 **Exportación**
 
+- Los agentes también exportan: `fablecut_export` lanza la exportación rápida en
+  el editor abierto o en un Chrome / Edge sin ventana y devuelve la ruta del archivo
 - Exportación rápida: el navegador renderiza cada fotograma y una mezcla de audio
   offline, y ffmpeg codifica un MP4 CRF-18 con precisión de fotograma (sigue
   renderizando aunque cambies de pestaña)
@@ -272,7 +304,9 @@ Tres superficies de control equivalentes:
 
    Herramientas: `fablecut_status` (arranca el editor solo), `fablecut_docs`,
    `fablecut_get_project`, `fablecut_set_project`, `fablecut_patch_project`,
-   `fablecut_import_media`, `fablecut_analyze_reference`.
+   `fablecut_import_media`, `fablecut_analyze_reference`,
+   `fablecut_encode_profiles`, `fablecut_normalize_audio`, `fablecut_auto_duck`,
+   `fablecut_denoise`, `fablecut_export`.
 
    FableCut también está publicado en el **registro oficial de MCP** como
    [`io.github.ronak-create/fablecut`](https://registry.modelcontextprotocol.io/v0/servers?search=fablecut)

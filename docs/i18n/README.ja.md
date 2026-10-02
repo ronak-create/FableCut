@@ -119,6 +119,34 @@ server-sent events 経由でおよそ 150 ms 以内にホットリロードさ�
   クリップのメディアを差し替えると、リンクされたチャンネルクリップは新しい素材の
   チャンネル数に再同期され、過不足分のクリップとトラックが増減します。
 
+- **エージェントからの編集** — 分割、リップル削除、リフト / 抽出、
+  インサート / 上書き、リップル / ローリング / スリップ / スライド、クロスフェードは
+  `fablecut_patch_project` の操作として、エディタのショートカットと同じコードで動きます。
+
+**オーディオ**
+
+- **ミキサー** — Inspector 横の **Mixer** タブに、オーディオトラックごとのストリップ
+  （フェーダー、パン、ミュート、ソロ、メーター）と、LUFS をリアルタイム表示する
+  マスターフェーダーがあります。プレビューと書き出しは同じミックスを通ります。
+- **サブミックスバス** — **+ Bus** で、エフェクト・フェーダー・パン・ミュート・
+  メーターを持つバスを追加。各トラック名の下のメニューでバスへ送れます
+  （台詞をまとめて 1 つのコンプレッサーに通す、など）。
+- **ゲイン、チャンネル、ノーマライズ** — クリップごとのゲイン (dB)、チャンネル
+  モード（ステレオ、モノ、左、右、入れ替え）、−14 / −16 / −23 LUFS または
+  −1 dBFS ピークへの **Normalize**。
+- **ボリュームライン、フェード、クロスフェード** — クリップのボリュームラインを
+  ドラッグ、角のグリップでフェード、**Shift+D** でカット点をクロスフェード。
+- **オートダッキング** — 話し声がある間だけ音楽が自動で下がります。
+- **エフェクトとプリセット** — EQ、ハイパス / ローパス、コンプレッサー、
+  リミッター、ノイズゲート、ディレイ、リバーブ、ディストーション、ステレオ幅、
+  ピッチシフト。クリップ・トラック・バス・マスターに掛けられます。プリセット：
+  Clean voice、Podcast、Radio、Deep voice、Telephone、Cinematic、Wide、Muffled。
+- **エフェクトのオートメーション** — 各パラメーター横の ◆ で、再生ヘッド位置に
+  キーを打てます（クリップのキーフレームと同じ感覚）。
+- **ノイズ除去** — インスペクターの **Noise**（Light / Medium / Strong）が
+  ファイルのノイズフロアを測り、ffmpeg でクリーンなコピーを作って差し替えます。
+  **Off** で元に戻ります。
+
 **ルック**
 
 - ワンクリックのフィルタープリセット 14 種（cinematic、teal-orange、noir、vintage、
@@ -194,6 +222,8 @@ server-sent events 経由でおよそ 150 ms 以内にホットリロードさ�
 
 **書き出し**
 
+- エージェントも書き出せます：`fablecut_export` が、開いているエディタまたは
+  ヘッドレスの Chrome / Edge で高速書き出しを実行し、ファイルのパスを返します
 - 高速書き出し: ブラウザが全フレームとオフラインの音声ミックスをレンダリングし、
   ffmpeg がフレーム精度の CRF-18 MP4 にエンコードします（タブを切り替えても
   レンダリングは続きます）
@@ -239,7 +269,9 @@ CDN からモデルを取得します。
 
    ツール: `fablecut_status`（エディタを自動起動）、`fablecut_docs`、
    `fablecut_get_project`、`fablecut_set_project`、`fablecut_patch_project`、
-   `fablecut_import_media`、`fablecut_analyze_reference`。
+   `fablecut_import_media`、`fablecut_analyze_reference`、
+   `fablecut_encode_profiles`、`fablecut_normalize_audio`、`fablecut_auto_duck`、
+   `fablecut_denoise`、`fablecut_export`。
 
    FableCut は**公式 MCP レジストリ**にも
    [`io.github.ronak-create/fablecut`](https://registry.modelcontextprotocol.io/v0/servers?search=fablecut)

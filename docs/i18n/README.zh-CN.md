@@ -102,6 +102,28 @@ FableCut 是一个完全运行在浏览器里的非线性视频编辑器（Premi
   （A5、A6……，上限 16 条）；替换片段媒体时，关联的声道片段会重新同步到新素材的声道数，
   按需增删片段和轨道。
 
+- **agent 也能剪辑** —— 分割、波纹删除、提升 / 提取、插入 / 覆盖、
+  波纹 / 滚动 / 滑移 / 滑动修剪以及交叉淡化，都是 `fablecut_patch_project` 的操作，
+  和编辑器快捷键跑的是同一份代码。
+
+**音频**
+
+- **混音台** —— Inspector 旁的 **Mixer** 标签页为每条音轨提供一条通道（推子、
+  声像、静音、独奏、电平表），外加实时显示 LUFS 的总线推子。预览和导出走同一套混音。
+- **子混音总线** —— **+ Bus** 新建一条带独立效果、推子、声像、静音和电平表的总线；
+  在每条音轨名称下方的菜单里把它送进总线（比如所有对白共用一个压缩器）。
+- **增益、声道与响度标准化** —— 每个片段的增益 (dB)、声道模式（立体声、单声道、
+  左、右、互换），以及标准化到 −14 / −16 / −23 LUFS 或 −1 dBFS 峰值的 **Normalize**。
+- **音量线、淡入淡出与交叉淡化** —— 直接拖动片段的音量线，拖角落手柄做淡入淡出，
+  **Shift+D** 在剪辑点做交叉淡化。
+- **自动闪避（Auto-duck）** —— 有人说话时音乐自动压低。
+- **效果与预设** —— EQ、高通 / 低通、压缩器、限制器、噪声门、延迟、混响、失真、
+  立体声宽度和变调，可用于片段、音轨、总线和总输出。预设：Clean voice、Podcast、
+  Radio、Deep voice、Telephone、Cinematic、Wide、Muffled。
+- **效果自动化** —— 每个参数旁的 ◆ 在播放头位置打关键帧，用法和片段关键帧一样。
+- **降噪** —— 检查器里的 **Noise**（Light / Medium / Strong）会先测量文件的底噪，
+  再用 ffmpeg 生成一份干净的副本并替换；选 **Off** 恢复原始音频。
+
 **画面风格**
 
 - 14 种一键滤镜预设（cinematic、teal-orange、noir、vintage、cyberpunk、sunset、midnight……）
@@ -169,6 +191,8 @@ FableCut 是一个完全运行在浏览器里的非线性视频编辑器（Premi
 
 **导出**
 
+- agent 也能导出：`fablecut_export` 会在已打开的编辑器或无界面的 Chrome / Edge
+  中执行快速导出，并返回文件路径
 - 快速导出：浏览器渲染每一帧并生成离线音频混音，由 ffmpeg 编码成逐帧精确的
   CRF-18 MP4（切换标签页也会继续渲染）
 - 没有 ffmpeg 时，退回到基于 MediaRecorder 的实时导出
@@ -208,7 +232,9 @@ agent 需要的一切都在 **[CLAUDE.md](../../CLAUDE.md)** 里——完整的 
 
    工具：`fablecut_status`（自动启动编辑器）、`fablecut_docs`、
    `fablecut_get_project`、`fablecut_set_project`、`fablecut_patch_project`、
-   `fablecut_import_media`、`fablecut_analyze_reference`。
+   `fablecut_import_media`、`fablecut_analyze_reference`、
+   `fablecut_encode_profiles`、`fablecut_normalize_audio`、`fablecut_auto_duck`、
+   `fablecut_denoise`、`fablecut_export`。
 
    FableCut 也已发布到**官方 MCP registry**，标识为
    [`io.github.ronak-create/fablecut`](https://registry.modelcontextprotocol.io/v0/servers?search=fablecut)

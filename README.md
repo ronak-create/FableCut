@@ -104,11 +104,21 @@ same time.
   after). It rides on top of the music's own volume, so re-running or clearing
   it never touches your levels. Agents use `fablecut_auto_duck`.
 - **Audio effects and presets** — EQ, high/low-pass, compressor, limiter,
-  noise gate, delay, reverb, distortion and stereo width, chained per clip,
-  per track (Mixer → **FX**) and on the master. Presets: Clean voice, Podcast,
-  Radio, Deep voice, Telephone, Cinematic, Wide and Muffled, all tweakable
-  afterwards. Preview and export run the same effects. Agents use the
-  `setFx` patch op.
+  noise gate, delay, reverb, distortion, stereo width and pitch shift, chained
+  per clip, per track (Mixer → **FX**), per bus and on the master. Presets:
+  Clean voice, Podcast, Radio, Deep voice, Telephone, Cinematic, Wide and
+  Muffled, all tweakable afterwards. Preview and export run the same effects.
+  Agents use the `setFx` patch op.
+- **Effect automation** — the ◆ beside an effect setting keys it at the
+  playhead, like clip keyframes: sweep a filter into the drop, open up a
+  reverb at the end. Agents use `setFxKeys`.
+- **Submix buses** — **+ Bus** in the Mixer adds a bus with its own effects,
+  fader, pan, mute and meter; route tracks into it from the menu under each
+  track's name (all the dialogue through one compressor and one fader).
+- **Noise reduction** — the inspector's **Noise** control (Light / Medium /
+  Strong) measures the file's noise floor and renders a cleaned copy with
+  ffmpeg; the clip's audio switches to it and **Off** switches back. Agents
+  use `fablecut_denoise`.
 - **Project bin folders** — tree view with expand/collapse; drag media or folders to nest; right-click the **Project** tab → New folder; drop files onto a folder to import into it
 - **Import from URL** — **+ URL** downloads an HTTPS video/audio/image into
   `./media/` (same-origin after import). Remote SVG is refused. Agents use
@@ -139,7 +149,7 @@ same time.
 - **Zoom to selection** (<kbd>⇧Z</kbd>) frames all selected clips, not just one
 - **IN/OUT work area** — set markers with <kbd>i</kbd> and <kbd>o</kbd> (<kbd>⇧I</kbd> / <kbd>⇧O</kbd> to clear). The Program Monitor shows playhead as `current / sequence duration`; when markers are set, IN, marked duration, and OUT stack on the right. **Export** has a Range dropdown (Entire timeline / IN–OUT; defaults to IN–OUT when markers exist) so you can keep markers for split/trim and still export the full sequence. Enabling **Limit** constrains playback to the marked range and maps <kbd>Home</kbd> / <kbd>End</kbd> to the IN and OUT positions rather than the full timeline. <kbd>t</kbd> splits clips at the markers; <kbd>⇧t</kbd> trims clips to the work (between marker in and marker out) area.
 - **Find & close gaps** — a gap is a stretch where every targeted track is empty (black frames). <kbd>g</kbd> jumps the playhead to the next shared gap (wraps; respects IN/OUT when both are set). <kbd>⇧G</kbd> closes the gap under the playhead by pulling later clips left on all targeted tracks (locked clips stay put).
-- **Trim tools** — a tool picker in the timeline toolbar (or <kbd>V</kbd> <kbd>B</kbd> <kbd>R</kbd> <kbd>Y</kbd> <kbd>U</kbd>): **Selection**, **Ripple edit** (drag a clip edge and everything after it follows, so no gap opens), **Rolling edit** (drag a cut between two clips; nothing else moves), **Slip** (change which part of the source a clip shows without moving it) and **Slide** (move a clip while its neighbours trim to make room). Every tool respects source length, targeting, locks and linked audio, and shows the offset beside the pointer while you drag.
+- **Trim tools** — a tool picker in the timeline toolbar (or <kbd>V</kbd> <kbd>B</kbd> <kbd>R</kbd> <kbd>Y</kbd> <kbd>U</kbd>): **Selection**, **Ripple edit** (drag a clip edge and everything after it follows, so no gap opens), **Rolling edit** (drag a cut between two clips; nothing else moves), **Slip** (change which part of the source a clip shows without moving it) and **Slide** (move a clip while its neighbours trim to make room). Every tool respects source length, targeting, locks and linked audio, and shows the offset beside the pointer while you drag. Agents run the same edits — split, ripple delete, lift / extract, insert / overwrite, ripple / roll / slip / slide and crossfade — as `fablecut_patch_project` ops, on the same code.
 - **Lift / Extract** — <kbd>;</kbd> removes the IN→OUT range on the targeted tracks and leaves the gap; <kbd>'</kbd> removes it and closes the gap. Both also sit in the timeline toolbar.
 - **Jump to cut** — <kbd>↑</kbd> / <kbd>↓</kbd> move the playhead to the previous / next edit (clip In or Out). With a clip selected, the first taps land on that clip’s start then end (Premiere-style); with no selection they walk cuts on targeted tracks. In the Source monitor they jump among 0, In, Out, and duration. Left/right still step frames; Home/End still go to the sequence (or IN/OUT with Limit).
 - **Ripple delete** — the timeline **Ripple delete** button (or <kbd>⇧Del</kbd>) removes the selection and pulls later clips left on each **targeted** track to close the gap; plain <kbd>Del</kbd> still lifts (leaves a gap). Linked AV partners always move together, even on untargeted tracks (sync lock); locked clips are never deleted or moved.
@@ -246,6 +256,8 @@ same time.
   stream-copies and muxes audio. Faster uploads; bitrate/VBR-CBR in the
   Export dialog. Unavailable while an export frame is set (use Fast)
 - Realtime MediaRecorder fallback when ffmpeg or WebCodecs isn't available
+- Agents export too: `fablecut_export` runs the Fast export in the open editor,
+  or in a headless Chrome / Edge the server starts, and returns the file path
 - Export **Range** dropdown: Entire timeline or IN–OUT (defaults to IN–OUT when
   markers are set). Effective IN/OUT export bounds are clamped to `projDur()`.
 
