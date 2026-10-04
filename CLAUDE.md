@@ -35,6 +35,8 @@ Every Claude Code session then has these tools:
   file and switches the clip's stems to it). See "Audio mix" below.
 - `fablecut_export` — render the timeline to a file in `exports/` with the editor's own
   Fast export (open tab, or headless Chrome / Edge). See "Export" below.
+- `fablecut_scopes` — measure the graded picture at a moment (levels, clipping, colour
+  cast), as the editor's scopes see it. See "Color" below.
 
 ### Token-efficient editing (important for agents)
 
@@ -313,7 +315,7 @@ Examples in `library/svg/`: `sparkles.svg` (loop), `lower-third.svg`,
 | `cornerRadius` | 0 | px, rounded corners — the PiP look |
 | `flipH`, `flipV` | false | mirror |
 
-**Filter / color** (video/image/svg):
+**Filter / color** (video/image/svg) — quick looks; for real grading use `grade` (see "Color" below):
 | prop | default | notes |
 |---|---|---|
 | `filterPreset` | "none" | one of: cinematic · teal-orange · noir · vintage · faded · warm · cold · pop · dreamy · retro · bw-soft · cyberpunk · sunset · midnight. Combines non-destructively with the sliders below. |
@@ -530,6 +532,67 @@ edits the key under the playhead. Agents:
   shaping, **duck** for dipping under dialogue, the **track fader** to
   balance whole lanes (dialogue against the music bed), and a **bus** when
   several lanes need the same processing or one fader.
+
+### Color
+
+A clip's color grade lives in `props.grade` on any video, image, svg or
+adjustment clip (an adjustment layer grades everything below it). It runs on
+the GPU (WebGL2; CPU fallback) **before** the clip is composited, in preview and
+export alike, so it comes before the Filter / color sliders and presets, which
+still apply on top. In the editor: the **Color** workspace (top bar) shows
+scopes beside the program monitor and the **Color** tab beside the Inspector
+has the wheels and sliders for the selected clip.
+
+The grade is sparse: only keys that differ from neutral are stored.
+
+| key | neutral | range | does |
+|---|---|---|---|
+| `exposure` | 0 | −5…5 | stops, in linear light |
+| `temp` · `tint` | 0 | −100…100 | white balance in linear light: temp > 0 warmer, tint > 0 magenta (±100 ≈ ±1 stop per channel) |
+| `lift` · `gamma` · `gain` · `offset` | [0,0,0,0] | each −1…1 | colour wheels, `[r, g, b, master]`; a channel's amount is its own value + master. offset adds, lift raises blacks keeping white (`x + l·(1−x)`), gain multiplies (`x·(1+g)`), gamma bends mids (`x^(1/2^γ)`, > 0 brighter) |
+| `contrast` · `pivot` | 1 · 0.435 | 0…3 · 0.05…0.95 | log-style contrast `pivot·(x/pivot)^c` — blacks never crush |
+| `blacks` `shadows` `midtones` `highlights` `whites` | 0 | −100…100 | tone bands on luma, darkest → brightest (smooth, overlapping) |
+| `lowSoft` · `highSoft` | 0 | 0…100 | soft rolloff into black / white instead of a hard clip |
+| `saturation` | 100 | 0…200 | around Rec.709 luma |
+| `on` | true | — | `false` bypasses the grade without losing it |
+
+Order: exposure + white balance → offset → lift → gain → gamma → contrast →
+tone bands → rolloff → saturation.
+
+**Wheel colours.** A wheel's `r, g, b` normally carry no brightness: they are a
+point on the vectorscope's Cb / Cr plane, so pushing a wheel toward a colour
+moves the picture's trace toward that colour's target. To tint shadows teal by
+about 0.03: `lift: [-0.034, 0.008, 0.012, 0]` (r = 1.5748·Cr, g = −0.1873·Cb −
+0.4681·Cr, b = 1.8556·Cb, with Cb = 0.0065, Cr = −0.0216 here). Small values go a
+long way — ±0.02…0.05 on lift and offset, ±0.05…0.15 on gamma and gain.
+
+**Agents** set a grade with the patch op `setGrade` and check it with
+`fablecut_scopes`:
+
+- `{op:"setGrade", id:"c_a", grade:{exposure:0.3, temp:-15, contrast:1.15}}` — merges
+  into the clip's grade key by key; `null` on a key resets it; `replace:true`
+  starts from neutral; `grade:null` clears it; `ids:[…]` grades several clips
+  at once. Unknown keys or bad values refuse the whole patch. Locks apply
+  (`force:true` as elsewhere).
+- `fablecut_scopes {time}` renders the graded frame at `time` (default: the
+  playhead) exactly as export would — an open editor tab, else headless — and
+  returns numbers: luma min / 1st percentile / median / mean / 99th percentile /
+  max (0–1), the % of pixels at pure black and pure white, mean R/G/B, average
+  saturation, and the midtones' colour cast (hue name, hue angle, strength;
+  "neutral" below 0.01), plus the clips on screen and their grades. With an
+  `exportFrame` it measures the delivered crop.
+
+Reading the numbers: a normally exposed shot has its median near 0.35–0.5;
+`whitePct` above ~1 means clipped highlights (lower `highlights` / `whites`, or
+add `highSoft`); `blackPct` above ~2 means crushed shadows. A cast strength
+above ~0.03 on a scene that should be neutral wants white balance: move `temp`
+against the cast (orange / yellow → lower temp; blue / cyan → raise it) and
+`tint` against green / magenta, then measure again.
+
+Workflow for matching shots: grade the hero shot, measure it, then grade every
+other shot of the scene until its median and cast land near the hero's. In the
+editor, **Copy** / **Paste** on the Color tab pastes one clip's grade onto every
+selected clip.
 
 ### Semantics
 
@@ -783,6 +846,11 @@ voice: `fablecut_auto_duck {clipIds:[<music clip>], under:["A1"], amount:-10}`.
 
 **Cinematic grade**: `props.filterPreset: "teal-orange"` (tweak with
 `temperature`/`vignette` on top).
+
+**Balanced, contrasty base grade** (then measure with `fablecut_scopes`):
+`{op:"setGrade", id, grade:{contrast:1.15, pivot:0.42, shadows:-10, highlights:-20, highSoft:30, saturation:108}}`.
+Teal shadows / warm highlights: add `lift:[-0.034, 0.008, 0.012, 0]` and `gain:[0.04, 0, -0.06, 0]`.
+A grade on an adjustment layer over the whole edit = one look for every shot.
 
 **Green-screen composite**: subject clip on V2 with
 `props: {chromaKey:"#00ff00", chromaTolerance:30, chromaSoftness:15}`,

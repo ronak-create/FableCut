@@ -49,8 +49,8 @@ function createExportJobs(opts) {
   let timer = null;
   const isEnded = (j) => j.status === "done" || j.status === "failed" || j.status === "cancelled";
   const view = (j) => ({
-    id: j.id, status: j.status, via: j.via, range: j.range, profile: j.profile || null,
-    progress: j.progress, src: j.src || null, error: j.error || null,
+    id: j.id, kind: j.kind, status: j.status, via: j.via, range: j.range, profile: j.profile || null,
+    time: j.time ?? null, progress: j.progress, src: j.src || null, result: j.result || null, error: j.error || null,
     created: j.created, updated: j.updated,
   });
 
@@ -76,8 +76,8 @@ function createExportJobs(opts) {
     for (const j of jobs.values()) {
       if (j.status === "pending" && now - j.created > (j.via === "headless" ? PENDING_HEADLESS_MS : PENDING_TAB_MS))
         end(j, "failed", { error: j.via === "headless"
-          ? "the headless browser never picked up the export (it may have failed to start or to load the editor)"
-          : "no editor tab picked up the export — is it busy exporting already? Retry with where:\"headless\"" });
+          ? "the headless browser never picked up the job (it may have failed to start or to load the editor)"
+          : "no editor tab picked up the job — is it busy exporting? Retry with where:\"headless\"" });
       else if (j.status === "running" && now - j.updated > STALL_MS)
         end(j, "failed", { error: "the editor stopped reporting progress (tab closed or browser crashed)" });
       else if (isEnded(j) && now - j.updated > KEEP_MS) jobs.delete(j.id);
@@ -102,18 +102,21 @@ function createExportJobs(opts) {
   }
 
   return {
-    /** Queue an export. where: auto (open tab, else headless) · tab · headless. */
-    request({ range, profile, revision, where = "auto" }) {
+    /** Queue an export. where: auto (open tab, else headless) · tab · headless.
+     *  kind "scopes" measures one still at `time` instead (fablecut_scopes). */
+    request({ kind = "export", range, profile, time, revision, where = "auto" }) {
       if (!["auto", "tab", "headless"].includes(where)) throw Object.assign(new Error("where must be auto, tab or headless"), { code: 400 });
+      if (kind !== "export" && kind !== "scopes") throw Object.assign(new Error("kind must be export or scopes"), { code: 400 });
+      if (time != null && !(Number.isFinite(time) && time >= 0)) throw Object.assign(new Error("time must be seconds ≥ 0"), { code: 400 });
       if (range != null && range !== "entire" && range !== "in-out") throw Object.assign(new Error("range must be \"entire\" or \"in-out\""), { code: 400 });
       const busy = [...jobs.values()].find((j) => !isEnded(j));
-      if (busy) throw Object.assign(new Error(`export ${busy.id} is still ${busy.status} — wait for it, or cancel it`), { code: 409 });
+      if (busy) throw Object.assign(new Error(`${busy.kind === "scopes" ? "scope reading" : "export"} ${busy.id} is still ${busy.status} — wait for it, or cancel it`), { code: 409 });
       const tabs = opts.editors();
       if (where === "tab" && !tabs) throw Object.assign(new Error("no editor tab is open — open the editor, or use where:\"headless\""), { code: 409 });
       const now = Date.now();
       const j = {
-        id: "x_" + Math.random().toString(36).slice(2, 10), status: "pending", progress: 0,
-        range: range || null, profile: profile || null, revision: Number.isFinite(revision) ? revision : null,
+        id: "x_" + Math.random().toString(36).slice(2, 10), kind, status: "pending", progress: 0,
+        range: range || null, profile: profile || null, time: time ?? null, revision: Number.isFinite(revision) ? revision : null,
         via: where === "headless" || (where === "auto" && !tabs) ? "headless" : "tab",
         created: now, updated: now,
       };
@@ -125,7 +128,7 @@ function createExportJobs(opts) {
     },
     get(id) { const j = jobs.get(id); return j ? view(j) : null; },
     /** What a tab needs to run the job (headless pages fetch it by id). */
-    ticket(id) { const j = jobs.get(id); return j ? { id: j.id, range: j.range, profile: j.profile, revision: j.revision, status: j.status } : null; },
+    ticket(id) { const j = jobs.get(id); return j ? { id: j.id, kind: j.kind, range: j.range, profile: j.profile, time: j.time, revision: j.revision, status: j.status } : null; },
     /** First tab to claim a pending job runs it. */
     claim(id) {
       const j = jobs.get(id);
@@ -134,14 +137,14 @@ function createExportJobs(opts) {
       return true;
     },
     /** Progress / result from the running tab. Returns {cancel} so a cancel reaches it. */
-    report(id, { progress, status, src, error } = {}) {
+    report(id, { progress, status, src, result, error } = {}) {
       const j = jobs.get(id);
       if (!j) return null;
       if (j.status === "cancelled") return { cancel: true };
       if (j.status !== "running") return { cancel: false };
       j.updated = Date.now();
       if (Number.isFinite(progress)) j.progress = Math.max(0, Math.min(1, progress));
-      if (status === "done") end(j, "done", { progress: 1, src: String(src || "") });
+      if (status === "done") end(j, "done", { progress: 1, src: String(src || ""), result: result && typeof result === "object" ? result : null });
       else if (status === "failed") end(j, "failed", { error: String(error || "export failed") });
       return { cancel: false };
     },

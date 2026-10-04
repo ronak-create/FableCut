@@ -8,7 +8,8 @@
    Tools: fablecut_status, fablecut_docs, fablecut_get_project,
           fablecut_set_project, fablecut_patch_project, fablecut_import_media,
           fablecut_analyze_reference, fablecut_encode_profiles,
-          fablecut_normalize_audio, fablecut_auto_duck, fablecut_export
+          fablecut_normalize_audio, fablecut_auto_duck, fablecut_export,
+          fablecut_scopes
    ═══════════════════════════════════════════════════════════════════════════ */
 "use strict";
 const fs = require("fs");
@@ -24,6 +25,7 @@ const { downloadImportUrl, kindFromName, maybeFaststart } = require("./import-ur
 const FX = require("./audio-fx");
 const EditOps = require("./edit-ops");
 const Denoise = require("./denoise");
+const Color = require("./color");
 
 /* ROOT is where the code lives (server.js, CLAUDE.md); the user's timeline and
    media live under DATA_DIR. Identical unless FABLECUT_DATA_DIR is set. */
@@ -132,7 +134,7 @@ const TOOLS = [
   },
   {
     name: "fablecut_patch_project",
-    description: "Apply targeted edits to the FableCut project WITHOUT round-tripping the whole document — PREFER THIS over get+set for every edit (it is ~10-100x cheaper in tokens and merge-safe by design: it re-reads the latest document from disk, applies your ops in order, bumps revision once, saves atomically). Ops: {op:'addClip', clip:{…}} (id auto-generated if omitted) · {op:'updateClip', id, set:{…}} · {op:'removeClip', id} · {op:'addMedia', media:{…}} · {op:'removeMedia', id} · {op:'setProject', set:{name|width|height|fps|background|markers|disabledTracks|lockedTracks|untargetedTracks|encodeProfile|master}} (markers = the full list [{t, label?, color?}], color: gold|red|orange|green|cyan|blue|purple|pink; master = {gain}, the master fader in dB) · {op:'setTrack', id:'A1', set:{gain?, pan?, out?}} (audio-track fader in dB −60…+12, pan −1…1, out = a submix bus id or 'master'; null or 0 resets) · {op:'setBus', id:'B1', set:{name?, gain?, pan?, mute?}} (submix bus, created if missing; route tracks into it with setTrack out) · {op:'removeBus', id} · {op:'setFx', target:'clip'|'track'|'bus'|'master', id?, preset?:'podcast'|… OR fx:[{type,…params}], append?:true} (audio effects — validated; presets: clean-voice, podcast, radio, deep-voice, telephone, cinematic, wide, muffled; fx:null clears; on a clip it applies to its linked stems too) · {op:'setFxKeys', target, id?, index?|type?, param, keys:[{t, v, ease?}]|null} (automate one effect parameter: t is clip-local for a clip's effects, timeline seconds otherwise; see the 'Audio mix' docs section). TIMELINE EDITS — the editor's own split / ripple / trim code, so linked stems, track targeting (untargetedTracks) and locks behave exactly as in the UI; times in seconds: {op:'split', at, ids?} (no ids: every targeted track) · {op:'rippleDelete', ids} (later clips close the hole) · {op:'closeGap', at} · {op:'lift'|'extract', from?, to?} (remove a range; extract closes it; default = project inPoint/outPoint, which then clear) · {op:'insert'|'overwrite', mediaId, at, in?, duration?} (three-point edit: insert pushes later clips right, overwrite replaces what is there; a video brings one audio stem per channel) · {op:'rippleTrim'|'roll', id, side:'in'|'out', delta} · {op:'slip'|'slide', id, delta} (clamped to the media; the note says what was applied) · {op:'crossfade', ids? | at, duration?} (constant-power audio crossfade, borrowing handles from both sides). Any of these takes tracks:[…] to target lanes for that op only. setProject also takes inPoint / outPoint. updateClip merge rules: top-level keys are replaced (keyframes/transitionIn/transitionOut wholesale), `props` merges key-by-key, and setting any key to null deletes it. LOCKS: the user can lock clips (`locked:true`) and tracks (`lockedTracks`); updateClip / removeClip on a locked clip — or on a clip linked to one — and addClip onto a locked track are refused. Leave locked material alone; only if the user asked you to change it, pass force:true on that op (or unlock first: updateClip set:{locked:null}, which is always allowed). All-or-nothing: an invalid op aborts the whole patch unsaved.",
+    description: "Apply targeted edits to the FableCut project WITHOUT round-tripping the whole document — PREFER THIS over get+set for every edit (it is ~10-100x cheaper in tokens and merge-safe by design: it re-reads the latest document from disk, applies your ops in order, bumps revision once, saves atomically). Ops: {op:'addClip', clip:{…}} (id auto-generated if omitted) · {op:'updateClip', id, set:{…}} · {op:'removeClip', id} · {op:'addMedia', media:{…}} · {op:'removeMedia', id} · {op:'setProject', set:{name|width|height|fps|background|markers|disabledTracks|lockedTracks|untargetedTracks|encodeProfile|master}} (markers = the full list [{t, label?, color?}], color: gold|red|orange|green|cyan|blue|purple|pink; master = {gain}, the master fader in dB) · {op:'setTrack', id:'A1', set:{gain?, pan?, out?}} (audio-track fader in dB −60…+12, pan −1…1, out = a submix bus id or 'master'; null or 0 resets) · {op:'setBus', id:'B1', set:{name?, gain?, pan?, mute?}} (submix bus, created if missing; route tracks into it with setTrack out) · {op:'removeBus', id} · {op:'setFx', target:'clip'|'track'|'bus'|'master', id?, preset?:'podcast'|… OR fx:[{type,…params}], append?:true} (audio effects — validated; presets: clean-voice, podcast, radio, deep-voice, telephone, cinematic, wide, muffled; fx:null clears; on a clip it applies to its linked stems too) · {op:'setFxKeys', target, id?, index?|type?, param, keys:[{t, v, ease?}]|null} (automate one effect parameter: t is clip-local for a clip's effects, timeline seconds otherwise; see the 'Audio mix' docs section) · {op:'setGrade', id | ids:[…], grade:{exposure?, temp?, tint?, lift?, gamma?, gain?, offset?, contrast?, pivot?, blacks?, shadows?, midtones?, highlights?, whites?, lowSoft?, highSoft?, saturation?, on?}, replace?:true} (color grade on video / image / svg / adjust clips — wheels are [r, g, b, master]; merges key by key, null resets a key, replace:true starts from neutral, grade:null clears; see the 'Color' docs section; measure the result with fablecut_scopes). TIMELINE EDITS — the editor's own split / ripple / trim code, so linked stems, track targeting (untargetedTracks) and locks behave exactly as in the UI; times in seconds: {op:'split', at, ids?} (no ids: every targeted track) · {op:'rippleDelete', ids} (later clips close the hole) · {op:'closeGap', at} · {op:'lift'|'extract', from?, to?} (remove a range; extract closes it; default = project inPoint/outPoint, which then clear) · {op:'insert'|'overwrite', mediaId, at, in?, duration?} (three-point edit: insert pushes later clips right, overwrite replaces what is there; a video brings one audio stem per channel) · {op:'rippleTrim'|'roll', id, side:'in'|'out', delta} · {op:'slip'|'slide', id, delta} (clamped to the media; the note says what was applied) · {op:'crossfade', ids? | at, duration?} (constant-power audio crossfade, borrowing handles from both sides). Any of these takes tracks:[…] to target lanes for that op only. setProject also takes inPoint / outPoint. updateClip merge rules: top-level keys are replaced (keyframes/transitionIn/transitionOut wholesale), `props` merges key-by-key, and setting any key to null deletes it. LOCKS: the user can lock clips (`locked:true`) and tracks (`lockedTracks`); updateClip / removeClip on a locked clip — or on a clip linked to one — and addClip onto a locked track are refused. Leave locked material alone; only if the user asked you to change it, pass force:true on that op (or unlock first: updateClip set:{locked:null}, which is always allowed). All-or-nothing: an invalid op aborts the whole patch unsaved.",
     inputSchema: {
       type: "object",
       properties: {
@@ -247,6 +249,18 @@ const TOOLS = [
         timeout: { type: "number", description: "Seconds to wait before returning the job's status instead (default 900); the export keeps running" },
         job: { type: "string", description: "Report on an export started earlier instead of starting one" },
         cancel: { type: "string", description: "Cancel this export job" },
+      },
+    },
+  },
+  {
+    name: "fablecut_scopes",
+    description: "Measure the graded picture at one moment — what the editor's scopes show, as numbers: luma levels (min, 1st percentile, median, mean, 99th percentile, max on 0–1), the % of pixels crushed to black / clipped to white, mean R/G/B, average saturation, and the colour cast of the midtones (hue name + strength; neutral below 0.01), plus the clips on screen and their grades. Rendered by the same compositor as export (an open editor tab, else headless Chrome / Edge), over the export frame when one is set. Use it to check a grade: e.g. a cast strength above ~0.03 on footage that should be neutral, whitePct above ~1 (clipped highlights), or a median far from ~0.4 for a normally exposed shot. The user's playhead does not move.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        time: { type: "number", description: "Timeline seconds to measure (default: the editor's playhead)" },
+        where: { type: "string", enum: ["auto", "tab", "headless"], description: "auto (default): an open editor tab, else headless · tab · headless" },
+        timeout: { type: "number", description: "Seconds to wait (default 60)" },
       },
     },
   },
@@ -574,11 +588,51 @@ async function exportTool(args) {
   return describeExportJob(job);
 }
 
+/* ── Scopes (fablecut_scopes): one graded still, measured in the editor ── */
+function describeScopes(j) {
+  if (j.status !== "done") return `Scope reading ${j.id} ${j.status}${j.error ? ": " + j.error : ""}`;
+  const r = j.result || {}, st = r.stats;
+  if (!st) return `Frame at ${r.time}s is empty (nothing drawn).`;
+  const L = st.luma, cast = st.cast;
+  const lines = [
+    `Frame at ${r.time}s (${r.frame?.w}x${r.frame?.h}):`,
+    `  luma min ${L.min} · p1 ${L.p1} · median ${L.median} · mean ${L.mean} · p99 ${L.p99} · max ${L.max}`,
+    `  clipped: black ${st.clipped.blackPct}% · white ${st.clipped.whitePct}%`,
+    `  rgb mean [${st.rgbMean.join(", ")}] · saturation ${st.saturation}`,
+    `  cast: ${cast.tone === "neutral" ? "neutral" : `${cast.tone} (hue ${cast.hue}°)`} · strength ${cast.strength}`,
+    `On screen (bottom → top): ${(r.clips || []).map((c) => `${c.id} ${c.track} ${c.kind}${c.grade !== "neutral" ? " grade:" + c.grade : ""}`).join(" | ") || "nothing"}`,
+  ];
+  return lines.join("\n") + "\n" + JSON.stringify({ time: r.time, stats: st });
+}
+async function scopesTool(args) {
+  if (!(await ensureUIServer())) throw new Error(`the editor server is not running and could not be started on port ${PORT}`);
+  const body = { where: args.where || "auto" };
+  if (args.time != null) body.time = args.time;
+  const r = await apiJSON("POST", "/api/scopes/request", body);
+  if (r.status !== 200) throw new Error(r.body?.error || `scope request failed (${r.status})`);
+  let job = r.body;
+  const deadline = Date.now() + 1000 * (Number.isFinite(args.timeout) && args.timeout > 0 ? args.timeout : 60);
+  while (job.status === "pending" || job.status === "running") {
+    if (Date.now() > deadline) {
+      await apiJSON("POST", "/api/export/job/cancel?id=" + encodeURIComponent(job.id));
+      throw new Error("timed out waiting for the editor to measure the frame");
+    }
+    await sleep(300);
+    const q = await apiJSON("GET", "/api/export/job?id=" + encodeURIComponent(job.id));
+    if (q.status !== 200) throw new Error(q.body?.error || "lost track of the scope reading");
+    job = q.body;
+  }
+  if (job.status !== "done") throw new Error(`scope reading ${job.status}: ${job.error || "no reason given"}`);
+  return describeScopes(job);
+}
+
 /* ── Tool implementations ── */
 async function callTool(name, args) {
   switch (name) {
     case "fablecut_export":
       return exportTool(args);
+    case "fablecut_scopes":
+      return scopesTool(args);
     case "fablecut_denoise":
       return denoiseTool(args);
     case "fablecut_status": {
@@ -651,7 +705,7 @@ async function callTool(name, args) {
         bold: true, weight: 0, italic: false, uppercase: false, align: "center",
         letterSpacing: 0, lineHeight: 1.2, textShadow: 12, glow: 0, glowColor: "",
         strokeWidth: 0, strokeColor: "#000", bgColor: "#000", bgOpacity: 0,
-        textAnim: "none", wordRate: 0.15,
+        textAnim: "none", wordRate: 0.15, direction: "auto", boxW: 0, boxH: 0, boxFit: false, vAlign: "middle",
       };
       const hex = (v) => typeof v === "string" && /^#[0-9a-f]{3}$/i.test(v)
         ? "#" + [...v.slice(1)].map((c) => c + c).join("").toLowerCase()
@@ -867,6 +921,25 @@ async function callTool(name, args) {
             notes.push(`~${t.label}.fx[${i}].${op.param}` + (keys[op.param] ? `(${keys[op.param].length} keys)` : "(keys cleared)"));
             break;
           }
+          case "setGrade": {
+            // {op:"setGrade", id | ids, grade:{…} | null, replace?:true}
+            const ids = Array.isArray(op.ids) ? op.ids : op.id != null ? [op.id] : [];
+            if (!ids.length) throw new Error("setGrade needs id or ids");
+            if (op.grade !== null && (typeof op.grade !== "object" || Array.isArray(op.grade)))
+              throw new Error("setGrade needs grade:{…} (or grade:null to clear)");
+            if (op.grade) Color.normalizeGrade(Object.fromEntries(Object.entries(op.grade).filter(([, v]) => v !== null)), true); // validate first
+            for (const id of ids) {
+              const c = proj.clips.find((x) => x.id === id);
+              if (!c) throw new Error("setGrade: no clip " + id);
+              if (!["video", "image", "svg", "adjust"].includes(c.kind)) throw new Error(`setGrade: ${id} is a ${c.kind} clip — grades go on video, image, svg or adjust clips`);
+              refuseLocked("setGrade", lockReason(c), op);
+              const next = op.grade === null ? null : Color.mergeGrade(op.replace ? null : c.props?.grade, op.grade, true);
+              c.props = c.props || {};
+              if (next) c.props.grade = next; else delete c.props.grade;
+              notes.push(`~${id}.grade(${Color.summarizeGrade(next)})`);
+            }
+            break;
+          }
           case "setTrack": {
             // Mixer settings on one lane: {op:"setTrack", id:"A1", set:{gain:-6, pan:0.2}}.
             if (!/^A\d+$/.test(String(op.id || ""))) throw new Error("setTrack: id must be an audio track (A1, A2, …)");
@@ -951,7 +1024,7 @@ async function callTool(name, args) {
             notes.push(timelineEdit(proj, op, refuseLocked, lockReason));
             break;
           default:
-            throw new Error("Unknown op: " + op.op + " (addClip|updateClip|removeClip|addMedia|removeMedia|setProject|setTrack|setBus|removeBus|setFx|setFxKeys|" +
+            throw new Error("Unknown op: " + op.op + " (addClip|updateClip|removeClip|addMedia|removeMedia|setProject|setTrack|setBus|removeBus|setFx|setFxKeys|setGrade|" +
               "split|rippleDelete|closeGap|lift|extract|rippleTrim|roll|slip|slide|insert|overwrite|crossfade)");
         }
       }

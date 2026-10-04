@@ -771,7 +771,7 @@ const els = {
   btnInsert: $("btnInsert"), btnReplace: $("btnReplace"),
   vuMeter: $("vuMeter"),
   sideTabs: $("sideTabs"),
-  mixer: $("mixer"),
+  mixer: $("mixer"), colorPage: $("colorPage"),
   exportSetup: $("exportSetup"), engineFast: $("engineFast"), engineRealtime: $("engineRealtime"),
   exportProfileRow: $("exportProfileRow"),
   exportProfileSel: $("exportProfileSel"), exportProfileNote: $("exportProfileNote"),
@@ -1435,6 +1435,10 @@ function applyProject(data) {
     if (!c.fx) delete c.fx;
     const raw = c.props || {};
     c.props = { ...DEFAULT_PROPS, ...raw };
+    if (c.props.grade !== undefined) {
+      const g = self.FableCutColor.normalizeGrade(c.props.grade);
+      if (g) c.props.grade = g; else delete c.props.grade;
+    }
     if (migratePan && !Object.hasOwn(raw, "pan") && Number.isInteger(raw.audioChannel) && raw.audioChannel >= 0)
       c.props.pan = defaultPanForChannel(raw.audioChannel);
     if (c.keyframes) for (const arr of Object.values(c.keyframes))
@@ -4789,6 +4793,7 @@ function clipStatusBar(c) {
     `</div>`;
 }
 function renderInspector(lite) {
+  if (colorState.open && !lite) renderColorPage();
   const c = getClip(state.selId);
   if (!c) {
     els.inspector.innerHTML = `<div class="inspector-empty">Select a clip to edit its<br>transform, effects &amp; audio.</div>`;
@@ -6945,14 +6950,17 @@ function parseDbInput(s) {
   return Number.isFinite(v) ? clampFaderDb(v) : null;
 }
 function setSideTab(tab) {
-  const mixer = tab === "mixer";
+  const mixer = tab === "mixer", color = tab === "color";
   mixerState.open = mixer;
+  colorState.open = color;
   for (const b of els.sideTabs.querySelectorAll("[data-side]"))
     b.classList.toggle("on", b.dataset.side === tab);
-  els.inspector.classList.toggle("hidden", mixer);
+  els.inspector.classList.toggle("hidden", mixer || color);
   els.mixer.classList.toggle("hidden", !mixer);
+  els.colorPage.classList.toggle("hidden", !color);
   try { localStorage.setItem(SIDE_TAB_KEY, tab); } catch { }
   if (mixer) renderMixer();
+  else if (color) renderColorPage(true);
   else renderInspector();
 }
 /** Write a track's fader / pan, push it into the live graph, persist. */
@@ -8494,6 +8502,8 @@ function drawAdjust(c, W, H, t) {
   let src = adjScratch;
   if (p.temperature || p.tint || p.rgbSplit > 0)
     src = pixelPass(c, { ...p, chromaKey: "", bgRemove: false }, adjScratch, 0, 0, W, H, W, H);
+  const grade = activeGrade(c, p);
+  if (grade) src = gradeSource(src, 0, 0, src.width, src.height, src.width, src.height, W, H, grade);
   ctx2d.drawImage(src, 0, 0, src.width, src.height, 0, 0, W, H);
   ctx2d.filter = "none";
   if (p.vignette > 0) {
@@ -8576,6 +8586,106 @@ function pixelPass(c, p, src, sx, sy, sw, sh, dw, dh) {
   return scratch;
 }
 
+/* ═══════════ COLOR GRADE (props.grade — math in color.js) ═══════════
+   One WebGL2 pass grades a clip's pixels before they are composited, in
+   preview and export alike. Without WebGL2 the same math runs on the CPU
+   (color.js gradeImageData). The legacy CSS filter sliders still apply on
+   top when the graded frame is drawn. */
+const Color = self.FableCutColor;
+const gradeGL = { tried: false, gl: null, canvas: null, loc: null };
+const gradeCpu = document.createElement("canvas");
+const gradeCpuCtx = gradeCpu.getContext("2d", { willReadFrequently: true });
+const GRADE_MAX_PX = 4096;
+/** The clip's grade when it changes anything, else null. */
+function activeGrade(c, p) {
+  if (runtime.gradeBypass === c.id) return null; // the WB picker samples the ungraded clip
+  return p.grade && !Color.isNeutral(p.grade) ? p.grade : null;
+}
+function initGradeGL() {
+  if (gradeGL.tried) return gradeGL.gl;
+  gradeGL.tried = true;
+  try {
+    const cv = document.createElement("canvas");
+    const gl = cv.getContext("webgl2", { premultipliedAlpha: true, preserveDrawingBuffer: true, antialias: false, alpha: true });
+    if (!gl) return null;
+    const sh = (type, src) => {
+      const s = gl.createShader(type);
+      gl.shaderSource(s, src); gl.compileShader(s);
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+      return s;
+    };
+    const prog = gl.createProgram();
+    gl.attachShader(prog, sh(gl.VERTEX_SHADER, Color.GRADE_VERT));
+    gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, Color.GRADE_FRAG));
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+    gl.useProgram(prog);
+    const buf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+    const aPos = gl.getAttribLocation(prog, "aPos");
+    gl.enableVertexAttribArray(aPos);
+    gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+    const loc = {};
+    for (const n of ["uRect", "uTex", "uMul", "uLinear", "uOff", "uLift", "uGain", "uGam", "uContrast", "uPivot", "uTone", "uSoft", "uSat"])
+      loc[n] = gl.getUniformLocation(prog, n);
+    gl.uniform1i(loc.uTex, 0);
+    cv.addEventListener("webglcontextlost", (e) => { e.preventDefault(); gradeGL.gl = null; });
+    cv.addEventListener("webglcontextrestored", () => { gradeGL.tried = false; });
+    Object.assign(gradeGL, { gl, canvas: cv, loc });
+    return gl;
+  } catch (err) {
+    console.warn("[FableCut] WebGL2 grade unavailable, using the CPU path:", err && err.message);
+    return null;
+  }
+}
+/** Grade the (sx, sy, sw, sh) rect of `src` into a canvas about dw×dh. */
+function gradeSource(src, sx, sy, sw, sh, srcW, srcH, dw, dh, grade) {
+  let w = Math.max(2, Math.round(Math.min(dw, sw * 2, GRADE_MAX_PX)));
+  let h = Math.max(2, Math.round(w * dh / Math.max(1, dw)));
+  if (h > GRADE_MAX_PX) { w = Math.max(2, Math.round(w * GRADE_MAX_PX / h)); h = GRADE_MAX_PX; }
+  const gl = initGradeGL();
+  if (gl) {
+    try {
+      const { canvas: cv, loc } = gradeGL;
+      if (cv.width !== w) cv.width = w;
+      if (cv.height !== h) cv.height = h;
+      gl.viewport(0, 0, w, h);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src);
+      const u = Color.gradeUniforms(grade);
+      gl.uniform4f(loc.uRect, sx / srcW, sy / srcH, sw / srcW, sh / srcH);
+      gl.uniform3fv(loc.uMul, u.uMul); gl.uniform1i(loc.uLinear, u.uLinear);
+      gl.uniform3fv(loc.uOff, u.uOff); gl.uniform3fv(loc.uLift, u.uLift);
+      gl.uniform3fv(loc.uGain, u.uGain); gl.uniform3fv(loc.uGam, u.uGam);
+      gl.uniform1f(loc.uContrast, u.uContrast); gl.uniform1f(loc.uPivot, u.uPivot);
+      gl.uniform1fv(loc.uTone, u.uTone); gl.uniform2fv(loc.uSoft, u.uSoft); gl.uniform1f(loc.uSat, u.uSat);
+      gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      return cv;
+    } catch (err) {
+      console.warn("[FableCut] grade pass failed, using the CPU path:", err && err.message);
+      gradeGL.gl = null;
+    }
+  }
+  w = Math.min(w, 1920); h = Math.max(2, Math.round(w * dh / Math.max(1, dw)));
+  if (gradeCpu.width !== w) gradeCpu.width = w;
+  if (gradeCpu.height !== h) gradeCpu.height = h;
+  gradeCpuCtx.clearRect(0, 0, w, h);
+  gradeCpuCtx.drawImage(src, sx, sy, sw, sh, 0, 0, w, h);
+  const img = gradeCpuCtx.getImageData(0, 0, w, h);
+  Color.gradeImageData(img.data, grade);
+  gradeCpuCtx.putImageData(img, 0, 0);
+  return gradeCpu;
+}
+
 /* ── Compositor ── */
 function buildFilter(p) {
   const parts = [];
@@ -8610,8 +8720,9 @@ function drawFrame(t = state.time) {
   ctx2d.fillStyle = project.background || "#000"; ctx2d.fillRect(0, 0, W, H);
   // render video tracks bottom-up (V1 under V2)
   for (const c of visibleClipsAt(t)) drawClip(c, W, H, t);
+  if (!runtime.sampling) updateScopes(); // before the handles, so they never reach the scopes
   // on-canvas selection handles (never during export or playback)
-  if (!state.exporting && !state.playing) drawSelectionOverlay(W, H, t);
+  if (!state.exporting && !state.playing && !runtime.sampling) drawSelectionOverlay(W, H, t);
 }
 
 /* ═══════════ Direct manipulation on the program monitor ═══════════
@@ -8951,9 +9062,14 @@ function drawClip(c, W, H, t) {
     if (p.bgRemove && c.kind === "video") requestMask(c.id, src); // refresh person mask
     if (p.bgRemove && c.kind === "image" && !bgSeg.masks.get(c.id)) requestMask(c.id, src);
     ctx2d.filter = buildFilter(p);
-    if (needsPixelPass(p, c)) {
-      const processed = pixelPass(c, p, src, sx, sy, cw, ch, dw, dh);
+    const grade = activeGrade(c, p);
+    if (needsPixelPass(p, c)) { // key / cut-out first, so the grade never shifts the key colour
+      let processed = pixelPass(c, p, src, sx, sy, cw, ch, dw, dh);
+      if (grade) processed = gradeSource(processed, 0, 0, processed.width, processed.height, processed.width, processed.height, dw, dh, grade);
       ctx2d.drawImage(processed, 0, 0, processed.width, processed.height, -dw / 2, -dh / 2, dw, dh);
+    } else if (grade) {
+      const graded = gradeSource(src, sx, sy, cw, ch, sw, sh, dw, dh, grade);
+      ctx2d.drawImage(graded, 0, 0, graded.width, graded.height, -dw / 2, -dh / 2, dw, dh);
     } else {
       ctx2d.drawImage(src, sx, sy, cw, ch, -dw / 2, -dh / 2, dw, dh);
     }
@@ -10747,6 +10863,7 @@ async function runExportJob(ticket) {
   for (let i = 0; i < 150 && ticket.revision != null && (project.revision || 0) < ticket.revision; i++)
     await new Promise((r) => setTimeout(r, 100));
   if (ticket.revision != null && (project.revision || 0) < ticket.revision) await syncFromServer();
+  if (ticket.kind === "scopes") return runScopesJob(ticket, fail);
   if (!state.ffmpeg) {
     const j = await fetch("/api/export/ffmpeg").then((r) => r.json()).catch(() => ({}));
     state.ffmpeg = !!j.available;
@@ -10764,6 +10881,56 @@ async function runExportJob(ticket) {
     await fastExport({ job: ticket.id, profile: ticket.profile });
   } finally {
     exportRangeForced = null;
+  }
+}
+/* fablecut_scopes: render one still exactly as export would (graded, all
+   tracks), then measure it with color.js scopeStats. The user's playhead
+   stays where it is. */
+async function renderStillAt(t) {
+  const waits = [];
+  for (const c of project.clips) {
+    if (!clipRenders(c) || !activeAt(c, t)) continue;
+    if (c.kind === "video") {
+      const el = getClipEl(c);
+      if (!el) continue;
+      if (!el.paused) el.pause();
+      waits.push(hardSeekVideo(el, mediaTimeAt(c, t)));
+    } else if (c.kind === "image") {
+      const img = runtime.mediaAux.get(c.mediaId)?.img;
+      if (img && !img.complete) waits.push(img.decode().catch(() => { }));
+    }
+  }
+  await Promise.all(waits);
+  await prepareFrameAssets(t);
+  runtime.sampling = true; // no selection handles, no scope refresh
+  try { drawFrame(t); } finally { runtime.sampling = false; }
+}
+async function runScopesJob(ticket, fail) {
+  const wasPlaying = state.playing;
+  try {
+    if (wasPlaying) pause();
+    await loadProjectFonts();
+    const dur = projDur();
+    const t = clamp(Number.isFinite(ticket.time) ? ticket.time : state.time, 0, Math.max(0, dur - 1 / projectFps()));
+    state.rendering = true; // the render loop keeps its hands off the canvas
+    await renderStillAt(t);
+    const W = els.preview.width, H = els.preview.height;
+    const r = getExportFrame() || { x: 0, y: 0, w: W, h: H };
+    const sw = Math.max(2, Math.min(960, Math.round(r.w))), sh = Math.max(2, Math.round(sw * r.h / r.w));
+    const cv = document.createElement("canvas");
+    cv.width = sw; cv.height = sh;
+    const g = cv.getContext("2d", { willReadFrequently: true });
+    g.drawImage(els.preview, r.x, r.y, r.w, r.h, 0, 0, sw, sh);
+    const stats = Color.scopeStats(g.getImageData(0, 0, sw, sh).data, sw, sh);
+    const clips = visibleClipsAt(t).map((c) => ({
+      id: c.id, name: c.name, kind: c.kind, track: c.track,
+      grade: Color.summarizeGrade(c.props.grade),
+    }));
+    await reportExportJob(ticket.id, { status: "done", result: { time: +t.toFixed(3), frame: { w: Math.round(r.w), h: Math.round(r.h) }, stats, clips } }, true);
+  } catch (err) {
+    fail("could not measure the frame: " + (err && err.message || err));
+  } finally {
+    state.rendering = false;
   }
 }
 /** A headless page opened for one job (?exportJob=<id>) fetches and runs it. */
@@ -11906,6 +12073,443 @@ function initPanelSplit() {
 
 /* ── Boot ── */
 loadSettings();
+/* ═══════════ COLOR WORKSPACE (wheels · primaries · scopes) ═══════════
+   The Color tab edits the selected clip's props.grade (math: color.js). The
+   Color workspace swaps the media bin for live scopes of the program
+   monitor. Grade edits are plain prop writes, so undo, save and the SSE
+   reload behave as for any inspector field. */
+const WS_KEY = "fablecut-workspace";
+const SCOPE_KEY = "fablecut-scopes";
+const SCOPE_KINDS = { waveform: "Waveform", parade: "RGB Parade", vectorscope: "Vectorscope", histogram: "Histogram" };
+const WHEEL_LABEL = { lift: "Lift", gamma: "Gamma", gain: "Gain", offset: "Offset" };
+const WHEEL_RIM = { lift: 0.25, gamma: 0.5, gain: 0.5, offset: 0.25 };    // Cb/Cr reached at the disc's rim
+const WHEEL_MASTER = { lift: 0.5, gamma: 1, gain: 1, offset: 0.5 };       // master slider range ±
+const colorState = { open: false, ws: "edit", pick: false, sig: "", drag: null, clipboard: null, disc: null };
+const scopes = { slots: ["waveform", "vectorscope"], last: 0, built: false, els: [], vecColor: null,
+  src: document.createElement("canvas"), tmp: document.createElement("canvas") };
+scopes.srcCtx = scopes.src.getContext("2d", { willReadFrequently: true });
+scopes.tmpCtx = scopes.tmp.getContext("2d");
+try {
+  const s = JSON.parse(localStorage.getItem(SCOPE_KEY) || "null");
+  if (Array.isArray(s) && s.length === 2 && s.every((k) => SCOPE_KINDS[k])) scopes.slots = s;
+} catch { }
+
+function isGradable(c) { return !!c && (c.kind === "video" || c.kind === "image" || c.kind === "svg" || c.kind === "adjust"); }
+function setWorkspace(ws) {
+  colorState.ws = ws === "color" ? "color" : "edit";
+  $("app").classList.toggle("ws-color", colorState.ws === "color");
+  for (const b of document.querySelectorAll("#wsSwitch [data-ws]")) b.classList.toggle("on", b.dataset.ws === colorState.ws);
+  try { localStorage.setItem(WS_KEY, colorState.ws); } catch { }
+  if (colorState.ws === "color") { buildScopeSlots(); setSideTab("color"); }
+  else if (colorState.open) setSideTab("inspector");
+  scopes.last = 0;
+}
+/** Write grade keys on a clip (null resets a key). */
+function writeGrade(c, set) {
+  const next = Color.mergeGrade(c.props.grade, set);
+  if (next) c.props.grade = next; else delete c.props.grade;
+  colorState.sig = colorPageSig(c);   // the page already shows this — no rebuild
+  scheduleSave();
+}
+function colorPageSig(c) {
+  return c && isGradable(c)
+    ? `${c.id}|${JSON.stringify(c.props.grade || null)}|${isGroupLocked(c)}|${state.selIds.size}|${!!colorState.clipboard}` : "none";
+}
+const fmtG = (v, step) => (+v).toFixed(step >= 1 ? 0 : step >= 0.01 ? 2 : 3);
+function renderColorPage(force = false) {
+  const root = els.colorPage;
+  if (!root || colorState.drag) return;
+  const c = getClip(state.selId);
+  const sig = colorPageSig(c);
+  if (!force && sig === colorState.sig) return;
+  colorState.sig = sig;
+  if (!isGradable(c)) {
+    root.innerHTML = `<div class="inspector-empty">Select a video, image or adjustment clip<br>to grade it.</div>`;
+    return;
+  }
+  const g = Color.fullGrade(c.props.grade), P = Color.GRADE_PARAMS, locked = isGroupLocked(c);
+  const num = (k) => {
+    const d = P[k];
+    return `<div class="insp-row cp-row"><label class="cp-label" data-greset="${k}" title="Double-click: reset">${d.label}</label>
+      <input type="range" data-g="${k}" min="${d.min}" max="${d.max}" step="${d.step}" value="${g[k]}">
+      <input type="number" class="cp-num" data-gnum="${k}" min="${d.min}" max="${d.max}" step="${d.step}" value="${fmtG(g[k], d.step)}"></div>`;
+  };
+  const nSel = selectedClips().filter(isGradable).length;
+  root.innerHTML = `
+    <div class="cp-head">
+      <span class="cp-name" title="${escapeHtml(c.name || "")}">${escapeHtml(c.name || c.kind)}</span>
+      <button type="button" class="btn tiny${g.on ? " toggle on" : ""}" data-gact="bypass" title="Grade on / off (compare with the ungraded clip)">${g.on ? "On" : "Off"}</button>
+      <button type="button" class="btn tiny${colorState.pick ? " toggle on" : ""}" data-gact="pick" title="White balance: click something white or grey in the monitor (Esc cancels)">WB pick</button>
+    </div>
+    <div class="cp-head cp-tools">
+      <button type="button" class="btn tiny" data-gact="copy" title="Copy this clip's grade">Copy</button>
+      <button type="button" class="btn tiny" data-gact="paste" ${colorState.clipboard ? "" : "disabled"} title="Paste the copied grade onto the selected clips">Paste${nSel > 1 ? ` → ${nSel}` : ""}</button>
+      <button type="button" class="btn tiny" data-gact="reset" title="Reset the whole grade">Reset all</button>
+    </div>
+    <div class="cp-wheels">${Color.WHEELS.map((w) => `
+      <div class="cw" data-wheel="${w}">
+        <div class="cw-head"><span class="cp-label" data-wreset="${w}" title="Double-click: reset">${WHEEL_LABEL[w]}</span></div>
+        <canvas class="cw-disc" data-wdisc="${w}" width="200" height="200" title="Drag to tint (Shift: fine) · double-click: reset colour"></canvas>
+        <input type="range" class="cw-master" data-wmaster="${w}" min="${-WHEEL_MASTER[w]}" max="${WHEEL_MASTER[w]}" step="0.005" value="${g[w][3]}" title="Master · double-click: reset">
+        <div class="cw-vals" data-wvals="${w}"></div>
+      </div>`).join("")}
+    </div>
+    <div class="insp-section"><h3>Exposure &amp; balance</h3>${num("exposure")}${num("temp")}${num("tint")}</div>
+    <div class="insp-section"><h3>Tone</h3>${num("blacks")}${num("shadows")}${num("midtones")}${num("highlights")}${num("whites")}</div>
+    <div class="insp-section"><h3>Contrast &amp; rolloff</h3>${num("contrast")}${num("pivot")}${num("lowSoft")}${num("highSoft")}${num("saturation")}</div>`;
+  root.classList.toggle("locked", locked);
+  for (const w of Color.WHEELS) drawWheel(w, g[w]);
+  if (locked) for (const el of root.querySelectorAll("input")) el.disabled = true;
+  bindColorPage(c);
+}
+/* The disc's colour field, computed once from the same Cb/Cr → RGB mapping
+   the wheels write, so the hue under the puck is the tint it applies. */
+function wheelDiscImage(size) {
+  if (colorState.disc && colorState.disc.width === size) return colorState.disc;
+  const cv = document.createElement("canvas");
+  cv.width = cv.height = size;
+  const g = cv.getContext("2d"), img = g.createImageData(size, size), R = size / 2 - 2;
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    const dx = (x + 0.5 - size / 2) / R, dy = (size / 2 - y - 0.5) / R, r = Math.hypot(dx, dy), i = (y * size + x) * 4;
+    if (r > 1) continue;
+    const v = Color.wheelToRgb(dx, dy), m = Math.max(1e-6, Math.abs(v[0]), Math.abs(v[1]), Math.abs(v[2]));
+    for (let k = 0; k < 3; k++) img.data[i + k] = clamp(Math.round(255 * (0.24 + 0.42 * r * v[k] / m)), 0, 255);
+    img.data[i + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  colorState.disc = cv;
+  return cv;
+}
+function drawWheel(w, vals) {
+  const root = els.colorPage, cv = root.querySelector(`[data-wdisc="${w}"]`);
+  if (!cv) return;
+  const s = cv.width, ctx = cv.getContext("2d"), R = s / 2 - 2;
+  ctx.clearRect(0, 0, s, s);
+  ctx.drawImage(wheelDiscImage(s), 0, 0);
+  ctx.strokeStyle = "rgba(255,255,255,0.18)"; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.arc(s / 2, s / 2, R, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(s / 2, s / 2, R / 2, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(s / 2 - 6, s / 2); ctx.lineTo(s / 2 + 6, s / 2); ctx.moveTo(s / 2, s / 2 - 6); ctx.lineTo(s / 2, s / 2 + 6); ctx.stroke();
+  const [cb, cr] = Color.rgbToWheel(vals[0], vals[1], vals[2]);
+  let px = cb / WHEEL_RIM[w], py = cr / WHEEL_RIM[w];
+  const r = Math.hypot(px, py);
+  if (r > 1) { px /= r; py /= r; }
+  const x = s / 2 + px * R, y = s / 2 - py * R;
+  ctx.fillStyle = "#fff"; ctx.strokeStyle = "rgba(0,0,0,0.7)"; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(x, y, 7, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  const out = root.querySelector(`[data-wvals="${w}"]`);
+  if (out) {
+    const f = (v) => (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(3);
+    out.textContent = `R${f(vals[0] + vals[3])} G${f(vals[1] + vals[3])} B${f(vals[2] + vals[3])}`;
+  }
+}
+function bindColorPage(c) {
+  const root = els.colorPage;
+  const guard = () => { if (isGroupLocked(c)) { toastLocked(); return false; } return true; };
+  const syncNum = (k, v) => {
+    const r = root.querySelector(`[data-g="${k}"]`), n = root.querySelector(`[data-gnum="${k}"]`);
+    if (r && document.activeElement !== r) r.value = v;
+    if (n && document.activeElement !== n) n.value = fmtG(v, Color.GRADE_PARAMS[k].step);
+  };
+  for (const r of root.querySelectorAll("[data-g]")) {
+    const k = r.dataset.g;
+    r.addEventListener("pointerdown", () => { if (guard()) pushUndo(); });
+    r.addEventListener("input", () => { if (!isGroupLocked(c)) { writeGrade(c, { [k]: +r.value }); syncNum(k, +r.value); } });
+  }
+  for (const n of root.querySelectorAll("[data-gnum]")) {
+    const k = n.dataset.gnum;
+    n.addEventListener("change", () => {
+      const v = parseFloat(n.value);
+      if (!Number.isFinite(v) || !guard()) return;
+      pushUndo(); writeGrade(c, { [k]: v });
+      syncNum(k, Color.fullGrade(c.props.grade)[k]);
+    });
+  }
+  for (const lab of root.querySelectorAll("[data-greset]")) lab.addEventListener("dblclick", () => {
+    if (!guard()) return;
+    pushUndo(); writeGrade(c, { [lab.dataset.greset]: null }); renderColorPage(true);
+  });
+  for (const lab of root.querySelectorAll("[data-wreset]")) lab.addEventListener("dblclick", () => {
+    if (!guard()) return;
+    pushUndo(); writeGrade(c, { [lab.dataset.wreset]: null }); renderColorPage(true);
+  });
+  for (const m of root.querySelectorAll("[data-wmaster]")) {
+    const w = m.dataset.wmaster;
+    m.addEventListener("pointerdown", () => { if (guard()) pushUndo(); });
+    m.addEventListener("input", () => {
+      if (isGroupLocked(c)) return;
+      const cur = Color.fullGrade(c.props.grade)[w];
+      cur[3] = +m.value;
+      writeGrade(c, { [w]: cur }); drawWheel(w, cur);
+    });
+    m.addEventListener("dblclick", () => {
+      if (!guard()) return;
+      const cur = Color.fullGrade(c.props.grade)[w];
+      cur[3] = 0; m.value = 0;
+      pushUndo(); writeGrade(c, { [w]: cur }); drawWheel(w, cur);
+    });
+  }
+  for (const cv of root.querySelectorAll("[data-wdisc]")) {
+    const w = cv.dataset.wdisc;
+    cv.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0 || !guard()) return;
+      e.preventDefault();
+      cv.setPointerCapture(e.pointerId);
+      pushUndo();
+      const cur = Color.fullGrade(c.props.grade)[w];
+      const [cb, cr] = Color.rgbToWheel(cur[0], cur[1], cur[2]);
+      colorState.drag = { w, x: e.clientX, y: e.clientY, cb, cr, master: cur[3], R: cv.getBoundingClientRect().width / 2 };
+    });
+    cv.addEventListener("pointermove", (e) => {
+      const d = colorState.drag;
+      if (!d || d.w !== w) return;
+      const k = WHEEL_RIM[w] / Math.max(20, d.R) * (e.shiftKey ? 0.2 : 1);
+      let cb = d.cb + (e.clientX - d.x) * k, cr = d.cr - (e.clientY - d.y) * k;
+      const r = Math.hypot(cb, cr) / WHEEL_RIM[w];
+      if (r > 1) { cb /= r; cr /= r; }
+      const vals = [...Color.wheelToRgb(cb, cr), d.master];
+      writeGrade(c, { [w]: vals }); drawWheel(w, vals);
+    });
+    const end = () => { if (colorState.drag?.w === w) colorState.drag = null; };
+    cv.addEventListener("pointerup", end);
+    cv.addEventListener("pointercancel", end);
+    cv.addEventListener("dblclick", () => {
+      if (!guard()) return;
+      const cur = Color.fullGrade(c.props.grade)[w];
+      const vals = [0, 0, 0, cur[3]];
+      pushUndo(); writeGrade(c, { [w]: vals }); drawWheel(w, vals);
+    });
+  }
+  for (const b of root.querySelectorAll("[data-gact]")) b.addEventListener("click", () => {
+    const a = b.dataset.gact;
+    if (a === "copy") {
+      colorState.clipboard = c.props.grade ? JSON.parse(JSON.stringify(c.props.grade)) : {};
+      toast("Grade copied"); renderColorPage(true); return;
+    }
+    if (a === "paste") {
+      if (!colorState.clipboard) return;
+      const targets = selectedClips().filter(isGradable);
+      if (!targets.length) targets.push(c);
+      const ok = targets.filter((x) => !isGroupLocked(x));
+      if (!ok.length) { toastLocked(); return; }
+      pushUndo();
+      const g = Color.normalizeGrade(colorState.clipboard);
+      for (const x of ok) { if (g) x.props.grade = JSON.parse(JSON.stringify(g)); else delete x.props.grade; }
+      scheduleSave(); renderColorPage(true);
+      toast(`Grade pasted onto ${ok.length} clip${ok.length > 1 ? "s" : ""}` + (ok.length < targets.length ? " (locked clips skipped)" : ""));
+      return;
+    }
+    if (a === "pick") { setWbPick(!colorState.pick); return; }
+    if (!guard()) return;
+    pushUndo();
+    if (a === "bypass") writeGrade(c, { on: c.props.grade?.on === false ? null : false });
+    else if (a === "reset") { delete c.props.grade; scheduleSave(); }
+    renderColorPage(true);
+  });
+}
+function setWbPick(on) {
+  colorState.pick = !!on;
+  els.preview.classList.toggle("wb-picking", colorState.pick);
+  const b = els.colorPage.querySelector("[data-gact=pick]");
+  if (b) { b.classList.toggle("on", colorState.pick); b.classList.toggle("toggle", colorState.pick); }
+  if (colorState.pick) toast("Click something that should be white or grey in the monitor");
+}
+/** Average sRGB colour (0…1) of a 5×5 patch of the program frame at canvas
+ *  px (x, y), rendered with `bypassId`'s grade switched off. */
+function sampleProgram(x, y, bypassId) {
+  const W = els.preview.width, H = els.preview.height;
+  runtime.gradeBypass = bypassId;
+  runtime.sampling = true;
+  try {
+    drawFrame(state.time);
+    const x0 = clamp(Math.round(x) - 2, 0, W - 5), y0 = clamp(Math.round(y) - 2, 0, H - 5);
+    const d = ctx2d.getImageData(x0, y0, 5, 5).data;
+    let r = 0, g = 0, b = 0;
+    for (let i = 0; i < d.length; i += 4) { r += d[i]; g += d[i + 1]; b += d[i + 2]; }
+    return [r / 25 / 255, g / 25 / 255, b / 25 / 255];
+  } catch { return null; }
+  finally {
+    runtime.gradeBypass = null;
+    runtime.sampling = false;
+    drawFrame(state.time);
+  }
+}
+els.preview.addEventListener("pointerdown", (e) => {
+  if (!colorState.pick || isSourceMode()) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  setWbPick(false);
+  const c = getClip(state.selId);
+  if (!isGradable(c)) { toast("Select the clip to balance first"); return; }
+  if (isGroupLocked(c)) { toastLocked(); return; }
+  const pt = canvasPt(e);
+  const rgb = sampleProgram(pt.x, pt.y, c.id);
+  if (!rgb) return;
+  if (Math.max(...rgb) < 0.03) { toast("That spot is too dark to balance on — pick a brighter white or grey"); return; }
+  const wb = Color.solveWhiteBalance(rgb);
+  pushUndo();
+  writeGrade(c, wb);
+  renderColorPage(true);
+  toast(`White balance: temp ${wb.temp}, tint ${wb.tint}`);
+}, true);
+window.addEventListener("keydown", (e) => {
+  if (colorState.pick && e.key === "Escape") { e.stopPropagation(); setWbPick(false); }
+}, true);
+
+/* ── Scopes: a ≤480 px copy of the program frame (or the export frame),
+   read back a few times a second while the Color workspace is open. ── */
+function buildScopeSlots() {
+  if (scopes.built) return;
+  scopes.built = true;
+  scopes.els = [...document.querySelectorAll("#scopesPanel .scope-slot")].map((el, i) => {
+    el.innerHTML = `<div class="scope-head"><select data-scope-kind aria-label="Scope">${Object.entries(SCOPE_KINDS).map(([k, l]) =>
+      `<option value="${k}"${k === scopes.slots[i] ? " selected" : ""}>${l}</option>`).join("")}</select></div><canvas class="scope-cv"></canvas>`;
+    const sel = el.querySelector("select");
+    sel.addEventListener("change", () => {
+      scopes.slots[i] = sel.value;
+      try { localStorage.setItem(SCOPE_KEY, JSON.stringify(scopes.slots)); } catch { }
+      scopes.last = 0;
+    });
+    const cv = el.querySelector("canvas");
+    return { el, cv, ctx: cv.getContext("2d") };
+  });
+}
+function updateScopes() {
+  if (colorState.ws !== "color" || !scopes.built || state.exporting || state.rendering) return;
+  const now = performance.now();
+  if (now - scopes.last < (state.playing ? 70 : 140)) return;
+  scopes.last = now;
+  const W = els.preview.width, H = els.preview.height;
+  const r = getExportFrame() || { x: 0, y: 0, w: W, h: H };
+  const sw = Math.max(2, Math.min(480, Math.round(r.w))), sh = Math.max(2, Math.round(sw * r.h / r.w));
+  if (scopes.src.width !== sw) scopes.src.width = sw;
+  if (scopes.src.height !== sh) scopes.src.height = sh;
+  scopes.srcCtx.drawImage(els.preview, r.x, r.y, r.w, r.h, 0, 0, sw, sh);
+  let img;
+  try { img = scopes.srcCtx.getImageData(0, 0, sw, sh); } catch { return; } // tainted canvas
+  const data = Color.computeScopes(img.data, sw, sh, [...new Set(scopes.slots)]);
+  scopes.els.forEach((s, i) => drawScope(s, scopes.slots[i], data, sw, sh));
+}
+function sizeScopeCanvas(s) {
+  const dpr = window.devicePixelRatio || 1, b = s.cv.getBoundingClientRect();
+  const w = Math.max(10, Math.round(b.width * dpr)), h = Math.max(10, Math.round(b.height * dpr));
+  if (s.cv.width !== w) s.cv.width = w;
+  if (s.cv.height !== h) s.cv.height = h;
+  return { w, h, dpr };
+}
+function scopeImage(width, height) {
+  if (scopes.tmp.width !== width) scopes.tmp.width = width;
+  if (scopes.tmp.height !== height) scopes.tmp.height = height;
+  return scopes.tmpCtx.createImageData(width, height);
+}
+function drawScope(s, kind, data, sw, sh) {
+  const { w, h, dpr } = sizeScopeCanvas(s), ctx = s.ctx;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalCompositeOperation = "source-over";
+  ctx.fillStyle = "#0b0b0e";
+  ctx.fillRect(0, 0, w, h);
+  ctx.font = `${Math.round(9 * dpr)}px ui-monospace, Consolas, monospace`;
+  if (kind === "waveform" || kind === "parade") {
+    const padL = Math.round(22 * dpr), pad = Math.round(6 * dpr);
+    const box = { x: padL, y: pad, w: w - padL - pad, h: h - pad * 2 };
+    const ref = Math.log1p(sh / 6);
+    const bands = kind === "parade" ? 3 : 1, cols = data[kind].cols;
+    const img = scopeImage(cols * bands, 256);
+    const tints = kind === "parade" ? [[255, 90, 90], [90, 255, 120], [100, 150, 255]] : [[200, 255, 205]];
+    for (let band = 0; band < bands; band++) {
+      const src = kind === "parade" ? data.parade.data[band] : data.waveform.data, [tr, tg, tb] = tints[band];
+      for (let col = 0; col < cols; col++) for (let lv = 0; lv < 256; lv++) {
+        const n = src[col * 256 + lv];
+        if (!n) continue;
+        const v = Math.min(1, Math.log1p(n) / ref), i = ((255 - lv) * cols * bands + band * cols + col) * 4;
+        img.data[i] = tr * v; img.data[i + 1] = tg * v; img.data[i + 2] = tb * v; img.data[i + 3] = 255;
+      }
+    }
+    scopes.tmpCtx.putImageData(img, 0, 0);
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(scopes.tmp, box.x, box.y, box.w, box.h);
+    ctx.strokeStyle = "rgba(255,255,255,0.12)"; ctx.fillStyle = "rgba(255,255,255,0.45)";
+    ctx.lineWidth = 1; ctx.textAlign = "right"; ctx.textBaseline = "middle";
+    for (const lv of [0, 25, 50, 75, 100]) {
+      const y = Math.round(box.y + box.h * (1 - lv / 100)) + 0.5;
+      ctx.beginPath(); ctx.moveTo(box.x, y); ctx.lineTo(box.x + box.w, y); ctx.stroke();
+      ctx.fillText(String(lv), box.x - 4 * dpr, y);
+    }
+    if (bands === 3) for (const k of [1, 2]) {
+      const x = Math.round(box.x + box.w * k / 3) + 0.5;
+      ctx.beginPath(); ctx.moveTo(x, box.y); ctx.lineTo(x, box.y + box.h); ctx.stroke();
+    }
+  } else if (kind === "vectorscope") {
+    const size = Math.min(w, h) - Math.round(8 * dpr), x0 = (w - size) / 2, y0 = (h - size) / 2;
+    if (!scopes.vecColor) {
+      scopes.vecColor = new Uint8ClampedArray(256 * 256 * 3);
+      for (let y = 0; y < 256; y++) for (let x = 0; x < 256; x++) {
+        const v = Color.wheelToRgb((x - 128) / 255, (128 - y) / 255), i = (y * 256 + x) * 3;
+        for (let k = 0; k < 3; k++) scopes.vecColor[i + k] = clamp(255 * (0.62 + 1.1 * v[k]), 60, 255);
+      }
+    }
+    const ref = Math.log1p(sw * sh / 1500), vec = data.vectorscope, img = scopeImage(256, 256);
+    for (let i = 0; i < 65536; i++) {
+      const n = vec[i];
+      if (!n) continue;
+      const v = Math.min(1, Math.log1p(n) / ref);
+      img.data[i * 4] = scopes.vecColor[i * 3] * v; img.data[i * 4 + 1] = scopes.vecColor[i * 3 + 1] * v;
+      img.data[i * 4 + 2] = scopes.vecColor[i * 3 + 2] * v; img.data[i * 4 + 3] = 255;
+    }
+    scopes.tmpCtx.putImageData(img, 0, 0);
+    const cx = x0 + size / 2, cy = y0 + size / 2, k = size / 256;
+    ctx.strokeStyle = "rgba(255,255,255,0.14)"; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(cx, cy, size / 2, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx - size / 2, cy); ctx.lineTo(cx + size / 2, cy); ctx.moveTo(cx, cy - size / 2); ctx.lineTo(cx, cy + size / 2); ctx.stroke();
+    const a = Color.SKIN_ANGLE * Math.PI / 180;   // skin-tone line
+    ctx.strokeStyle = "rgba(255,200,150,0.35)";
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(a) * size / 2, cy - Math.sin(a) * size / 2); ctx.stroke();
+    ctx.imageSmoothingEnabled = true;
+    ctx.globalCompositeOperation = "lighter";
+    ctx.drawImage(scopes.tmp, x0, y0, size, size);
+    ctx.globalCompositeOperation = "source-over";
+    ctx.strokeStyle = "rgba(255,255,255,0.5)"; ctx.fillStyle = "rgba(255,255,255,0.55)";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    const bx = 5 * dpr;
+    for (const t of Color.vectorTargets()) {
+      const x = x0 + t.x * k, y = y0 + t.y * k;
+      ctx.strokeRect(x - bx, y - bx, bx * 2, bx * 2);
+      const dx = x - cx, dy = y - cy, d = Math.hypot(dx, dy) || 1;
+      ctx.fillText(t.label, x + dx / d * 13 * dpr, y + dy / d * 13 * dpr);
+    }
+  } else if (kind === "histogram") {
+    const pad = Math.round(6 * dpr), box = { x: pad, y: pad, w: w - pad * 2, h: h - pad * 2 };
+    const H4 = data.histogram;
+    let mx = 1;
+    for (const ch of [H4.r, H4.g, H4.b]) for (let i = 1; i < 255; i++) if (ch[i] > mx) mx = ch[i];
+    ctx.globalCompositeOperation = "lighter";
+    const plot = (bins, fill) => {
+      ctx.fillStyle = fill;
+      ctx.beginPath();
+      ctx.moveTo(box.x, box.y + box.h);
+      for (let i = 0; i < 256; i++) ctx.lineTo(box.x + box.w * i / 255, box.y + box.h * (1 - Math.min(1, bins[i] / mx)));
+      ctx.lineTo(box.x + box.w, box.y + box.h);
+      ctx.closePath(); ctx.fill();
+    };
+    plot(H4.r, "rgba(255,70,70,0.55)"); plot(H4.g, "rgba(70,255,100,0.5)"); plot(H4.b, "rgba(80,130,255,0.6)");
+    ctx.globalCompositeOperation = "source-over";
+    ctx.strokeStyle = "rgba(255,255,255,0.75)"; ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let i = 0; i < 256; i++) {
+      const x = box.x + box.w * i / 255, y = box.y + box.h * (1 - Math.min(1, H4.y[i] / mx));
+      if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+    }
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(255,255,255,0.1)";
+    for (const q of [0.25, 0.5, 0.75]) {
+      const x = Math.round(box.x + box.w * q) + 0.5;
+      ctx.beginPath(); ctx.moveTo(x, box.y); ctx.lineTo(x, box.y + box.h); ctx.stroke();
+    }
+  }
+}
+for (const b of document.querySelectorAll("#wsSwitch [data-ws]"))
+  b.addEventListener("click", () => setWorkspace(b.dataset.ws));
+
 initPanelSplit();
 buildTrackDOM();
 rebuildClips();
@@ -11915,6 +12519,10 @@ syncMonitorModeUI();
 buildMeterDOM();
 for (const b of els.sideTabs.querySelectorAll("[data-side]"))
   b.addEventListener("click", () => setSideTab(b.dataset.side));
-try { if (localStorage.getItem(SIDE_TAB_KEY) === "mixer") setSideTab("mixer"); } catch { }
+try {
+  const side = localStorage.getItem(SIDE_TAB_KEY);
+  if (side === "mixer" || side === "color") setSideTab(side);
+  if (localStorage.getItem(WS_KEY) === "color") setWorkspace("color");
+} catch { }
 connectServer().then(() => { loadLibraryFonts(); runExportJobFromUrl(); });
 requestAnimationFrame(loop);

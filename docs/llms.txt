@@ -30,6 +30,12 @@ about 150 ms. A human and an agent can work the same timeline at once.
   reverb, distortion, stereo width, pitch shift) with presets and keyframed
   parameters; loudness normalization (LUFS); auto-duck; crossfades; noise
   reduction.
+- Color: a Color workspace with GPU grading per clip or adjustment layer
+  (lift / gamma / gain / offset wheels, exposure, white balance with a picker,
+  blacks / shadows / midtones / highlights / whites, log-style contrast and
+  pivot, soft rolloff, saturation) and live scopes (waveform, RGB parade,
+  vectorscope, histogram). Agents grade with the `setGrade` patch op and read
+  the result as numbers with `fablecut_scopes`.
 - Export: fast ffmpeg export via encoding profiles, WebCodecs hardware export
   (browser encodes H.264, server muxes), and a realtime MediaRecorder fallback.
   Agents can start an export themselves (`fablecut_export`), in the open editor

@@ -170,7 +170,15 @@ same time.
 
 - 14 one-click filter presets (cinematic, teal-orange, noir, vintage, cyberpunk, sunset, midnight…)
 - **Adjustment layers** — one clip grades everything below it, Premiere-style
-- Full grade controls: brightness/contrast/saturation/hue, **temperature & tint**,
+- **Color workspace** (top bar → **Color**): live **waveform, RGB parade,
+  vectorscope and histogram** beside the program monitor, and a **Color** tab
+  that grades the selected clip on the GPU — **lift / gamma / gain / offset
+  wheels**, exposure, white balance with a **picker** (click something white),
+  blacks / shadows / midtones / highlights / whites, log-style contrast with a
+  pivot, soft rolloff and saturation. Copy / paste a grade across shots.
+  Agents grade with the `setGrade` patch op and read the result as numbers
+  with `fablecut_scopes` (levels, clipping, colour cast)
+- Quick filter sliders: brightness/contrast/saturation/hue, **temperature & tint**,
   blur, grayscale/sepia/invert, **vignette**, animated **film grain**
 - Blend modes (screen, multiply, overlay…), fit modes (contain/cover/stretch),
   per-edge cropping, corner radius, flip H/V
@@ -351,7 +359,7 @@ Three equivalent control surfaces:
    `fablecut_get_project`, `fablecut_set_project`, `fablecut_patch_project`,
    `fablecut_import_media`, `fablecut_analyze_reference`,
    `fablecut_encode_profiles`, `fablecut_normalize_audio`, `fablecut_auto_duck`,
-   `fablecut_denoise`, `fablecut_export`.
+   `fablecut_denoise`, `fablecut_export`, `fablecut_scopes`.
 
    FableCut is also published on the **official MCP registry** as
    [`io.github.ronak-create/fablecut`](https://registry.modelcontextprotocol.io/v0/servers?search=fablecut)

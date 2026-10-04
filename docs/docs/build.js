@@ -49,6 +49,11 @@ const PAGES = [
     parts: [["project.json schema", "Audio mix"]],
   },
   {
+    slug: "color", nav: "Color", title: "Color", group: "The timeline",
+    lede: "Grade a clip with wheels, exposure, white balance and tone, and check it with scopes: in the Color workspace, or from an agent with setGrade and fablecut_scopes.",
+    parts: [["project.json schema", "Color"]],
+  },
+  {
     slug: "editing", nav: "Editing rules", title: "Editing rules", group: "The timeline",
     lede: "How tracks, links, locks, targeting and the trim tools behave, for people and agents alike.",
     parts: [["project.json schema", "Semantics"]],

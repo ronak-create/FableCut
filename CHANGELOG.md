@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Color workspace.** An **Edit / Color** switch in the top bar. Color swaps
+  the media bin for live scopes of the program monitor (or of the export
+  frame, when one is set) — **waveform, RGB parade, vectorscope** (75 %
+  targets and a skin-tone line) and **histogram**, two at a time — and opens
+  the new **Color** tab beside the Inspector and Mixer.
+- **Color grading** (`props.grade`) on video, image, SVG and adjustment
+  clips, run on the GPU (WebGL2, with a CPU fallback) before the clip is
+  composited, so preview and export match: **lift / gamma / gain / offset
+  wheels** with master sliders, **exposure** and **white balance** in linear
+  light, a **white-balance picker** (click something white or grey in the
+  monitor), **blacks / shadows / midtones / highlights / whites**, log-style
+  **contrast with a pivot**, soft **rolloff** into black and white, and
+  **saturation**. On / off to compare, Reset, and Copy / Paste a grade onto
+  every selected clip. The existing filter sliders and presets still apply on
+  top.
+- Agents: the patch op **`setGrade`** (merge, reset a key with `null`,
+  `replace`, several clips at once; validated, honours locks) and the tool
+  **`fablecut_scopes`**, which renders the graded frame exactly as export
+  would and returns luma levels, clipping, mean RGB, saturation and the
+  colour cast as numbers.
+
 ## [1.10.0] - 2026-10-02
 
 ### Added

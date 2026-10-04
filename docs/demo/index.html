@@ -17,6 +17,10 @@
     <div class="logo"><span class="logo-mark">▶</span> Fable<b>Cut</b></div>
     <div class="topbar-center" id="projectName">Untitled Project</div>
     <div class="topbar-right">
+      <span class="btn-group ws-switch" id="wsSwitch" role="tablist" title="Workspace">
+        <button type="button" class="btn tiny on" data-ws="edit" title="Edit workspace: media bin, inspector, mixer">Edit</button>
+        <button type="button" class="btn tiny" data-ws="color" title="Color workspace: scopes, wheels and the grade of the selected clip">Color</button>
+      </span>
       <span class="layout-tools">
         <button type="button" class="btn tiny" id="btnLayoutReset" title="Restore default layout">⊡ Layout</button>
         <span class="btn-group" id="trackSizeGroup" title="Timeline track height">
@@ -66,6 +70,12 @@
     </aside>
 
     <!-- Single monitor (Source / Program — Avid-style toggle) -->
+    <!-- Scopes (Color workspace) -->
+    <aside class="panel scopes" id="scopesPanel" aria-label="Scopes">
+      <div class="scope-slot" data-slot="0"></div>
+      <div class="scope-slot" data-slot="1"></div>
+    </aside>
+
     <section class="panel monitor" id="monitorPanel">
       <div class="panel-head">
         <span class="panel-head-title">
@@ -170,11 +180,13 @@
       <div class="bin-tabs side-tabs" id="sideTabs" role="tablist">
         <button type="button" data-side="inspector" class="on" title="Selected clip: transform, effects &amp; audio">Inspector</button>
         <button type="button" data-side="mixer" title="Track and master faders, pan, mute / solo, meters">Mixer</button>
+        <button type="button" data-side="color" title="Grade the selected clip: wheels, exposure, white balance, tone">Color</button>
       </div>
       <div class="inspector-body" id="inspector">
         <div class="inspector-empty">Select a clip to edit its<br>transform, effects &amp; audio.</div>
       </div>
       <div class="mixer hidden" id="mixer"></div>
+      <div class="color-page hidden" id="colorPage"></div>
     </aside>
   </div>
 
@@ -395,6 +407,7 @@
 <script src="loudness.js"></script>
 <script src="ducking.js"></script>
 <script src="audio-fx.js"></script>
+<script src="color.js"></script>
 <script src="edit-ops.js"></script>
 <script src="static-shim.js"></script>
 <script src="app.js"></script>
