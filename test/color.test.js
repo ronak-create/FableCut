@@ -138,7 +138,10 @@ test("fablecut_scopes hands a scopes job to the tab and reports its measurement"
   const { base, port } = await startServer(t, dir, { FABLECUT_NO_FS_WATCH: "1", FABLECUT_CHROME: path.join(dir, "no-such-browser") });
   const tickets = [];
   let wake = null, buf = "";
+  let opened;
+  const open = new Promise((r) => { opened = r; });
   const sse = http.get(base + "/api/events", (res) => {
+    opened();
     res.setEncoding("utf8");
     res.on("data", (chunk) => {
       buf += chunk;
@@ -151,12 +154,17 @@ test("fablecut_scopes hands a scopes job to the tab and reports its measurement"
   });
   sse.on("error", () => {});
   t.after(() => sse.destroy());
-  await new Promise((r) => setTimeout(r, 300));
+  await open; // the server counts the tab once its stream is open
+  await new Promise((r) => setTimeout(r, 100));
   const mcp = startMcp(t, dir, { FABLECUT_PORT: String(port) });
   await mcp.request("initialize", { protocolVersion: "2025-11-25" });
 
-  const pending = mcp.callTool("fablecut_scopes", { time: 2.5 });
-  if (!tickets.length) await new Promise((r) => { wake = r; });
+  const pending = mcp.callTool("fablecut_scopes", { time: 2.5, where: "tab" });
+  if (!tickets.length) {
+    // a refused request resolves pending instead of sending a ticket — fail, don't hang
+    const early = await Promise.race([new Promise((r) => { wake = () => r(null); }), pending]);
+    assert.equal(early, null, "expected a ticket, got: " + early?.text);
+  }
   const ticket = tickets.shift();
   assert.equal(ticket.kind, "scopes");
   assert.equal(ticket.time, 2.5);
