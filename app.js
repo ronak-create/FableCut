@@ -8599,7 +8599,8 @@ const GRADE_MAX_PX = 4096;
 /** The clip's grade when it changes anything, else null. */
 function activeGrade(c, p) {
   if (runtime.gradeBypass === c.id) return null; // the WB picker samples the ungraded clip
-  return p.grade && !Color.isNeutral(p.grade) ? p.grade : null;
+  const g = runtime.gradeNoCurves === c.id ? Color.withoutCurves(p.grade) : p.grade; // curve pickers: before the curves
+  return g && !Color.isNeutral(g) ? g : null;
 }
 function initGradeGL() {
   if (gradeGL.tried) return gradeGL.gl;
@@ -8635,12 +8636,27 @@ function initGradeGL() {
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
     const loc = {};
-    for (const n of ["uRect", "uTex", "uMul", "uLinear", "uOff", "uLift", "uGain", "uGam", "uContrast", "uPivot", "uTone", "uSoft", "uSat"])
+    for (const n of ["uRect", "uTex", "uMul", "uLinear", "uOff", "uLift", "uGain", "uGam", "uContrast", "uPivot", "uTone", "uSoft", "uSat",
+      "uCurveLut", "uHueLut", "uCurves", "uHueCurves"])
       loc[n] = gl.getUniformLocation(prog, n);
     gl.uniform1i(loc.uTex, 0);
+    // curve tables (color.js bakes them): float, read with texelFetch, so no filtering extension needed
+    const lutTex = (unit, n) => {
+      const t = gl.createTexture();
+      gl.activeTexture(gl.TEXTURE0 + unit);
+      gl.bindTexture(gl.TEXTURE_2D, t);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, n, 1, 0, gl.RGBA, gl.FLOAT, new Float32Array(n * 4));
+      gl.activeTexture(gl.TEXTURE0);
+      return t;
+    };
+    const curveTex = lutTex(1, Color.CURVE_N), hueTex = lutTex(2, Color.HUE_N);
+    gl.uniform1i(loc.uCurveLut, 1); gl.uniform1i(loc.uHueLut, 2);
+    gl.bindTexture(gl.TEXTURE_2D, tex);
     cv.addEventListener("webglcontextlost", (e) => { e.preventDefault(); gradeGL.gl = null; });
     cv.addEventListener("webglcontextrestored", () => { gradeGL.tried = false; });
-    Object.assign(gradeGL, { gl, canvas: cv, loc });
+    Object.assign(gradeGL, { gl, canvas: cv, loc, curveTex, hueTex, curveRef: null, hueRef: null });
     return gl;
   } catch (err) {
     console.warn("[FableCut] WebGL2 grade unavailable, using the CPU path:", err && err.message);
@@ -8669,6 +8685,17 @@ function gradeSource(src, sx, sy, sw, sh, srcW, srcH, dw, dh, grade) {
       gl.uniform3fv(loc.uGain, u.uGain); gl.uniform3fv(loc.uGam, u.uGam);
       gl.uniform1f(loc.uContrast, u.uContrast); gl.uniform1f(loc.uPivot, u.uPivot);
       gl.uniform1fv(loc.uTone, u.uTone); gl.uniform2fv(loc.uSoft, u.uSoft); gl.uniform1f(loc.uSat, u.uSat);
+      const upload = (unit, texObj, ref, data, n) => {
+        if (!data || gradeGL[ref] === data) return; // tables are cached per curve set — upload on change only
+        gl.activeTexture(gl.TEXTURE0 + unit);
+        gl.bindTexture(gl.TEXTURE_2D, texObj);
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, n, 1, gl.RGBA, gl.FLOAT, data);
+        gl.activeTexture(gl.TEXTURE0);
+        gradeGL[ref] = data;
+      };
+      upload(1, gradeGL.curveTex, "curveRef", u.curveLut, u.CURVE_N);
+      upload(2, gradeGL.hueTex, "hueRef", u.hueLut, u.HUE_N);
+      gl.uniform1i(loc.uCurves, u.curveLut ? 1 : 0); gl.uniform1i(loc.uHueCurves, u.hueLut ? 1 : 0);
       gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       return cv;
@@ -12090,7 +12117,8 @@ const SCOPE_KINDS = { waveform: "Waveform", parade: "RGB Parade", vectorscope: "
 const WHEEL_LABEL = { lift: "Lift", gamma: "Gamma", gain: "Gain", offset: "Offset" };
 const WHEEL_RIM = { lift: 0.25, gamma: 0.5, gain: 0.5, offset: 0.25 };    // Cb/Cr reached at the disc's rim
 const WHEEL_MASTER = { lift: 0.5, gamma: 1, gain: 1, offset: 0.5 };       // master slider range ±
-const colorState = { open: false, ws: "edit", pick: false, sig: "", drag: null, clipboard: null, disc: null };
+const colorState = { open: false, ws: "edit", pick: false, sig: "", drag: null, clipboard: null, disc: null,
+  curveTab: "curves", curveCh: "y", curvePick: false, curveMark: null, cdrag: null };
 const scopes = { slots: ["waveform", "vectorscope"], last: 0, built: false, els: [], vecColor: null,
   src: document.createElement("canvas"), tmp: document.createElement("canvas") };
 scopes.srcCtx = scopes.src.getContext("2d", { willReadFrequently: true });
@@ -12124,7 +12152,7 @@ function colorPageSig(c) {
 const fmtG = (v, step) => (+v).toFixed(step >= 1 ? 0 : step >= 0.01 ? 2 : 3);
 function renderColorPage(force = false) {
   const root = els.colorPage;
-  if (!root || colorState.drag) return;
+  if (!root || colorState.drag || colorState.cdrag) return;
   const c = getClip(state.selId);
   const sig = colorPageSig(c);
   if (!force && sig === colorState.sig) return;
@@ -12162,7 +12190,8 @@ function renderColorPage(force = false) {
     </div>
     <div class="insp-section"><h3>Exposure &amp; balance</h3>${num("exposure")}${num("temp")}${num("tint")}</div>
     <div class="insp-section"><h3>Tone</h3>${num("blacks")}${num("shadows")}${num("midtones")}${num("highlights")}${num("whites")}</div>
-    <div class="insp-section"><h3>Contrast &amp; rolloff</h3>${num("contrast")}${num("pivot")}${num("lowSoft")}${num("highSoft")}${num("saturation")}</div>`;
+    <div class="insp-section"><h3>Contrast &amp; rolloff</h3>${num("contrast")}${num("pivot")}${num("lowSoft")}${num("highSoft")}${num("saturation")}</div>
+    ${curvesSectionHtml()}`;
   root.classList.toggle("locked", locked);
   for (const w of Color.WHEELS) drawWheel(w, g[w]);
   if (locked) for (const el of root.querySelectorAll("input")) el.disabled = true;
@@ -12212,6 +12241,7 @@ function drawWheel(w, vals) {
 function bindColorPage(c) {
   const root = els.colorPage;
   const guard = () => { if (isGroupLocked(c)) { toastLocked(); return false; } return true; };
+  bindCurveEditor(c, guard);
   const syncNum = (k, v) => {
     const r = root.querySelector(`[data-g="${k}"]`), n = root.querySelector(`[data-gnum="${k}"]`);
     if (r && document.activeElement !== r) r.value = v;
@@ -12315,16 +12345,17 @@ function bindColorPage(c) {
 }
 function setWbPick(on) {
   colorState.pick = !!on;
-  els.preview.classList.toggle("wb-picking", colorState.pick);
+  if (on && colorState.curvePick) setCurvePick(false);
+  els.preview.classList.toggle("wb-picking", colorState.pick || colorState.curvePick);
   const b = els.colorPage.querySelector("[data-gact=pick]");
   if (b) { b.classList.toggle("on", colorState.pick); b.classList.toggle("toggle", colorState.pick); }
   if (colorState.pick) toast("Click something that should be white or grey in the monitor");
 }
 /** Average sRGB colour (0…1) of a 5×5 patch of the program frame at canvas
  *  px (x, y), rendered with `bypassId`'s grade switched off. */
-function sampleProgram(x, y, bypassId) {
+function sampleProgram(x, y, bypassId, stage = "all") {
   const W = els.preview.width, H = els.preview.height;
-  runtime.gradeBypass = bypassId;
+  if (stage === "curves") runtime.gradeNoCurves = bypassId; else runtime.gradeBypass = bypassId;
   runtime.sampling = true;
   try {
     drawFrame(state.time);
@@ -12336,16 +12367,23 @@ function sampleProgram(x, y, bypassId) {
   } catch { return null; }
   finally {
     runtime.gradeBypass = null;
+    runtime.gradeNoCurves = null;
     runtime.sampling = false;
     drawFrame(state.time);
   }
 }
 els.preview.addEventListener("pointerdown", (e) => {
-  if (!colorState.pick || isSourceMode()) return;
+  if ((!colorState.pick && !colorState.curvePick) || isSourceMode()) return;
   e.preventDefault();
   e.stopImmediatePropagation();
-  setWbPick(false);
   const c = getClip(state.selId);
+  if (colorState.curvePick) {
+    setCurvePick(false);
+    if (!isGradable(c)) { toast("Select the clip to grade first"); return; }
+    curvePickAt(c, canvasPt(e));
+    return;
+  }
+  setWbPick(false);
   if (!isGradable(c)) { toast("Select the clip to balance first"); return; }
   if (isGroupLocked(c)) { toastLocked(); return; }
   const pt = canvasPt(e);
@@ -12359,8 +12397,188 @@ els.preview.addEventListener("pointerdown", (e) => {
   toast(`White balance: temp ${wb.temp}, tint ${wb.tint}`);
 }, true);
 window.addEventListener("keydown", (e) => {
-  if (colorState.pick && e.key === "Escape") { e.stopPropagation(); setWbPick(false); }
+  if ((colorState.pick || colorState.curvePick) && e.key === "Escape") { e.stopPropagation(); setWbPick(false); setCurvePick(false); }
 }, true);
+
+/* ── Curves editor (Color tab): YRGB curves and the four hue curves ──
+   One canvas edits the curve picked by the tabs. Click adds a point on the
+   curve (no jump), drag moves it, double-click removes it. Pick samples the
+   monitor (before the curves) and marks that hue / level on the editor. */
+const CURVE_TABS = { curves: "Curves", hueHue: "Hue·Hue", hueSat: "Hue·Sat", hueLuma: "Hue·Luma", satLuma: "Sat·Luma" };
+const CURVE_COLORS = { y: "#e8e8ee", r: "#ff5a5a", g: "#4fdc6a", b: "#5a8cff" };
+function curveSpec(tab) {
+  if (tab === "curves") return { xMax: 1, min: 0, max: 1, neutral: null, periodic: false };
+  return Color.HUE_CURVES[tab];
+}
+function curvePoints(c, tab, ch) {
+  const g = c.props.grade || {};
+  if (tab === "curves") return (g.curves && g.curves[ch] || [[0, 0], [1, 1]]).map((p) => p.slice());
+  return (g[tab] || []).map((p) => p.slice());
+}
+function curveValueAt(pts, tab, x) {
+  const d = curveSpec(tab);
+  if (!pts.length) return tab === "curves" ? x : d.neutral;
+  return Color.curveFn(pts, d.periodic)(x);
+}
+function writeCurve(c, tab, ch, pts) {
+  if (tab === "curves") writeGrade(c, { curves: { [ch]: pts.length ? pts : null } });
+  else writeGrade(c, { [tab]: pts.length ? pts : null });
+}
+function curvesSectionHtml() {
+  const tab = colorState.curveTab, ch = colorState.curveCh;
+  return `<div class="insp-section cp-curves"><h3>Curves</h3>
+    <div class="cv-tabs">${Object.entries(CURVE_TABS).map(([k, l]) =>
+      `<button type="button" class="btn tiny${k === tab ? " toggle on" : ""}" data-cvtab="${k}">${l}</button>`).join("")}</div>
+    <div class="cv-bar">
+      ${tab === "curves" ? Color.CURVE_CHANNELS.map((k) =>
+        `<button type="button" class="btn tiny cv-ch${k === ch ? " toggle on" : ""}" data-cvch="${k}" style="--cv:${CURVE_COLORS[k]}" title="${k === "y" ? "Luma — brightness only, colour kept" : k.toUpperCase() + " channel"}">${k.toUpperCase()}</button>`).join("") : `<span class="cv-label">${Color.HUE_CURVES[tab].label}</span>`}
+      <span class="cv-sp"></span>
+      <button type="button" class="btn tiny${colorState.curvePick ? " toggle on" : ""}" data-cvact="pick" title="Click the monitor to mark that colour's ${tab === "curves" ? "level" : tab === "satLuma" ? "saturation" : "hue"} on the curve">Pick</button>
+      <button type="button" class="btn tiny" data-cvact="reset" title="Reset this curve">Reset</button>
+    </div>
+    <canvas class="cv-ed${tab === "curves" ? " square" : ""}" data-cved title="Click: add a point · drag: move · double-click: remove"></canvas>
+  </div>`;
+}
+function drawCurveEditor(c) {
+  const cv = els.colorPage.querySelector("[data-cved]");
+  if (!cv || !c) return;
+  const dpr = window.devicePixelRatio || 1, b = cv.getBoundingClientRect();
+  const W = Math.max(10, Math.round(b.width * dpr)), H = Math.max(10, Math.round(b.height * dpr));
+  if (cv.width !== W) cv.width = W;
+  if (cv.height !== H) cv.height = H;
+  const ctx = cv.getContext("2d"), tab = colorState.curveTab, d = curveSpec(tab), pad = 6 * dpr;
+  const X = (x) => pad + (x / d.xMax) * (W - pad * 2), Y = (v) => H - pad - ((v - d.min) / (d.max - d.min)) * (H - pad * 2);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = "#0b0b0e"; ctx.fillRect(0, 0, W, H);
+  if (tab !== "curves") { // colour band: hue across, or grey → saturated
+    for (let i = 0; i < 90; i++) {
+      const u = i / 90, x0 = X(u * d.xMax), x1 = X((u + 1 / 90) * d.xMax) + 1;
+      const rgb = tab === "satLuma" ? Color.hsvToRgb(0.02, u, 0.85) : Color.hsvToRgb(u, 0.75, 0.8);
+      ctx.fillStyle = `rgba(${rgb.map((v) => Math.round(v * 255)).join(",")},${tab === "satLuma" ? 0.35 : 0.22})`;
+      ctx.fillRect(x0, pad, x1 - x0, H - pad * 2);
+    }
+  }
+  ctx.strokeStyle = "rgba(255,255,255,0.08)"; ctx.lineWidth = 1;
+  for (const q of [0.25, 0.5, 0.75]) {
+    ctx.beginPath(); ctx.moveTo(X(q * d.xMax), pad); ctx.lineTo(X(q * d.xMax), H - pad); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(pad, pad + q * (H - pad * 2)); ctx.lineTo(W - pad, pad + q * (H - pad * 2)); ctx.stroke();
+  }
+  ctx.setLineDash([4 * dpr, 4 * dpr]); ctx.strokeStyle = "rgba(255,255,255,0.25)";
+  ctx.beginPath();
+  if (tab === "curves") { ctx.moveTo(X(0), Y(0)); ctx.lineTo(X(1), Y(1)); }
+  else { ctx.moveTo(X(0), Y(d.neutral)); ctx.lineTo(X(d.xMax), Y(d.neutral)); }
+  ctx.stroke(); ctx.setLineDash([]);
+  const mark = colorState.curveMark?.[tab === "curves" ? "curves" : tab];
+  if (mark != null) {
+    ctx.strokeStyle = "rgba(255,210,90,0.9)"; ctx.lineWidth = 1.5 * dpr;
+    ctx.beginPath(); ctx.moveTo(X(mark), pad); ctx.lineTo(X(mark), H - pad); ctx.stroke();
+  }
+  const plot = (pts, color, width, ch) => {
+    ctx.strokeStyle = color; ctx.lineWidth = width;
+    ctx.beginPath();
+    for (let i = 0; i <= 200; i++) {
+      const x = (i / 200) * d.xMax, v = curveValueAt(pts, tab, x);
+      if (i) ctx.lineTo(X(x), Y(v)); else ctx.moveTo(X(x), Y(v));
+    }
+    ctx.stroke();
+  };
+  if (tab === "curves") {
+    for (const ch of Color.CURVE_CHANNELS) if (ch !== colorState.curveCh) plot(curvePoints(c, tab, ch), CURVE_COLORS[ch] + "55", 1 * dpr);
+  }
+  const pts = colorState.cdrag ? colorState.cdrag.pts : curvePoints(c, tab, colorState.curveCh);
+  plot(pts, tab === "curves" ? CURVE_COLORS[colorState.curveCh] : "#ffffff", 1.6 * dpr);
+  for (const [x, v] of pts) {
+    ctx.fillStyle = "#fff"; ctx.strokeStyle = "rgba(0,0,0,0.8)"; ctx.lineWidth = 1.5 * dpr;
+    ctx.beginPath(); ctx.arc(X(x), Y(v), 4 * dpr, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  }
+  cv._map = { X, Y, toData: (px, py) => [
+    clamp(((px * dpr - pad) / (W - pad * 2)) * d.xMax, 0, d.xMax),
+    clamp(d.min + ((H - pad - py * dpr) / (H - pad * 2)) * (d.max - d.min), d.min, d.max)], dpr };
+}
+function bindCurveEditor(c, guard) {
+  const root = els.colorPage, cv = root.querySelector("[data-cved]");
+  for (const b of root.querySelectorAll("[data-cvtab]")) b.addEventListener("click", () => {
+    colorState.curveTab = b.dataset.cvtab; renderColorPage(true);
+  });
+  for (const b of root.querySelectorAll("[data-cvch]")) b.addEventListener("click", () => {
+    colorState.curveCh = b.dataset.cvch; renderColorPage(true);
+  });
+  for (const b of root.querySelectorAll("[data-cvact]")) b.addEventListener("click", () => {
+    if (b.dataset.cvact === "pick") { setCurvePick(!colorState.curvePick); return; }
+    if (!guard()) return;
+    pushUndo(); writeCurve(c, colorState.curveTab, colorState.curveCh, []); renderColorPage(true);
+  });
+  if (!cv) return;
+  requestAnimationFrame(() => drawCurveEditor(c)); // after layout, so the canvas has its size
+  const hit = (e) => {
+    const r = cv.getBoundingClientRect(), m = cv._map, px = e.clientX - r.left, py = e.clientY - r.top;
+    const pts = curvePoints(c, colorState.curveTab, colorState.curveCh);
+    const i = pts.findIndex(([x, v]) => Math.hypot(m.X(x) / m.dpr - px, m.Y(v) / m.dpr - py) < 8);
+    return { pts, i, data: m.toData(px, py), px };
+  };
+  cv.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 || !cv._map || !guard()) return;
+    e.preventDefault();
+    const tab = colorState.curveTab, d = curveSpec(tab);
+    let { pts, i, data } = hit(e);
+    if (i < 0) { // new point, on the curve so nothing jumps; snaps to a picked mark nearby
+      let x = data[0];
+      const mark = colorState.curveMark?.[tab];
+      if (mark != null && Math.abs(cv._map.X(mark) - cv._map.X(x)) / cv._map.dpr < 10) x = mark;
+      const v = curveValueAt(pts, tab, x);
+      if (d.periodic && !pts.length) pts = [[(x - Color.BAND + 360) % 360, d.neutral], [x, v], [(x + Color.BAND) % 360, d.neutral]];
+      else pts.push([x, v]);
+      pts.sort((a, b) => a[0] - b[0]);
+      i = pts.findIndex((p) => p[0] === x);
+    }
+    pushUndo();
+    cv.setPointerCapture(e.pointerId);
+    const sorted = pts.map((p) => p[0]);
+    colorState.cdrag = { pts, i, lo: i > 0 ? sorted[i - 1] : 0, hi: i < pts.length - 1 ? sorted[i + 1] : d.xMax,
+      endpoint: tab === "curves" && (i === 0 || i === pts.length - 1) };
+    drawCurveEditor(c);
+  });
+  cv.addEventListener("pointermove", (e) => {
+    const g = colorState.cdrag;
+    if (!g) return;
+    const r = cv.getBoundingClientRect(), [x, v] = cv._map.toData(e.clientX - r.left, e.clientY - r.top);
+    const d = curveSpec(colorState.curveTab), eps = d.xMax * 0.002;
+    g.pts[g.i] = [g.endpoint ? g.pts[g.i][0] : (d.periodic ? x : clamp(x, g.lo + eps, g.hi - eps)), v];
+    writeCurve(c, colorState.curveTab, colorState.curveCh, g.pts);
+    drawCurveEditor(c);
+  });
+  const end = () => { if (colorState.cdrag) { colorState.cdrag = null; drawCurveEditor(c); } };
+  cv.addEventListener("pointerup", end);
+  cv.addEventListener("pointercancel", end);
+  cv.addEventListener("dblclick", (e) => {
+    if (!guard()) return;
+    const { pts, i } = hit(e);
+    if (i < 0) return;
+    const tab = colorState.curveTab;
+    if (tab === "curves" && (i === 0 || i === pts.length - 1)) pts[i] = [pts[i][0], pts[i][0]]; // endpoints reset, never leave
+    else pts.splice(i, 1);
+    pushUndo(); writeCurve(c, tab, colorState.curveCh, pts); drawCurveEditor(c);
+  });
+}
+function setCurvePick(on) {
+  colorState.curvePick = !!on;
+  if (on) setWbPick(false);
+  els.preview.classList.toggle("wb-picking", colorState.pick || colorState.curvePick);
+  const b = els.colorPage.querySelector("[data-cvact=pick]");
+  if (b) { b.classList.toggle("on", colorState.curvePick); b.classList.toggle("toggle", colorState.curvePick); }
+  if (on) toast("Click the colour to adjust in the monitor");
+}
+/** Monitor click while Pick is on: mark the sample on every curve tab. */
+function curvePickAt(c, pt) {
+  const rgb = sampleProgram(pt.x, pt.y, c.id, "curves");
+  if (!rgb) return;
+  const [h, s] = Color.rgbToHsv(rgb[0], rgb[1], rgb[2]);
+  const ch = colorState.curveCh;
+  const level = ch === "y" ? 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2] : rgb["rgb".indexOf(ch)];
+  colorState.curveMark = { curves: level, hueHue: h * 360, hueSat: h * 360, hueLuma: h * 360, satLuma: s };
+  if (s < 0.05 && colorState.curveTab !== "curves" && colorState.curveTab !== "satLuma") toast("That spot is nearly grey — its hue is not reliable");
+  drawCurveEditor(c);
+}
 
 /* ── Scopes: a ≤480 px copy of the program frame (or the export frame),
    read back a few times a second while the Color workspace is open. ── */
