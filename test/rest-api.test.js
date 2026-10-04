@@ -13,9 +13,13 @@ const os = require("node:os");
 const path = require("node:path");
 const { makeDataDir, readProject, seedProject, startServer, rawGet } = require("./helpers");
 
+// None of these need live reload; on Windows, fs.watch on a short-name (8.3)
+// temp dir can abort the server mid-request.
+const NO_WATCH = { FABLECUT_NO_FS_WATCH: "1" };
+
 const boot = async (t, project) => {
   const dir = makeDataDir(t, project);
-  const { base } = await startServer(t, dir);
+  const { base } = await startServer(t, dir, NO_WATCH);
   return { dir, base };
 };
 
@@ -103,7 +107,7 @@ test("seeding the library never overwrites the user's own files", async (t) => {
   fs.mkdirSync(fonts, { recursive: true });
   fs.writeFileSync(path.join(fonts, "Anton.woff2"), "the user's own Anton");
   fs.writeFileSync(path.join(fonts, "Brand.woff2"), "a font the user added");
-  const { base } = await startServer(t, dir);
+  const { base } = await startServer(t, dir, NO_WATCH);
 
   assert.equal(fs.readFileSync(path.join(fonts, "Anton.woff2"), "utf8"), "the user's own Anton");
   assert.equal(fs.readFileSync(path.join(fonts, "Brand.woff2"), "utf8"), "a font the user added");
@@ -343,7 +347,7 @@ test("the app shell and its assets are served", async (t) => {
 
 test("requests from a foreign Host or Origin are refused (DNS-rebinding guard)", async (t) => {
   const dir = makeDataDir(t);
-  const { port } = await startServer(t, dir);
+  const { port } = await startServer(t, dir, NO_WATCH);
   // A page on evil.example resolving its own hostname to 127.0.0.1 must not
   // reach the API — otherwise any website could read and rewrite the timeline.
   const byHost = await rawGet(port, "/api/project", { Host: "evil.example" });
@@ -364,7 +368,7 @@ test("requests from a foreign Host or Origin are refused (DNS-rebinding guard)",
 
 test("traversal out of the served roots and dot-directories are refused", async (t) => {
   const dir = makeDataDir(t);
-  const { port } = await startServer(t, dir);
+  const { port } = await startServer(t, dir, NO_WATCH);
   const host = { Host: `127.0.0.1:${port}` };
 
   // A file outside both the app dir and the data dir. The data dir is itself a
