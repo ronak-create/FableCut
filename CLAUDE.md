@@ -315,7 +315,7 @@ Examples in `library/svg/`: `sparkles.svg` (loop), `lower-third.svg`,
 | `cornerRadius` | 0 | px, rounded corners — the PiP look |
 | `flipH`, `flipV` | false | mirror |
 
-**Filter / color** (video/image/svg) — quick looks; for real grading use `grade` (see "Color" below):
+**Filter / color** (video/image/svg):
 | prop | default | notes |
 |---|---|---|
 | `filterPreset` | "none" | one of: cinematic · teal-orange · noir · vintage · faded · warm · cold · pop · dreamy · retro · bw-soft · cyberpunk · sunset · midnight. Combines non-destructively with the sliders below. |
@@ -325,6 +325,8 @@ Examples in `library/svg/`: `sparkles.svg` (loop), `lower-third.svg`,
 | `tint` | 0 | −100 (magenta) … +100 (green) |
 | `blur` | 0 | px |
 | `grayscale` `sepia` `invert` `vignette` | 0 | % |
+
+These are quick looks. For real grading use `props.grade` (see "Color" below).
 
 **Motion FX** (video/image/svg/adjust — all animatable):
 | prop | default | notes |

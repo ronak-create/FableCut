@@ -534,6 +534,8 @@ const server = http.createServer(async (req, res) => {
       const opts = JSON.parse((await readBody(req)).toString("utf8") || "{}");
       let revision = null;
       try { revision = JSON.parse(fs.readFileSync(PROJECT_FILE, "utf8").replace(/^﻿/, "")).revision ?? null; } catch {}
+      const ok = typeof opts.time === "number" || (typeof opts.time === "string" && opts.time.trim() !== "" && Number.isFinite(Number(opts.time)));
+      if (opts.time != null && !ok) { sendJSON(res, 400, { error: "time must be seconds ≥ 0" }); return; }
       const time = opts.time == null ? null : Number(opts.time);
       sendJSON(res, 200, exportJobs.request({ kind: "scopes", time, where: opts.where, revision }));
     } catch (e) {

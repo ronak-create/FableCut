@@ -182,6 +182,6 @@ test("fablecut_scopes hands a scopes job to the tab and reports its measurement"
   assert.match(text, /orange \(hue 31°\)/);
   assert.match(text, /c_a V1 video grade:exposure\+0\.5/);
 
-  const bad = await post("/api/scopes/request", { time: -1 });
-  assert.equal(bad.status, 400);
+  for (const time of [-1, "", false, [], "abc"])
+    assert.equal((await post("/api/scopes/request", { time })).status, 400, JSON.stringify(time) + " is not a time");
 });

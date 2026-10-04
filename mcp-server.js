@@ -35,7 +35,7 @@ const PORT = process.env.FABLECUT_PORT || 7777;
 const BASE = `http://localhost:${PORT}`;
 // Requests go to the address the server binds: on Node 18, "localhost" can
 // resolve to ::1 first and is not retried on 127.0.0.1.
-const API = `http://127.0.0.1:${PORT}`;
+const API = `http://${process.env.HOST === "::1" ? "[::1]" : "127.0.0.1"}:${PORT}`;
 
 /* MCP initialize must echo a version we actually speak. Echoing an unknown
    client version (or crashing) fails handshake with stock SDK clients. */

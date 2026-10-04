@@ -8503,7 +8503,7 @@ function drawAdjust(c, W, H, t) {
   if (p.temperature || p.tint || p.rgbSplit > 0)
     src = pixelPass(c, { ...p, chromaKey: "", bgRemove: false }, adjScratch, 0, 0, W, H, W, H);
   const grade = activeGrade(c, p);
-  if (grade) src = gradeSource(src, 0, 0, src.width, src.height, src.width, src.height, W, H, grade);
+  if (grade) src = gradeSource(src, 0, 0, src.width, src.height, src.width, src.height, W, H, grade) || src;
   ctx2d.drawImage(src, 0, 0, src.width, src.height, 0, 0, W, H);
   ctx2d.filter = "none";
   if (p.vignette > 0) {
@@ -8647,7 +8647,9 @@ function initGradeGL() {
     return null;
   }
 }
-/** Grade the (sx, sy, sw, sh) rect of `src` into a canvas about dw×dh. */
+/** Grade the (sx, sy, sw, sh) rect of `src` into a canvas about dw×dh.
+ *  Null when the pixels can't be read (a cross-origin source without CORS):
+ *  the caller draws the clip ungraded. */
 function gradeSource(src, sx, sy, sw, sh, srcW, srcH, dw, dh, grade) {
   let w = Math.max(2, Math.round(Math.min(dw, sw * 2, GRADE_MAX_PX)));
   let h = Math.max(2, Math.round(w * dh / Math.max(1, dw)));
@@ -8671,6 +8673,7 @@ function gradeSource(src, sx, sy, sw, sh, srcW, srcH, dw, dh, grade) {
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       return cv;
     } catch (err) {
+      if (err && err.name === "SecurityError") return null; // this source only — keep the GPU path
       console.warn("[FableCut] grade pass failed, using the CPU path:", err && err.message);
       gradeGL.gl = null;
     }
@@ -8680,7 +8683,8 @@ function gradeSource(src, sx, sy, sw, sh, srcW, srcH, dw, dh, grade) {
   if (gradeCpu.height !== h) gradeCpu.height = h;
   gradeCpuCtx.clearRect(0, 0, w, h);
   gradeCpuCtx.drawImage(src, sx, sy, sw, sh, 0, 0, w, h);
-  const img = gradeCpuCtx.getImageData(0, 0, w, h);
+  let img;
+  try { img = gradeCpuCtx.getImageData(0, 0, w, h); } catch { return null; }
   Color.gradeImageData(img.data, grade);
   gradeCpuCtx.putImageData(img, 0, 0);
   return gradeCpu;
@@ -9063,12 +9067,12 @@ function drawClip(c, W, H, t) {
     if (p.bgRemove && c.kind === "image" && !bgSeg.masks.get(c.id)) requestMask(c.id, src);
     ctx2d.filter = buildFilter(p);
     const grade = activeGrade(c, p);
+    let graded = null;
     if (needsPixelPass(p, c)) { // key / cut-out first, so the grade never shifts the key colour
       let processed = pixelPass(c, p, src, sx, sy, cw, ch, dw, dh);
-      if (grade) processed = gradeSource(processed, 0, 0, processed.width, processed.height, processed.width, processed.height, dw, dh, grade);
+      if (grade) processed = gradeSource(processed, 0, 0, processed.width, processed.height, processed.width, processed.height, dw, dh, grade) || processed;
       ctx2d.drawImage(processed, 0, 0, processed.width, processed.height, -dw / 2, -dh / 2, dw, dh);
-    } else if (grade) {
-      const graded = gradeSource(src, sx, sy, cw, ch, sw, sh, dw, dh, grade);
+    } else if (grade && (graded = gradeSource(src, sx, sy, cw, ch, sw, sh, dw, dh, grade))) {
       ctx2d.drawImage(graded, 0, 0, graded.width, graded.height, -dw / 2, -dh / 2, dw, dh);
     } else {
       ctx2d.drawImage(src, sx, sy, cw, ch, -dw / 2, -dh / 2, dw, dh);
@@ -10931,6 +10935,8 @@ async function runScopesJob(ticket, fail) {
     fail("could not measure the frame: " + (err && err.message || err));
   } finally {
     state.rendering = false;
+    seekMediaWhilePaused(); // the videos sat on the job's frame — back to the playhead
+    if (wasPlaying) play();
   }
 }
 /** A headless page opened for one job (?exportJob=<id>) fetches and runs it. */
@@ -12173,7 +12179,7 @@ function wheelDiscImage(size) {
     const dx = (x + 0.5 - size / 2) / R, dy = (size / 2 - y - 0.5) / R, r = Math.hypot(dx, dy), i = (y * size + x) * 4;
     if (r > 1) continue;
     const v = Color.wheelToRgb(dx, dy), m = Math.max(1e-6, Math.abs(v[0]), Math.abs(v[1]), Math.abs(v[2]));
-    for (let k = 0; k < 3; k++) img.data[i + k] = clamp(Math.round(255 * (0.26 + 0.3 * r * v[k] / m)), 0, 255);
+    for (let k = 0; k < 3; k++) img.data[i + k] = clamp(Math.round(255 * (0.24 + 0.42 * r * v[k] / m)), 0, 255);
     img.data[i + 3] = 255;
   }
   g.putImageData(img, 0, 0);
