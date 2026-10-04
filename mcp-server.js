@@ -33,6 +33,9 @@ const ROOT = APP_DIR;
 ensureDirs();
 const PORT = process.env.FABLECUT_PORT || 7777;
 const BASE = `http://localhost:${PORT}`;
+// Requests go to the address the server binds: on Node 18, "localhost" can
+// resolve to ::1 first and is not retried on 127.0.0.1.
+const API = `http://127.0.0.1:${PORT}`;
 
 /* MCP initialize must echo a version we actually speak. Echoing an unknown
    client version (or crashing) fails handshake with stock SDK clients. */
@@ -68,7 +71,7 @@ function httpOk(url) {
 /** JSON request to the editor server → {status, body}. */
 function apiJSON(method, urlPath, payload) {
   return new Promise((resolve, reject) => {
-    const req = http.request(BASE + urlPath, { method, headers: { "Content-Type": "application/json" } }, (r) => {
+    const req = http.request(API + urlPath, { method, headers: { "Content-Type": "application/json" } }, (r) => {
       let data = "";
       r.setEncoding("utf8");
       r.on("data", (d) => { data += d; });
@@ -84,12 +87,12 @@ function apiJSON(method, urlPath, payload) {
   });
 }
 async function ensureUIServer() {
-  if (await httpOk(BASE + "/api/project")) return true;
+  if (await httpOk(API + "/api/project")) return true;
   spawn(process.execPath, [path.join(ROOT, "server.js")],
     { cwd: ROOT, detached: true, stdio: "ignore" }).unref();
   for (let i = 0; i < 12; i++) {
     await sleep(300);
-    if (await httpOk(BASE + "/api/project")) return true;
+    if (await httpOk(API + "/api/project")) return true;
   }
   return false;
 }
