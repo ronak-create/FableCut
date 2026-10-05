@@ -3552,3 +3552,12 @@ input[type="range"].cq-hue {
   border-radius: 3px;
   height: 6px;
 }
+.dialog.help .keys tr.keys-head td {
+  padding-top: 12px;
+  color: var(--text);
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: normal;
+}
