@@ -8502,8 +8502,9 @@ function drawAdjust(c, W, H, t) {
   let src = adjScratch;
   if (p.temperature || p.tint || p.rgbSplit > 0)
     src = pixelPass(c, { ...p, chromaKey: "", bgRemove: false }, adjScratch, 0, 0, W, H, W, H);
-  const grade = activeGrade(c, p);
-  if (grade) src = gradeSource(src, 0, 0, src.width, src.height, src.width, src.height, W, H, grade) || src;
+  const grade = activeGrade(c, p, t);
+  if (grade) src = gradeSource(src, 0, 0, src.width, src.height, src.width, src.height, W, H, grade, gradeMatte(c)) || src;
+  noteGradeGeom(c, ctx2d.getTransform(), W, H, 0, 0);
   ctx2d.drawImage(src, 0, 0, src.width, src.height, 0, 0, W, H);
   ctx2d.filter = "none";
   if (p.vignette > 0) {
@@ -8596,11 +8597,25 @@ const gradeGL = { tried: false, gl: null, canvas: null, loc: null };
 const gradeCpu = document.createElement("canvas");
 const gradeCpuCtx = gradeCpu.getContext("2d", { willReadFrequently: true });
 const GRADE_MAX_PX = 4096;
-/** The clip's grade when it changes anything, else null. */
-function activeGrade(c, p) {
-  if (runtime.gradeBypass === c.id) return null; // the WB picker samples the ungraded clip
-  const g = runtime.gradeNoCurves === c.id ? Color.withoutCurves(p.grade) : p.grade; // curve pickers: before the curves
+/** The clip's grade at timeline time t when it changes anything, else null.
+ *  Pickers swap in the grade up to what they edit (runtime.gradeOverride). */
+function activeGrade(c, p, t) {
+  const o = runtime.gradeOverride;
+  const g0 = o && o.id === c.id ? o.grade : p.grade;
+  const g = g0 && t != null ? Color.gradeAt(g0, t - c.start) : g0;   // animated masks
+  if (g && gradeMatte(c) >= 0) return g;   // matte view shows even a neutral layer
   return g && !Color.isNeutral(g) ? g : null;
+}
+/** Where the clip's picture landed on the monitor (masks are drawn and
+ *  dragged in its 0…1 space): canvas transform + the drawn rect. */
+function noteGradeGeom(c, m, w, h, x0, y0) {
+  if (state.exporting || runtime.sampling) return;
+  (runtime.gradeGeom ||= new Map()).set(c.id, { m, w, h, x0, y0 });
+}
+/** The layer whose matte the monitor shows for this clip, else −1 (preview only). */
+function gradeMatte(c) {
+  const m = runtime.matte;
+  return m && m.id === c.id && !state.exporting && !runtime.gradeOverride ? m.layer : -1;
 }
 function initGradeGL() {
   if (gradeGL.tried) return gradeGL.gl;
@@ -8637,7 +8652,8 @@ function initGradeGL() {
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
     const loc = {};
     for (const n of ["uRect", "uTex", "uMul", "uLinear", "uOff", "uLift", "uGain", "uGam", "uContrast", "uPivot", "uTone", "uSoft", "uSat",
-      "uCurveLut", "uHueLut", "uCurves", "uHueCurves"])
+      "uCurveLut", "uHueLut", "uCurves", "uHueCurves", "uLayer", "uMatte", "uPremul", "uQOn", "uQInv", "uQUse", "uQHue", "uQSat", "uQLuma",
+      "uMShape", "uMInv", "uMN", "uMC", "uMW", "uMRot", "uMFeather", "uAspect", "uMPts"])
       loc[n] = gl.getUniformLocation(prog, n);
     gl.uniform1i(loc.uTex, 0);
     // curve tables (color.js bakes them): float, read with texelFetch, so no filtering extension needed
@@ -8656,7 +8672,9 @@ function initGradeGL() {
     gl.bindTexture(gl.TEXTURE_2D, tex);
     cv.addEventListener("webglcontextlost", (e) => { e.preventDefault(); gradeGL.gl = null; });
     cv.addEventListener("webglcontextrestored", () => { gradeGL.tried = false; });
-    Object.assign(gradeGL, { gl, canvas: cv, loc, curveTex, hueTex, curveRef: null, hueRef: null });
+    // layers render pass by pass through two framebuffers (half-float when the GPU can draw into it)
+    const floatFbo = !!gl.getExtension("EXT_color_buffer_float");
+    Object.assign(gradeGL, { gl, canvas: cv, loc, tex, curveTex, hueTex, curveRef: null, hueRef: null, fbos: [], floatFbo });
     return gl;
   } catch (err) {
     console.warn("[FableCut] WebGL2 grade unavailable, using the CPU path:", err && err.message);
@@ -8666,7 +8684,27 @@ function initGradeGL() {
 /** Grade the (sx, sy, sw, sh) rect of `src` into a canvas about dw×dh.
  *  Null when the pixels can't be read (a cross-origin source without CORS):
  *  the caller draws the clip ungraded. */
-function gradeSource(src, sx, sy, sw, sh, srcW, srcH, dw, dh, grade) {
+/** One of the two framebuffers the layer passes ping-pong between, w × h. */
+function gradeFbo(i, w, h) {
+  const gl = gradeGL.gl;
+  let f = gradeGL.fbos[i];
+  if (!f) {
+    f = gradeGL.fbos[i] = { fb: gl.createFramebuffer(), tex: gl.createTexture(), w: 0, h: 0 };
+    gl.bindTexture(gl.TEXTURE_2D, f.tex);
+    for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.NEAREST], [gl.TEXTURE_MAG_FILTER, gl.NEAREST],
+      [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) gl.texParameteri(gl.TEXTURE_2D, k, v);
+  }
+  if (f.w !== w || f.h !== h) {
+    gl.bindTexture(gl.TEXTURE_2D, f.tex);
+    if (gradeGL.floatFbo) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, w, h, 0, gl.RGBA, gl.HALF_FLOAT, null);
+    else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, f.fb);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, f.tex, 0);
+    f.w = w; f.h = h;
+  }
+  return f;
+}
+function gradeSource(src, sx, sy, sw, sh, srcW, srcH, dw, dh, grade, matte = -1) {
   let w = Math.max(2, Math.round(Math.min(dw, sw * 2, GRADE_MAX_PX)));
   let h = Math.max(2, Math.round(w * dh / Math.max(1, dw)));
   if (h > GRADE_MAX_PX) { w = Math.max(2, Math.round(w * GRADE_MAX_PX / h)); h = GRADE_MAX_PX; }
@@ -8677,9 +8715,28 @@ function gradeSource(src, sx, sy, sw, sh, srcW, srcH, dw, dh, grade) {
       if (cv.width !== w) cv.width = w;
       if (cv.height !== h) cv.height = h;
       gl.viewport(0, 0, w, h);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, gradeGL.tex);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src);
-      const u = Color.gradeUniforms(grade);
-      gl.uniform4f(loc.uRect, sx / srcW, sy / srcH, sw / srcW, sh / srcH);
+      gl.uniform1f(loc.uAspect, w / h);
+      const passes = Color.gradePasses(grade, matte);
+      passes.forEach((u, i) => {
+      const last = i === passes.length - 1;
+      if (i === 0) gl.uniform4f(loc.uRect, sx / srcW, sy / srcH, sw / srcW, sh / srcH);
+      else { // the previous pass's framebuffer, read bottom-up
+        gl.bindTexture(gl.TEXTURE_2D, gradeFbo((i - 1) % 2, w, h).tex);
+        gl.uniform4f(loc.uRect, 0, 1, 1, -1);
+      }
+      gl.bindFramebuffer(gl.FRAMEBUFFER, last ? null : gradeFbo(i % 2, w, h).fb);
+      gl.bindTexture(gl.TEXTURE_2D, i === 0 ? gradeGL.tex : gradeGL.fbos[(i - 1) % 2].tex);
+      gl.uniform1i(loc.uLayer, i > 0 ? 1 : 0); gl.uniform1i(loc.uPremul, last ? 1 : 0);
+      if (i > 0) {
+        gl.uniform1i(loc.uMatte, u.uMatte); gl.uniform1i(loc.uQOn, u.uQOn); gl.uniform1i(loc.uQInv, u.uQInv);
+        gl.uniform3iv(loc.uQUse, u.uQUse); gl.uniform3fv(loc.uQHue, u.uQHue); gl.uniform3fv(loc.uQSat, u.uQSat); gl.uniform3fv(loc.uQLuma, u.uQLuma);
+        gl.uniform1i(loc.uMShape, u.uMShape); gl.uniform1i(loc.uMInv, u.uMInv); gl.uniform1i(loc.uMN, u.uMN);
+        gl.uniform2fv(loc.uMC, u.uMC); gl.uniform2fv(loc.uMW, u.uMW); gl.uniform1f(loc.uMRot, u.uMRot);
+        gl.uniform1f(loc.uMFeather, u.uMFeather); gl.uniform2fv(loc.uMPts, u.uMPts);
+      }
       gl.uniform3fv(loc.uMul, u.uMul); gl.uniform1i(loc.uLinear, u.uLinear);
       gl.uniform3fv(loc.uOff, u.uOff); gl.uniform3fv(loc.uLift, u.uLift);
       gl.uniform3fv(loc.uGain, u.uGain); gl.uniform3fv(loc.uGam, u.uGam);
@@ -8698,8 +8755,11 @@ function gradeSource(src, sx, sy, sw, sh, srcW, srcH, dw, dh, grade) {
       gl.uniform1i(loc.uCurves, u.curveLut ? 1 : 0); gl.uniform1i(loc.uHueCurves, u.hueLut ? 1 : 0);
       gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      });
+      gl.bindTexture(gl.TEXTURE_2D, gradeGL.tex);
       return cv;
     } catch (err) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       if (err && err.name === "SecurityError") return null; // this source only — keep the GPU path
       console.warn("[FableCut] grade pass failed, using the CPU path:", err && err.message);
       gradeGL.gl = null;
@@ -8712,7 +8772,7 @@ function gradeSource(src, sx, sy, sw, sh, srcW, srcH, dw, dh, grade) {
   gradeCpuCtx.drawImage(src, sx, sy, sw, sh, 0, 0, w, h);
   let img;
   try { img = gradeCpuCtx.getImageData(0, 0, w, h); } catch { return null; }
-  Color.gradeImageData(img.data, grade);
+  Color.gradeImageData(img.data, grade, w, h, matte);
   gradeCpuCtx.putImageData(img, 0, 0);
   return gradeCpu;
 }
@@ -8794,6 +8854,7 @@ function overlayHandles(b, W, H) {
 }
 function drawSelectionOverlay(W, H, t) {
   const c = getClip(state.selId);
+  if (maskEditing(c) && drawMaskOverlay(c, W)) return;   // a layer's mask replaces the box
   if (!isVisualClip(c) || !activeAt(c, t) || !clipRenders(c)) return;
   const b = clipBounds(c, evalProps(c, t), W, H);
   const lw = Math.max(2, W / 640);
@@ -9093,13 +9154,14 @@ function drawClip(c, W, H, t) {
     if (p.bgRemove && c.kind === "video") requestMask(c.id, src); // refresh person mask
     if (p.bgRemove && c.kind === "image" && !bgSeg.masks.get(c.id)) requestMask(c.id, src);
     ctx2d.filter = buildFilter(p);
-    const grade = activeGrade(c, p);
+    const grade = activeGrade(c, p, t), matte = gradeMatte(c);
     let graded = null;
+    noteGradeGeom(c, ctx2d.getTransform(), dw, dh, -dw / 2, -dh / 2);
     if (needsPixelPass(p, c)) { // key / cut-out first, so the grade never shifts the key colour
       let processed = pixelPass(c, p, src, sx, sy, cw, ch, dw, dh);
-      if (grade) processed = gradeSource(processed, 0, 0, processed.width, processed.height, processed.width, processed.height, dw, dh, grade) || processed;
+      if (grade) processed = gradeSource(processed, 0, 0, processed.width, processed.height, processed.width, processed.height, dw, dh, grade, matte) || processed;
       ctx2d.drawImage(processed, 0, 0, processed.width, processed.height, -dw / 2, -dh / 2, dw, dh);
-    } else if (grade && (graded = gradeSource(src, sx, sy, cw, ch, sw, sh, dw, dh, grade))) {
+    } else if (grade && (graded = gradeSource(src, sx, sy, cw, ch, sw, sh, dw, dh, grade, matte))) {
       ctx2d.drawImage(graded, 0, 0, graded.width, graded.height, -dw / 2, -dh / 2, dw, dh);
     } else {
       ctx2d.drawImage(src, sx, sy, cw, ch, -dw / 2, -dh / 2, dw, dh);
@@ -10952,12 +11014,37 @@ async function runScopesJob(ticket, fail) {
     cv.width = sw; cv.height = sh;
     const g = cv.getContext("2d", { willReadFrequently: true });
     g.drawImage(els.preview, r.x, r.y, r.w, r.h, 0, 0, sw, sh);
-    const stats = Color.scopeStats(g.getImageData(0, 0, sw, sh).data, sw, sh);
+    const img = g.getImageData(0, 0, sw, sh).data;
+    const stats = Color.scopeStats(img, sw, sh);
+    let matte = null;
+    if (ticket.matte) { // the same frame again with the layer's matte in place of the clip → what it selects
+      const { clip, layer } = ticket.matte, mc = getClip(clip);
+      matte = { clip, layer };
+      if (!mc) matte.error = "no such clip";
+      else if (!gradeLayers(mc)[layer]) matte.error = `the clip has ${gradeLayers(mc).length} grade layer(s)`;
+      else if (!visibleClipsAt(t).some((x) => x.id === clip)) matte.error = "the clip is not on screen at that time";
+      else {
+        const before = runtime.matte;
+        runtime.matte = { id: clip, layer };
+        try { await renderStillAt(t); } finally { runtime.matte = before; }
+        g.drawImage(els.preview, r.x, r.y, r.w, r.h, 0, 0, sw, sh);
+        const mm = g.getImageData(0, 0, sw, sh).data;
+        let sum = 0, n = 0;
+        const sel = [];
+        for (let i = 0; i < mm.length; i += 4) {
+          sum += mm[i];
+          if (mm[i] >= 128) { sel.push(img[i], img[i + 1], img[i + 2], 255); n++; }
+        }
+        matte.coverage = +(100 * sum / 255 / (sw * sh)).toFixed(2);
+        // the selected pixels of the graded frame: how the layer left them
+        if (n) matte.selected = Color.scopeStats(new Uint8ClampedArray(sel), n, 1);
+      }
+    }
     const clips = visibleClipsAt(t).map((c) => ({
       id: c.id, name: c.name, kind: c.kind, track: c.track,
       grade: Color.summarizeGrade(c.props.grade),
     }));
-    await reportExportJob(ticket.id, { status: "done", result: { time: +t.toFixed(3), frame: { w: Math.round(r.w), h: Math.round(r.h) }, stats, clips } }, true);
+    await reportExportJob(ticket.id, { status: "done", result: { time: +t.toFixed(3), frame: { w: Math.round(r.w), h: Math.round(r.h) }, stats, clips, matte } }, true);
   } catch (err) {
     fail("could not measure the frame: " + (err && err.message || err));
   } finally {
@@ -12118,7 +12205,8 @@ const WHEEL_LABEL = { lift: "Lift", gamma: "Gamma", gain: "Gain", offset: "Offse
 const WHEEL_RIM = { lift: 0.25, gamma: 0.5, gain: 0.5, offset: 0.25 };    // Cb/Cr reached at the disc's rim
 const WHEEL_MASTER = { lift: 0.5, gamma: 1, gain: 1, offset: 0.5 };       // master slider range ±
 const colorState = { open: false, ws: "edit", pick: false, sig: "", drag: null, clipboard: null, disc: null,
-  curveTab: "curves", curveCh: "y", curvePick: false, curveMark: null, cdrag: null };
+  curveTab: "curves", curveCh: "y", curvePick: false, curveMark: null, cdrag: null,
+  layer: -1, layerClip: null, qualPick: false, mdrag: false };
 const scopes = { slots: ["waveform", "vectorscope"], last: 0, built: false, els: [], vecColor: null,
   src: document.createElement("canvas"), tmp: document.createElement("canvas") };
 scopes.srcCtx = scopes.src.getContext("2d", { willReadFrequently: true });
@@ -12135,25 +12223,40 @@ function setWorkspace(ws) {
   for (const b of document.querySelectorAll("#wsSwitch [data-ws]")) b.classList.toggle("on", b.dataset.ws === colorState.ws);
   try { localStorage.setItem(WS_KEY, colorState.ws); } catch { }
   if (colorState.ws === "color") { buildScopeSlots(); setSideTab("color"); }
-  else if (colorState.open) setSideTab("inspector");
+  else {
+    if (runtime.matte) setMatte(null, false);
+    if (colorState.qualPick) setQualPick(false);
+    if (colorState.open) setSideTab("inspector");
+  }
   scopes.last = 0;
 }
-/** Write grade keys on a clip (null resets a key). */
+/** Write grade keys (null resets a key) on what the Color tab edits: the
+ *  primary grade or the selected layer. */
 function writeGrade(c, set) {
-  const next = Color.mergeGrade(c.props.grade, set);
-  if (next) c.props.grade = next; else delete c.props.grade;
+  if (colorState.layer >= 0 && curLayer(c)) writeLayer(c, colorState.layer, set);
+  else {
+    const next = Color.mergeGrade(c.props.grade, set);
+    if (next) c.props.grade = next; else delete c.props.grade;
+  }
   colorState.sig = colorPageSig(c);   // the page already shows this — no rebuild
   scheduleSave();
 }
 function colorPageSig(c) {
-  return c && isGradable(c)
-    ? `${c.id}|${JSON.stringify(c.props.grade || null)}|${isGroupLocked(c)}|${state.selIds.size}|${!!colorState.clipboard}` : "none";
+  if (!c || !isGradable(c)) return "none";
+  const keyed = gradeLayers(c).some((l) => l.mask && l.mask.keys);   // keyed masks: the sliders follow the playhead
+  return `${c.id}|${JSON.stringify(c.props.grade || null)}|${isGroupLocked(c)}|${state.selIds.size}|${!!colorState.clipboard}|${colorState.layer}|${!!runtime.matte}${keyed ? "|" + state.time.toFixed(3) : ""}`;
 }
 const fmtG = (v, step) => (+v).toFixed(step >= 1 ? 0 : step >= 0.01 ? 2 : 3);
 function renderColorPage(force = false) {
   const root = els.colorPage;
-  if (!root || colorState.drag || colorState.cdrag) return;
+  if (!root || colorState.drag || colorState.cdrag || colorState.mdrag) return;
   const c = getClip(state.selId);
+  if ((c && c.id) !== colorState.layerClip) { // another clip: back to its primary
+    colorState.layerClip = c && c.id; colorState.layer = -1;
+    if (runtime.matte) setMatte(null, false);
+    if (colorState.qualPick) setQualPick(false);
+  }
+  if (colorState.layer >= gradeLayers(c).length) colorState.layer = gradeLayers(c).length - 1;
   const sig = colorPageSig(c);
   if (!force && sig === colorState.sig) return;
   colorState.sig = sig;
@@ -12161,7 +12264,7 @@ function renderColorPage(force = false) {
     root.innerHTML = `<div class="inspector-empty">Select a video, image or adjustment clip<br>to grade it.</div>`;
     return;
   }
-  const g = Color.fullGrade(c.props.grade), P = Color.GRADE_PARAMS, locked = isGroupLocked(c);
+  const g = Color.fullGrade(targetGrade(c)), P = Color.GRADE_PARAMS, locked = isGroupLocked(c), allOn = c.props.grade?.on !== false;
   const num = (k) => {
     const d = P[k];
     return `<div class="insp-row cp-row"><label class="cp-label" data-greset="${k}" title="Double-click: reset">${d.label}</label>
@@ -12172,14 +12275,16 @@ function renderColorPage(force = false) {
   root.innerHTML = `
     <div class="cp-head">
       <span class="cp-name" title="${escapeHtml(c.name || "")}">${escapeHtml(c.name || c.kind)}</span>
-      <button type="button" class="btn tiny${g.on ? " toggle on" : ""}" data-gact="bypass" title="Grade on / off (compare with the ungraded clip)">${g.on ? "On" : "Off"}</button>
+      <button type="button" class="btn tiny${allOn ? " toggle on" : ""}" data-gact="bypass" title="Whole grade on / off, layers included (compare with the ungraded clip)">${allOn ? "On" : "Off"}</button>
       <button type="button" class="btn tiny${colorState.pick ? " toggle on" : ""}" data-gact="pick" title="White balance: click something white or grey in the monitor (Esc cancels)">WB pick</button>
     </div>
     <div class="cp-head cp-tools">
       <button type="button" class="btn tiny" data-gact="copy" title="Copy this clip's grade">Copy</button>
       <button type="button" class="btn tiny" data-gact="paste" ${colorState.clipboard ? "" : "disabled"} title="Paste the copied grade onto the selected clips">Paste${nSel > 1 ? ` → ${nSel}` : ""}</button>
-      <button type="button" class="btn tiny" data-gact="reset" title="Reset the whole grade">Reset all</button>
+      <button type="button" class="btn tiny" data-gact="reset" title="Reset the whole grade, layers included">Reset all</button>
     </div>
+    ${layersStripHtml(c)}
+    ${layerSectionsHtml(c)}
     <div class="cp-wheels">${Color.WHEELS.map((w) => `
       <div class="cw" data-wheel="${w}">
         <div class="cw-head"><span class="cp-label" data-wreset="${w}" title="Double-click: reset">${WHEEL_LABEL[w]}</span></div>
@@ -12242,6 +12347,7 @@ function bindColorPage(c) {
   const root = els.colorPage;
   const guard = () => { if (isGroupLocked(c)) { toastLocked(); return false; } return true; };
   bindCurveEditor(c, guard);
+  bindLayerControls(c, guard);
   const syncNum = (k, v) => {
     const r = root.querySelector(`[data-g="${k}"]`), n = root.querySelector(`[data-gnum="${k}"]`);
     if (r && document.activeElement !== r) r.value = v;
@@ -12258,7 +12364,7 @@ function bindColorPage(c) {
       const v = parseFloat(n.value);
       if (!Number.isFinite(v) || !guard()) return;
       pushUndo(); writeGrade(c, { [k]: v });
-      syncNum(k, Color.fullGrade(c.props.grade)[k]);
+      syncNum(k, Color.fullGrade(targetGrade(c))[k]);
     });
   }
   for (const lab of root.querySelectorAll("[data-greset]")) lab.addEventListener("dblclick", () => {
@@ -12274,13 +12380,13 @@ function bindColorPage(c) {
     m.addEventListener("pointerdown", () => { if (guard()) pushUndo(); });
     m.addEventListener("input", () => {
       if (isGroupLocked(c)) return;
-      const cur = Color.fullGrade(c.props.grade)[w];
+      const cur = Color.fullGrade(targetGrade(c))[w];
       cur[3] = +m.value;
       writeGrade(c, { [w]: cur }); drawWheel(w, cur);
     });
     m.addEventListener("dblclick", () => {
       if (!guard()) return;
-      const cur = Color.fullGrade(c.props.grade)[w];
+      const cur = Color.fullGrade(targetGrade(c))[w];
       cur[3] = 0; m.value = 0;
       pushUndo(); writeGrade(c, { [w]: cur }); drawWheel(w, cur);
     });
@@ -12292,7 +12398,7 @@ function bindColorPage(c) {
       e.preventDefault();
       cv.setPointerCapture(e.pointerId);
       pushUndo();
-      const cur = Color.fullGrade(c.props.grade)[w];
+      const cur = Color.fullGrade(targetGrade(c))[w];
       const [cb, cr] = Color.rgbToWheel(cur[0], cur[1], cur[2]);
       colorState.drag = { w, x: e.clientX, y: e.clientY, cb, cr, master: cur[3], R: cv.getBoundingClientRect().width / 2 };
     });
@@ -12311,7 +12417,7 @@ function bindColorPage(c) {
     cv.addEventListener("pointercancel", end);
     cv.addEventListener("dblclick", () => {
       if (!guard()) return;
-      const cur = Color.fullGrade(c.props.grade)[w];
+      const cur = Color.fullGrade(targetGrade(c))[w];
       const vals = [0, 0, 0, cur[3]];
       pushUndo(); writeGrade(c, { [w]: vals }); drawWheel(w, vals);
     });
@@ -12338,24 +12444,29 @@ function bindColorPage(c) {
     if (a === "pick") { setWbPick(!colorState.pick); return; }
     if (!guard()) return;
     pushUndo();
-    if (a === "bypass") writeGrade(c, { on: c.props.grade?.on === false ? null : false });
-    else if (a === "reset") { delete c.props.grade; scheduleSave(); }
+    if (a === "bypass") {
+      const next = Color.mergeGrade(c.props.grade, { on: c.props.grade?.on === false ? null : false });
+      if (next) c.props.grade = next; else delete c.props.grade;
+      scheduleSave();
+    }
+    else if (a === "reset") { delete c.props.grade; colorState.layer = -1; setMatte(null, false); scheduleSave(); }
     renderColorPage(true);
   });
 }
 function setWbPick(on) {
   colorState.pick = !!on;
   if (on && colorState.curvePick) setCurvePick(false);
-  els.preview.classList.toggle("wb-picking", colorState.pick || colorState.curvePick);
+  if (on && colorState.qualPick) setQualPick(false);
+  els.preview.classList.toggle("wb-picking", colorState.pick || colorState.curvePick || colorState.qualPick);
   const b = els.colorPage.querySelector("[data-gact=pick]");
   if (b) { b.classList.toggle("on", colorState.pick); b.classList.toggle("toggle", colorState.pick); }
   if (colorState.pick) toast("Click something that should be white or grey in the monitor");
 }
 /** Average sRGB colour (0…1) of a 5×5 patch of the program frame at canvas
  *  px (x, y), rendered with `bypassId`'s grade switched off. */
-function sampleProgram(x, y, bypassId, stage = "all") {
+function sampleProgram(x, y, id, grade = null) {
   const W = els.preview.width, H = els.preview.height;
-  if (stage === "curves") runtime.gradeNoCurves = bypassId; else runtime.gradeBypass = bypassId;
+  runtime.gradeOverride = { id, grade };
   runtime.sampling = true;
   try {
     drawFrame(state.time);
@@ -12366,17 +12477,23 @@ function sampleProgram(x, y, bypassId, stage = "all") {
     return [r / 25 / 255, g / 25 / 255, b / 25 / 255];
   } catch { return null; }
   finally {
-    runtime.gradeBypass = null;
-    runtime.gradeNoCurves = null;
+    runtime.gradeOverride = null;
     runtime.sampling = false;
     drawFrame(state.time);
   }
 }
 els.preview.addEventListener("pointerdown", (e) => {
-  if ((!colorState.pick && !colorState.curvePick) || isSourceMode()) return;
+  if ((!colorState.pick && !colorState.curvePick && !colorState.qualPick) || isSourceMode()) return;
   e.preventDefault();
   e.stopImmediatePropagation();
   const c = getClip(state.selId);
+  if (colorState.qualPick) {
+    setQualPick(false);
+    if (!isGradable(c) || !curLayer(c)) { toast("Select a layer of the clip first"); return; }
+    if (isGroupLocked(c)) { toastLocked(); return; }
+    qualPickAt(c, canvasPt(e));
+    return;
+  }
   if (colorState.curvePick) {
     setCurvePick(false);
     if (!isGradable(c)) { toast("Select the clip to grade first"); return; }
@@ -12387,7 +12504,7 @@ els.preview.addEventListener("pointerdown", (e) => {
   if (!isGradable(c)) { toast("Select the clip to balance first"); return; }
   if (isGroupLocked(c)) { toastLocked(); return; }
   const pt = canvasPt(e);
-  const rgb = sampleProgram(pt.x, pt.y, c.id);
+  const rgb = sampleProgram(pt.x, pt.y, c.id, gradeBefore(c));
   if (!rgb) return;
   if (Math.max(...rgb) < 0.03) { toast("That spot is too dark to balance on — pick a brighter white or grey"); return; }
   const wb = Color.solveWhiteBalance(rgb);
@@ -12397,7 +12514,7 @@ els.preview.addEventListener("pointerdown", (e) => {
   toast(`White balance: temp ${wb.temp}, tint ${wb.tint}`);
 }, true);
 window.addEventListener("keydown", (e) => {
-  if ((colorState.pick || colorState.curvePick) && e.key === "Escape") { e.stopPropagation(); setWbPick(false); setCurvePick(false); }
+  if ((colorState.pick || colorState.curvePick || colorState.qualPick) && e.key === "Escape") { e.stopPropagation(); setWbPick(false); setCurvePick(false); setQualPick(false); }
 }, true);
 
 /* ── Curves editor (Color tab): YRGB curves and the four hue curves ──
@@ -12411,7 +12528,7 @@ function curveSpec(tab) {
   return Color.HUE_CURVES[tab];
 }
 function curvePoints(c, tab, ch) {
-  const g = c.props.grade || {};
+  const g = targetGrade(c) || {};
   if (tab === "curves") return (g.curves && g.curves[ch] || [[0, 0], [1, 1]]).map((p) => p.slice());
   return (g[tab] || []).map((p) => p.slice());
 }
@@ -12565,15 +12682,15 @@ function bindCurveEditor(c, guard) {
 }
 function setCurvePick(on) {
   colorState.curvePick = !!on;
-  if (on) setWbPick(false);
-  els.preview.classList.toggle("wb-picking", colorState.pick || colorState.curvePick);
+  if (on) { setWbPick(false); if (colorState.qualPick) setQualPick(false); }
+  els.preview.classList.toggle("wb-picking", colorState.pick || colorState.curvePick || colorState.qualPick);
   const b = els.colorPage.querySelector("[data-cvact=pick]");
   if (b) { b.classList.toggle("on", colorState.curvePick); b.classList.toggle("toggle", colorState.curvePick); }
   if (on) toast("Click the colour to adjust in the monitor");
 }
 /** Monitor click while Pick is on: mark the sample on every curve tab. */
 function curvePickAt(c, pt) {
-  const rgb = sampleProgram(pt.x, pt.y, c.id, "curves");
+  const rgb = sampleProgram(pt.x, pt.y, c.id, gradeBefore(c, true));
   if (!rgb) return;
   const [h, s] = Color.rgbToHsv(rgb[0], rgb[1], rgb[2]);
   const ch = colorState.curveCh;
@@ -12582,6 +12699,433 @@ function curvePickAt(c, pt) {
   if (s < 0.05 && colorState.curveTab !== "curves" && colorState.curveTab !== "satLuma") toast("That spot is nearly grey — its hue is not reliable");
   drawCurveEditor(c);
 }
+
+/* ── Layers (secondaries) on the Color tab ──
+   colorState.layer picks what the wheels, sliders and curves edit: −1 = the
+   primary grade, k = grade.layers[k]. A layer adds a qualifier (HSL key on its
+   input), a mask (ellipse / rect / poly, dragged on the monitor, keyable) and
+   its own grade; Matte shows what it selects. */
+const QUAL_ROWS = {
+  hue: [["Centre", 0, 360, 1], ["Width", 0, 360, 1], ["Soft", 0, 180, 1]],
+  sat: [["Low", 0, 1, 0.01], ["High", 0, 1, 0.01], ["Soft", 0, 0.5, 0.01]],
+  luma: [["Low", 0, 1, 0.01], ["High", 0, 1, 0.01], ["Soft", 0, 0.5, 0.01]],
+};
+const QUAL_LABEL = { hue: "Hue", sat: "Saturation", luma: "Luma" };
+const QUAL_DEFAULT = { hue: [30, 60, 20], sat: [0.15, 1, 0.1], luma: [0.2, 0.8, 0.1] };
+const MASK_ROWS = { x: ["X", -0.5, 1.5, 0.005], y: ["Y", -0.5, 1.5, 0.005], w: ["Width", 0.01, 2, 0.005], h: ["Height", 0.01, 2, 0.005],
+  rotation: ["Rotation", -180, 180, 1], feather: ["Feather", 0, 0.5, 0.005] };
+const MASK_DEFAULT = { ellipse: { shape: "ellipse", x: 0.5, y: 0.5, w: 0.35, h: 0.5, feather: 0.06 },
+  rect: { shape: "rect", x: 0.5, y: 0.5, w: 0.4, h: 0.4, feather: 0.04 },
+  poly: { shape: "poly", x: 0.5, y: 0.5, feather: 0.04, points: [[0, -0.22], [0.16, -0.06], [0.11, 0.18], [-0.11, 0.18], [-0.16, -0.06]] } };
+function gradeLayers(c) { return (c && c.props.grade && c.props.grade.layers) || []; }
+function curLayer(c) {
+  const ls = gradeLayers(c);
+  if (colorState.layer >= ls.length) colorState.layer = ls.length - 1;
+  return colorState.layer >= 0 ? ls[colorState.layer] : null;
+}
+/** What the Color tab edits: the primary grade, or the selected layer. */
+function targetGrade(c) {
+  const l = curLayer(c);
+  return l ? Color.layerGrade(l) : c.props.grade;
+}
+function writeLayers(c, layers) {
+  const next = Color.mergeGrade(c.props.grade, { layers: layers.length ? layers : null });
+  if (next) c.props.grade = next; else delete c.props.grade;
+  colorState.sig = colorPageSig(c);   // the page already shows this — no rebuild
+}
+function writeLayer(c, k, set) {
+  const ls = gradeLayers(c).map((l) => l);
+  ls[k] = Color.mergeLayer(ls[k], set);
+  if (!ls[k].name) ls[k].name = `Layer ${k + 1}`;   // a layer always keeps a name, so it is never dropped
+  writeLayers(c, ls);
+}
+/** The grade a picker samples for what is being edited: everything before it,
+ *  plus (for the curve pickers) the edited grade without its curves. */
+function gradeBefore(c, withSelf = false) {
+  const g = c.props.grade || {}, k = colorState.layer;
+  if (k < 0) return withSelf ? { ...Color.withoutCurves(g), layers: null } : null;
+  const ls = gradeLayers(c).slice(0, k);
+  if (withSelf) ls.push(Color.withoutCurves(gradeLayers(c)[k]));
+  return { ...g, layers: ls };
+}
+function clipLocalT(c) { return state.time - c.start; }
+/** The selected layer's mask as it is at the playhead (keys resolved). */
+function maskNow(c) {
+  const l = curLayer(c);
+  return l && l.mask ? Color.maskAt(l.mask, clipLocalT(c)) : null;
+}
+function maskKeyAt(m, t) {
+  const tol = 0.5 / (projectFps() || 30);
+  return m && m.keys ? m.keys.findIndex((k) => Math.abs(k.t - t) < tol) : -1;
+}
+/** Change the selected layer's mask; with keys, keyed params land in a key at the playhead. */
+function writeMask(c, set) {
+  const l = curLayer(c);
+  if (!l) return;
+  const m = l.mask;
+  if (!m || !m.keys || !m.keys.length || !Color.MASK_KEYED.some((p) => p in set)) { writeLayer(c, colorState.layer, { mask: set }); return; }
+  const t = clipLocalT(c), keys = m.keys.map((k) => ({ ...k })), now = Color.maskAt(m, t);
+  const statics = {};
+  for (const [p, v] of Object.entries(set)) if (!Color.MASK_KEYED.includes(p)) statics[p] = v;
+  let i = maskKeyAt(m, t);
+  if (i < 0) {
+    const k = { t: +t.toFixed(4) };
+    for (const p of Color.MASK_KEYED) k[p] = now[p];
+    keys.push(k); keys.sort((a, b) => a.t - b.t); i = keys.indexOf(k);
+  }
+  for (const p of Color.MASK_KEYED) if (p in set) keys[i][p] = set[p];
+  writeLayer(c, colorState.layer, { mask: { ...statics, keys } });
+}
+function layersStripHtml(c) {
+  const ls = gradeLayers(c), k = colorState.layer;
+  const chip = (i, label, off) => `<button type="button" class="btn tiny cl-chip${i === k ? " toggle on" : ""}${off ? " off" : ""}" data-layer="${i}"
+    title="${i < 0 ? "The primary grade — the whole picture" : "Layer: graded where its qualifier and mask select"}">${escapeHtml(label)}</button>`;
+  return `<div class="cp-layers">${chip(-1, "Primary")}${ls.map((l, i) => chip(i, l.name || `Layer ${i + 1}`, l.on === false)).join("")}
+    <button type="button" class="btn tiny" data-lact="add" ${ls.length >= Color.MAX_LAYERS ? "disabled" : ""} title="Add a layer: a correction limited by a qualifier and / or a mask">+ Layer</button></div>`;
+}
+function layerSectionsHtml(c) {
+  const l = curLayer(c);
+  if (!l) return "";
+  const q = l.qualifier || {}, m = maskNow(c), i = colorState.layer, n = gradeLayers(c).length;
+  const qrow = (key) => {
+    const on = !!q[key], vals = q[key] || QUAL_DEFAULT[key];
+    return `<div class="cq-block${on ? "" : " off"}"><label class="cq-on"><input type="checkbox" data-qon="${key}" ${on ? "checked" : ""}> ${QUAL_LABEL[key]}</label>
+      ${QUAL_ROWS[key].map(([lab, min, max, step], j) => `<div class="insp-row cp-row"><label class="cp-label">${lab}</label>
+        <input type="range" class="${key === "hue" && j === 0 ? "cq-hue" : ""}" data-q="${key}.${j}" min="${min}" max="${max}" step="${step}" value="${vals[j]}" ${on ? "" : "disabled"}>
+        <input type="number" class="cp-num" data-qnum="${key}.${j}" min="${min}" max="${max}" step="${step}" value="${vals[j]}" ${on ? "" : "disabled"}></div>`).join("")}</div>`;
+  };
+  const keyed = m && l.mask.keys ? l.mask.keys.length : 0, onKey = m && maskKeyAt(l.mask, clipLocalT(c)) >= 0;
+  const mrow = (p) => {
+    const [lab, min, max, step] = MASK_ROWS[p];
+    return `<div class="insp-row cp-row"><label class="cp-label">${lab}</label>
+      <input type="range" data-m="${p}" min="${min}" max="${max}" step="${step}" value="${m[p]}">
+      <input type="number" class="cp-num" data-mnum="${p}" min="${min}" max="${max}" step="${step}" value="${fmtG(m[p], step)}"></div>`;
+  };
+  return `<div class="insp-section cp-layer">
+      <div class="cl-row"><input type="text" class="cl-name" data-lname value="${escapeHtml(l.name || "")}" maxlength="40" title="Layer name">
+        <button type="button" class="btn tiny${l.on === false ? "" : " toggle on"}" data-lact="on" title="Layer on / off">${l.on === false ? "Off" : "On"}</button>
+        <button type="button" class="btn tiny${runtime.matte ? " toggle on" : ""}" data-lact="matte" title="Show what this layer selects (white = graded) in the monitor">Matte</button>
+        <button type="button" class="btn tiny" data-lact="up" ${i === 0 ? "disabled" : ""} title="Move earlier">↑</button>
+        <button type="button" class="btn tiny" data-lact="down" ${i >= n - 1 ? "disabled" : ""} title="Move later">↓</button>
+        <button type="button" class="btn tiny" data-lact="del" title="Delete this layer">Delete</button></div>
+    </div>
+    <div class="insp-section cp-qual"><h3>Qualifier</h3>
+      <div class="cl-row"><button type="button" class="btn tiny${colorState.qualPick ? " toggle on" : ""}" data-qact="pick" title="Click a colour in the monitor to select it (its hue, saturation and luma)">Pick</button>
+        <button type="button" class="btn tiny${q.invert ? " toggle on" : ""}" data-qact="invert" title="Select everything except this">Invert</button>
+        <button type="button" class="btn tiny" data-qact="clear" title="No qualifier: the mask alone decides">Clear</button></div>
+      ${qrow("hue")}${qrow("sat")}${qrow("luma")}
+    </div>
+    <div class="insp-section cp-mask"><h3>Mask</h3>
+      <div class="cl-row">${["none", "ellipse", "rect", "poly"].map((s) => `<button type="button" class="btn tiny${(m ? m.shape : "none") === s ? " toggle on" : ""}" data-mshape="${s}">${s === "none" ? "None" : s === "rect" ? "Rect" : s[0].toUpperCase() + s.slice(1)}</button>`).join("")}
+        ${m ? `<button type="button" class="btn tiny${m.invert ? " toggle on" : ""}" data-mact="invert" title="Grade outside the shape">Invert</button>` : ""}</div>
+      ${m ? `<div class="cl-row"><button type="button" class="btn tiny${onKey ? " toggle on" : ""}" data-mact="key" title="${onKey ? "Remove the key at the playhead" : "Key the shape at the playhead — with keys, every change keys"}">◆ Key</button>
+        <span class="cl-note">${keyed ? `${keyed} key${keyed > 1 ? "s" : ""}` : "not animated"}</span>
+        ${keyed ? `<button type="button" class="btn tiny" data-mact="clearkeys" title="Remove every key (keeps the shape at the playhead)">Clear keys</button>` : ""}</div>
+      ${mrow("x")}${mrow("y")}${m.shape !== "poly" ? mrow("w") + mrow("h") : ""}${mrow("rotation")}${mrow("feather")}
+      <p class="cl-note">Drag it on the monitor: inside moves, handles resize, the knob rotates${m.shape === "poly" ? "; Ctrl-click adds a point, double-click one removes it" : ""}.</p>` : ""}
+    </div>`;
+}
+function bindLayerControls(c, guard) {
+  const root = els.colorPage;
+  const rerender = () => renderColorPage(true);
+  for (const b of root.querySelectorAll("[data-layer]")) b.addEventListener("click", () => {
+    colorState.layer = +b.dataset.layer;
+    if (runtime.matte) setMatte(c, colorState.layer >= 0);
+    setQualPick(false);
+    rerender();
+  });
+  for (const b of root.querySelectorAll("[data-lact]")) b.addEventListener("click", () => {
+    const a = b.dataset.lact;
+    if (a === "matte") { setMatte(c, !runtime.matte); rerender(); return; }
+    if (!guard()) return;
+    const ls = gradeLayers(c).slice(), i = colorState.layer;
+    pushUndo();
+    if (a === "add") { ls.push({ name: `Layer ${ls.length + 1}` }); writeLayers(c, ls); colorState.layer = ls.length - 1; }
+    else if (a === "on") writeLayer(c, i, { on: ls[i].on === false ? null : false });
+    else if (a === "del") { ls.splice(i, 1); writeLayers(c, ls); colorState.layer = Math.min(i, ls.length - 1); if (runtime.matte) setMatte(c, colorState.layer >= 0); }
+    else if (a === "up" || a === "down") {
+      const j = a === "up" ? i - 1 : i + 1;
+      [ls[i], ls[j]] = [ls[j], ls[i]]; writeLayers(c, ls); colorState.layer = j;
+      if (runtime.matte) setMatte(c, true);
+    }
+    scheduleSave(); rerender();
+  });
+  const name = root.querySelector("[data-lname]");
+  if (name) name.addEventListener("change", () => {
+    if (!guard()) return;
+    pushUndo(); writeLayer(c, colorState.layer, { name: name.value.trim() || `Layer ${colorState.layer + 1}` }); scheduleSave(); rerender();
+  });
+  // qualifier
+  const qWrite = (key, vals) => { writeLayer(c, colorState.layer, { qualifier: { [key]: vals } }); scheduleSave(); };
+  for (const cb of root.querySelectorAll("[data-qon]")) cb.addEventListener("change", () => {
+    if (!guard()) { cb.checked = !cb.checked; return; }
+    const key = cb.dataset.qon;
+    pushUndo(); qWrite(key, cb.checked ? QUAL_DEFAULT[key].slice() : null); rerender();
+  });
+  const qVals = (key) => (curLayer(c)?.qualifier?.[key] || QUAL_DEFAULT[key]).slice();
+  for (const r of root.querySelectorAll("[data-q]")) {
+    const [key, j] = r.dataset.q.split(".");
+    r.addEventListener("pointerdown", () => { if (guard()) pushUndo(); });
+    r.addEventListener("input", () => {
+      if (isGroupLocked(c)) return;
+      const v = qVals(key); v[+j] = +r.value; qWrite(key, v);
+      const n = root.querySelector(`[data-qnum="${key}.${j}"]`); if (n) n.value = r.value;
+    });
+  }
+  for (const n of root.querySelectorAll("[data-qnum]")) {
+    const [key, j] = n.dataset.qnum.split(".");
+    n.addEventListener("change", () => {
+      const x = parseFloat(n.value);
+      if (!Number.isFinite(x) || !guard()) return;
+      const v = qVals(key); v[+j] = x;
+      pushUndo(); qWrite(key, v); rerender();
+    });
+  }
+  for (const b of root.querySelectorAll("[data-qact]")) b.addEventListener("click", () => {
+    const a = b.dataset.qact;
+    if (a === "pick") { setQualPick(!colorState.qualPick); return; }
+    if (!guard()) return;
+    pushUndo();
+    if (a === "invert") qWrite("invert", curLayer(c)?.qualifier?.invert ? null : true);
+    else writeLayer(c, colorState.layer, { qualifier: null });
+    scheduleSave(); rerender();
+  });
+  // mask
+  for (const b of root.querySelectorAll("[data-mshape]")) b.addEventListener("click", () => {
+    if (!guard()) return;
+    const s = b.dataset.mshape, cur = maskNow(c);
+    pushUndo();
+    if (s === "none") writeLayer(c, colorState.layer, { mask: null });
+    else if (!cur || cur.shape !== s) {
+      const m = { ...MASK_DEFAULT[s] };
+      if (cur) { m.x = cur.x; m.y = cur.y; m.rotation = cur.rotation; if (cur.invert) m.invert = true; }
+      writeLayer(c, colorState.layer, { mask: null });
+      writeLayer(c, colorState.layer, { mask: m });
+    }
+    scheduleSave(); rerender();
+  });
+  for (const b of root.querySelectorAll("[data-mact]")) b.addEventListener("click", () => {
+    if (!guard()) return;
+    const a = b.dataset.mact, l = curLayer(c), m = l && l.mask;
+    if (!m) return;
+    pushUndo();
+    if (a === "invert") writeLayer(c, colorState.layer, { mask: { invert: m.invert ? null : true } });
+    else if (a === "clearkeys") {
+      const now = maskNow(c), set = { keys: null };
+      for (const p of Color.MASK_KEYED) set[p] = now[p];
+      writeLayer(c, colorState.layer, { mask: set });
+    } else if (a === "key") {
+      const t = clipLocalT(c), i = maskKeyAt(m, t), now = maskNow(c);
+      let keys = (m.keys || []).map((k) => ({ ...k }));
+      if (i >= 0) keys.splice(i, 1);
+      else { const k = { t: +t.toFixed(4) }; for (const p of Color.MASK_KEYED) k[p] = now[p]; keys.push(k); }
+      const set = { keys: keys.length ? keys : null };
+      if (!keys.length) for (const p of Color.MASK_KEYED) set[p] = now[p];
+      writeLayer(c, colorState.layer, { mask: set });
+    }
+    scheduleSave(); rerender();
+  });
+  for (const r of root.querySelectorAll("[data-m]")) {
+    const p = r.dataset.m;
+    r.addEventListener("pointerdown", () => { if (guard()) pushUndo(); });
+    r.addEventListener("input", () => {
+      if (isGroupLocked(c)) return;
+      writeMask(c, { [p]: +r.value }); scheduleSave();
+      const n = root.querySelector(`[data-mnum="${p}"]`); if (n) n.value = fmtG(+r.value, MASK_ROWS[p][3]);
+    });
+  }
+  for (const n of root.querySelectorAll("[data-mnum]")) {
+    const p = n.dataset.mnum;
+    n.addEventListener("change", () => {
+      const x = parseFloat(n.value);
+      if (!Number.isFinite(x) || !guard()) return;
+      pushUndo(); writeMask(c, { [p]: x }); scheduleSave(); rerender();
+    });
+  }
+}
+function syncMaskInputs(c) {
+  const m = maskNow(c);
+  if (!m) return;
+  for (const p of Object.keys(MASK_ROWS)) {
+    const r = els.colorPage.querySelector(`[data-m="${p}"]`), n = els.colorPage.querySelector(`[data-mnum="${p}"]`);
+    if (r) r.value = m[p];
+    if (n) n.value = fmtG(m[p], MASK_ROWS[p][3]);
+  }
+}
+function setMatte(c, on) {
+  runtime.matte = on && c && colorState.layer >= 0 ? { id: c.id, layer: colorState.layer } : null;
+  state.dirtyTimeline = true;
+}
+function setQualPick(on) {
+  colorState.qualPick = !!on;
+  if (on) { setWbPick(false); setCurvePick(false); }
+  els.preview.classList.toggle("wb-picking", colorState.pick || colorState.curvePick || colorState.qualPick);
+  const b = els.colorPage.querySelector("[data-qact=pick]");
+  if (b) { b.classList.toggle("on", colorState.qualPick); b.classList.toggle("toggle", colorState.qualPick); }
+  if (on) toast("Click the colour this layer should select");
+}
+/** Monitor click while the qualifier's Pick is on: select that colour. */
+function qualPickAt(c, pt) {
+  const rgb = sampleProgram(pt.x, pt.y, c.id, gradeBefore(c));
+  if (!rgb) return;
+  const [h, s] = Color.rgbToHsv(rgb[0], rgb[1], rgb[2]), y = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
+  const q = { luma: [Math.max(0, y - 0.25), Math.min(1, y + 0.25), 0.1] };
+  if (s >= 0.08) { q.hue = [Math.round(h * 360), 40, 20]; q.sat = [Math.max(0, s - 0.3), Math.min(1, s + 0.3), 0.1]; }
+  else { q.hue = null; q.sat = [0, Math.min(1, s + 0.12), 0.08]; }
+  pushUndo(); writeLayer(c, colorState.layer, { qualifier: q }); scheduleSave(); renderColorPage(true);
+  toast(s >= 0.08 ? `Selected hue ${Math.round(h * 360)}° — turn on Matte to check` : "Selected a neutral tone (greys carry no hue)");
+}
+
+/* ── The selected layer's mask on the monitor ── */
+/** Mask-space (0…1 of the clip's picture) ↔ monitor canvas px. */
+function maskSpace(c) {
+  const g = runtime.gradeGeom && runtime.gradeGeom.get(c.id);
+  if (!g) return null;
+  const inv = g.m.inverse();
+  return {
+    aspect: g.w / g.h,
+    toCanvas: (u, v) => { const p = g.m.transformPoint(new DOMPoint(g.x0 + u * g.w, g.y0 + v * g.h)); return { x: p.x, y: p.y }; },
+    toUv: (pt) => { const p = inv.transformPoint(new DOMPoint(pt.x, pt.y)); return { u: (p.x - g.x0) / g.w, v: (p.y - g.y0) / g.h }; },
+  };
+}
+/** Mask-local (aspect-corrected, unrotated) → picture uv. */
+function maskLocalToUv(m, a, px, py) {
+  const th = m.rotation * Math.PI / 180, cs = Math.cos(th), sn = Math.sin(th);
+  return { u: m.x + (px * cs - py * sn) / a, v: m.y + px * sn + py * cs };
+}
+function uvToMaskLocal(m, a, u, v) {
+  const th = m.rotation * Math.PI / 180, cs = Math.cos(th), sn = Math.sin(th);
+  const dx = (u - m.x) * a, dy = v - m.y;
+  return { x: dx * cs + dy * sn, y: -dx * sn + dy * cs };
+}
+/** The mask's handles in canvas px: centre, edges (w / h), rotate knob, poly points. */
+function maskHandles(c) {
+  const m = maskNow(c), sp = m && maskSpace(c);
+  if (!sp) return null;
+  const a = sp.aspect, at = (px, py) => { const q = maskLocalToUv(m, a, px, py); return sp.toCanvas(q.u, q.v); };
+  const rx = (m.w / 2) * a, ry = m.h / 2;
+  const top = m.shape === "poly" ? Math.min(...m.points.map(([, y]) => y)) : -ry;
+  const W = els.preview.width, H = els.preview.height, inset = Math.max(8, W / 110), knob = at(0, top - 0.08);
+  knob.x = clamp(knob.x, inset, W - inset); knob.y = clamp(knob.y, inset, H - inset);   // stays grabbable above the frame
+  const h = { m, sp, centre: at(0, 0), knob, knobBase: at(0, top), edges: [], points: [] };
+  if (m.shape === "poly") h.points = m.points.map(([x, y]) => at(x * a, y));
+  else h.edges = [["w", rx, 0], ["w", -rx, 0], ["h", 0, ry], ["h", 0, -ry]].map(([k, x, y]) => ({ k, ...at(x, y) }));
+  return h;
+}
+function maskOutline(c, h) {
+  const { m, sp } = h, a = sp.aspect, pts = [];
+  if (m.shape === "ellipse") {
+    for (let i = 0; i < 64; i++) { const t = i / 64 * Math.PI * 2; const q = maskLocalToUv(m, a, Math.cos(t) * m.w / 2 * a, Math.sin(t) * m.h / 2); pts.push(sp.toCanvas(q.u, q.v)); }
+  } else if (m.shape === "rect") {
+    for (const [x, y] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) { const q = maskLocalToUv(m, a, x * m.w / 2 * a, y * m.h / 2); pts.push(sp.toCanvas(q.u, q.v)); }
+  } else pts.push(...h.points);
+  return pts;
+}
+function maskEditing(c) {
+  return colorState.ws === "color" && colorState.layer >= 0 && c && state.selId === c.id && !!maskNow(c) && activeAt(c, state.time);
+}
+/** Drawn instead of the selection box while a layer's mask is being edited. */
+function drawMaskOverlay(c, W) {
+  const h = maskHandles(c);
+  if (!h) return false;
+  const lw = Math.max(1.5, W / 800), hs = Math.max(5, W / 170);
+  ctx2d.save();
+  ctx2d.setTransform(1, 0, 0, 1, 0, 0);
+  const pts = maskOutline(c, h);
+  ctx2d.lineWidth = lw * 2.2; ctx2d.strokeStyle = "rgba(0,0,0,0.55)";
+  ctx2d.beginPath(); pts.forEach((p, i) => (i ? ctx2d.lineTo(p.x, p.y) : ctx2d.moveTo(p.x, p.y))); ctx2d.closePath(); ctx2d.stroke();
+  ctx2d.lineWidth = lw; ctx2d.strokeStyle = h.m.invert ? "#ff9f5a" : "#ffd25a";
+  ctx2d.beginPath(); pts.forEach((p, i) => (i ? ctx2d.lineTo(p.x, p.y) : ctx2d.moveTo(p.x, p.y))); ctx2d.closePath(); ctx2d.stroke();
+  ctx2d.beginPath(); ctx2d.moveTo(h.knobBase.x, h.knobBase.y); ctx2d.lineTo(h.knob.x, h.knob.y); ctx2d.stroke();
+  const dot = (p, r, fill) => { ctx2d.beginPath(); ctx2d.arc(p.x, p.y, r, 0, Math.PI * 2); ctx2d.fillStyle = fill; ctx2d.fill(); ctx2d.strokeStyle = "rgba(0,0,0,0.7)"; ctx2d.stroke(); };
+  for (const e of h.edges) dot(e, hs * 0.8, "#fff");
+  for (const p of h.points) dot(p, hs * 0.8, "#fff");
+  dot(h.centre, hs * 0.55, "#ffd25a");
+  dot(h.knob, hs * 0.9, "#ffce5c");
+  ctx2d.restore();
+  return true;
+}
+let maskDrag = null;
+els.preview.addEventListener("pointerdown", (e) => {
+  if (e.button !== 0 || e.altKey || isSourceMode() || colorState.pick || colorState.curvePick || colorState.qualPick) return;
+  const c = getClip(state.selId);
+  if (!maskEditing(c)) return;
+  const h = maskHandles(c);
+  if (!h) return;
+  const pt = canvasPt(e), W = els.preview.width, grab = Math.max(8, W / 110);
+  const near = (p) => Math.hypot(p.x - pt.x, p.y - pt.y) <= grab;
+  const { m, sp } = h, a = sp.aspect, uv = sp.toUv(pt);
+  let drag = null;
+  if (near(h.knob)) drag = { mode: "rotate" };
+  else if (h.points.some(near)) drag = { mode: "point", i: h.points.findIndex(near) };
+  else if (h.edges.some(near)) drag = { mode: h.edges.find(near).k };
+  else if (m.shape === "poly" && (e.ctrlKey || e.metaKey)) { // add a point on the nearest edge
+    const lp = uvToMaskLocal(m, a, uv.u, uv.v), P = m.points.map(([x, y]) => [x * a, y]);
+    let best = 0, bd = Infinity;
+    for (let i = 0; i < P.length; i++) {
+      const [x1, y1] = P[i], [x2, y2] = P[(i + 1) % P.length], ex = x2 - x1, ey = y2 - y1;
+      const k = clamp(((lp.x - x1) * ex + (lp.y - y1) * ey) / Math.max(1e-9, ex * ex + ey * ey), 0, 1);
+      const d = Math.hypot(lp.x - x1 - ex * k, lp.y - y1 - ey * k);
+      if (d < bd) { bd = d; best = i; }
+    }
+    if (m.points.length >= Color.MAX_POLY) { toast(`A mask has at most ${Color.MAX_POLY} points`); e.stopImmediatePropagation(); return; }
+    if (isGroupLocked(c)) { toastLocked(); e.stopImmediatePropagation(); return; }
+    const pts = m.points.map((p) => p.slice());
+    pts.splice(best + 1, 0, [lp.x / a, lp.y]);
+    pushUndo(); writeMask(c, { points: pts }); scheduleSave();
+    drag = { mode: "point", i: best + 1, pushed: true };
+  } else if (Color.maskDist(m, uv.u, uv.v, a) <= 0.01) drag = { mode: "move" };
+  if (!drag) return;     // outside the shape: the monitor's usual clicks
+  e.preventDefault(); e.stopImmediatePropagation();
+  if (isGroupLocked(c)) { toastLocked(); return; }
+  if (!drag.pushed) pushUndo();
+  maskDrag = { ...drag, id: c.id, start: uv, m0: { ...m, points: m.points && m.points.map((p) => p.slice()) } };
+  colorState.mdrag = true;
+  els.preview.setPointerCapture(e.pointerId);
+}, true);
+els.preview.addEventListener("pointermove", (e) => {
+  if (!maskDrag) return;
+  e.stopImmediatePropagation();
+  const c = getClip(maskDrag.id), sp = c && maskSpace(c);
+  if (!sp) return;
+  const uv = sp.toUv(canvasPt(e)), m0 = maskDrag.m0, a = sp.aspect, d = maskDrag;
+  const lp = uvToMaskLocal(m0, a, uv.u, uv.v);
+  let set;
+  if (d.mode === "move") set = { x: +(m0.x + uv.u - d.start.u).toFixed(4), y: +(m0.y + uv.v - d.start.v).toFixed(4) };
+  else if (d.mode === "w") set = { w: +clamp(Math.abs(lp.x) * 2 / a, 0.01, 4).toFixed(4) };
+  else if (d.mode === "h") set = { h: +clamp(Math.abs(lp.y) * 2, 0.01, 4).toFixed(4) };
+  else if (d.mode === "rotate") {
+    const dx = (uv.u - m0.x) * a, dy = uv.v - m0.y;
+    let r = Math.atan2(dx, -dy) * 180 / Math.PI;
+    if (e.shiftKey) r = Math.round(r / 15) * 15;
+    set = { rotation: +r.toFixed(1) };
+  } else if (d.mode === "point") {
+    const pts = (curLayer(c)?.mask?.points || m0.points).map((p) => p.slice());
+    pts[d.i] = [+(lp.x / a).toFixed(4), +lp.y.toFixed(4)];
+    set = { points: pts };
+  }
+  if (set) { writeMask(c, set); syncMaskInputs(c); state.dirtyTimeline = true; }
+}, true);
+const endMaskDrag = (e) => {
+  if (!maskDrag) return;
+  e.stopImmediatePropagation();
+  maskDrag = null; colorState.mdrag = false;
+  scheduleSave(); renderColorPage(true);
+};
+els.preview.addEventListener("pointerup", endMaskDrag, true);
+els.preview.addEventListener("pointercancel", endMaskDrag, true);
+els.preview.addEventListener("dblclick", (e) => {
+  const c = getClip(state.selId);
+  if (!maskEditing(c)) return;
+  const h = maskHandles(c), pt = canvasPt(e), grab = Math.max(8, els.preview.width / 110);
+  const i = h ? h.points.findIndex((p) => Math.hypot(p.x - pt.x, p.y - pt.y) <= grab) : -1;
+  if (i < 0) return;
+  e.preventDefault(); e.stopImmediatePropagation();
+  if (h.m.points.length <= 3) { toast("A mask needs at least 3 points"); return; }
+  if (isGroupLocked(c)) { toastLocked(); return; }
+  const pts = h.m.points.map((p) => p.slice()); pts.splice(i, 1);
+  pushUndo(); writeMask(c, { points: pts }); scheduleSave(); renderColorPage(true);
+}, true);
 
 /* ── Scopes: a ≤480 px copy of the program frame (or the export frame),
    read back a few times a second while the Color workspace is open. ── */

@@ -30,6 +30,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   curve with one point is a band around that hue. Stored in `props.grade`
   (`curves`, `hueHue`, `hueSat`, `hueLuma`, `satLuma`) and set by agents with
   `setGrade`.
+- **Layers (secondaries)** in the Color tab: corrections limited by an HSL
+  **qualifier** (hue / saturation / luma ranges with softness, invert, and a
+  Pick that selects a colour from the monitor) and / or a **mask** (ellipse,
+  rectangle or polygon; feather, invert, rotation), dragged on the monitor
+  and keyframable. **Matte** shows what a layer selects. Each layer has its
+  own wheels, sliders and curves; up to 8 stack in order. Stored in
+  `props.grade.layers`. Agents edit one layer with the patch op
+  **`setGradeLayer`** and check it with `fablecut_scopes {matte:{clip, layer}}`
+  (coverage, plus the levels and colour of the selected pixels).
 - Agents: the patch op **`setGrade`** (merge, reset a key with `null`,
   `replace`, several clips at once; validated, honours locks) and the tool
   **`fablecut_scopes`**, which renders the graded frame exactly as export

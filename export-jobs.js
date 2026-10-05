@@ -104,7 +104,7 @@ function createExportJobs(opts) {
   return {
     /** Queue an export. where: auto (open tab, else headless) · tab · headless.
      *  kind "scopes" measures one still at `time` instead (fablecut_scopes). */
-    request({ kind = "export", range, profile, time, revision, where = "auto" }) {
+    request({ kind = "export", range, profile, time, revision, where = "auto", matte = null }) {
       if (!["auto", "tab", "headless"].includes(where)) throw Object.assign(new Error("where must be auto, tab or headless"), { code: 400 });
       if (kind !== "export" && kind !== "scopes") throw Object.assign(new Error("kind must be export or scopes"), { code: 400 });
       if (time != null && !(Number.isFinite(time) && time >= 0)) throw Object.assign(new Error("time must be seconds ≥ 0"), { code: 400 });
@@ -117,6 +117,7 @@ function createExportJobs(opts) {
       const j = {
         id: "x_" + Math.random().toString(36).slice(2, 10), kind, status: "pending", progress: 0,
         range: range || null, profile: profile || null, time: time ?? null, revision: Number.isFinite(revision) ? revision : null,
+        matte: kind === "scopes" && matte ? { clip: String(matte.clip), layer: matte.layer } : null,
         via: where === "headless" || (where === "auto" && !tabs) ? "headless" : "tab",
         created: now, updated: now,
       };
@@ -128,7 +129,7 @@ function createExportJobs(opts) {
     },
     get(id) { const j = jobs.get(id); return j ? view(j) : null; },
     /** What a tab needs to run the job (headless pages fetch it by id). */
-    ticket(id) { const j = jobs.get(id); return j ? { id: j.id, kind: j.kind, range: j.range, profile: j.profile, time: j.time, revision: j.revision, status: j.status } : null; },
+    ticket(id) { const j = jobs.get(id); return j ? { id: j.id, kind: j.kind, range: j.range, profile: j.profile, time: j.time, revision: j.revision, matte: j.matte || null, status: j.status } : null; },
     /** First tab to claim a pending job runs it. */
     claim(id) {
       const j = jobs.get(id);

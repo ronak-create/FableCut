@@ -177,7 +177,10 @@ same time.
   blacks / shadows / midtones / highlights / whites, log-style contrast with a
   pivot, soft rolloff and saturation, plus **curves** — luma and R / G / B,
   hue vs hue, hue vs saturation, hue vs luma and saturation vs luma, with a
-  picker that marks a colour from the monitor. Copy / paste a grade across shots.
+  picker that marks a colour from the monitor, and **layers** (secondaries):
+  a correction limited by an HSL **qualifier** and / or an ellipse, rect or
+  polygon **mask** (feathered, invertible, keyframable, dragged on the
+  monitor), with a matte view. Copy / paste a grade across shots.
   Agents grade with the `setGrade` patch op and read the result as numbers
   with `fablecut_scopes` (levels, clipping, colour cast)
 - Quick filter sliders: brightness/contrast/saturation/hue, **temperature & tint**,

@@ -137,7 +137,7 @@ const TOOLS = [
   },
   {
     name: "fablecut_patch_project",
-    description: "Apply targeted edits to the FableCut project WITHOUT round-tripping the whole document — PREFER THIS over get+set for every edit (it is ~10-100x cheaper in tokens and merge-safe by design: it re-reads the latest document from disk, applies your ops in order, bumps revision once, saves atomically). Ops: {op:'addClip', clip:{…}} (id auto-generated if omitted) · {op:'updateClip', id, set:{…}} · {op:'removeClip', id} · {op:'addMedia', media:{…}} · {op:'removeMedia', id} · {op:'setProject', set:{name|width|height|fps|background|markers|disabledTracks|lockedTracks|untargetedTracks|encodeProfile|master}} (markers = the full list [{t, label?, color?}], color: gold|red|orange|green|cyan|blue|purple|pink; master = {gain}, the master fader in dB) · {op:'setTrack', id:'A1', set:{gain?, pan?, out?}} (audio-track fader in dB −60…+12, pan −1…1, out = a submix bus id or 'master'; null or 0 resets) · {op:'setBus', id:'B1', set:{name?, gain?, pan?, mute?}} (submix bus, created if missing; route tracks into it with setTrack out) · {op:'removeBus', id} · {op:'setFx', target:'clip'|'track'|'bus'|'master', id?, preset?:'podcast'|… OR fx:[{type,…params}], append?:true} (audio effects — validated; presets: clean-voice, podcast, radio, deep-voice, telephone, cinematic, wide, muffled; fx:null clears; on a clip it applies to its linked stems too) · {op:'setFxKeys', target, id?, index?|type?, param, keys:[{t, v, ease?}]|null} (automate one effect parameter: t is clip-local for a clip's effects, timeline seconds otherwise; see the 'Audio mix' docs section) · {op:'setGrade', id | ids:[…], grade:{exposure?, temp?, tint?, lift?, gamma?, gain?, offset?, contrast?, pivot?, blacks?, shadows?, midtones?, highlights?, whites?, lowSoft?, highSoft?, saturation?, curves?:{y?, r?, g?, b?}, hueHue?, hueSat?, hueLuma?, satLuma?, on?}, replace?:true} (color grade on video / image / svg / adjust clips — wheels are [r, g, b, master]; curves are [[x, y], …] point lists on 0…1 and merge per channel; hue curves are [[hue°, value], …] — one point = a ±40° band; merges key by key, null resets a key, replace:true starts from neutral, grade:null clears; see the 'Color' docs section; measure the result with fablecut_scopes). TIMELINE EDITS — the editor's own split / ripple / trim code, so linked stems, track targeting (untargetedTracks) and locks behave exactly as in the UI; times in seconds: {op:'split', at, ids?} (no ids: every targeted track) · {op:'rippleDelete', ids} (later clips close the hole) · {op:'closeGap', at} · {op:'lift'|'extract', from?, to?} (remove a range; extract closes it; default = project inPoint/outPoint, which then clear) · {op:'insert'|'overwrite', mediaId, at, in?, duration?} (three-point edit: insert pushes later clips right, overwrite replaces what is there; a video brings one audio stem per channel) · {op:'rippleTrim'|'roll', id, side:'in'|'out', delta} · {op:'slip'|'slide', id, delta} (clamped to the media; the note says what was applied) · {op:'crossfade', ids? | at, duration?} (constant-power audio crossfade, borrowing handles from both sides). Any of these takes tracks:[…] to target lanes for that op only. setProject also takes inPoint / outPoint. updateClip merge rules: top-level keys are replaced (keyframes/transitionIn/transitionOut wholesale), `props` merges key-by-key, and setting any key to null deletes it. LOCKS: the user can lock clips (`locked:true`) and tracks (`lockedTracks`); updateClip / removeClip on a locked clip — or on a clip linked to one — and addClip onto a locked track are refused. Leave locked material alone; only if the user asked you to change it, pass force:true on that op (or unlock first: updateClip set:{locked:null}, which is always allowed). All-or-nothing: an invalid op aborts the whole patch unsaved.",
+    description: "Apply targeted edits to the FableCut project WITHOUT round-tripping the whole document — PREFER THIS over get+set for every edit (it is ~10-100x cheaper in tokens and merge-safe by design: it re-reads the latest document from disk, applies your ops in order, bumps revision once, saves atomically). Ops: {op:'addClip', clip:{…}} (id auto-generated if omitted) · {op:'updateClip', id, set:{…}} · {op:'removeClip', id} · {op:'addMedia', media:{…}} · {op:'removeMedia', id} · {op:'setProject', set:{name|width|height|fps|background|markers|disabledTracks|lockedTracks|untargetedTracks|encodeProfile|master}} (markers = the full list [{t, label?, color?}], color: gold|red|orange|green|cyan|blue|purple|pink; master = {gain}, the master fader in dB) · {op:'setTrack', id:'A1', set:{gain?, pan?, out?}} (audio-track fader in dB −60…+12, pan −1…1, out = a submix bus id or 'master'; null or 0 resets) · {op:'setBus', id:'B1', set:{name?, gain?, pan?, mute?}} (submix bus, created if missing; route tracks into it with setTrack out) · {op:'removeBus', id} · {op:'setFx', target:'clip'|'track'|'bus'|'master', id?, preset?:'podcast'|… OR fx:[{type,…params}], append?:true} (audio effects — validated; presets: clean-voice, podcast, radio, deep-voice, telephone, cinematic, wide, muffled; fx:null clears; on a clip it applies to its linked stems too) · {op:'setFxKeys', target, id?, index?|type?, param, keys:[{t, v, ease?}]|null} (automate one effect parameter: t is clip-local for a clip's effects, timeline seconds otherwise; see the 'Audio mix' docs section) · {op:'setGrade', id | ids:[…], grade:{exposure?, temp?, tint?, lift?, gamma?, gain?, offset?, contrast?, pivot?, blacks?, shadows?, midtones?, highlights?, whites?, lowSoft?, highSoft?, saturation?, curves?:{y?, r?, g?, b?}, hueHue?, hueSat?, hueLuma?, satLuma?, layers?:[…], on?}, replace?:true} (color grade on video / image / svg / adjust clips — wheels are [r, g, b, master]; curves are [[x, y], …] point lists on 0…1 and merge per channel; hue curves are [[hue°, value], …] — one point = a ±40° band; layers replaces the whole layer list; merges key by key, null resets a key, replace:true starts from neutral, grade:null clears; see the 'Color' docs section; measure the result with fablecut_scopes) · {op:'setGradeLayer', id | ids, layer: index | 'name', set:{name?, on?, qualifier?:{hue?:[centre°, width°, soft°], sat?:[lo, hi, soft], luma?:[lo, hi, soft], invert?}, mask?:{shape:'ellipse'|'rect'|'poly', x, y, w, h, rotation?, feather?, invert?, points?, keys?:[{t, x?, y?, …}]}, …any grade key}, replace?:true, remove?:true} (a secondary: a grade applied only where the qualifier × mask select; a new name or index = length adds a layer; qualifier and mask merge key by key; check what it selects with fablecut_scopes matte:{clip, layer}). TIMELINE EDITS — the editor's own split / ripple / trim code, so linked stems, track targeting (untargetedTracks) and locks behave exactly as in the UI; times in seconds: {op:'split', at, ids?} (no ids: every targeted track) · {op:'rippleDelete', ids} (later clips close the hole) · {op:'closeGap', at} · {op:'lift'|'extract', from?, to?} (remove a range; extract closes it; default = project inPoint/outPoint, which then clear) · {op:'insert'|'overwrite', mediaId, at, in?, duration?} (three-point edit: insert pushes later clips right, overwrite replaces what is there; a video brings one audio stem per channel) · {op:'rippleTrim'|'roll', id, side:'in'|'out', delta} · {op:'slip'|'slide', id, delta} (clamped to the media; the note says what was applied) · {op:'crossfade', ids? | at, duration?} (constant-power audio crossfade, borrowing handles from both sides). Any of these takes tracks:[…] to target lanes for that op only. setProject also takes inPoint / outPoint. updateClip merge rules: top-level keys are replaced (keyframes/transitionIn/transitionOut wholesale), `props` merges key-by-key, and setting any key to null deletes it. LOCKS: the user can lock clips (`locked:true`) and tracks (`lockedTracks`); updateClip / removeClip on a locked clip — or on a clip linked to one — and addClip onto a locked track are refused. Leave locked material alone; only if the user asked you to change it, pass force:true on that op (or unlock first: updateClip set:{locked:null}, which is always allowed). All-or-nothing: an invalid op aborts the whole patch unsaved.",
     inputSchema: {
       type: "object",
       properties: {
@@ -262,6 +262,12 @@ const TOOLS = [
       type: "object",
       properties: {
         time: { type: "number", description: "Timeline seconds to measure (default: the editor's playhead)" },
+        matte: {
+          type: "object",
+          description: "Also measure what one grade layer selects: {clip, layer} (layer = index into the clip's grade.layers). Adds the matte's coverage (% of the frame) and the levels / colour of the selected pixels in the graded frame",
+          properties: { clip: { type: "string" }, layer: { type: "integer", minimum: 0 } },
+          required: ["clip", "layer"],
+        },
         where: { type: "string", enum: ["auto", "tab", "headless"], description: "auto (default): an open editor tab, else headless · tab · headless" },
         timeout: { type: "number", description: "Seconds to wait (default 60)" },
       },
@@ -605,12 +611,18 @@ function describeScopes(j) {
     `  cast: ${cast.tone === "neutral" ? "neutral" : `${cast.tone} (hue ${cast.hue}°)`} · strength ${cast.strength}`,
     `On screen (bottom → top): ${(r.clips || []).map((c) => `${c.id} ${c.track} ${c.kind}${c.grade !== "neutral" ? " grade:" + c.grade : ""}`).join(" | ") || "nothing"}`,
   ];
-  return lines.join("\n") + "\n" + JSON.stringify({ time: r.time, stats: st });
+  const m = r.matte;
+  if (m) {
+    lines.push(m.error ? `Matte ${m.clip} layer ${m.layer}: ${m.error}` : `Matte of ${m.clip} layer ${m.layer}: covers ${m.coverage}% of the frame` +
+      (m.selected ? ` · selected pixels: luma median ${m.selected.luma.median} (p1 ${m.selected.luma.p1}, p99 ${m.selected.luma.p99}) · rgb mean [${m.selected.rgbMean.join(", ")}] · saturation ${m.selected.saturation} · cast ${m.selected.cast.tone === "neutral" ? "neutral" : `${m.selected.cast.tone} (hue ${m.selected.cast.hue}°)`}` : " · nothing selected"));
+  }
+  return lines.join("\n") + "\n" + JSON.stringify({ time: r.time, stats: st, ...(m ? { matte: m } : {}) });
 }
 async function scopesTool(args) {
   if (!(await ensureUIServer())) throw new Error(`the editor server is not running and could not be started on port ${PORT}`);
   const body = { where: args.where || "auto" };
   if (args.time != null) body.time = args.time;
+  if (args.matte != null) body.matte = args.matte;
   const r = await apiJSON("POST", "/api/scopes/request", body);
   if (r.status !== 200) throw new Error(r.body?.error || `scope request failed (${r.status})`);
   let job = r.body;
@@ -943,6 +955,41 @@ async function callTool(name, args) {
             }
             break;
           }
+          case "setGradeLayer": {
+            // {op:"setGradeLayer", id | ids, layer: index | "name", set?:{…}, replace?:true, remove?:true}
+            const ids = Array.isArray(op.ids) ? op.ids : op.id != null ? [op.id] : [];
+            if (!ids.length) throw new Error("setGradeLayer needs id or ids");
+            const byName = typeof op.layer === "string" && op.layer.trim() !== "";
+            if (!byName && !(Number.isInteger(op.layer) && op.layer >= 0)) throw new Error("setGradeLayer needs layer: an index (0 = first) or a layer name");
+            if (!op.remove && (op.set == null || typeof op.set !== "object" || Array.isArray(op.set))) throw new Error("setGradeLayer needs set:{…} (or remove:true)");
+            for (const id of ids) {
+              const c = proj.clips.find((x) => x.id === id);
+              if (!c) throw new Error("setGradeLayer: no clip " + id);
+              if (!["video", "image", "svg", "adjust"].includes(c.kind)) throw new Error(`setGradeLayer: ${id} is a ${c.kind} clip — grades go on video, image, svg or adjust clips`);
+              refuseLocked("setGradeLayer", lockReason(c), op);
+              const layers = (c.props?.grade?.layers || []).map((l) => ({ ...l }));
+              let i = byName ? layers.findIndex((l) => l.name === op.layer.trim()) : op.layer;
+              if (op.remove) {
+                if (i < 0 || i >= layers.length) throw new Error(`setGradeLayer: ${id} has no layer ${JSON.stringify(op.layer)}`);
+                layers.splice(i, 1);
+              } else {
+                if (i < 0 || i === layers.length) { // a new layer
+                  if (layers.length >= Color.MAX_LAYERS) throw new Error(`setGradeLayer: at most ${Color.MAX_LAYERS} layers`);
+                  i = layers.length; layers.push({ name: byName ? op.layer.trim() : `Layer ${i + 1}` });
+                } else if (i > layers.length) throw new Error(`setGradeLayer: ${id} has ${layers.length} layer(s) — use layer:${layers.length} to add one`);
+                const base = op.replace ? { name: layers[i].name } : layers[i];
+                let next;
+                try { next = Color.mergeLayer(base, op.set, true); } catch (err) { throw new Error(`setGradeLayer: ${err.message.replace(/^grade\.layers\[0\]\.?/, "")}`); }
+                if (!next.name) next.name = layers[i].name || `Layer ${i + 1}`;
+                layers[i] = next;
+              }
+              const g = Color.mergeGrade(c.props?.grade, { layers: layers.length ? layers : null }, true);
+              c.props = c.props || {};
+              if (g) c.props.grade = g; else delete c.props.grade;
+              notes.push(`~${id}.grade(${Color.summarizeGrade(g)})`);
+            }
+            break;
+          }
           case "setTrack": {
             // Mixer settings on one lane: {op:"setTrack", id:"A1", set:{gain:-6, pan:0.2}}.
             if (!/^A\d+$/.test(String(op.id || ""))) throw new Error("setTrack: id must be an audio track (A1, A2, …)");
@@ -1027,7 +1074,7 @@ async function callTool(name, args) {
             notes.push(timelineEdit(proj, op, refuseLocked, lockReason));
             break;
           default:
-            throw new Error("Unknown op: " + op.op + " (addClip|updateClip|removeClip|addMedia|removeMedia|setProject|setTrack|setBus|removeBus|setFx|setFxKeys|setGrade|" +
+            throw new Error("Unknown op: " + op.op + " (addClip|updateClip|removeClip|addMedia|removeMedia|setProject|setTrack|setBus|removeBus|setFx|setFxKeys|setGrade|setGradeLayer|" +
               "split|rippleDelete|closeGap|lift|extract|rippleTrim|roll|slip|slide|insert|overwrite|crossfade)");
         }
       }

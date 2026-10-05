@@ -558,10 +558,12 @@ The grade is sparse: only keys that differ from neutral are stored.
 | `saturation` | 100 | 0…200 | around Rec.709 luma |
 | `curves` | — | `{y?, r?, g?, b?}` | tone curves, each `[[x, y], …]` on 0…1 (see Curves below) |
 | `hueHue` · `hueSat` · `hueLuma` · `satLuma` | — | `[[x, value], …]` | hue / saturation curves (see Curves below) |
+| `layers` | — | up to 8 | secondaries: grades limited by a qualifier and / or a mask (see Layers below) |
 | `on` | true | — | `false` bypasses the grade without losing it |
 
 Order: exposure + white balance → offset → lift → gain → gamma → contrast →
-tone bands → rolloff → saturation → curves (luma, then R G B) → hue curves.
+tone bands → rolloff → saturation → curves (luma, then R G B) → hue curves →
+layers, in order.
 
 **Curves.** Point lists drawn through a smooth curve that never overshoots
 (monotone cubic) — at most 24 points each.
@@ -588,6 +590,51 @@ curve, drag to move it, double-click to remove it, **Pick** then click the
 monitor to mark that colour's level or hue on the curve (new points snap to
 the mark), **Reset** clears the curve shown.
 
+**Layers (secondaries).** Each layer is a grade of its own — any keys above
+except `layers` — mixed into the picture where its **matte** says:
+matte = qualifier × mask (either may be left out; with neither, the layer
+grades the whole frame). Layers run after the primary grade, in order, and
+each one's qualifier looks at the picture as it reaches that layer.
+
+```jsonc
+"layers": [
+  { "name": "Skin", "qualifier": { "hue": [25, 40, 20], "sat": [0.15, 0.7, 0.1] },
+    "saturation": 90, "hueHue": [[25, -4]] },
+  { "name": "Vignette", "mask": { "shape": "ellipse", "x": 0.5, "y": 0.5, "w": 0.8, "h": 0.9, "feather": 0.25, "invert": true },
+    "exposure": -0.6 }
+]
+```
+
+| key | does |
+|---|---|
+| `name` · `on` | a label; `on:false` turns the layer off |
+| `qualifier.hue` | `[centre°, width°, soft°]` — hues within ±width/2 of the centre, easing out over `soft`; wraps through red. Greys carry no hue, so a hue range leaves them out |
+| `qualifier.sat` · `qualifier.luma` | `[low, high, soft]` on 0…1 — saturation (HSV) / Rec.709 luma between low and high |
+| `qualifier.invert` | select everything else |
+| `mask.shape` | `ellipse` · `rect` · `poly` |
+| `mask.x` · `mask.y` | centre, as fractions of the clip's picture (0…1, y down) |
+| `mask.w` · `mask.h` | size, fractions of the picture's width / height (ellipse, rect) |
+| `mask.rotation` | degrees, clockwise |
+| `mask.feather` | soft edge, a fraction of the picture's height (0…0.5), centred on the outline |
+| `mask.points` | poly: 3–16 `[dx, dy]` corners around `x, y` (fractions of width / height) |
+| `mask.invert` | grade outside the shape |
+| `mask.keys` | animate it: `[{t, x?, y?, w?, h?, rotation?, feather?, ease?}]`, `t` in seconds from the clip's start; each param eases between the keys that set it (`ease` on the arriving key, as for clip keyframes) |
+
+Masks live in the clip's own picture, so they follow the clip when it is
+moved, scaled, rotated, cropped or flipped. On an adjustment layer they are
+fractions of the canvas.
+
+In the editor the strip under **Copy / Paste** lists **Primary** and the
+layers; **+ Layer** adds one. With a layer picked, the wheels, sliders and
+curves edit that layer, and three more sections appear: the layer's name,
+**On**, **Matte** (the monitor shows what it selects, white = graded), ↑ ↓ to
+reorder, **Delete**; **Qualifier** — **Pick** then click a colour in the
+monitor to select its hue, saturation and luma, then tune the ranges; and
+**Mask** — pick a shape and drag it on the monitor (inside moves it, the
+handles resize it, the knob rotates it, Shift snaps to 15°; on a poly,
+Ctrl-click adds a point and double-click removes one). **◆ Key** keys the
+shape at the playhead; once it has keys, every change to the shape keys.
+
 **Wheel colours.** A wheel's `r, g, b` normally carry no brightness: they are a
 point on the vectorscope's Cb / Cr plane, so pushing a wheel toward a colour
 moves the picture's trace toward that colour's target. To tint shadows teal by
@@ -602,8 +649,16 @@ long way — ±0.02…0.05 on lift and offset, ±0.05…0.15 on gamma and gain.
   into the clip's grade key by key; `null` on a key resets it; `replace:true`
   starts from neutral; `grade:null` clears it; `ids:[…]` grades several clips
   at once. `curves` merges per channel: `grade:{curves:{r:[[0.5, 0.55]]}}`
-  keeps the other channels, `curves:{y:null}` removes the luma curve. Unknown keys or bad values refuse the whole patch. Locks apply
+  keeps the other channels, `curves:{y:null}` removes the luma curve. `layers`
+  replaces the whole layer list. Unknown keys or bad values refuse the whole patch. Locks apply
   (`force:true` as elsewhere).
+- `{op:"setGradeLayer", id, layer, set:{…}}` edits one layer: `layer` is an
+  index (0 = first) or a name. A name that isn't there yet — or the index one
+  past the end — adds a layer. `set` takes any layer key and merges like
+  `setGrade`; `qualifier` and `mask` also merge key by key (`mask:{x:0.6}`
+  moves it, `qualifier:{luma:null}` drops the luma range). `replace:true`
+  starts the layer from scratch (keeping its name), `remove:true` deletes it.
+  `ids:[…]` works too.
 - `fablecut_scopes {time}` renders the graded frame at `time` (default: the
   playhead) exactly as export would — an open editor tab, else headless — and
   returns numbers: luma min / 1st percentile / median / mean / 99th percentile /
@@ -611,6 +666,11 @@ long way — ±0.02…0.05 on lift and offset, ±0.05…0.15 on gamma and gain.
   saturation, and the midtones' colour cast (hue name, hue angle, strength;
   "neutral" below 0.01), plus the clips on screen and their grades. With an
   `exportFrame` it measures the delivered crop.
+- `fablecut_scopes {time, matte:{clip, layer}}` also measures what one layer
+  selects: the matte's coverage (% of the frame) and the levels, mean RGB,
+  saturation and cast of the selected pixels in the graded frame. A coverage
+  near 0 means the qualifier or mask misses; check it before trusting a
+  secondary.
 
 Reading the numbers: a normally exposed shot has its median near 0.35–0.5;
 `whitePct` above ~1 means clipped highlights (lower `highlights` / `whites`, or
@@ -618,6 +678,16 @@ add `highSoft`); `blackPct` above ~2 means crushed shadows. A cast strength
 above ~0.03 on a scene that should be neutral wants white balance: move `temp`
 against the cast (orange / yellow → lower temp; blue / cyan → raise it) and
 `tint` against green / magenta, then measure again.
+
+Secondary workflow: grade the whole shot first (primary), then add a layer
+for the one thing that needs its own correction — e.g. skin:
+`{op:"setGradeLayer", id, layer:"Skin", set:{qualifier:{hue:[25, 40, 20], sat:[0.12, 0.7, 0.1]}, saturation:92}}`,
+then `fablecut_scopes {matte:{clip:id, layer:0}}` — expect a coverage that
+matches how much of the frame is skin and a cast near orange (hue ~25–35°).
+A sky: `qualifier:{hue:[210, 50, 25], luma:[0.45, 1, 0.1]}` with `hueSat:[[210, 1.25]]`.
+A vignette or a relight: a feathered ellipse `mask` with `invert:true` and
+`exposure:-0.5`, or without `invert` and `exposure:+0.3` on a face; give it
+`keys` to follow a move.
 
 Workflow for matching shots: grade the hero shot, measure it, then grade every
 other shot of the scene until its median and cast land near the hero's. In the

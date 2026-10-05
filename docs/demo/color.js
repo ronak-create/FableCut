@@ -35,7 +35,18 @@
      hueLuma: [[hue°, offset], …]       offset −0.5…0.5, neutral 0
      satLuma: [[saturation, offset], …] saturation 0…1, offset −0.5…0.5
    Hue curves wrap around 360°. A hue curve with ONE point is a band: that
-   value at the hue, easing back to neutral 40° either side. */
+   value at the hue, easing back to neutral 40° either side.
+
+   Layers (secondaries) run after all of that, in order. Each is a grade of
+   its own (any keys above) mixed into the picture by a matte:
+     layers: [{ name?, on?, qualifier?, mask?, …grade keys }]
+     qualifier: { hue?: [centre°, width°, soft°], sat?: [lo, hi, soft],
+                  luma?: [lo, hi, soft], invert? }   — measured on the layer's input
+     mask: { shape: ellipse | rect | poly, x, y (centre, 0…1 of the picture),
+             w, h (size, 0…1), rotation°, feather (0…0.5 of the height),
+             invert?, points?: [[dx, dy], …] (poly, relative to x, y),
+             keys?: [{ t, ease?, x?, y?, w?, h?, rotation?, feather? }] }
+   matte = qualifier × mask (each 1 when absent); out = mix(in, graded, matte). */
 (function (root, factory) {
   const api = factory();
   if (typeof module === "object" && module.exports) module.exports = api;
@@ -78,6 +89,10 @@
   const BAND = 40;            // a one-point hue curve eases back to neutral this far either side
   const CURVE_N = 1024;       // luma / RGB lookup-table size
   const HUE_N = 360;          // hue-curve lookup-table size (also sat 0…1 for satLuma)
+  const MAX_LAYERS = 8;
+  const MAX_POLY = 16;
+  const MASK_SHAPES = ["ellipse", "rect", "poly"];
+  const MASK_KEYED = ["x", "y", "w", "h", "rotation", "feather"];
   const WB_STOPS = 1 / 100;   // temp / tint ±100 → ±1 stop per channel
   const TONE_K = 0.5;         // tone slider ±100 → ±0.5 luma at the band's peak
 
@@ -87,7 +102,7 @@
   /** Validate a grade. Returns the sparse form (neutral keys dropped), or null
    *  when nothing is left. strict: throw on unknown keys / bad values instead
    *  of dropping them (agent input). */
-  function normalizeGrade(g, strict = false) {
+  function normalizeGrade(g, strict = false, nested = false) {
     if (g == null) return null;
     if (typeof g !== "object" || Array.isArray(g)) {
       if (strict) throw new Error("grade must be an object like {exposure: 0.5, lift: [0, 0, 0.05, 0]}");
@@ -96,6 +111,11 @@
     const out = {};
     for (const [k, v] of Object.entries(g)) {
       if (k === "on") { if (v === false) out.on = false; continue; }
+      if (k === "layers" && !nested) {
+        const ls = normalizeLayers(v, strict);
+        if (ls) out.layers = ls;
+        continue;
+      }
       if (k === "curves") {
         const c = normalizeCurves(v, strict);
         if (c) out.curves = c;
@@ -108,7 +128,7 @@
       }
       const def = GRADE_PARAMS[k];
       if (!def) {
-        if (strict) throw new Error(`unknown grade key ${JSON.stringify(k)} (known: on, ${GRADE_KEYS.join(", ")}, curves, ${HUE_KEYS.join(", ")})`);
+        if (strict) throw new Error(`unknown grade key ${JSON.stringify(k)} (known: on, ${GRADE_KEYS.join(", ")}, curves, ${HUE_KEYS.join(", ")}${nested ? "" : ", layers"})`);
         continue;
       }
       if (WHEELS.includes(k)) {
@@ -209,6 +229,7 @@
     }
     if (g.curves && CURVE_CHANNELS.some((ch) => Array.isArray(g.curves[ch]) && g.curves[ch].length)) return false;
     if (HUE_KEYS.some((k) => Array.isArray(g[k]) && g[k].length)) return false;
+    if (Array.isArray(g.layers) && g.layers.some((l) => l && l.on !== false && !isNeutral(layerGrade(l)))) return false;
     return true;
   }
   /** The grade without its curves (what the curve pickers sample). */
@@ -232,6 +253,24 @@
       else next[k] = v;
     }
     return normalizeGrade(next, strict);
+  }
+  /** Merge a change into one layer: grade keys as mergeGrade, qualifier and
+   *  mask key by key (null removes); returns the normalized layer. */
+  function mergeLayer(l, set, strict = false) {
+    const next = { ...(l || {}) };
+    for (const [k, v] of Object.entries(set || {})) {
+      if (v === null) { delete next[k]; continue; }
+      if ((k === "qualifier" || k === "mask") && typeof v === "object" && !Array.isArray(v)) {
+        const cur = { ...(next[k] || {}) };
+        for (const [kk, vv] of Object.entries(v)) { if (vv === null) delete cur[kk]; else cur[kk] = vv; }
+        next[k] = cur;
+      } else if (k === "curves" && v && typeof v === "object" && !Array.isArray(v)) {
+        const cur = { ...(next.curves || {}) };
+        for (const [ch, pts] of Object.entries(v)) { if (pts === null) delete cur[ch]; else cur[ch] = pts; }
+        next.curves = cur;
+      } else next[k] = v;
+    }
+    return normalizeLayer(next, strict, 0) || {};
   }
 
   /* ── White balance ── */
@@ -382,6 +421,208 @@
     return [k(5), k(3), k(1)];
   }
 
+  /* ── Layers (secondaries): qualifier × mask mixes a grade in ── */
+  const LAYER_META = ["name", "on", "qualifier", "mask"];
+  /** The grade part of a layer (no name / qualifier / mask). */
+  function layerGrade(l) {
+    if (!l) return null;
+    const g = {};
+    for (const [k, v] of Object.entries(l)) if (!LAYER_META.includes(k)) g[k] = v;
+    return g;
+  }
+  function normalizeLayers(v, strict) {
+    if (v == null) return null;
+    if (!Array.isArray(v)) { if (strict) throw new Error("grade.layers must be a list of layers"); return null; }
+    if (v.length > MAX_LAYERS) { if (strict) throw new Error(`grade.layers has ${v.length} layers (at most ${MAX_LAYERS})`); v = v.slice(0, MAX_LAYERS); }
+    const out = v.map((l, i) => normalizeLayer(l, strict, i)).filter(Boolean);
+    return out.length ? out : null;
+  }
+  function normalizeLayer(l, strict, i) {
+    const where = `grade.layers[${i}]`;
+    if (l == null || typeof l !== "object" || Array.isArray(l)) {
+      if (strict) throw new Error(`${where} must be an object like {qualifier:{hue:[25, 40, 20]}, saturation: 90}`);
+      return null;
+    }
+    if ("layers" in l && strict) throw new Error(`${where}: layers do not nest`);
+    let gpart;
+    try { gpart = normalizeGrade(layerGrade(l), strict, true); }
+    catch (err) { throw new Error(`${where}: ${err.message.replace(/^grade\./, "")}`); }
+    const out = {};
+    if (typeof l.name === "string" && l.name.trim()) out.name = l.name.trim().slice(0, 40);
+    else if (l.name != null && strict) throw new Error(`${where}.name must be a string`);
+    if (l.on === false) out.on = false;
+    const q = normalizeQualifier(l.qualifier, strict, where);
+    if (q) out.qualifier = q;
+    const m = normalizeMask(l.mask, strict, where);
+    if (m) out.mask = m;
+    if (gpart) { delete gpart.on; Object.assign(out, gpart); }
+    return Object.keys(out).length ? out : null;
+  }
+  const isNum = (v) => typeof v === "number" && Number.isFinite(v);
+  function normalizeQualifier(q, strict, where) {
+    if (q == null) return null;
+    const bad = (msg) => { if (strict) throw new Error(`${where}.qualifier${msg}`); return null; };
+    if (typeof q !== "object" || Array.isArray(q)) return bad(" must be {hue?, sat?, luma?, invert?}");
+    const out = {};
+    for (const [k, v] of Object.entries(q)) {
+      if (k === "invert") { if (v === true) out.invert = true; continue; }
+      if (k !== "hue" && k !== "sat" && k !== "luma") { bad(`.${k}: unknown key (hue, sat, luma, invert)`); continue; }
+      if (v == null) continue;
+      if (!Array.isArray(v) || v.length < 2 || v.length > 3 || !v.every(isNum)) {
+        bad(k === "hue" ? ".hue must be [centre°, width°, soft°?]" : `.${k} must be [low, high, soft?] on 0…1`);
+        continue;
+      }
+      if (k === "hue") {
+        out.hue = [+(((v[0] % 360) + 360) % 360).toFixed(2), +clamp(v[1], 0, 360).toFixed(2), +clamp(v[2] ?? 10, 0, 180).toFixed(2)];
+      } else {
+        let lo = clamp(v[0], 0, 1), hi = clamp(v[1], 0, 1);
+        if (lo > hi) [lo, hi] = [hi, lo];
+        out[k] = [+lo.toFixed(4), +hi.toFixed(4), +clamp(v[2] ?? 0.05, 0, 0.5).toFixed(4)];
+      }
+    }
+    return out.hue || out.sat || out.luma ? out : null;
+  }
+  function normalizeMask(m, strict, where) {
+    if (m == null) return null;
+    const bad = (msg) => { if (strict) throw new Error(`${where}.mask${msg}`); return null; };
+    if (typeof m !== "object" || Array.isArray(m)) return bad(" must be {shape, x, y, w, h, rotation?, feather?, invert?}");
+    const shape = m.shape == null ? "ellipse" : m.shape;
+    if (!MASK_SHAPES.includes(shape)) return bad(`.shape must be ${MASK_SHAPES.join(" | ")}`);
+    for (const k of Object.keys(m)) if (![...MASK_KEYED, "shape", "invert", "points", "keys"].includes(k)) bad(`.${k}: unknown key`);
+    const f = (k, def) => {
+      const v = m[k];
+      if (v == null) return def;
+      if (!isNum(v)) { bad(`.${k} must be a number`); return def; }
+      return v;
+    };
+    const out = {
+      shape,
+      x: +clamp(f("x", 0.5), -1, 2).toFixed(4), y: +clamp(f("y", 0.5), -1, 2).toFixed(4),
+      w: +clamp(f("w", 0.4), 0.001, 4).toFixed(4), h: +clamp(f("h", 0.4), 0.001, 4).toFixed(4),
+      rotation: +((((f("rotation", 0) + 180) % 360) + 360) % 360 - 180).toFixed(2),
+      feather: +clamp(f("feather", 0.05), 0, 0.5).toFixed(4),
+    };
+    if (m.invert === true) out.invert = true;
+    if (shape === "poly") {
+      const pts = m.points;
+      if (!Array.isArray(pts) || pts.length < 3 || pts.length > MAX_POLY || pts.some((p) => !Array.isArray(p) || p.length !== 2 || !p.every(isNum)))
+        return bad(`.points must be 3…${MAX_POLY} [dx, dy] pairs around x, y (fractions of the picture)`);
+      out.points = pts.map(([a, b]) => [+clamp(a, -2, 2).toFixed(4), +clamp(b, -2, 2).toFixed(4)]);
+    }
+    if (m.keys != null) {
+      if (!Array.isArray(m.keys)) return bad(".keys must be a list of {t, x?, y?, w?, h?, rotation?, feather?}");
+      const keys = [];
+      for (const kf of m.keys) {
+        if (!kf || typeof kf !== "object" || !isNum(kf.t)) { bad(".keys entries need a time t (seconds from the clip's start)"); continue; }
+        const k = { t: +Math.max(0, kf.t).toFixed(4) };
+        for (const p of MASK_KEYED) if (isNum(kf[p])) k[p] = +kf[p].toFixed(4);
+        if (kf.ease && kf.ease !== "ease-in-out") {
+          if (!EASES[kf.ease]) { bad(`.keys ease must be ${Object.keys(EASES).join(" | ")}`); continue; }
+          k.ease = kf.ease;
+        }
+        if (Object.keys(k).some((p) => MASK_KEYED.includes(p))) keys.push(k);
+      }
+      keys.sort((a, b) => a.t - b.t);
+      const dedup = keys.filter((k, i) => i === keys.length - 1 || keys[i + 1].t !== k.t);
+      if (dedup.length) out.keys = dedup;
+    }
+    return out;
+  }
+  const EASES = {
+    linear: (u) => u,
+    "ease-in": (u) => u * u,
+    "ease-out": (u) => 1 - (1 - u) * (1 - u),
+    "ease-in-out": (u) => (u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2),
+  };
+  /** A mask's shape at clip-local time t (keys resolved, keys removed). */
+  function maskAt(m, t) {
+    if (!m || !m.keys || !m.keys.length) return m;
+    const out = { ...m };
+    delete out.keys;
+    for (const p of MASK_KEYED) {
+      const ks = m.keys.filter((k) => k[p] != null);
+      if (!ks.length) continue;
+      if (t <= ks[0].t) { out[p] = ks[0][p]; continue; }
+      if (t >= ks[ks.length - 1].t) { out[p] = ks[ks.length - 1][p]; continue; }
+      let i = 0;
+      while (t > ks[i + 1].t) i++;
+      const a = ks[i], b = ks[i + 1], u = (EASES[b.ease || "ease-in-out"] || EASES.linear)((t - a.t) / Math.max(1e-9, b.t - a.t));
+      out[p] = a[p] + (b[p] - a[p]) * u;
+    }
+    return out;
+  }
+  /** The grade at clip-local time t: animated masks resolved (same object when nothing moves). */
+  function gradeAt(g, t) {
+    if (!g || !Array.isArray(g.layers) || !g.layers.some((l) => l.mask && l.mask.keys)) return g;
+    return { ...g, layers: g.layers.map((l) => (l.mask && l.mask.keys ? { ...l, mask: maskAt(l.mask, t) } : l)) };
+  }
+  const smooth = (a, b, x) => { const u = clamp((x - a) / (b - a), 0, 1); return u * u * (3 - 2 * u); };
+  function range(v, q) {
+    const sf = Math.max(1e-4, q[2]);
+    return smooth(q[0] - sf, q[0], v) * (1 - smooth(q[1], q[1] + sf, v));
+  }
+  /** Qualifier matte (0…1) for an sRGB colour. Greys carry no hue, so a hue
+   *  range fades out below 2–10 % saturation. */
+  function qualAlpha(q, r, g, b) {
+    if (!q) return 1;
+    let a = 1;
+    if (q.hue || q.sat) {
+      const hsv = rgbToHsv(clamp(r, 0, 1), clamp(g, 0, 1), clamp(b, 0, 1));
+      if (q.hue) {
+        const c = q.hue[0] / 360, hw = q.hue[1] / 720, sf = Math.max(1e-4, q.hue[2] / 360);
+        const d = Math.abs((((hsv[0] - c + 0.5) % 1) + 1) % 1 - 0.5);
+        a *= (1 - smooth(hw, hw + sf, d)) * smooth(0.02, 0.1, hsv[1]);
+      }
+      if (q.sat) a *= range(hsv[1], q.sat);
+    }
+    if (q.luma) a *= range(clamp(0.2126 * r + 0.7152 * g + 0.0722 * b, 0, 1), q.luma);
+    return q.invert ? 1 - a : a;
+  }
+  /** Mask matte (0…1) at picture position (u, v), 0…1 with y down; aspect = width / height. */
+  function maskAlpha(m, u, v, aspect) {
+    if (!m) return 1;
+    const d = maskDist(m, u, v, aspect), f = Math.max(0.002, m.feather);
+    const a = 1 - smooth(-f / 2, f / 2, d);
+    return m.invert ? 1 - a : a;
+  }
+  /** Signed distance (in picture heights) from (u, v) to the mask's edge — negative inside. */
+  function maskDist(m, u, v, aspect) {
+    const th = m.rotation * Math.PI / 180, cs = Math.cos(th), sn = Math.sin(th);
+    const dx = (u - m.x) * aspect, dy = v - m.y;
+    const px = dx * cs + dy * sn, py = -dx * sn + dy * cs;
+    const rx = m.w / 2 * aspect, ry = m.h / 2;
+    if (m.shape === "rect") {
+      const qx = Math.abs(px) - rx, qy = Math.abs(py) - ry;
+      return Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0);
+    }
+    if (m.shape === "poly") return polyDist(m.points.map(([a, b]) => [a * aspect, b]), px, py);
+    const k0 = Math.hypot(px / rx, py / ry), k1 = Math.hypot(px / (rx * rx), py / (ry * ry));
+    return k0 < 1e-6 ? -Math.min(rx, ry) : k0 * (k0 - 1) / k1;
+  }
+  function polyDist(pts, px, py) {
+    let d = (px - pts[0][0]) ** 2 + (py - pts[0][1]) ** 2, s = 1;
+    for (let i = 0, j = pts.length - 1; i < pts.length; j = i, i++) {
+      const ex = pts[j][0] - pts[i][0], ey = pts[j][1] - pts[i][1], wx = px - pts[i][0], wy = py - pts[i][1];
+      const k = clamp((wx * ex + wy * ey) / Math.max(1e-12, ex * ex + ey * ey), 0, 1);
+      d = Math.min(d, (wx - ex * k) ** 2 + (wy - ey * k) ** 2);
+      const c1 = py >= pts[i][1], c2 = py < pts[j][1], c3 = ex * wy > ey * wx;
+      if ((c1 && c2 && c3) || (!c1 && !c2 && !c3)) s = -s;
+    }
+    return s * Math.sqrt(d);
+  }
+  /** The layers that render (on, and changing something), prepared; plus
+   *  `matte` = a layer index whose matte replaces the picture. */
+  function prepareLayers(g, matte = -1) {
+    const out = [], n = g && Array.isArray(g.layers) ? normalizeGrade({ layers: g.layers }) : null;   // fills mask defaults
+    (n ? n.layers : []).forEach((l, i) => {
+      const show = i === matte;
+      if (!show && (l.on === false || isNeutral(layerGrade(l)))) return;
+      out.push({ index: i, P: prepareGrade(layerGrade(l)), qualifier: l.qualifier || null, mask: l.mask || null, matte: show });
+    });
+    const m = out.findIndex((L) => L.matte);
+    return m >= 0 ? out.slice(0, m + 1) : out;
+  }
+
   /* ── The grade itself ── */
   /** Pre-compute the numbers the shader and the CPU path use. */
   function prepareGrade(g) {
@@ -459,27 +700,71 @@
     return out;
   }
   /** Grade one sRGB colour (0…1) — the reference the shader matches. */
-  function gradePixel(rgb, g) {
+  /** Grade one sRGB colour. Layers see it at picture position (u, v). */
+  function gradePixel(rgb, g, u = 0.5, v = 0.5, aspect = 16 / 9) {
     const P = g && g.mul ? g : prepareGrade(g);
     if (!P.on) return rgb.slice(0, 3);
-    return finishPixel(channelCurve(rgb[0], P, 0), channelCurve(rgb[1], P, 1), channelCurve(rgb[2], P, 2), P, [0, 0, 0]);
+    const out = finishPixel(channelCurve(rgb[0], P, 0), channelCurve(rgb[1], P, 1), channelCurve(rgb[2], P, 2), P, [0, 0, 0]);
+    return g && g.mul ? out : applyLayers(out, prepareLayers(g), u, v, aspect);
   }
-  /** Grade RGBA bytes in place (CPU fallback). Alpha is left alone. */
-  function gradeImageData(data, g) {
+  /** Mix each layer's grade in by its matte (in place); a matte layer shows its matte. */
+  function applyLayers(px, Ls, u, v, aspect) {
+    for (const L of Ls) {
+      const a = qualAlpha(L.qualifier, px[0], px[1], px[2]) * maskAlpha(L.mask, u, v, aspect);
+      if (L.matte) { px[0] = px[1] = px[2] = a; break; }
+      if (a < 1e-5) continue;
+      const q = finishPixel(channelCurve(px[0], L.P, 0), channelCurve(px[1], L.P, 1), channelCurve(px[2], L.P, 2), L.P, [0, 0, 0]);
+      for (let c = 0; c < 3; c++) px[c] += (q[c] - px[c]) * a;
+    }
+    return px;
+  }
+  /** Grade RGBA bytes in place (the CPU fallback). w x h place the layers'
+   *  masks; `matte` = a layer index whose matte replaces the picture. */
+  function gradeImageData(data, g, w = 1, h = 1, matte = -1) {
     const P = prepareGrade(g);
     if (!P.on) return data;
     const lut = [new Float32Array(256), new Float32Array(256), new Float32Array(256)];
     for (let c = 0; c < 3; c++) for (let i = 0; i < 256; i++) lut[c][i] = channelCurve(i / 255, P, c);
+    const Ls = prepareLayers(g, matte), aspect = w / h;
     const px = [0, 0, 0];
     for (let i = 0; i < data.length; i += 4) {
       finishPixel(lut[0][data[i]], lut[1][data[i + 1]], lut[2][data[i + 2]], P, px);
+      if (Ls.length) { const k = i >> 2; applyLayers(px, Ls, ((k % w) + 0.5) / w, (Math.floor(k / w) + 0.5) / h, aspect); }
       data[i] = Math.round(px[0] * 255); data[i + 1] = Math.round(px[1] * 255); data[i + 2] = Math.round(px[2] * 255);
     }
     return data;
   }
   /** Uniform values for GRADE_FRAG (flat arrays, ready for gl.uniform*). */
-  function gradeUniforms(g) {
-    const P = prepareGrade(g);
+  function gradeUniforms(g) { return passUniforms(prepareGrade(g)); }
+  /** The GPU passes for a grade: the primary, then one per rendering layer
+   *  (qualifier and mask uniforms included). `matte` as in gradeImageData. */
+  function gradePasses(g, matte = -1) {
+    const passes = [passUniforms(prepareGrade(g))];
+    for (const L of prepareLayers(g, matte)) {
+      const u = passUniforms(L.P), q = L.qualifier, m = L.mask;
+      u.layer = L.index;
+      u.uMatte = L.matte ? 1 : 0;
+      u.uQOn = q ? 1 : 0;
+      u.uQUse = q ? [q.hue ? 1 : 0, q.sat ? 1 : 0, q.luma ? 1 : 0] : [0, 0, 0];
+      u.uQHue = q && q.hue ? [q.hue[0] / 360, q.hue[1] / 720, Math.max(1e-4, q.hue[2] / 360)] : [0, 0, 1];
+      u.uQSat = q && q.sat ? [q.sat[0], q.sat[1], Math.max(1e-4, q.sat[2])] : [0, 1, 1];
+      u.uQLuma = q && q.luma ? [q.luma[0], q.luma[1], Math.max(1e-4, q.luma[2])] : [0, 1, 1];
+      u.uQInv = q && q.invert ? 1 : 0;
+      u.uMShape = m ? MASK_SHAPES.indexOf(m.shape) + 1 : 0;
+      u.uMC = m ? [m.x, m.y] : [0.5, 0.5];
+      u.uMW = m ? [m.w, m.h] : [1, 1];
+      u.uMRot = m ? m.rotation * Math.PI / 180 : 0;
+      u.uMFeather = m ? Math.max(0.002, m.feather) : 0.002;
+      u.uMInv = m && m.invert ? 1 : 0;
+      const pts = new Float32Array(MAX_POLY * 2);
+      if (m && m.points) m.points.forEach(([a, b], i) => { pts[i * 2] = a; pts[i * 2 + 1] = b; });
+      u.uMPts = pts;
+      u.uMN = m && m.points ? m.points.length : 0;
+      passes.push(u);
+    }
+    return passes;
+  }
+  function passUniforms(P) {
     return {
       uMul: P.mul, uLinear: P.linear ? 1 : 0, uOff: P.off, uLift: P.lift, uGain: P.gain, uGam: P.gam,
       uContrast: P.contrast, uPivot: P.pivot, uTone: P.tone, uSoft: [P.lowSoft, P.highSoft], uSat: P.sat,
@@ -491,9 +776,11 @@
 in vec2 aPos;
 uniform vec4 uRect;   // source crop: x, y, w, h in texture coords (y down)
 out vec2 vUv;
+out vec2 vPos;        // 0…1 over the output picture, y down (masks live here)
 void main() {
   vec2 t = aPos * 0.5 + 0.5;
   vUv = vec2(uRect.x + t.x * uRect.z, uRect.y + (1.0 - t.y) * uRect.w);
+  vPos = vec2(t.x, 1.0 - t.y);
   gl_Position = vec4(aPos, 0.0, 1.0);
 }`;
   const GRADE_FRAG = `#version 300 es
@@ -508,6 +795,15 @@ uniform vec2 uSoft;
 uniform sampler2D uCurveLut;  // ${CURVE_N}×1 RGBA32F: r, g, b curves + luma curve in .a
 uniform sampler2D uHueLut;    // ${HUE_N}×1 RGBA32F: hue shift°, sat factor, hue→luma, sat→luma
 uniform int uCurves, uHueCurves;
+uniform int uLayer, uMatte, uPremul;   // layer pass: mix by its matte · show the matte · premultiply the output
+uniform int uQOn, uQInv;
+uniform ivec3 uQUse;                   // hue, sat, luma ranges in use
+uniform vec3 uQHue, uQSat, uQLuma;     // hue: centre, half width, soft (turns) · sat / luma: low, high, soft
+uniform int uMShape, uMInv, uMN;       // 0 none · 1 ellipse · 2 rect · 3 poly
+uniform vec2 uMC, uMW;
+uniform float uMRot, uMFeather, uAspect;
+uniform vec2 uMPts[${MAX_POLY}];
+in vec2 vPos;
 out vec4 outColor;
 vec4 lutAt(sampler2D t, int n, float x) {
   float f = clamp(x, 0.0, 1.0) * float(n - 1);
@@ -543,9 +839,52 @@ float softLow(float v, float s) {
   float k = 0.25 * s;
   return v < k ? k - k * tanh((k - v) / k) : v;
 }
-void main() {
-  vec4 src = texture(uTex, vUv);
-  vec3 v = src.rgb;
+float range3(float v, vec3 q) { return smoothstep(q.x - q.z, q.x, v) * (1.0 - smoothstep(q.y, q.y + q.z, v)); }
+float qualify(vec3 c) {
+  if (uQOn == 0) return 1.0;
+  vec3 hsv = rgbToHsv(clamp(c, 0.0, 1.0));
+  float a = 1.0;
+  if (uQUse.x == 1) {
+    float d = abs(fract(hsv.x - uQHue.x + 0.5) - 0.5);
+    a *= (1.0 - smoothstep(uQHue.y, uQHue.y + uQHue.z, d)) * smoothstep(0.02, 0.1, hsv.y);
+  }
+  if (uQUse.y == 1) a *= range3(hsv.y, uQSat);
+  if (uQUse.z == 1) a *= range3(clamp(dot(c, vec3(0.2126, 0.7152, 0.0722)), 0.0, 1.0), uQLuma);
+  return uQInv == 1 ? 1.0 - a : a;
+}
+float maskDist(vec2 uv) {
+  float cs = cos(uMRot), sn = sin(uMRot);
+  vec2 d = vec2((uv.x - uMC.x) * uAspect, uv.y - uMC.y);
+  vec2 p = vec2(d.x * cs + d.y * sn, -d.x * sn + d.y * cs);
+  vec2 r = vec2(uMW.x * 0.5 * uAspect, uMW.y * 0.5);
+  if (uMShape == 2) {
+    vec2 q = abs(p) - r;
+    return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0);
+  }
+  if (uMShape == 3) {
+    vec2 v0 = uMPts[0] * vec2(uAspect, 1.0);
+    float dd = dot(p - v0, p - v0), s = 1.0;
+    for (int i = 0; i < ${MAX_POLY}; i++) {
+      if (i >= uMN) break;
+      int j = i == 0 ? uMN - 1 : i - 1;
+      vec2 vi = uMPts[i] * vec2(uAspect, 1.0), vj = uMPts[j] * vec2(uAspect, 1.0);
+      vec2 e = vj - vi, w = p - vi;
+      vec2 b = w - e * clamp(dot(w, e) / max(dot(e, e), 1e-12), 0.0, 1.0);
+      dd = min(dd, dot(b, b));
+      bvec3 c = bvec3(p.y >= vi.y, p.y < vj.y, e.x * w.y > e.y * w.x);
+      if (all(c) || all(not(c))) s = -s;
+    }
+    return s * sqrt(dd);
+  }
+  float k0 = length(p / r), k1 = length(p / (r * r));
+  return k0 < 1e-6 ? -min(r.x, r.y) : k0 * (k0 - 1.0) / k1;
+}
+float maskAlpha(vec2 uv) {
+  if (uMShape == 0) return 1.0;
+  float a = 1.0 - smoothstep(-uMFeather * 0.5, uMFeather * 0.5, maskDist(uv));
+  return uMInv == 1 ? 1.0 - a : a;
+}
+vec3 grade(vec3 v) {
   if (uLinear == 1) v = toSrgb(max(vec3(0.0), toLin(v) * uMul));
   v += uOff;
   v += uLift * (1.0 - v);
@@ -570,8 +909,16 @@ void main() {
     float dl = hc.b * hsv.y + lutAt(uHueLut, ${HUE_N}, hsv.y).a;
     v = hsvToRgb(vec3(fract(hsv.x + hc.r / 360.0), clamp(hsv.y * hc.g, 0.0, 1.0), hsv.z)) + dl;
   }
-  v = clamp(v, 0.0, 1.0);
-  outColor = vec4(v * src.a, src.a);   // premultiplied for the canvas
+  return clamp(v, 0.0, 1.0);
+}
+void main() {
+  vec4 src = texture(uTex, vUv);
+  vec3 v = grade(src.rgb);
+  if (uLayer == 1) {
+    float a = qualify(src.rgb) * maskAlpha(vPos);
+    v = uMatte == 1 ? vec3(a) : mix(src.rgb, v, a);
+  }
+  outColor = uPremul == 1 ? vec4(v * src.a, src.a) : vec4(v, src.a);   // the canvas wants premultiplied
 }`;
 
   /* ── Scopes ──
@@ -665,10 +1012,18 @@ void main() {
     return h < 0 ? h + 360 : h;
   }
   /** Short text for a grade, e.g. "exposure+0.3 temp-12 lift(0,0,0.02,-0.03)". */
+  function summarizeLayer(l, i) {
+    const by = [];
+    if (l.qualifier) by.push("qualifier(" + ["hue", "sat", "luma"].filter((k) => l.qualifier[k]).map((k) => `${k} ${l.qualifier[k].join("/")}`).join(", ") + (l.qualifier.invert ? ", inverted" : "") + ")");
+    if (l.mask) by.push(`${l.mask.invert ? "outside " : ""}${l.mask.shape}@${+l.mask.x.toFixed(2)},${+l.mask.y.toFixed(2)}${l.mask.keys ? ` ${l.mask.keys.length} keys` : ""}`);
+    const g = normalizeGrade(layerGrade(l), false, true);
+    return `${l.name ? JSON.stringify(l.name) : "#" + (i + 1)}${l.on === false ? " (off)" : ""}: ${by.join(" ") || "whole frame"} → ${g ? summarizeGrade(g) : "neutral"}`;
+  }
   function summarizeGrade(g) {
     const s = normalizeGrade(g);
     if (!s) return "neutral";
     return Object.entries(s).map(([k, v]) => k === "on" ? "(bypassed)"
+      : k === "layers" ? `layers[${v.map((l, i) => summarizeLayer(l, i)).join(" | ")}]`
       : k === "curves" ? `curves(${Object.keys(v).join(",")})`
       : HUE_CURVES[k] ? `${k}(${v.map((p) => p.join(":")).join(" ")})`
       : Array.isArray(v) ? `${k}(${v.join(",")})` : `${k}${v >= 0 && k !== "contrast" && k !== "pivot" && k !== "saturation" ? "+" : ""}${v}`).join(" ");
@@ -678,6 +1033,7 @@ void main() {
     GRADE_PARAMS, GRADE_KEYS, WHEELS, GRADE_VERT, GRADE_FRAG, SKIN_ANGLE,
     CURVE_CHANNELS, HUE_CURVES, HUE_KEYS, CURVE_N, HUE_N, BAND,
     normalizeGrade, fullGrade, isNeutral, mergeGrade, summarizeGrade, withoutCurves,
+    MAX_LAYERS, MAX_POLY, MASK_SHAPES, MASK_KEYED, mergeLayer, layerGrade, maskAt, gradeAt, qualAlpha, maskAlpha, maskDist, gradePasses,
     monotone, curveFn, rgbToHsv, hsvToRgb,
     wbGains, solveWhiteBalance, srgbToLinear, linearToSrgb, wheelToRgb, rgbToWheel, ycbcr,
     prepareGrade, gradePixel, gradeImageData, gradeUniforms,

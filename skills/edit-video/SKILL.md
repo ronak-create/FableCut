@@ -59,7 +59,8 @@ re-read after a moment instead of shelling out to ffprobe.
   lists the built-in title styles.
 - **Grade** with the `setGrade` patch op (`props.grade`: exposure, temp / tint,
   lift / gamma / gain / offset wheels, tone bands, contrast, saturation, tone
-  curves and hue curves) and
+  curves and hue curves; `setGradeLayer` for a secondary on one colour or one
+  area — check its matte with `fablecut_scopes {matte:{clip, layer}}`) and
   check every grade with `fablecut_scopes` — median luma near 0.35–0.5, no
   clipped whites, cast strength under ~0.03 on neutral scenes.
   `fablecut_docs {section:"Color"}` has the keys and how to read the numbers.

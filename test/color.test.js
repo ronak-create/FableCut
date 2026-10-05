@@ -182,8 +182,22 @@ test("fablecut_scopes hands a scopes job to the tab and reports its measurement"
   assert.match(text, /orange \(hue 31°\)/);
   assert.match(text, /c_a V1 video grade:exposure\+0\.5/);
 
+  // matte: what one grade layer selects rides along on the ticket and comes back in the text
+  const pending2 = mcp.callTool("fablecut_scopes", { time: 1, where: "tab", matte: { clip: "c_a", layer: 0 } });
+  while (!tickets.length) await new Promise((r) => { wake = r; });
+  const t2 = tickets.shift();
+  assert.deepEqual(t2.matte, { clip: "c_a", layer: 0 });
+  assert.equal((await post("/api/export/job/claim?id=" + t2.id)).status, 200);
+  await post("/api/export/job/report?id=" + t2.id, { status: "done", result: { time: 1, frame: { w: 1280, h: 720 }, stats, clips: [],
+    matte: { clip: "c_a", layer: 0, coverage: 12.5, selected: { ...stats, cast: { tone: "neutral", hue: 0, strength: 0 } } } } });
+  const r2 = await pending2;
+  assert.equal(r2.isError, false, r2.text);
+  assert.match(r2.text, /Matte of c_a layer 0: covers 12\.5% of the frame · selected pixels: luma median 0\.41/);
+
   for (const time of [-1, "", false, [], "abc"])
     assert.equal((await post("/api/scopes/request", { time })).status, 400, JSON.stringify(time) + " is not a time");
+  for (const matte of [{ clip: "c_a" }, { clip: 3, layer: 0 }, { clip: "c_a", layer: -1 }, "c_a"])
+    assert.equal((await post("/api/scopes/request", { matte })).status, 400, JSON.stringify(matte) + " is not a matte");
 });
 
 test("curves: monotone, endpoints added, luma curve keeps hue, hue curves wrap", () => {
@@ -239,4 +253,97 @@ test("setGrade sets curves per channel and hue curves, null removes one", async 
   r = await patch({ op: "setGrade", id: "c_a", grade: { curves: { r: [[0.5, 0.6, 1]] } } });
   assert.equal(r.isError, true);
   assert.match(r.text, /\[x, value\]/);
+});
+
+test("layers: qualifier and mask mattes, mixing, stacking, keys and validation", () => {
+  const blue = C.hsvToRgb(240 / 360, 0.8, 0.8), green = C.hsvToRgb(120 / 360, 0.8, 0.8), grey = [0.5, 0.5, 0.5];
+  // qualifier: hue picks blue only, greys never (they carry no hue)
+  const q = { hue: [240, 40, 20] };
+  near(C.qualAlpha(q, ...blue), 1, 1e-9, "blue selected");
+  assert.equal(C.qualAlpha(q, ...green), 0, "green not");
+  assert.equal(C.qualAlpha(q, ...grey), 0, "grey not");
+  assert.equal(C.qualAlpha({ ...q, invert: true }, ...green), 1, "invert");
+  near(C.qualAlpha({ luma: [0.4, 0.6, 0] }, ...grey), 1, 1e-6, "luma range");
+  assert.equal(C.qualAlpha({ luma: [0.6, 0.9, 0] }, ...grey), 0, "outside the luma range");
+  assert.ok(C.qualAlpha({ hue: [345, 50, 10] }, ...C.hsvToRgb(5 / 360, 0.8, 0.8)) > 0.9, "hue ranges wrap through red");
+  // masks: inside 1, outside 0, feather in between, invert, rotation, poly
+  const e = C.normalizeGrade({ layers: [{ mask: { shape: "ellipse", x: 0.5, y: 0.5, w: 0.4, h: 0.4, feather: 0.1 } }] }).layers[0].mask;
+  near(C.maskAlpha(e, 0.5, 0.5, 1), 1, 1e-9, "centre");
+  assert.equal(C.maskAlpha(e, 0.05, 0.05, 1), 0, "corner");
+  near(C.maskAlpha(e, 0.7, 0.5, 1), 0.5, 0.05, "the feather straddles the edge");
+  assert.equal(C.maskAlpha({ ...e, invert: true }, 0.05, 0.05, 1), 1);
+  const r = { shape: "rect", x: 0.5, y: 0.5, w: 0.6, h: 0.1, rotation: 90, feather: 0.002 };
+  assert.equal(C.maskAlpha(r, 0.5, 0.75, 1), 1, "rotated 90°: tall now");
+  assert.equal(C.maskAlpha(r, 0.75, 0.5, 1), 0);
+  const tri = { shape: "poly", x: 0.5, y: 0.5, rotation: 0, feather: 0.002, points: [[0, -0.3], [0.3, 0.2], [-0.3, 0.2]] };
+  assert.equal(C.maskAlpha(tri, 0.5, 0.55, 1), 1, "inside the triangle");
+  assert.equal(C.maskAlpha(tri, 0.25, 0.3, 1), 0, "outside it");
+  // a layer mixes its grade in by qualifier × mask; the primary still applies everywhere
+  const g = { exposure: 0.5, layers: [{ qualifier: q, mask: { shape: "rect", x: 0.25, y: 0.5, w: 0.5, h: 1, feather: 0 }, saturation: 0 }] };
+  const inL = C.gradePixel(blue, g, 0.2, 0.5, 1), inR = C.gradePixel(blue, g, 0.8, 0.5, 1), base = C.gradePixel(blue, { exposure: 0.5 });
+  assert.ok(C.rgbToHsv(...inL)[1] < 0.01, "blue on the left: desaturated");
+  assert.deepEqual(inR, base, "blue on the right: primary only");
+  assert.deepEqual(C.gradePixel(green, g, 0.2, 0.5, 1), C.gradePixel(green, { exposure: 0.5 }), "green: primary only");
+  // layers stack in order; an off layer does nothing; a neutral layer is skipped
+  const two = { layers: [{ exposure: 1 }, { exposure: -1 }] };
+  near(C.gradePixel(grey, two)[0], 0.5, 0.02, "+1 then −1 stop");
+  assert.deepEqual(C.gradePixel(grey, { layers: [{ exposure: 1, on: false }] }), grey);
+  assert.ok(C.isNeutral({ layers: [{ name: "empty", mask: { shape: "ellipse" } }] }), "a layer with no grade changes nothing");
+  assert.ok(!C.isNeutral({ layers: [{ exposure: 1 }] }));
+  // matte view: the layer's matte replaces the picture
+  const data = new Uint8ClampedArray([0, 0, 204, 255, 0, 204, 0, 255]);
+  C.gradeImageData(data, { layers: [{ qualifier: q, exposure: 1 }] }, 2, 1, 0);
+  assert.deepEqual([...data], [255, 255, 255, 255, 0, 0, 0, 255]);
+  // animated masks: keys resolve per param with easing
+  const k = C.normalizeGrade({ layers: [{ mask: { shape: "ellipse", keys: [{ t: 2, x: 0.8, ease: "linear" }, { t: 0, x: 0.2 }] }, exposure: 1 }] }).layers[0].mask;
+  assert.deepEqual(k.keys.map((x) => x.t), [0, 2], "sorted");
+  near(C.maskAt(k, 1).x, 0.5, 1e-9, "linear midpoint");
+  assert.equal(C.maskAt(k, 5).x, 0.8, "holds after the last key");
+  assert.equal(C.maskAt(k, 1).w, k.w, "unkeyed params stay");
+  assert.equal(C.gradeAt({ layers: [{ mask: k }] }, 1).layers[0].mask.keys, undefined);
+  // validation
+  assert.throws(() => C.normalizeGrade({ layers: [{ qualifier: { hue: [10] } }] }, true), /layers\[0\]\.qualifier\.hue/);
+  assert.throws(() => C.normalizeGrade({ layers: [{ mask: { shape: "star" } }] }, true), /shape must be/);
+  assert.throws(() => C.normalizeGrade({ layers: [{ mask: { shape: "poly", points: [[0, 0], [1, 1]] } }] }, true), /points/);
+  assert.throws(() => C.normalizeGrade({ layers: [{ glow: 1 }] }, true), /layers\[0\]: unknown grade key "glow"/);
+  assert.throws(() => C.normalizeGrade({ layers: [{ layers: [] }] }, true), /do not nest/);
+  assert.throws(() => C.normalizeGrade({ layers: Array.from({ length: 9 }, () => ({ exposure: 1 })) }, true), /at most 8/);
+  assert.deepEqual(C.mergeLayer({ name: "a", qualifier: { hue: [10, 20, 5], sat: [0, 1, 0] } }, { qualifier: { sat: null }, exposure: 1 }),
+    { name: "a", qualifier: { hue: [10, 20, 5] }, exposure: 1 }, "qualifier merges key by key");
+  assert.match(C.summarizeGrade({ layers: [{ name: "Skin", qualifier: q, saturation: 80 }] }), /"Skin": qualifier\(hue 240\/40\/20\) → saturation80/);
+});
+
+test("setGradeLayer adds, merges, finds by name, removes — and setGrade replaces the layer list", async (t) => {
+  const dir = makeDataDir(t, graded());
+  const mcp = startMcp(t, dir);
+  await mcp.request("initialize", { protocolVersion: "2025-11-25" });
+  const patch = (...ops) => mcp.callTool("fablecut_patch_project", { ops });
+  const layers = (id) => readProject(dir).clips.find((c) => c.id === id).props?.grade?.layers;
+
+  let r = await patch({ op: "setGradeLayer", id: "c_a", layer: "Skin", set: { qualifier: { hue: [25, 40, 20] }, saturation: 85 } });
+  assert.equal(r.isError, false, r.text);
+  assert.match(r.text, /"Skin": qualifier\(hue 25\/40\/20\) → saturation85/);
+  r = await patch({ op: "setGradeLayer", id: "c_a", layer: 1, set: { mask: { shape: "ellipse", x: 0.3 }, exposure: 0.4 } });
+  assert.deepEqual(layers("c_a").map((l) => l.name), ["Skin", "Layer 2"]);
+  assert.equal(layers("c_a")[1].mask.x, 0.3);
+  r = await patch({ op: "setGradeLayer", id: "c_a", layer: "Skin", set: { qualifier: { luma: [0.2, 0.8] }, saturation: null } });
+  assert.deepEqual(layers("c_a")[0], { name: "Skin", qualifier: { hue: [25, 40, 20], luma: [0.2, 0.8, 0.05] } }, "merged; null reset a key");
+  r = await patch({ op: "setGradeLayer", id: "c_a", layer: 1, set: { mask: { y: 0.6 } } });
+  assert.deepEqual([layers("c_a")[1].mask.x, layers("c_a")[1].mask.y], [0.3, 0.6], "the mask merges key by key");
+  r = await patch({ op: "setGradeLayer", id: "c_a", layer: 0, remove: true });
+  assert.deepEqual(layers("c_a").map((l) => l.name), ["Layer 2"]);
+
+  r = await patch({ op: "setGradeLayer", id: "c_a", layer: 5, set: { exposure: 1 } });
+  assert.equal(r.isError, true);
+  assert.match(r.text, /use layer:1 to add one/);
+  r = await patch({ op: "setGradeLayer", id: "c_a", layer: 0, set: { mask: { shape: "star" } } });
+  assert.match(r.text, /shape must be/);
+  r = await patch({ op: "setGradeLayer", id: "c_b", layer: 0, set: { exposure: 1 } });
+  assert.match(r.text, /locked/);
+
+  r = await patch({ op: "setGrade", id: "c_a", grade: { layers: [{ name: "Sky", qualifier: { hue: [210, 50] }, hueSat: [[210, 1.3]] }] } });
+  assert.equal(r.isError, false, r.text);
+  assert.deepEqual(layers("c_a").map((l) => l.name), ["Sky"], "layers replaces the list");
+  r = await patch({ op: "setGrade", id: "c_a", grade: { layers: null } });
+  assert.equal(layers("c_a"), undefined);
 });
