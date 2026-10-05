@@ -192,7 +192,7 @@ test("fablecut_scopes hands a scopes job to the tab and reports its measurement"
     matte: { clip: "c_a", layer: 0, coverage: 12.5, selected: { ...stats, cast: { tone: "neutral", hue: 0, strength: 0 } } } } });
   const r2 = await pending2;
   assert.equal(r2.isError, false, r2.text);
-  assert.match(r2.text, /Matte of c_a layer 0: covers 12\.5% of the frame · selected pixels: luma median 0\.41/);
+  assert.match(r2.text, /Matte of c_a layer 0: covers 12\.5% of the clip's picture · selected pixels: luma median 0\.41/);
 
   for (const time of [-1, "", false, [], "abc"])
     assert.equal((await post("/api/scopes/request", { time })).status, 400, JSON.stringify(time) + " is not a time");

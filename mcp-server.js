@@ -264,7 +264,7 @@ const TOOLS = [
         time: { type: "number", description: "Timeline seconds to measure (default: the editor's playhead)" },
         matte: {
           type: "object",
-          description: "Also measure what one grade layer selects: {clip, layer} (layer = index into the clip's grade.layers). Adds the matte's coverage (% of the frame) and the levels / colour of the selected pixels in the graded frame",
+          description: "Also measure what one grade layer selects: {clip, layer} (layer = index into the clip's grade.layers). Adds the matte's coverage (% of that clip's picture) and the levels / colour of the selected pixels after grading",
           properties: { clip: { type: "string" }, layer: { type: "integer", minimum: 0 } },
           required: ["clip", "layer"],
         },
@@ -613,7 +613,7 @@ function describeScopes(j) {
   ];
   const m = r.matte;
   if (m) {
-    lines.push(m.error ? `Matte ${m.clip} layer ${m.layer}: ${m.error}` : `Matte of ${m.clip} layer ${m.layer}: covers ${m.coverage}% of the frame` +
+    lines.push(m.error ? `Matte ${m.clip} layer ${m.layer}: ${m.error}` : `Matte of ${m.clip} layer ${m.layer}: covers ${m.coverage}% of the clip's picture` +
       (m.selected ? ` · selected pixels: luma median ${m.selected.luma.median} (p1 ${m.selected.luma.p1}, p99 ${m.selected.luma.p99}) · rgb mean [${m.selected.rgbMean.join(", ")}] · saturation ${m.selected.saturation} · cast ${m.selected.cast.tone === "neutral" ? "neutral" : `${m.selected.cast.tone} (hue ${m.selected.cast.hue}°)`}` : " · nothing selected"));
   }
   return lines.join("\n") + "\n" + JSON.stringify({ time: r.time, stats: st, ...(m ? { matte: m } : {}) });

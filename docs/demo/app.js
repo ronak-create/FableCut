@@ -8503,6 +8503,7 @@ function drawAdjust(c, W, H, t) {
   if (p.temperature || p.tint || p.rgbSplit > 0)
     src = pixelPass(c, { ...p, chromaKey: "", bgRemove: false }, adjScratch, 0, 0, W, H, W, H);
   const grade = activeGrade(c, p, t);
+  captureGradeInput(c, [src, 0, 0, src.width, src.height, src.width, src.height, W, H]);
   if (grade) src = gradeSource(src, 0, 0, src.width, src.height, src.width, src.height, W, H, grade, gradeMatte(c)) || src;
   noteGradeGeom(c, ctx2d.getTransform(), W, H, 0, 0);
   ctx2d.drawImage(src, 0, 0, src.width, src.height, 0, 0, W, H);
@@ -8608,6 +8609,12 @@ function activeGrade(c, p, t) {
 }
 /** Where the clip's picture landed on the monitor (masks are drawn and
  *  dragged in its 0…1 space): canvas transform + the drawn rect. */
+/** fablecut_scopes matte: the clip's own picture as the compositor grades it,
+ *  so the matte is measured alone (no other clips, adjustments or transforms). */
+function captureGradeInput(c, args) {
+  const cap = runtime.gradeCapture;
+  if (cap && cap.id === c.id && !cap.args) cap.args = args;
+}
 function noteGradeGeom(c, m, w, h, x0, y0) {
   if (state.exporting || runtime.sampling) return;
   (runtime.gradeGeom ||= new Map()).set(c.id, { m, w, h, x0, y0 });
@@ -9159,9 +9166,14 @@ function drawClip(c, W, H, t) {
     noteGradeGeom(c, ctx2d.getTransform(), dw, dh, -dw / 2, -dh / 2);
     if (needsPixelPass(p, c)) { // key / cut-out first, so the grade never shifts the key colour
       let processed = pixelPass(c, p, src, sx, sy, cw, ch, dw, dh);
+      if (runtime.gradeCapture) { // pixelPass reuses its canvas — keep a copy
+        const cp = document.createElement("canvas"); cp.width = processed.width; cp.height = processed.height;
+        cp.getContext("2d").drawImage(processed, 0, 0);
+        captureGradeInput(c, [cp, 0, 0, cp.width, cp.height, cp.width, cp.height, dw, dh]);
+      }
       if (grade) processed = gradeSource(processed, 0, 0, processed.width, processed.height, processed.width, processed.height, dw, dh, grade, matte) || processed;
       ctx2d.drawImage(processed, 0, 0, processed.width, processed.height, -dw / 2, -dh / 2, dw, dh);
-    } else if (grade && (graded = gradeSource(src, sx, sy, cw, ch, sw, sh, dw, dh, grade, matte))) {
+    } else if (captureGradeInput(c, [src, sx, sy, cw, ch, sw, sh, dw, dh]), grade && (graded = gradeSource(src, sx, sy, cw, ch, sw, sh, dw, dh, grade, matte))) {
       ctx2d.drawImage(graded, 0, 0, graded.width, graded.height, -dw / 2, -dh / 2, dw, dh);
     } else {
       ctx2d.drawImage(src, sx, sy, cw, ch, -dw / 2, -dh / 2, dw, dh);
@@ -9860,6 +9872,7 @@ function loop(ts) {
   updateKfGraphs();
   syncInspectorPlayhead();
   syncFxEditors();
+  syncColorPlayhead();
   updateMeterUI(dt);
   updateTimecode(dur);
   if (isSourceMode()) updateSourceScrub();
@@ -11006,7 +11019,13 @@ async function runScopesJob(ticket, fail) {
     const dur = projDur();
     const t = clamp(Number.isFinite(ticket.time) ? ticket.time : state.time, 0, Math.max(0, dur - 1 / projectFps()));
     state.rendering = true; // the render loop keeps its hands off the canvas
-    await renderStillAt(t);
+    const shown = runtime.matte;
+    runtime.matte = null;   // measure the graded picture, not the matte the user may be looking at
+    const mClip = ticket.matte && getClip(ticket.matte.clip);
+    if (mClip) runtime.gradeCapture = { id: mClip.id, args: null };
+    try { await renderStillAt(t); } finally { runtime.matte = shown; }
+    const cap = runtime.gradeCapture;
+    runtime.gradeCapture = null;
     const W = els.preview.width, H = els.preview.height;
     const r = getExportFrame() || { x: 0, y: 0, w: W, h: H };
     const sw = Math.max(2, Math.min(960, Math.round(r.w))), sh = Math.max(2, Math.round(sw * r.h / r.w));
@@ -11017,27 +11036,35 @@ async function runScopesJob(ticket, fail) {
     const img = g.getImageData(0, 0, sw, sh).data;
     const stats = Color.scopeStats(img, sw, sh);
     let matte = null;
-    if (ticket.matte) { // the same frame again with the layer's matte in place of the clip → what it selects
-      const { clip, layer } = ticket.matte, mc = getClip(clip);
+    if (ticket.matte) { // the clip's own picture, graded and as its layer's matte → what the layer selects
+      const { clip, layer } = ticket.matte, mc = mClip;
       matte = { clip, layer };
       if (!mc) matte.error = "no such clip";
       else if (!gradeLayers(mc)[layer]) matte.error = `the clip has ${gradeLayers(mc).length} grade layer(s)`;
-      else if (!visibleClipsAt(t).some((x) => x.id === clip)) matte.error = "the clip is not on screen at that time";
+      else if (!cap || !cap.args) matte.error = "the clip is not on screen at that time";
       else {
-        const before = runtime.matte;
-        runtime.matte = { id: clip, layer };
-        try { await renderStillAt(t); } finally { runtime.matte = before; }
-        g.drawImage(els.preview, r.x, r.y, r.w, r.h, 0, 0, sw, sh);
-        const mm = g.getImageData(0, 0, sw, sh).data;
-        let sum = 0, n = 0;
-        const sel = [];
-        for (let i = 0; i < mm.length; i += 4) {
-          sum += mm[i];
-          if (mm[i] >= 128) { sel.push(img[i], img[i + 1], img[i + 2], 255); n++; }
+        const grade = Color.gradeAt(mc.props.grade, t - mc.start);
+        const read = (out) => {
+          const mw = Math.max(2, Math.min(480, out.width)), mh = Math.max(2, Math.round(mw * out.height / out.width));
+          const cv2 = document.createElement("canvas"); cv2.width = mw; cv2.height = mh;
+          const g2 = cv2.getContext("2d", { willReadFrequently: true });
+          g2.drawImage(out, 0, 0, mw, mh);
+          return g2.getImageData(0, 0, mw, mh).data;
+        };
+        const mOut = gradeSource(...cap.args, grade, layer), mm = mOut && read(mOut);
+        const gOut = mm && gradeSource(...cap.args, grade, -1), gg = gOut && read(gOut);
+        if (!mm || !gg) matte.error = "the clip's pixels can't be read (a cross-origin source)";
+        else {
+          let sum = 0, n = 0, px = 0;
+          const sel = [];
+          for (let i = 0; i < mm.length; i += 4) {
+            if (gg[i + 3] < 128) continue;   // transparent: not part of the picture
+            px++; sum += mm[i];
+            if (mm[i] >= 128) { sel.push(gg[i], gg[i + 1], gg[i + 2], 255); n++; }
+          }
+          matte.coverage = px ? +(100 * sum / 255 / px).toFixed(2) : 0;
+          if (n) matte.selected = Color.scopeStats(new Uint8ClampedArray(sel), n, 1);
         }
-        matte.coverage = +(100 * sum / 255 / (sw * sh)).toFixed(2);
-        // the selected pixels of the graded frame: how the layer left them
-        if (n) matte.selected = Color.scopeStats(new Uint8ClampedArray(sel), n, 1);
       }
     }
     const clips = visibleClipsAt(t).map((c) => ({
@@ -11048,6 +11075,7 @@ async function runScopesJob(ticket, fail) {
   } catch (err) {
     fail("could not measure the frame: " + (err && err.message || err));
   } finally {
+    runtime.gradeCapture = null;
     state.rendering = false;
     seekMediaWhilePaused(); // the videos sat on the job's frame — back to the playhead
     if (wasPlaying) play();
@@ -12942,6 +12970,18 @@ function bindLayerControls(c, guard) {
       pushUndo(); writeMask(c, { [p]: x }); scheduleSave(); rerender();
     });
   }
+}
+/** Keyed masks: the Color tab's mask sliders and ◆ follow the playhead. */
+function syncColorPlayhead() {
+  if (colorState.layer < 0 || colorState.mdrag || colorState.lastT === state.time) return;
+  colorState.lastT = state.time;
+  const c = getClip(state.selId), l = c && curLayer(c);
+  if (!l || !l.mask || !l.mask.keys || !els.colorPage.querySelector("[data-m]")) return;
+  const active = document.activeElement;
+  if (active && active.dataset && (active.dataset.m || active.dataset.mnum)) return;   // mid-edit
+  syncMaskInputs(c);
+  const k = els.colorPage.querySelector("[data-mact=key]"), on = maskKeyAt(l.mask, clipLocalT(c)) >= 0;
+  if (k) { k.classList.toggle("on", on); k.classList.toggle("toggle", on); }
 }
 function syncMaskInputs(c) {
   const m = maskNow(c);

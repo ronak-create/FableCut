@@ -93,6 +93,7 @@
   const MAX_POLY = 16;
   const MASK_SHAPES = ["ellipse", "rect", "poly"];
   const MASK_KEYED = ["x", "y", "w", "h", "rotation", "feather"];
+  const KEY_RANGE = { x: [-1, 2], y: [-1, 2], w: [0.001, 4], h: [0.001, 4], rotation: [-720, 720], feather: [0, 0.5] };
   const WB_STOPS = 1 / 100;   // temp / tint ±100 → ±1 stop per channel
   const TONE_K = 0.5;         // tone slider ±100 → ±0.5 luma at the band's peak
 
@@ -515,7 +516,7 @@
       for (const kf of m.keys) {
         if (!kf || typeof kf !== "object" || !isNum(kf.t)) { bad(".keys entries need a time t (seconds from the clip's start)"); continue; }
         const k = { t: +Math.max(0, kf.t).toFixed(4) };
-        for (const p of MASK_KEYED) if (isNum(kf[p])) k[p] = +kf[p].toFixed(4);
+        for (const p of MASK_KEYED) if (isNum(kf[p])) k[p] = +clamp(kf[p], ...KEY_RANGE[p]).toFixed(4);
         if (kf.ease && kf.ease !== "ease-in-out") {
           if (!EASES[kf.ease]) { bad(`.keys ease must be ${Object.keys(EASES).join(" | ")}`); continue; }
           k.ease = kf.ease;

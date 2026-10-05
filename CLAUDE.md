@@ -667,8 +667,9 @@ long way — ±0.02…0.05 on lift and offset, ±0.05…0.15 on gamma and gain.
   "neutral" below 0.01), plus the clips on screen and their grades. With an
   `exportFrame` it measures the delivered crop.
 - `fablecut_scopes {time, matte:{clip, layer}}` also measures what one layer
-  selects: the matte's coverage (% of the frame) and the levels, mean RGB,
-  saturation and cast of the selected pixels in the graded frame. A coverage
+  selects: the matte's coverage (% of that clip's own picture, measured
+  alone — other clips and adjustment layers don't count) and the levels, mean
+  RGB, saturation and cast of the selected pixels after grading. A coverage
   near 0 means the qualifier or mask misses; check it before trusting a
   secondary.
 
