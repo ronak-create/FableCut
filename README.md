@@ -175,7 +175,9 @@ same time.
   that grades the selected clip on the GPU — **lift / gamma / gain / offset
   wheels**, exposure, white balance with a **picker** (click something white),
   blacks / shadows / midtones / highlights / whites, log-style contrast with a
-  pivot, soft rolloff and saturation. Copy / paste a grade across shots.
+  pivot, soft rolloff and saturation, plus **curves** — luma and R / G / B,
+  hue vs hue, hue vs saturation, hue vs luma and saturation vs luma, with a
+  picker that marks a colour from the monitor. Copy / paste a grade across shots.
   Agents grade with the `setGrade` patch op and read the result as numbers
   with `fablecut_scopes` (levels, clipping, colour cast)
 - Quick filter sliders: brightness/contrast/saturation/hue, **temperature & tint**,

@@ -33,7 +33,8 @@ about 150 ms. A human and an agent can work the same timeline at once.
 - Color: a Color workspace with GPU grading per clip or adjustment layer
   (lift / gamma / gain / offset wheels, exposure, white balance with a picker,
   blacks / shadows / midtones / highlights / whites, log-style contrast and
-  pivot, soft rolloff, saturation) and live scopes (waveform, RGB parade,
+  pivot, soft rolloff, saturation, luma / RGB curves and hue vs hue / sat /
+  luma and sat vs luma curves) and live scopes (waveform, RGB parade,
   vectorscope, histogram). Agents grade with the `setGrade` patch op and read
   the result as numbers with `fablecut_scopes`.
 - Export: fast ffmpeg export via encoding profiles, WebCodecs hardware export

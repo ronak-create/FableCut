@@ -23,6 +23,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **saturation**. On / off to compare, Reset, and Copy / Paste a grade onto
   every selected clip. The existing filter sliders and presets still apply on
   top.
+- **Curves** in the Color tab: a luma curve (brightness only) and R / G / B
+  curves, plus **hue vs hue**, **hue vs saturation**, **hue vs luma** and
+  **saturation vs luma**. Click to add a point, drag to move it, double-click
+  to remove it; **Pick** marks a colour from the monitor on the curve. A hue
+  curve with one point is a band around that hue. Stored in `props.grade`
+  (`curves`, `hueHue`, `hueSat`, `hueLuma`, `satLuma`) and set by agents with
+  `setGrade`.
 - Agents: the patch op **`setGrade`** (merge, reset a key with `null`,
   `replace`, several clips at once; validated, honours locks) and the tool
   **`fablecut_scopes`**, which renders the graded frame exactly as export

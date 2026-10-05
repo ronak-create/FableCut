@@ -12511,17 +12511,19 @@ function bindCurveEditor(c, guard) {
   if (!cv) return;
   requestAnimationFrame(() => drawCurveEditor(c)); // after layout, so the canvas has its size
   const hit = (e) => {
+    drawCurveEditor(c); // fresh hit map: the panel may have resized, or no frame has drawn it yet
     const r = cv.getBoundingClientRect(), m = cv._map, px = e.clientX - r.left, py = e.clientY - r.top;
     const pts = curvePoints(c, colorState.curveTab, colorState.curveCh);
     const i = pts.findIndex(([x, v]) => Math.hypot(m.X(x) / m.dpr - px, m.Y(v) / m.dpr - py) < 8);
     return { pts, i, data: m.toData(px, py), px };
   };
   cv.addEventListener("pointerdown", (e) => {
-    if (e.button !== 0 || !cv._map || !guard()) return;
+    if (e.button !== 0 || !guard()) return;
     e.preventDefault();
     const tab = colorState.curveTab, d = curveSpec(tab);
     let { pts, i, data } = hit(e);
-    if (i < 0) { // new point, on the curve so nothing jumps; snaps to a picked mark nearby
+    const added = i < 0;
+    if (added) { // new point, on the curve so nothing jumps; snaps to a picked mark nearby
       let x = data[0];
       const mark = colorState.curveMark?.[tab];
       if (mark != null && Math.abs(cv._map.X(mark) - cv._map.X(x)) / cv._map.dpr < 10) x = mark;
@@ -12536,6 +12538,7 @@ function bindCurveEditor(c, guard) {
     const sorted = pts.map((p) => p[0]);
     colorState.cdrag = { pts, i, lo: i > 0 ? sorted[i - 1] : 0, hi: i < pts.length - 1 ? sorted[i + 1] : d.xMax,
       endpoint: tab === "curves" && (i === 0 || i === pts.length - 1) };
+    if (added) writeCurve(c, tab, colorState.curveCh, pts); // a plain click keeps the point too
     drawCurveEditor(c);
   });
   cv.addEventListener("pointermove", (e) => {
@@ -12543,7 +12546,7 @@ function bindCurveEditor(c, guard) {
     if (!g) return;
     const r = cv.getBoundingClientRect(), [x, v] = cv._map.toData(e.clientX - r.left, e.clientY - r.top);
     const d = curveSpec(colorState.curveTab), eps = d.xMax * 0.002;
-    g.pts[g.i] = [g.endpoint ? g.pts[g.i][0] : (d.periodic ? x : clamp(x, g.lo + eps, g.hi - eps)), v];
+    g.pts[g.i] = [g.endpoint ? g.pts[g.i][0] : clamp(x, g.lo + eps, g.hi - eps), v];
     writeCurve(c, colorState.curveTab, colorState.curveCh, g.pts);
     drawCurveEditor(c);
   });

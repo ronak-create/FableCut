@@ -556,10 +556,37 @@ The grade is sparse: only keys that differ from neutral are stored.
 | `blacks` `shadows` `midtones` `highlights` `whites` | 0 | −100…100 | tone bands on luma, darkest → brightest (smooth, overlapping) |
 | `lowSoft` · `highSoft` | 0 | 0…100 | soft rolloff into black / white instead of a hard clip |
 | `saturation` | 100 | 0…200 | around Rec.709 luma |
+| `curves` | — | `{y?, r?, g?, b?}` | tone curves, each `[[x, y], …]` on 0…1 (see Curves below) |
+| `hueHue` · `hueSat` · `hueLuma` · `satLuma` | — | `[[x, value], …]` | hue / saturation curves (see Curves below) |
 | `on` | true | — | `false` bypasses the grade without losing it |
 
 Order: exposure + white balance → offset → lift → gain → gamma → contrast →
-tone bands → rolloff → saturation.
+tone bands → rolloff → saturation → curves (luma, then R G B) → hue curves.
+
+**Curves.** Point lists drawn through a smooth curve that never overshoots
+(monotone cubic) — at most 24 points each.
+
+| key | x | value | neutral | does |
+|---|---|---|---|---|
+| `curves.y` | level 0…1 | level 0…1 | the diagonal | luma curve: brightness only, the colour is kept |
+| `curves.r` / `.g` / `.b` | level 0…1 | level 0…1 | the diagonal | one channel |
+| `hueHue` | hue 0…360° | shift −180…180° | 0 | rotate one hue toward another |
+| `hueSat` | hue 0…360° | factor 0…2 | 1 | saturate / desaturate one hue (0 = grey) |
+| `hueLuma` | hue 0…360° | −0.5…0.5 | 0 | brighten / darken one hue (scaled by its saturation, so greys never move) |
+| `satLuma` | saturation 0…1 | −0.5…0.5 | 0 | brighten / darken by how saturated a pixel is |
+
+Tone curves get `[0, 0]` and `[1, 1]` added when missing, so
+`curves:{y:[[0.25, 0.2], [0.75, 0.8]]}` is a gentle S. Hue curves wrap around
+360°, and **a hue curve with one point is a band**: that value at the hue,
+easing back to neutral 40° either side — `hueSat:[[220, 0.6]]` mutes blues
+only. Hues: red 0, yellow 60, green 120, cyan 180, blue 240, magenta 300;
+skin sits near 20–30. A curve equal to neutral is dropped.
+
+In the editor the **Curves** section of the Color tab edits them: tabs for
+Curves (Y / R / G / B) and the four hue curves; click to add a point on the
+curve, drag to move it, double-click to remove it, **Pick** then click the
+monitor to mark that colour's level or hue on the curve (new points snap to
+the mark), **Reset** clears the curve shown.
 
 **Wheel colours.** A wheel's `r, g, b` normally carry no brightness: they are a
 point on the vectorscope's Cb / Cr plane, so pushing a wheel toward a colour
@@ -574,7 +601,8 @@ long way — ±0.02…0.05 on lift and offset, ±0.05…0.15 on gamma and gain.
 - `{op:"setGrade", id:"c_a", grade:{exposure:0.3, temp:-15, contrast:1.15}}` — merges
   into the clip's grade key by key; `null` on a key resets it; `replace:true`
   starts from neutral; `grade:null` clears it; `ids:[…]` grades several clips
-  at once. Unknown keys or bad values refuse the whole patch. Locks apply
+  at once. `curves` merges per channel: `grade:{curves:{r:[[0.5, 0.55]]}}`
+  keeps the other channels, `curves:{y:null}` removes the luma curve. Unknown keys or bad values refuse the whole patch. Locks apply
   (`force:true` as elsewhere).
 - `fablecut_scopes {time}` renders the graded frame at `time` (default: the
   playhead) exactly as export would — an open editor tab, else headless — and
@@ -852,6 +880,9 @@ voice: `fablecut_auto_duck {clipIds:[<music clip>], under:["A1"], amount:-10}`.
 **Balanced, contrasty base grade** (then measure with `fablecut_scopes`):
 `{op:"setGrade", id, grade:{contrast:1.15, pivot:0.42, shadows:-10, highlights:-20, highSoft:30, saturation:108}}`.
 Teal shadows / warm highlights: add `lift:[-0.034, 0.008, 0.012, 0]` and `gain:[0.04, 0, -0.06, 0]`.
+Film-style S-curve, muted greens, yellows pushed toward orange:
+`grade:{curves:{y:[[0.25, 0.2], [0.75, 0.82]]}, hueSat:[[115, 0.7]], hueHue:[[60, -12]]}` —
+then `fablecut_scopes` to check the blacks didn't crush.
 A grade on an adjustment layer over the whole edit = one look for every shot.
 
 **Green-screen composite**: subject clip on V2 with

@@ -185,3 +185,58 @@ test("fablecut_scopes hands a scopes job to the tab and reports its measurement"
   for (const time of [-1, "", false, [], "abc"])
     assert.equal((await post("/api/scopes/request", { time })).status, 400, JSON.stringify(time) + " is not a time");
 });
+
+test("curves: monotone, endpoints added, luma curve keeps hue, hue curves wrap", () => {
+  const f = C.monotone([[0, 0], [0.3, 0.1], [0.31, 0.9], [1, 1]]);
+  let prev = -1;
+  for (let i = 0; i <= 200; i++) { const v = f(i / 200); assert.ok(v >= prev - 1e-12, "never dips"); assert.ok(v >= 0 && v <= 1, "no overshoot"); prev = v; }
+  assert.deepEqual(C.normalizeGrade({ curves: { y: [[0.25, 0.2]] } }), { curves: { y: [[0, 0], [0.25, 0.2], [1, 1]] } });
+  assert.equal(C.normalizeGrade({ curves: { r: [[0.5, 0.5]] }, hueSat: [[90, 1]] }), null, "identity curves are dropped");
+  assert.deepEqual(C.normalizeGrade({ hueHue: [[370, 30]] }).hueHue, [[330, 0], [10, 30], [50, 0]].sort((a, b) => a[0] - b[0]), "one point = a ±40° band, wrapped");
+  assert.throws(() => C.normalizeGrade({ curves: { w: [[0.5, 0.6]] } }, true), /unknown curve/);
+  assert.throws(() => C.normalizeGrade({ hueSat: [[10]] }, true), /\[x, value\]/);
+
+  // luma curve: brighter, same chroma direction (every channel moves by the same amount)
+  const src = [0.6, 0.4, 0.2], out = C.gradePixel(src, { curves: { y: [[0.5, 0.6]] } });
+  assert.ok(out[0] > src[0], "brighter");
+  near(out[0] - src[0], out[2] - src[2], 0.01, "the luma curve adds the same to each channel");
+  // a red-channel curve leaves green and blue alone
+  const rc = C.gradePixel([0.5, 0.5, 0.5], { curves: { r: [[0.5, 0.7]] } });
+  near(rc[0], 0.7, 0.01, "r"); near(rc[1], 0.5, 1e-6, "g"); near(rc[2], 0.5, 1e-6, "b");
+
+  // hue curves: only the targeted hue moves; greys never do
+  const blue = C.hsvToRgb(240 / 360, 0.8, 0.8), green = C.hsvToRgb(120 / 360, 0.8, 0.8);
+  const desat = C.gradePixel(blue, { hueSat: [[240, 0]] });
+  assert.ok(C.rgbToHsv(...desat)[1] < 0.02, "blue desaturated");
+  assert.deepEqual(C.gradePixel(green, { hueSat: [[240, 0]] }).map((v) => +v.toFixed(4)), green.map((v) => +v.toFixed(4)), "green untouched");
+  near(C.rgbToHsv(...C.gradePixel(blue, { hueHue: [[240, -30]] }))[0] * 360, 210, 1, "hue vs hue shifts the hue");
+  assert.ok(C.gradePixel(blue, { hueLuma: [[240, -0.3]] })[2] < blue[2], "hue vs luma darkens");
+  assert.deepEqual(C.gradePixel([0.5, 0.5, 0.5], { hueLuma: [[0, -0.3]], hueSat: [[0, 2]] }), [0.5, 0.5, 0.5], "grey has no hue");
+  assert.ok(C.gradePixel(blue, { satLuma: [[1, 0.2]] })[2] > blue[2], "sat vs luma lifts saturated colours");
+  // a red band reaches across 0°/360°
+  assert.ok(C.rgbToHsv(...C.gradePixel(C.hsvToRgb(350 / 360, 0.8, 0.8), { hueSat: [[5, 0]] }))[1] < 0.6, "band wraps");
+
+  assert.equal(C.withoutCurves({ exposure: 1, curves: { y: [[0, 0.1], [1, 1]] }, hueSat: [[0, 0]] }).exposure, 1);
+  assert.deepEqual(Object.keys(C.withoutCurves({ exposure: 1, curves: {}, hueSat: [] })), ["exposure"]);
+});
+
+test("setGrade sets curves per channel and hue curves, null removes one", async (t) => {
+  const dir = makeDataDir(t, graded());
+  const mcp = startMcp(t, dir);
+  await mcp.request("initialize", { protocolVersion: "2025-11-25" });
+  const patch = (...ops) => mcp.callTool("fablecut_patch_project", { ops });
+  const grade = (id) => readProject(dir).clips.find((c) => c.id === id).props?.grade;
+
+  let r = await patch({ op: "setGrade", id: "c_a", grade: { curves: { y: [[0.25, 0.2], [0.75, 0.8]] }, hueSat: [[220, 1.4]] } });
+  assert.equal(r.isError, false, r.text);
+  assert.match(r.text, /curves\(y\)/);
+  assert.deepEqual(grade("c_a").curves, { y: [[0, 0], [0.25, 0.2], [0.75, 0.8], [1, 1]] });
+  assert.equal(grade("c_a").hueSat.length, 3, "one point became a band");
+  r = await patch({ op: "setGrade", id: "c_a", grade: { curves: { r: [[0.5, 0.55]] } } });
+  assert.deepEqual(Object.keys(grade("c_a").curves), ["y", "r"], "curves merge per channel");
+  r = await patch({ op: "setGrade", id: "c_a", grade: { curves: { y: null }, hueSat: null } });
+  assert.deepEqual(grade("c_a"), { curves: { r: [[0, 0], [0.5, 0.55], [1, 1]] } });
+  r = await patch({ op: "setGrade", id: "c_a", grade: { curves: { r: [[0.5, 0.6, 1]] } } });
+  assert.equal(r.isError, true);
+  assert.match(r.text, /\[x, value\]/);
+});
