@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-10-05
+
 ### Added
 - **Color workspace.** An **Edit / Color** switch in the top bar. Color swaps
   the media bin for live scopes of the program monitor (or of the export
@@ -44,6 +46,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **`fablecut_scopes`**, which renders the graded frame exactly as export
   would and returns luma levels, clipping, mean RGB, saturation and the
   colour cast as numbers.
+- The keyboard-shortcuts dialog (**?**) lists the Color workspace gestures
+  (wheels, pickers, curves, masks on the monitor) and the audio volume line.
 
 ## [1.10.0] - 2026-10-02
 
@@ -625,7 +629,8 @@ the report in [#1](https://github.com/ronak-create/FableCut/issues/1) — thanks
 - Three control surfaces for AI agents: **MCP server**, direct `project.json`
   editing, and a **REST API** with live-reload over server-sent events.
 
-[Unreleased]: https://github.com/ronak-create/FableCut/compare/v1.10.0...HEAD
+[Unreleased]: https://github.com/ronak-create/FableCut/compare/v1.11.0...HEAD
+[1.11.0]: https://github.com/ronak-create/FableCut/compare/v1.10.0...v1.11.0
 [1.10.0]: https://github.com/ronak-create/FableCut/compare/v1.9.0...v1.10.0
 [1.9.0]: https://github.com/ronak-create/FableCut/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/ronak-create/FableCut/compare/v1.7.0...v1.8.0
