@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-10-08
+
 ### Added
 - **npm package.** `npx -y fablecut` starts the editor and `npx -y fablecut mcp`
   runs the MCP server, so registering FableCut no longer needs a clone or a
@@ -639,7 +641,8 @@ the report in [#1](https://github.com/ronak-create/FableCut/issues/1) — thanks
 - Three control surfaces for AI agents: **MCP server**, direct `project.json`
   editing, and a **REST API** with live-reload over server-sent events.
 
-[Unreleased]: https://github.com/ronak-create/FableCut/compare/v1.11.0...HEAD
+[Unreleased]: https://github.com/ronak-create/FableCut/compare/v1.12.0...HEAD
+[1.12.0]: https://github.com/ronak-create/FableCut/compare/v1.11.0...v1.12.0
 [1.11.0]: https://github.com/ronak-create/FableCut/compare/v1.10.0...v1.11.0
 [1.10.0]: https://github.com/ronak-create/FableCut/compare/v1.9.0...v1.10.0
 [1.9.0]: https://github.com/ronak-create/FableCut/compare/v1.8.0...v1.9.0

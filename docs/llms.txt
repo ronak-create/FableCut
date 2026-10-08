@@ -16,8 +16,10 @@ about 150 ms. A human and an agent can work the same timeline at once.
 - Requirements: Node.js 18+ and a Chromium-based browser. ffmpeg on PATH is
   optional but recommended (fast export, upload remuxing, loudness
   normalization, auto-duck and noise reduction).
-- Install: `git clone https://github.com/ronak-create/FableCut.git`, then
-  `node server.js`, then open http://localhost:7777.
+- Install: `npx -y fablecut`, then open http://localhost:7777 (projects and
+  media go to ~/FableCut). Or clone the repo and run `node server.js`.
+- MCP: `claude mcp add -s user fablecut -- npx -y fablecut mcp` (any client:
+  command `npx`, args `-y fablecut mcp`).
 - The server binds 127.0.0.1 only. Media stays in a local folder; nothing is
   uploaded to a cloud service.
 - Control surfaces: an MCP server (stdio, client-neutral), a REST API, and

@@ -55,7 +55,7 @@
     {
       "@type": "Question",
       "name": "What do I need to run it?",
-      "acceptedAnswer": { "@type": "Answer", "text": "Node 18 or newer and a Chromium browser. Clone the repo, run node server.js, open http://localhost:7777. It works on Windows, macOS and Linux, and if you would rather not deal with paths at all, it installs as a Claude Code plugin." }
+      "acceptedAnswer": { "@type": "Answer", "text": "Node 18 or newer and a Chromium browser. Run npx -y fablecut and open http://localhost:7777. It works on Windows, macOS and Linux." }
     }
   ]
 }
@@ -123,23 +123,21 @@
     <div class="step reveal" id="run">
       <div class="step-copy">
         <h2>Run the editor</h2>
-        <p>Clone the repo and start the server. There is nothing to install: FableCut has zero npm dependencies.</p>
+        <p>Start it with one command. FableCut has zero npm dependencies; your projects, media and exports go to <code class="ic">~/FableCut</code>.</p>
       </div>
       <div>
         <div class="code code-card">
-<pre><code>git clone https://github.com/ronak-create/FableCut
-cd FableCut
-node server.js</code></pre>
+<pre><code>npx -y fablecut</code></pre>
           <button class="copy" type="button" aria-label="Copy the install commands"><svg class="i i-cp" aria-hidden="true"><use href="#i-copy"/></svg><svg class="i i-ok" aria-hidden="true"><use href="#i-check"/></svg></button>
         </div>
-        <p class="step-note">Opens at <code class="ic">http://localhost:7777</code>. The server listens on 127.0.0.1 only.</p>
+        <p class="step-note">Opens at <code class="ic">http://localhost:7777</code>. The server listens on 127.0.0.1 only. Prefer a clone? <code class="ic">git clone https://github.com/ronak-create/FableCut</code>, then <code class="ic">node server.js</code>.</p>
       </div>
     </div>
 
     <div class="step reveal" id="connect">
       <div class="step-copy">
         <h2>Connect your agent</h2>
-        <p>Register the MCP server once and every session can read and rewrite your timeline. Claude Code and Claude Desktop install it without a path; other clients point at <code class="ic">mcp-server.js</code> in your clone.</p>
+        <p>Register the MCP server once and every session can read and rewrite your timeline. Every client below runs it with <code class="ic">npx</code>, so there is no path to set.</p>
       </div>
       <div>
         <div class="tabs" data-tabs>
@@ -165,12 +163,12 @@ node server.js</code></pre>
           </div>
           <div class="tabpanel code" role="tabpanel" id="p-codex" aria-labelledby="t-codex" hidden>
 <pre><code>codex mcp add fablecut -- \
-  node "/path/to/FableCut/mcp-server.js"</code></pre>
+  npx -y fablecut mcp</code></pre>
             <button class="copy" type="button" aria-label="Copy the Codex setup"><svg class="i i-cp" aria-hidden="true"><use href="#i-copy"/></svg><svg class="i i-ok" aria-hidden="true"><use href="#i-check"/></svg></button>
           </div>
           <div class="tabpanel code" role="tabpanel" id="p-gemini" aria-labelledby="t-gemini" hidden>
 <pre><code>gemini mcp add -s user fablecut \
-  node "/path/to/FableCut/mcp-server.js"</code></pre>
+  npx -y fablecut mcp</code></pre>
             <button class="copy" type="button" aria-label="Copy the Gemini CLI setup"><svg class="i i-cp" aria-hidden="true"><use href="#i-copy"/></svg><svg class="i i-ok" aria-hidden="true"><use href="#i-check"/></svg></button>
           </div>
           <div class="tabpanel code" role="tabpanel" id="p-cursor" aria-labelledby="t-cursor" hidden>
@@ -178,8 +176,8 @@ node server.js</code></pre>
 {
   "mcpServers": {
     "fablecut": {
-      "command": "node",
-      "args": ["/path/to/FableCut/mcp-server.js"]
+      "command": "npx",
+      "args": ["-y", "fablecut", "mcp"]
     }
   }
 }</code></pre>
@@ -191,7 +189,7 @@ node server.js</code></pre>
   "mcp": {
     "fablecut": {
       "type": "local",
-      "command": ["node", "/path/to/FableCut/mcp-server.js"],
+      "command": ["npx", "-y", "fablecut", "mcp"],
       "enabled": true
     }
   }
@@ -200,11 +198,11 @@ node server.js</code></pre>
           </div>
           <div class="tabpanel code" role="tabpanel" id="p-amp" aria-labelledby="t-amp" hidden>
 <pre><code>amp mcp add fablecut -- \
-  node "/path/to/FableCut/mcp-server.js"</code></pre>
+  npx -y fablecut mcp</code></pre>
             <button class="copy" type="button" aria-label="Copy the Amp setup"><svg class="i i-cp" aria-hidden="true"><use href="#i-copy"/></svg><svg class="i i-ok" aria-hidden="true"><use href="#i-check"/></svg></button>
           </div>
         </div>
-        <p class="step-note">Prefer to register it by hand in Claude Code? <code class="ic">claude mcp add -s user fablecut -- node "/path/to/FableCut/mcp-server.js"</code></p>
+        <p class="step-note">Prefer to register it by hand in Claude Code? <code class="ic">claude mcp add -s user fablecut -- npx -y fablecut mcp</code></p>
       </div>
     </div>
 
@@ -251,7 +249,7 @@ node server.js</code></pre>
       </details>
       <details>
         <summary>What do I need to run it?</summary>
-        <p>Node 18 or newer and a Chromium browser. Clone the repo, run <code class="ic">node server.js</code>, open <code class="ic">http://localhost:7777</code>. It works on Windows, macOS and Linux, and if you would rather not deal with paths at all, it installs as a Claude Code plugin.</p>
+        <p>Node 18 or newer and a Chromium browser. Run <code class="ic">npx -y fablecut</code> and open <code class="ic">http://localhost:7777</code>. It works on Windows, macOS and Linux.</p>
       </details>
     </div>
     <div class="links-row reveal">

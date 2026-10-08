@@ -403,12 +403,12 @@
       </div>
       <div class="tabpanel code" role="tabpanel" id="p-codex" aria-labelledby="t-codex" hidden>
 <pre><code>codex mcp add fablecut -- \
-  node "/path/to/FableCut/mcp-server.js"</code></pre>
+  npx -y fablecut mcp</code></pre>
         <button class="copy" type="button" aria-label="Copy the Codex setup"><svg class="i i-cp" aria-hidden="true"><use href="#i-copy"/></svg><svg class="i i-ok" aria-hidden="true"><use href="#i-check"/></svg></button>
       </div>
       <div class="tabpanel code" role="tabpanel" id="p-gemini" aria-labelledby="t-gemini" hidden>
 <pre><code>gemini mcp add -s user fablecut \
-  node "/path/to/FableCut/mcp-server.js"</code></pre>
+  npx -y fablecut mcp</code></pre>
         <button class="copy" type="button" aria-label="Copy the Gemini CLI setup"><svg class="i i-cp" aria-hidden="true"><use href="#i-copy"/></svg><svg class="i i-ok" aria-hidden="true"><use href="#i-check"/></svg></button>
       </div>
       <div class="tabpanel code" role="tabpanel" id="p-cursor" aria-labelledby="t-cursor" hidden>
@@ -416,8 +416,8 @@
 {
   "mcpServers": {
     "fablecut": {
-      "command": "node",
-      "args": ["/path/to/FableCut/mcp-server.js"]
+      "command": "npx",
+      "args": ["-y", "fablecut", "mcp"]
     }
   }
 }</code></pre>
@@ -429,7 +429,7 @@
   "mcp": {
     "fablecut": {
       "type": "local",
-      "command": ["node", "/path/to/FableCut/mcp-server.js"],
+      "command": ["npx", "-y", "fablecut", "mcp"],
       "enabled": true
     }
   }
@@ -438,7 +438,7 @@
       </div>
       <div class="tabpanel code" role="tabpanel" id="p-amp" aria-labelledby="t-amp" hidden>
 <pre><code>amp mcp add fablecut -- \
-  node "/path/to/FableCut/mcp-server.js"</code></pre>
+  npx -y fablecut mcp</code></pre>
         <button class="copy" type="button" aria-label="Copy the Amp setup"><svg class="i i-cp" aria-hidden="true"><use href="#i-copy"/></svg><svg class="i i-ok" aria-hidden="true"><use href="#i-check"/></svg></button>
       </div>
     </div>
@@ -500,9 +500,7 @@
     </div>
     <div class="reveal">
       <div class="code code-card">
-<pre><code>git clone https://github.com/ronak-create/FableCut
-cd FableCut
-node server.js</code></pre>
+<pre><code>npx -y fablecut</code></pre>
         <button class="copy" type="button" aria-label="Copy the install commands"><svg class="i i-cp" aria-hidden="true"><use href="#i-copy"/></svg><svg class="i i-ok" aria-hidden="true"><use href="#i-check"/></svg></button>
       </div>
       <p class="cta-note">Then open <code class="ic">localhost:7777</code>. MIT licensed, zero npm dependencies.</p>
