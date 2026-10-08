@@ -2,7 +2,7 @@
   "manifest_version": "0.2",
   "name": "fablecut",
   "display_name": "FableCut",
-  "version": "1.12.0",
+  "version": "1.12.1",
   "description": "Zero-dependency browser video editor that AI agents can drive — JSON timeline, MCP tools, live-reloading UI.",
   "long_description": "FableCut is a Premiere-style non-linear video editor that runs in the browser with zero npm dependencies. An AI agent edits video by patching a single project.json timeline (clips, keyframes, transitions, text animations, filters, speed ramps, adjustment layers) through MCP tools; the open editor UI live-reloads within ~150 ms and exports MP4 via ffmpeg. Includes reference-video analysis (shot cuts, beats, BPM, energy, drop) so agents can remake an edit with new footage.",
   "author": {

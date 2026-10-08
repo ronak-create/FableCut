@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.12.1] - 2026-10-08
+
+### Changed
+- Each GitHub release now publishes the matching `fablecut` package to npm
+  automatically, with provenance, through npm trusted publishing.
+
 ## [1.12.0] - 2026-10-08
 
 ### Added
@@ -641,7 +647,8 @@ the report in [#1](https://github.com/ronak-create/FableCut/issues/1) — thanks
 - Three control surfaces for AI agents: **MCP server**, direct `project.json`
   editing, and a **REST API** with live-reload over server-sent events.
 
-[Unreleased]: https://github.com/ronak-create/FableCut/compare/v1.12.0...HEAD
+[Unreleased]: https://github.com/ronak-create/FableCut/compare/v1.12.1...HEAD
+[1.12.1]: https://github.com/ronak-create/FableCut/compare/v1.12.0...v1.12.1
 [1.12.0]: https://github.com/ronak-create/FableCut/compare/v1.11.0...v1.12.0
 [1.11.0]: https://github.com/ronak-create/FableCut/compare/v1.10.0...v1.11.0
 [1.10.0]: https://github.com/ronak-create/FableCut/compare/v1.9.0...v1.10.0

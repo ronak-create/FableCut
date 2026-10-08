@@ -1381,7 +1381,7 @@ async function handle(msg) {
         result: {
           protocolVersion: negotiateProtocolVersion(params?.protocolVersion),
           capabilities: { tools: {} },
-          serverInfo: { name: "fablecut", version: "1.12.0" },
+          serverInfo: { name: "fablecut", version: "1.12.1" },
         },
       });
     }
