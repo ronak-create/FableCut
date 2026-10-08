@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **npm package.** `npx -y fablecut` starts the editor and `npx -y fablecut mcp`
+  runs the MCP server, so registering FableCut no longer needs a clone or a
+  file path: `claude mcp add -s user fablecut -- npx -y fablecut mcp`.
+  Installed from npm, projects, media and exports live in `~/FableCut`
+  (`FABLECUT_DATA_DIR` still overrides), so updates never touch them.
+- `fablecut_patch_project` takes an optional `baseRevision`: a patch planned
+  against an older revision is refused with a conflict and the current
+  revision instead of landing on top of a newer edit.
+
 ## [1.11.0] - 2026-10-05
 
 ### Added

@@ -11,8 +11,9 @@ drive the editor.
 
 ## MCP connection (preferred — works from any session, any directory)
 
-Register the MCP server (`mcp-server.js`) once at user scope as `fablecut`:
-`claude mcp add -s user fablecut -- node "<path-to>/fablecut/mcp-server.js"`.
+Register the MCP server once at user scope as `fablecut`:
+`claude mcp add -s user fablecut -- npx -y fablecut mcp` (from npm, no path needed),
+or from a clone `claude mcp add -s user fablecut -- node "<path-to>/fablecut/mcp-server.js"`.
 Every Claude Code session then has these tools:
 
 - `fablecut_status` — auto-starts the editor server, returns URL + project summary. Call first.
@@ -108,7 +109,8 @@ asks to overwrite conflicting changes. `fablecut_import_media` only appends a
 new media entry and always merges safely — no conflict check needed.
 
 For Claude Desktop, add to its MCP config:
-`{"mcpServers":{"fablecut":{"command":"node","args":["<path-to>/fablecut/mcp-server.js"]}}}`
+`{"mcpServers":{"fablecut":{"command":"npx","args":["-y","fablecut","mcp"]}}}`
+(or `"command":"node","args":["<path-to>/fablecut/mcp-server.js"]` from a clone)
 Direct file editing of `project.json` (below) works too and is equivalent.
 
 Installing as a Claude Code plugin (`/plugin marketplace add ronak-create/FableCut`,
@@ -117,7 +119,8 @@ then `/plugin install fablecut@fablecut`) does the registration for you.
 ### Where the files are
 
 `project.json`, `media/`, `exports/`, `analysis/` and `library/` normally sit in
-the repo next to `server.js`. Set **`FABLECUT_DATA_DIR`** to move all five
+the repo next to `server.js`; installed from npm (`npx fablecut`) they sit in
+`~/FableCut`. Set **`FABLECUT_DATA_DIR`** to move all five
 somewhere else; the code and the static app files stay in the install directory
 either way. The plugin sets this so a plugin update can replace the install
 directory without touching anyone's timeline or footage. **Don't assume
@@ -131,7 +134,7 @@ data dir. Production leaves watching on so the UI live-reloads.
 ## Run
 
 ```
-node server.js        # → http://localhost:7777
+node server.js        # → http://localhost:7777   (from npm: npx -y fablecut)
 ```
 
 Files: `index.html` + `style.css` + `app.js` (editor UI), `server.js` (API + hosting),

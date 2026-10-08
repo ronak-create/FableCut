@@ -277,6 +277,12 @@ same time.
 ## Quick start
 
 ```bash
+npx -y fablecut       # → http://localhost:7777
+```
+
+Your projects, media and exports go to `~/FableCut`. Or run it from a clone:
+
+```bash
 git clone https://github.com/ronak-create/FableCut.git
 cd FableCut
 node server.js        # → http://localhost:7777
@@ -324,6 +330,13 @@ Three equivalent control surfaces:
    zero-dependency MCP server once:
 
    ```bash
+   claude mcp add -s user fablecut -- npx -y fablecut mcp
+   ```
+
+   No clone or path needed; your work lives in `~/FableCut`. From a clone,
+   point at the file instead:
+
+   ```bash
    claude mcp add -s user fablecut -- node "<path-to>/fablecut/mcp-server.js"
    ```
 
@@ -351,14 +364,16 @@ Three equivalent control surfaces:
    {
      "name": "fablecut",
      "transport": "stdio",
-     "command": "node",
-     "args": ["/absolute/path/to/FableCut/mcp-server.js"]
+     "command": "npx",
+     "args": ["-y", "fablecut", "mcp"]
    }
    ```
 
+   (From a clone: `"command": "node"`, `"args": ["/absolute/path/to/FableCut/mcp-server.js"]`.)
+
    The server is intentionally client-neutral. It speaks MCP over stdio and
-   does not require Claude-specific environment variables. Keep the path
-   absolute, and use Node 18 or newer.
+   does not require Claude-specific environment variables. With a clone, keep
+   the path absolute. Node 18 or newer either way.
 
    Tools: `fablecut_status` (auto-starts the editor), `fablecut_docs`,
    `fablecut_get_project`, `fablecut_set_project`, `fablecut_patch_project`,

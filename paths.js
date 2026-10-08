@@ -12,17 +12,20 @@
 
    Standalone (`node server.js`) they are the same directory, which is exactly
    how FableCut has always behaved. Set FABLECUT_DATA_DIR to split them; the
-   plugin sets it to ${CLAUDE_PLUGIN_DATA}.
+   plugin sets it to ${CLAUDE_PLUGIN_DATA}. Installed from npm (the code sits
+   under node_modules, e.g. the npx cache) the default is ~/FableCut.
    ═══════════════════════════════════════════════════════════════════════════ */
 "use strict";
 const crypto = require("crypto");
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 
 const APP_DIR = __dirname;
+const FROM_NPM = APP_DIR.split(path.sep).includes("node_modules");
 const DATA_DIR = process.env.FABLECUT_DATA_DIR
   ? path.resolve(process.env.FABLECUT_DATA_DIR)
-  : APP_DIR;
+  : FROM_NPM ? path.join(os.homedir(), "FableCut") : APP_DIR;
 const SPLIT = DATA_DIR !== APP_DIR;
 
 const MEDIA_DIR = path.join(DATA_DIR, "media");
