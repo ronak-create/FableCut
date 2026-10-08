@@ -11071,7 +11071,15 @@ async function runScopesJob(ticket, fail) {
       id: c.id, name: c.name, kind: c.kind, track: c.track,
       grade: Color.summarizeGrade(c.props.grade),
     }));
-    await reportExportJob(ticket.id, { status: "done", result: { time: +t.toFixed(3), frame: { w: Math.round(r.w), h: Math.round(r.h) }, stats, clips, matte } }, true);
+    /* fablecut_frame {time} with no src: hand back the same graded still as a
+       JPEG so the agent can see what it is measuring. toDataURL can throw on a
+       canvas tainted by a cross-origin src — the numbers still stand. */
+    let image = null;
+    if (ticket.image) {
+      try { image = cv.toDataURL("image/jpeg", 0.85); }
+      catch (err) { image = null; }
+    }
+    await reportExportJob(ticket.id, { status: "done", result: { time: +t.toFixed(3), frame: { w: Math.round(r.w), h: Math.round(r.h) }, stats, clips, matte, image } }, true);
   } catch (err) {
     fail("could not measure the frame: " + (err && err.message || err));
   } finally {

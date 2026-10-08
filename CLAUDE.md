@@ -26,12 +26,20 @@ Every Claude Code session then has these tools:
   into `./media/` and register it. The stored `src` is always `/media/…`.
 - `fablecut_analyze_reference` — turn a reference video into an edit blueprint
   (shots, beats, BPM, energy, drop) + extract its music. See "Remake a reference video".
+- `fablecut_frame` — **look at** a moment and get back an actual image.
+  `{path, t}` returns one frame of a source clip; `{path, frames}` returns a
+  contact sheet across it; with no `path`, `{time}` renders the composed
+  timeline. See "Look at the footage" below.
 - `fablecut_encode_profiles` — list export presets from `encoding-profiles.json` (each is a
   raw ffmpeg args list). Set `project.encodeProfile` via patch to pin a project default.
 - `fablecut_normalize_audio` — measure clips (BS.1770 LUFS or sample peak, via ffmpeg) and
   set their clip gain to a loudness target. See "Audio mix" below.
 - `fablecut_auto_duck` — find where the voice tracks speak and write `duck` keyframes that
   dip the music under it. See "Audio mix" below.
+- `fablecut_frame` — **see** a moment. `{path, t}` → one JPEG frame of a source
+  clip; `{path, frames:12}` → a contact sheet across it; `{time}` → the composed
+  timeline, graded, as export renders it. Returns a real image, not numbers.
+  See "Look at the footage" below.
 - `fablecut_denoise` — reduce background noise on audio clips (renders a cleaned copy of the
   file and switches the clip's stems to it). See "Audio mix" below.
 - `fablecut_export` — render the timeline to a file in `exports/` with the editor's own
@@ -58,6 +66,8 @@ Editing via full get→modify→set costs thousands of tokens per change. Cheape
    instead of the whole manual; skip it entirely if the schema is already in context.
 4. **Media questions** (duration, fps, size): read them from the registered media
    entries — don't shell out to ffprobe; the browser probes and writes them back.
+   For what the footage *looks like*, use `fablecut_frame` — it is far cheaper
+   than reading a file, and far more reliable than inferring from a number.
 5. Batch related changes into ONE patch call (ops apply in order, one revision bump).
 6. **Cut and trim with the edit ops** (next section) rather than recomputing
    `start` / `in` / `duration` by hand — they keep linked stems in sync.
@@ -798,6 +808,42 @@ selected clip.
 - `bgRemove` and `chromaKey` can combine with all filters; heavy pixel work is
   automatic (only runs when those props are set).
 
+## Look at the footage (`fablecut_frame`)
+
+`fablecut_analyze_reference` gives you the **ears** — where the cuts are, how hard
+each shot hits. `fablecut_frame` gives you the **eyes**. It answers with a real
+image (an MCP `image` content block), so you can judge a shot instead of
+inferring it from an `energy` value.
+
+| call | returns |
+|---|---|
+| `{path:"/media/x.mp4", t:3.2}` | that exact frame |
+| `{path:"/media/x.mp4", frames:12}` | a 4×3 contact sheet across the whole clip |
+| `{path:"/media/x.mp4", frames:12, from:30, to:90}` | a contact sheet across part of it |
+| `{time:8.5}` (no `path`) | the **composed timeline** at 8.5 s, graded, all tracks |
+| `{path}` with an absolute path | the file is read in place without copying into `media/` |
+| `{path, text:true}` | text-only statistics (luma, colors, texture, saturation, motion) for non-vision agents |
+
+Each answer leads with a text line naming the source, the timestamp(s) and (in
+timeline mode) the clips on screen, so you always know what you are looking at.
+`width` sets the pixel width (default 768 for one frame, 320 per contact-sheet
+cell); `text:true` returns descriptive statistics instead of an image block, for
+agents without vision capability; `where`/`timeout` apply to timeline mode only.
+
+The REST endpoint `/api/frame` accepts `src`, `t`, `frames`, `from`, `to`, `w`,
+`q` (JPEG quality 1–31) and `text=1` (statistics mode) as query parameters.
+
+**When it pays.** Before choosing a clip's `in` point, sample a few candidate
+moments — the blueprint tells you a shot spans 2.1 s–4.9 s and reads
+`energy: 88`, but only a frame tells you whether that is a car jump or a pan
+across a landscape. Contact sheets are the cheap survey: one call shows you
+what a whole 3-minute clip holds, then you grab single frames where it matters.
+Timeline mode answers "what did I actually build?" — the same picture the user
+sees and export renders, grades and transitions included.
+
+Needs ffmpeg on PATH for the source modes. Timeline mode runs in the open editor
+tab, else a headless browser, like `fablecut_export`.
+
 ## Remake a reference video (analyze → blueprint → rebuild)
 
 Given a reference edit (a reel/montage the user likes), FableCut can analyze it
@@ -837,6 +883,8 @@ obvious cuts were missed, raise it if motion is being misread as cuts.
    (hard cuts by default — that's what shot detection saw). Pick source footage
    whose motion matches each shot's `energy` (calm ≤40, action ≥70), and choose
    each clip's `in` so something interesting happens inside the window.
+   **Then look**: `fablecut_frame {path, frames:12}` to survey a candidate clip,
+   `{path, t}` at the exact moment you want, before committing to an `in`.
 4. The `drop`: put the hero shot there; classic garnish = a speed ramp landing
    on it, an impact `adjust` layer (shake+rgbSplit), or a whip transition.
 5. Pacing garnish to taste: shots shorter than ~0.6 s read as beat-flashes;
@@ -874,6 +922,18 @@ obvious cuts were missed, raise it if motion is being misread as cuts.
 - `POST /api/analyze` — body `{src:"/media/ref.mp4", threshold?, music?}`: analyze a
   reference video into an edit blueprint (see "Remake a reference video"); extracts
   its music into ./media. `GET /api/analyze?src=…` returns the cached blueprint.
+- `GET  /api/frame?src=/media/x.mp4&t=3.2` — one JPEG still of a source clip, the
+  "eyes" to go with `/api/analyze`'s ears (see "Look at the footage"). Optional
+  `w` (pixel width, default 768) and `q` (ffmpeg `-q:v` 1–31, default 4).
+  `&frames=N[&cols=4][&from=][&to=][&w=320]` instead returns one N-up **contact
+  sheet** across the clip (N 2–60). `src` must name an existing file under
+  `/media/` or `/library/` (404 otherwise). Results are cached in
+  `analysis/frames/` keyed by source path, size and mtime; the response carries
+  `X-FableCut-Frame-Times` (comma-separated sample times, so a sheet's cells can
+  be mapped back to timestamps) and `X-FableCut-Frame-Source`.
+- `POST /api/scopes/request` also takes `{"image":true}`, which makes the editor
+  return the measured still as a JPEG data URL in `result.image` — how
+  `fablecut_frame {time}` shows an agent the composed program picture.
 - `GET  /api/events`  — SSE: named event `change` when project.json, ./media or
   ./library changes; named event `profiles` when `encoding-profiles.json` changes
   (UI refreshes the export-profile list only — no project reload)

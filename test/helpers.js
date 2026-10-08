@@ -177,11 +177,17 @@ function startMcp(t, dataDir, env = {}) {
         child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
       });
     },
-    /* Convenience: call a tool and return its text payload. */
+    /* Convenience: call a tool and return its text payload. `content` is the
+       full block list for tools that answer with more than text (images). */
     async callTool(name, args = {}) {
       const res = await api.request("tools/call", { name, arguments: args });
       assert.ok(res.result, `tools/call ${name} returned no result: ${JSON.stringify(res)}`);
-      return { text: res.result.content[0].text, isError: !!res.result.isError };
+      const content = res.result.content || [];
+      return {
+        text: (content.find((c) => c.type === "text") || {}).text || "",
+        content,
+        isError: !!res.result.isError,
+      };
     },
     stop: () => new Promise((resolve) => {
       if (exited !== null) return resolve();

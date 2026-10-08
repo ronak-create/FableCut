@@ -16,11 +16,12 @@
    ═══════════════════════════════════════════════════════════════════════════ */
 "use strict";
 const http = require("http");
+const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const { spawn, spawnSync, execFile } = require("child_process");
 
-const { analyze } = require("./analyze");
+const { analyze, frame, frameGrid } = require("./analyze");
 const {
   PROFILES_FILE,
   loadEncodeProfiles,
@@ -37,7 +38,7 @@ const { denoiseFile, AMOUNT_IDS: DENOISE_AMOUNTS } = require("./denoise");
 
 const {
   APP_DIR, DATA_DIR, MEDIA_DIR, EXPORTS_DIR, ANALYSIS_DIR, LIBRARY_DIR,
-  PROJECT_FILE, LIBRARY_SUBDIRS, ensureDirs,
+  PROJECT_FILE, LIBRARY_SUBDIRS, FRAMES_DIR, ensureDirs,
 } = require("./paths");
 
 /* Static app files are served from the install dir; everything the user creates
@@ -173,6 +174,32 @@ function run(cmd, args) {
     execFile(cmd, args, { maxBuffer: 1 << 24 }, (err, _out, stderr) =>
       err ? reject(new Error((stderr || String(err)).slice(-800))) : resolve());
   });
+}
+
+/** A "/media/…" or "/library/…" src → an existing file inside that root, or null.
+ *  Every src-accepting endpoint resolves through here: basename alone is not
+ *  enough (library has subfolders) and a bare join is a traversal hole. */
+function resolveSrc(src) {
+  const p = decodeURIComponent(String(src || "").split("?")[0]);
+  const [root, rel] = p.startsWith("/media/") ? [MEDIA_DIR, p.slice(7)]
+    : p.startsWith("/library/") ? [LIBRARY_DIR, p.slice(9)] : [null, null];
+  if (!root || !rel) return null;
+  const file = path.normalize(path.join(root, rel));
+  if (!file.startsWith(path.normalize(root + path.sep))) return null;
+  try { return fs.statSync(file).isFile() ? file : null; } catch { return null; }
+}
+
+/** An explicit absolute/relative path argument → an existing file, or null.
+ *  Used by /api/frame only. This deliberately reaches outside media/ and
+ *  library/: looking at a clip must not require putting it in the project
+ *  folder. The caller is the local MCP server or the user's own fetch, both
+ *  already able to read any file the user can — and unlike resolveSrc() it
+ *  never turns a request string into a path *inside* a served root, so there
+ *  is no traversal to defend. It is deliberately NOT how a src is resolved. */
+function resolvePathArg(p) {
+  if (!p || typeof p !== "string") return null;
+  let file = path.resolve(p);
+  try { return fs.statSync(file).isFile() ? file : null; } catch { return null; }
 }
 
 /* Remux MP4-family uploads with `+faststart` so the moov atom leads the file —
@@ -541,7 +568,7 @@ const server = http.createServer(async (req, res) => {
       if (m != null && (typeof m !== "object" || typeof m.clip !== "string" || !Number.isInteger(m.layer) || m.layer < 0)) {
         sendJSON(res, 400, { error: "matte must be {clip: \"<clip id>\", layer: <index ≥ 0>}" }); return;
       }
-      sendJSON(res, 200, exportJobs.request({ kind: "scopes", time, where: opts.where, revision, matte: m || null }));
+      sendJSON(res, 200, exportJobs.request({ kind: "scopes", time, where: opts.where, revision, matte: m || null, image: opts.image === true }));
     } catch (e) {
       sendJSON(res, e.code === 409 || e.code === 400 ? e.code : 500, { error: String(e.message || e) });
     }
@@ -683,6 +710,104 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  /* API: one frame of a source clip, or an N-up contact sheet across it —
+     the "eyes" to go with /api/analyze's ears, so an agent can look at a
+     moment instead of guessing from an energy number. JPEG in, JPEG out.
+
+       GET /api/frame?src=/media/x.mp4&t=3.2[&w=768][&q=4]
+       GET /api/frame?src=/media/x.mp4&frames=12[&cols=4][&from=0][&to=30][&w=320]
+       GET /api/frame?path=C:\clips\x.mp4&t=3.2
+
+     `src` is a served /media/ or /library/ path. `path` is any readable path on
+     this machine — it does NOT copy the file into media/, because looking at a
+     clip must not change the user's project folder. `path` is reached only from
+     this localhost API (the MCP server and the user's own fetch), which can
+     already read those files; resolveSrc() remains the guard for anything that
+     turns a request string into a path inside a served root.
+
+     &text=1 returns JSON statistics instead of the image, for agents (or
+     models) that cannot see one. Needs ffmpeg on PATH.
+
+     Results are cached under analysis/frames/ by a hash of every argument, so
+     polling the same timestamp costs nothing and the mtime/size of the cached
+     file answers "did the source change underneath this?". */
+  if (p === "/api/frame" && req.method === "GET") {
+    /* The path is resolved first: whether a file is readable never depends on
+       whether ffmpeg happens to be installed. */
+    const pathArg = url.searchParams.get("path");
+    const src = url.searchParams.get("src") || "";
+    const file = pathArg ? resolvePathArg(pathArg) : resolveSrc(src);
+    if (!file) {
+      sendJSON(res, 404, { error: pathArg
+        ? "path must be an existing file on this machine"
+        : "src must name an existing file under /media/ or /library/" });
+      return;
+    }
+    if (!HAS_FFMPEG) { sendJSON(res, 400, { error: "ffmpeg not found on PATH — frame extraction needs it" }); return; }
+    const num = (k, dflt) => {
+      const raw = url.searchParams.get(k);
+      if (raw === null || raw === "") return dflt;
+      const n = Number(raw);
+      if (!Number.isFinite(n)) throw new Error(`${k} must be a number`);
+      return n;
+    };
+    try {
+      fs.mkdirSync(FRAMES_DIR, { recursive: true });
+      const isSheet = url.searchParams.get("frames") != null;
+      const opts = isSheet
+        ? { frames: num("frames"), cols: num("cols", 4), from: num("from", 0), to: num("to", undefined), width: num("w", 320), quality: url.searchParams.get("q") }
+        : { t: num("t", 0), width: num("w", 768), quality: url.searchParams.get("q") };
+      // Key on the source's identity + size + mtime so an overwritten file
+      // never serves a stale grab.
+      const st = fs.statSync(file);
+      const key = crypto.createHash("sha1")
+        .update(JSON.stringify([file, st.size, Math.round(st.mtimeMs), opts])).digest("hex");
+      const cache = path.join(FRAMES_DIR, key + ".jpg");
+      let meta = null;
+      try {
+        meta = JSON.parse(fs.readFileSync(cache.replace(/\.jpg$/, ".json"), "utf8"));
+      } catch { /* render below */ }
+      // Self-healing: if the JPEG exists but meta doesn't, re-render so both are
+      // written together. A partial write (JPEG with no meta) otherwise serves
+      // 500 forever because meta stays null.
+      if (!fs.existsSync(cache) || !meta) {
+        const r = isSheet ? await frameGrid(file, opts) : await frame(file, opts);
+        meta = isSheet
+          ? { frames: r.frames, cols: r.cols, rows: r.rows, times: r.times, duration: r.duration, cellWidth: r.width, stats: r.stats }
+          : { frames: 1, times: [r.time], stats: r.stats };
+        meta.source = pathArg ? pathArg : src;
+        const tmp = cache + ".tmp";
+        fs.writeFileSync(tmp, r.jpeg);
+        fs.renameSync(tmp, cache); // atomic: a half-written jpeg never gets cached
+        fs.writeFileSync(cache.replace(/\.jpg$/, ".json"), JSON.stringify(meta));
+      }
+      /* text=1 answers JSON measurements instead of the picture, for agents and
+         models that cannot see one. Same decode, no pixels over the wire. */
+      if (url.searchParams.get("text") === "1") {
+        sendJSON(res, 200, {
+          source: meta.source, frames: meta.frames, times: meta.times,
+          cols: meta.cols || null, rows: meta.rows || null, duration: meta.duration ?? null,
+          stats: meta.stats || null,
+        });
+        return;
+      }
+      res.writeHead(200, {
+        "Content-Type": "image/jpeg",
+        "Content-Length": fs.statSync(cache).size,
+        "Cache-Control": "no-cache",
+        "X-FableCut-Frame-Times": (meta.times || []).join(","),
+        "X-FableCut-Frame-Source": encodeURI(meta.source || src),
+      });
+      fs.createReadStream(cache).pipe(res);
+    } catch (e) {
+      const msg = e && e.message ? e.message : String(e);
+      /* A bad argument, a missing file, or a timestamp past the end is the
+         caller's problem; anything else is ours. */
+      sendJSON(res, /must be|File not found|no video|no frame|past the end/.test(msg) ? 400 : 500, { error: msg });
+    }
+    return;
+  }
+
   /* API: noise reduction — POST {src:"/media/…"|"/library/…", amount:"light"|"medium"|"strong"}
      writes a denoised FLAC of the whole file into media/ (reused if it exists)
      and returns {src, name, duration, channels}. Registering it is the caller's job. */
@@ -691,11 +816,8 @@ const server = http.createServer(async (req, res) => {
     try {
       const opts = JSON.parse((await readBody(req)).toString("utf8") || "{}");
       if (!DENOISE_AMOUNTS.includes(opts.amount)) { sendJSON(res, 400, { error: `amount must be one of ${DENOISE_AMOUNTS.join(", ")}` }); return; }
-      const src = decodeURIComponent(String(opts.src || "").split("?")[0]);
-      const [root, rel] = src.startsWith("/media/") ? [MEDIA_DIR, src.slice(7)]
-        : src.startsWith("/library/") ? [LIBRARY_DIR, src.slice(9)] : [null, null];
-      const file = root && path.normalize(path.join(root, rel));
-      if (!file || !file.startsWith(path.normalize(root + path.sep)) || !fs.existsSync(file)) {
+      const file = resolveSrc(opts.src);
+      if (!file) {
         sendJSON(res, 404, { error: "src must name an existing file under /media/ or /library/" });
         return;
       }

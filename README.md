@@ -252,6 +252,20 @@ same time.
   `node analyze.js ref.mp4`, `POST /api/analyze`, or the
   `fablecut_analyze_reference` MCP tool.
 
+**Look at the footage**
+
+- An agent (or you, over REST) can fetch an actual **image** of any moment:
+  `GET /api/frame?src=/media/x.mp4&t=3.2` returns a JPEG of that frame, and
+  `&frames=12` returns a 4×3 **contact sheet** across the clip — a cheap survey
+  of everything a 3-minute take holds. Grabs are cached under `analysis/frames/`.
+- The `fablecut_frame` MCP tool wraps it and returns the image inline, so a
+  multimodal model can *look*. Pass a `time` instead of a `path` and it renders
+  the **composed timeline** through the editor's own compositor — graded, all
+  tracks, identical to what export produces — so "is this grade right?" and "what
+  did I actually build?" have a visual answer.
+- Together with the analyzer above, agents pick footage by looking at it instead
+  of guessing from an energy number.
+
 **Asset library**
 
 - `library/` folders surface as tabs in the UI: **Elements** (overlay art),
@@ -377,7 +391,7 @@ Three equivalent control surfaces:
 
    Tools: `fablecut_status` (auto-starts the editor), `fablecut_docs`,
    `fablecut_get_project`, `fablecut_set_project`, `fablecut_patch_project`,
-   `fablecut_import_media`, `fablecut_analyze_reference`,
+   `fablecut_import_media`, `fablecut_analyze_reference`, `fablecut_frame`,
    `fablecut_encode_profiles`, `fablecut_normalize_audio`, `fablecut_auto_duck`,
    `fablecut_denoise`, `fablecut_export`, `fablecut_scopes`.
 
@@ -405,6 +419,15 @@ Or hand it a reference: *"here's a reel I like — analyze it and remake it with
 my clips, same music"*. The agent calls `fablecut_analyze_reference`, gets the
 blueprint (cuts, beats, BPM, energy, drop, extracted music), and rebuilds the
 structure shot-for-shot with your footage.
+
+**The agent can see, not just measure.** `fablecut_analyze_reference` gives it
+the *ears* — where the cuts land, which shots hit hard. `fablecut_frame` gives it
+the *eyes*: ask for any moment of any clip (`{path, t:3.2}`) and the call comes
+back with an actual image the model can look at, or ask for a 12-frame contact
+sheet to survey a whole clip in one call (`{path, frames:12}`). Pass a `time`
+with no `path` and it renders the composed timeline — graded, all tracks, exactly
+as export would. So footage gets chosen by looking at it rather than guessing
+from a number, and a grade gets checked against the real picture.
 
 **Conflict-safe concurrent editing**: the UI, the MCP tools, and direct
 `project.json` writes all agree on a `revision` counter. If you edit a clip in

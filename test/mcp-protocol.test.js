@@ -82,9 +82,35 @@ test("tools/list advertises well-formed tools", async (t) => {
   const names = result.tools.map((x) => x.name);
   for (const expected of ["fablecut_status", "fablecut_docs", "fablecut_get_project",
     "fablecut_set_project", "fablecut_patch_project", "fablecut_import_media",
-    "fablecut_analyze_reference", "fablecut_encode_profiles"]) {
+    "fablecut_analyze_reference", "fablecut_frame", "fablecut_encode_profiles"]) {
     assert.ok(names.includes(expected), `missing documented tool ${expected}`);
   }
+});
+
+test("every tools/call answer is well-formed content blocks", async (t) => {
+  // fablecut_frame answers with an image alongside its text; the rest answer
+  // with text only. Whatever a tool returns must reach the client as valid
+  // content blocks, and at least one text block must lead so an agent can read
+  // what it is looking at without decoding an image.
+  const mcp = startMcp(t, makeDataDir(t));
+  await mcp.request("initialize", { protocolVersion: LATEST });
+  const { result } = await mcp.request("tools/list");
+  for (const tool of result.tools) {
+    if (tool.name === "fablecut_status") continue; // spawns the editor server
+    const res = await mcp.request("tools/call", { name: tool.name, arguments: {} });
+    assert.ok(res.result, `${tool.name} returned no result`);
+    const content = res.result.content;
+    assert.ok(Array.isArray(content) && content.length, `${tool.name} returned no content blocks`);
+    assert.equal(content[0].type, "text", `${tool.name} must lead with a text block`);
+    for (const block of content) {
+      if (block.type === "text") assert.equal(typeof block.text, "string");
+      else if (block.type === "image") {
+        assert.match(block.mimeType || "", /^image\//, "an image block needs its mime type");
+        assert.match(block.data || "", /^[A-Za-z0-9+/]+={0,2}$/, "image data must be base64");
+      } else assert.fail(`${tool.name} returned an unknown block type: ${block.type}`);
+    }
+  }
+  await stillAlive(mcp);
 });
 
 test("tools/call on an unknown tool is an error result, not a crash", async (t) => {

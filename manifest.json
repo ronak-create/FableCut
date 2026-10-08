@@ -33,6 +33,7 @@
     { "name": "fablecut_patch_project", "description": "Apply targeted, merge-safe ops (add/update/remove clip or media, set project fields, track levels, submix buses, audio effects and their automation, color grades and secondaries) and timeline edits (split, ripple delete, lift/extract, insert/overwrite, ripple/roll/slip/slide, crossfade)" },
     { "name": "fablecut_import_media", "description": "Copy a local file into the project's media folder and register it" },
     { "name": "fablecut_analyze_reference", "description": "Analyze a reference video into an edit blueprint: shot cuts, beats, BPM, energy curve, drop; extracts its music" },
+    { "name": "fablecut_frame", "description": "Look at the footage: one JPEG frame of a source clip at a timestamp, an N-up contact sheet across a clip, or the composed timeline rendered and graded at a moment - returned inline as an image the agent can see" },
     { "name": "fablecut_encode_profiles", "description": "List the ffmpeg encoding profiles available for Fast export" },
     { "name": "fablecut_normalize_audio", "description": "Loudness-normalize clips (BS.1770 LUFS or sample peak) by setting their clip gain" },
     { "name": "fablecut_auto_duck", "description": "Duck music under dialogue: write duck keyframes wherever the voice tracks speak" },
