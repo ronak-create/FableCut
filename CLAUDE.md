@@ -47,7 +47,12 @@ Editing via full get→modify→set costs thousands of tokens per change. Cheape
 2. **Edit** with `fablecut_patch_project` ops — send only what changes, e.g.
    `{ops:[{op:"updateClip", id:"c_v2", set:{props:{filterPreset:"noir"}}}]}`.
    It re-reads the latest document internally, so it is merge-safe by design
-   (no CONFLICT dance) and never destroys concurrent UI tweaks.
+   (no CONFLICT dance) and never destroys concurrent UI tweaks. To also be sure
+   the clips you touch haven't changed since you looked, pass `baseRevision`
+   (the `revision` you planned from — `fablecut_get_project`, `fablecut_status`
+   or the last "Patched (revision N)" result): if the project has moved past it,
+   the patch is refused with "CONFLICT — not saved" and the current revision.
+   Re-check the clips, then retry with that revision.
 3. **Docs**: request `fablecut_docs {section:"schema"}` (or "Recipes", "Remake", …)
    instead of the whole manual; skip it entirely if the schema is already in context.
 4. **Media questions** (duration, fps, size): read them from the registered media

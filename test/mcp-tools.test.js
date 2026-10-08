@@ -215,6 +215,43 @@ test("fablecut_set_project refuses to clobber an edit made behind its back", asy
   assert.ok(after.revision > 7, "a forced save still moves the revision forward");
 });
 
+test("patch with a stale baseRevision is refused instead of landing on a newer edit", async (t) => {
+  const { dir, mcp } = await boot(t);
+  const base = readProject(dir).revision;
+
+  // The user edits in the UI while the agent is planning its ops.
+  writeProject(dir, { ...readProject(dir), revision: base + 3, name: "Edited in the UI" });
+
+  const stale = await mcp.callTool("fablecut_patch_project", {
+    baseRevision: base,
+    ops: [{ op: "updateClip", id: "c_a", set: { start: 2 } }],
+  });
+  assert.ok(stale.isError, "a patch planned on an old revision must be refused");
+  assert.match(stale.text, /CONFLICT/);
+  assert.match(stale.text, new RegExp(`revision ${base + 3}`), "the error carries the current revision");
+  assert.equal(readProject(dir).clips[0].start, 0, "nothing may be written");
+  assert.equal(readProject(dir).name, "Edited in the UI");
+
+  // Retrying against the revision from the error goes through.
+  const ok = await mcp.callTool("fablecut_patch_project", {
+    baseRevision: base + 3,
+    ops: [{ op: "updateClip", id: "c_a", set: { start: 2 } }],
+  });
+  assert.equal(ok.isError, false, ok.text);
+  assert.match(ok.text, new RegExp(`revision ${base + 4}`));
+  const doc = readProject(dir);
+  assert.equal(doc.clips[0].start, 2);
+  assert.equal(doc.name, "Edited in the UI", "the user's edit survives");
+
+  // Without baseRevision a patch still applies on top of whatever is latest.
+  const loose = await mcp.callTool("fablecut_patch_project", { ops: [{ op: "setProject", set: { name: "Agent" } }] });
+  assert.equal(loose.isError, false, loose.text);
+
+  const bad = await mcp.callTool("fablecut_patch_project", { baseRevision: "7", ops: [{ op: "setProject", set: { name: "x" } }] });
+  assert.ok(bad.isError);
+  assert.match(bad.text, /baseRevision/);
+});
+
 test("fablecut_encode_profiles lists shipped presets and rejects an unknown id", async (t) => {
   const { mcp } = await boot(t);
 
