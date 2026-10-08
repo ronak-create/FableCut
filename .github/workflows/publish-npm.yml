@@ -1,0 +1,59 @@
+name: Publish to npm
+
+# Publishes the `fablecut` package whenever a GitHub release goes out. Auth is
+# npm Trusted Publishing (OIDC): npm trusts this workflow file directly, so there
+# is no NPM_TOKEN secret to store or rotate. One-time setup on npmjs.com:
+# package `fablecut` → Settings → Trusted Publisher → GitHub Actions,
+# repo ronak-create/FableCut, workflow `publish-npm.yml`.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:        # manual re-run: publishes whatever main's package.json says
+
+permissions:
+  contents: read
+  id-token: write           # required for the OIDC exchange with npm
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+
+      # Trusted Publishing needs npm >= 11.5.1.
+      - name: Update npm
+        run: npm install -g npm@latest
+
+      - name: Check the version
+        id: ver
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          echo "package.json version: $version"
+          # A release tag must match package.json, or we'd publish the wrong version.
+          if [ -n "${TAG:-}" ] && [ "${TAG#v}" != "$version" ]; then
+            echo "::error::Release tag $TAG does not match package.json version $version"
+            exit 1
+          fi
+          # Already published (e.g. by hand)? Nothing to do — npm refuses re-publishes.
+          if npm view "fablecut@$version" version >/dev/null 2>&1; then
+            echo "fablecut@$version is already on npm, skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run the test suite
+        if: steps.ver.outputs.skip != 'true'
+        run: npm test
+
+      - name: Publish
+        if: steps.ver.outputs.skip != 'true'
+        run: npm publish --access public
