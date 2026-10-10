@@ -84,8 +84,7 @@ const TRANSITIONS = ["none", "fade", "slide-left", "slide-right", "slide-up", "s
 const TEXT_ANIMS = ["none", "typewriter", "word-pop", "word-slide", "karaoke",
   "letter-pop", "wave", "bounce", "shake",
   "clip-reveal", "zoom-in", "font-cut", "rise-mask"];
-const BLEND_MODES = ["normal", "multiply", "screen", "overlay", "lighter", "soft-light",
-  "hard-light", "color-dodge", "darken", "lighten", "difference"];
+const BLEND_MODES = self.FableCutMask.BLENDS;   // the canvas composite set, shared with the agent (mask.js)
 /* Named looks. % props multiply against the clip's own value, additive props add. */
 const FILTER_PRESETS = {
   none: {},
@@ -3273,6 +3272,9 @@ function rebuildClips() {
   els.tracksContent.style.width = w + "px";
   els.ruler.style.width = els.timelineScroll.clientWidth + "px";
   for (const row of els.tracks.children) row.innerHTML = "";
+  const matted = project.clips.map((x) => [x, clipMatte(x)]).filter(([, m]) => m);
+  const isMatte = (c) => matted.some(([x, m]) => m.track === c.track && x.disabled !== true &&
+    x.start < c.start + c.duration && c.start < x.start + x.duration);   // hidden while it cuts that clip
   for (const c of project.clips) {
     const tr = trackOf(c); if (!tr) continue;
     const row = els.tracks.querySelector(`[data-track="${c.track}"]`);
@@ -3280,7 +3282,7 @@ function rebuildClips() {
     div.className = `clip c-${c.kind}` +
       (state.selIds.has(c.id) ? " selected" : "") + (c.id === state.selId ? " primary" : "") +
       (isClipLocked(c) ? " locked" : "") + (c.disabled === true ? " disabled" : "") +
-      (c.unlinked === true ? " unlinked" : "");
+      (c.unlinked === true ? " unlinked" : "") + (c.kind !== "audio" && isMatte(c) ? " matte-src" : "");
     div.dataset.id = c.id;
     div.style.left = c.start * state.pps + "px";
     div.style.width = Math.max(8, c.duration * state.pps) + "px";
@@ -3292,7 +3294,8 @@ function rebuildClips() {
     const hasWave = c.kind === "audio" && !!wavePeaksFor(c);
     if (hasWave) body += `<canvas class="wave"></canvas>`;
     const badge = (c.keyframes && Object.keys(c.keyframes).length ? "◆ " : "") +
-                  (c.transitionIn || c.transitionOut ? "⇄ " : "");
+                  (c.transitionIn || c.transitionOut ? "⇄ " : "") +
+                  (clipMatte(c) ? "◐ " : "");
     const chTag = (() => {
       const s = audioChannelShort(c.props?.audioChannel);
       return s ? s + " · " : "";
@@ -4860,9 +4863,18 @@ function renderInspector(lite) {
   const sel = (label, k, opts, cur) => row(label,
     `<select data-k="${k}">${opts.map((o) => `<option value="${o}" ${String(o) === String(cur) ? "selected" : ""}>${o}</option>`).join("")}</select>`, k);
   const check = (label, k, on) => row(label, `<input type="checkbox" data-k="${k}" ${on ? "checked" : ""}>`, k);
+  // track matte: the mode, and the track it comes from (auto = the video track above)
+  const matteRows = () => {
+    const others = videoTrackIds().filter((id) => id !== c.track), auto = Mask.matteTrackFor({ ...c, props: { matte: "alpha" } }, videoTrackIds());
+    const opts = (cur) => [`<option value="" ${!cur ? "selected" : ""}>Above (${auto || "none"})</option>`, ...others.map((id) => `<option value="${id}" ${cur === id ? "selected" : ""}>${id}</option>`)].join("");
+    return row("Track matte", `<select data-k="matte">${["none", ...Mask.MATTES].map((o) => `<option value="${o}" ${(p.matte || "none") === o ? "selected" : ""}>${o.replace("-", " ")}</option>`).join("")}</select>`, "matte")
+      + (p.matte ? row("Matte track", `<select data-k="matteTrack">${opts(p.matteTrack)}</select>`, "matteTrack")
+        + (clipMatte(c) ? "" : `<div class="insp-note">No video track above to take the matte from — pick one.</div>`) : "");
+  };
   if (c.kind === "adjust") {
     html += `<div class="insp-section"><h3>Adjustment layer</h3>
       ${slider("opacity", 0, 1, 0.01, p.opacity)}
+      ${matteRows()}
     </div>`;
   } else if (c.kind !== "audio") {
     html += `<div class="insp-section"><h3>Transform</h3>
@@ -4872,6 +4884,7 @@ function renderInspector(lite) {
       ${slider("rotation", -180, 180, 1, p.rotation, "°")}
       ${slider("opacity", 0, 1, 0.01, p.opacity)}
       ${sel("Blend", "blend", BLEND_MODES, p.blend)}
+      ${matteRows()}
     </div>`;
   }
   if (c.kind === "video" || c.kind === "image" || c.kind === "svg") {
@@ -5079,6 +5092,12 @@ function renderInspector(lite) {
       else if (ANIMATABLE.includes(k)) {
         if (!setAnimProp(c, k, v))
           toast("Move the playhead over the clip to edit its keyframes");
+      }
+      else if (k === "matte" || k === "matteTrack") {   // "none" / "" (= the track above) clear the prop
+        if (v === "none" || v === "") delete c.props[k]; else c.props[k] = String(v);
+        if (!c.props.matte) delete c.props.matteTrack;
+        state.dirtyTimeline = true; inspPropGen++;
+        if (k === "matte") renderInspector();
       }
       else { c.props[k] = v; if (k === "text") state.dirtyTimeline = true; }
       const valEl = els.inspector.querySelector(`[data-val="${k}"]`);
@@ -8826,7 +8845,8 @@ function drawFrame(t = state.time) {
   ctx2d.fillStyle = project.background || "#000"; ctx2d.fillRect(0, 0, W, H);
   // render video tracks bottom-up (V1 under V2)
   if (runtime.maskView) runtime.maskView.ready = false;
-  for (const c of visibleClipsAt(t)) drawClip(c, W, H, t);
+  const clips = visibleClipsAt(t), mattes = matteTracksAt(clips);
+  for (const c of clips) if (!mattes.has(c.track)) drawClip(c, W, H, t);   // a matte track only cuts
   if (!state.exporting && !runtime.sampling) drawMaskView(W, H);
   if (!runtime.sampling) updateScopes(); // before the handles, so they never reach the scopes
   // on-canvas selection handles (never during export or playback)
@@ -8908,7 +8928,8 @@ function toLocal(pt, b) {
   return { x: dx * cs - dy * sn, y: dx * sn + dy * cs };
 }
 function pickClipAt(pt, W, H) {
-  const seq = visibleClipsAt(state.time).filter(isVisualClip);
+  const all = visibleClipsAt(state.time), mattes = matteTracksAt(all);
+  const seq = all.filter((c) => isVisualClip(c) && !mattes.has(c.track));
   for (let i = seq.length - 1; i >= 0; i--) {
     const c = seq[i], b = clipBounds(c, evalProps(c, state.time), W, H), lp = toLocal(pt, b);
     if (Math.abs(lp.x) <= b.hw && Math.abs(lp.y) <= b.hh) return c;
@@ -9105,9 +9126,9 @@ function endCanvasDrag(e) {
 els.preview.addEventListener("pointerup", endCanvasDrag);
 els.preview.addEventListener("pointercancel", endCanvasDrag);
 
-function drawClip(c, W, H, t) {
-  const masks = clipMasksAt(c, t);
-  if (masks) drawMaskedClip(c, W, H, t, masks);
+function drawClip(c, W, H, t, asMatte = false) {
+  const masks = clipMasksAt(c, t), matte = asMatte ? null : clipMatte(c);
+  if (masks || matte) drawMaskedClip(c, W, H, t, masks, matte);
   else drawClipPicture(c, W, H, t, false);
 }
 /** Draw one clip. `layered`: into a mask layer — opacity and blend wait for
@@ -9253,7 +9274,82 @@ function noteMaskGeom(c, m, x0, y0, w, h) {
   if (!state.exporting && !runtime.sampling) (runtime.maskGeom ||= new Map()).set(c.id, g);
   return g;
 }
-function drawMaskedClip(c, W, H, t, masks) {
+/* ── Track mattes ──
+   A clip with props.matte is cut by the picture on its matte track (the video
+   track above unless props.matteTrack names one): by that picture's alpha, or
+   by its luma (white = shows), each optionally inverted. The matte track does
+   not draw into the frame while a clip on screen uses it. */
+const videoTrackIds = () => TRACKS.filter((tr) => tr.kind === "video").map((tr) => tr.id);
+/** { mode, track } when the clip has a track matte with a track to take it from. */
+function clipMatte(c) {
+  if (c.kind === "audio" || !c.props || !c.props.matte) return null;
+  const track = Mask.matteTrackFor(c, videoTrackIds());
+  return track ? { mode: c.props.matte, track } : null;
+}
+/** The tracks that are mattes for clips in `clips` (the frame's clips): they only cut. */
+function matteTracksAt(clips) {
+  const out = new Set();
+  for (const c of clips) { const m = clipMatte(c); if (m) out.add(m.track); }
+  return out;
+}
+/** The matte track's picture at t as an alpha matte: { canvas, empty }. A luma matte
+ *  turns brightness into alpha (over black, so transparent = black). */
+function trackMatteAt(matte, W, H, t) {
+  const src = maskCtx("tmSrc", W, H), luma = matte.mode.startsWith("luma");
+  src.setTransform(1, 0, 0, 1, 0, 0);
+  src.globalAlpha = 1; src.globalCompositeOperation = "source-over"; src.filter = "none";
+  src.clearRect(0, 0, W, H);
+  const clips = project.clips.filter((x) => x.track === matte.track && x.disabled !== true && x.kind !== "audio" &&
+    x.kind !== "adjust" && activeAt(x, t)).sort((a, b) => a.start - b.start);
+  if (!clips.length) return { canvas: src.canvas, empty: true };
+  if (luma) { src.fillStyle = "#000"; src.fillRect(0, 0, W, H); }
+  const main = ctx2d;
+  ctx2d = src;
+  try { for (const x of clips) drawClip(x, W, H, t, true); } finally { ctx2d = main; }
+  if (!luma) return { canvas: src.canvas, empty: false };
+  return { canvas: lumaToAlpha(src.canvas, maskCtx("tmOut", W, H), W, H), empty: false };
+}
+/** Brightness → alpha (Rec. 709 weights): an SVG luminanceToAlpha filter on the
+ *  canvas, or a pixel loop where canvas filters are missing. */
+let lumaFilter = null;
+function lumaToAlpha(srcCanvas, out, W, H) {
+  out.setTransform(1, 0, 0, 1, 0, 0);
+  out.globalAlpha = 1; out.globalCompositeOperation = "source-over";
+  out.clearRect(0, 0, W, H);
+  if (lumaFilter == null) lumaFilter = makeLumaFilter();
+  if (lumaFilter) {
+    out.filter = lumaFilter; out.drawImage(srcCanvas, 0, 0); out.filter = "none";
+    return out.canvas;
+  }
+  out.drawImage(srcCanvas, 0, 0);
+  const img = out.getImageData(0, 0, W, H), d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    d[i + 3] = Math.round(0.2125 * d[i] + 0.7154 * d[i + 1] + 0.0721 * d[i + 2]);
+    d[i] = d[i + 1] = d[i + 2] = 0;
+  }
+  out.putImageData(img, 0, 0);
+  return out.canvas;
+}
+/** "url(#…)" for the luma filter, or "" when the canvas can't apply it (checked once on a pixel). */
+function makeLumaFilter() {
+  try {
+    const ns = "http://www.w3.org/2000/svg", svg = document.createElementNS(ns, "svg");
+    svg.setAttribute("width", "0"); svg.setAttribute("height", "0"); svg.setAttribute("aria-hidden", "true");
+    svg.style.cssText = "position:absolute;width:0;height:0;overflow:hidden";
+    svg.innerHTML = '<filter id="fcLumaAlpha" color-interpolation-filters="sRGB"><feColorMatrix type="luminanceToAlpha"/></filter>';
+    document.body.appendChild(svg);
+    const a = document.createElement("canvas"), b = document.createElement("canvas");
+    a.width = b.width = a.height = b.height = 1;
+    const x = a.getContext("2d"); x.fillStyle = "#fff"; x.fillRect(0, 0, 1, 1);
+    const y = b.getContext("2d", { willReadFrequently: true });
+    y.filter = "url(#fcLumaAlpha)"; y.drawImage(a, 0, 0);
+    const px = y.getImageData(0, 0, 1, 1).data;
+    return px[3] > 250 && px[0] < 5 ? "url(#fcLumaAlpha)" : "";
+  } catch { return ""; }
+}
+/** A clip that is cut before it composites: by its masks, by a track matte, or both. */
+function drawMaskedClip(c, W, H, t, masks, matte = null) {
+  const tm = matte ? trackMatteAt(matte, W, H, t) : null;   // first: the matte's clips use the layer buffers too
   const layer = maskCtx("layer", W, H);
   layer.setTransform(1, 0, 0, 1, 0, 0);
   layer.globalAlpha = 1; layer.globalCompositeOperation = "source-over"; layer.filter = "none";
@@ -9263,7 +9359,26 @@ function drawMaskedClip(c, W, H, t, masks) {
   ctx2d = layer;
   try { r = drawClipPicture(c, W, H, t, true); } finally { ctx2d = main; }
   if (!r || !r.geom) return;
-  const g = r.geom, matte = maskCtx("matte", W, H);
+  layer.setTransform(1, 0, 0, 1, 0, 0);
+  if (tm) {
+    layer.globalCompositeOperation = matte.mode.endsWith("-inverted") ? "destination-out" : "destination-in";
+    if (tm.empty) { if (!matte.mode.endsWith("-inverted")) layer.clearRect(0, 0, W, H); }   // nothing on the matte track: alpha hides all
+    else layer.drawImage(tm.canvas, 0, 0);
+    layer.globalCompositeOperation = "source-over";
+  }
+  if (masks) cutByMasks(c, layer, r.geom, masks, W, H);
+  main.save();
+  main.setTransform(1, 0, 0, 1, 0, 0);
+  const p = r.p;
+  if (c.kind !== "adjust") {   // an adjustment layer already drew at its own opacity
+    main.globalAlpha = clamp(p.opacity, 0, 1);
+    if (p.blend && p.blend !== "normal" && BLEND_MODES.includes(p.blend)) main.globalCompositeOperation = p.blend;
+  }
+  main.drawImage(layer.canvas, 0, 0);
+  main.restore();
+}
+function cutByMasks(c, layer, g, masks, W, H) {
+  const matte = maskCtx("matte", W, H);
   Mask.rasterize(matte, maskCtx("tmp", W, H), maskCtx("tmp2", W, H), masks,
     g.m.translate(g.x0, g.y0), g.w, g.h, W / Math.max(1, project.width));
   layer.setTransform(1, 0, 0, 1, 0, 0);
@@ -9282,15 +9397,6 @@ function drawMaskedClip(c, W, H, t, masks) {
     v.globalCompositeOperation = "source-over";
     view.ready = true;
   }
-  main.save();
-  main.setTransform(1, 0, 0, 1, 0, 0);
-  const p = r.p;
-  if (c.kind !== "adjust") {   // an adjustment layer already drew at its own opacity
-    main.globalAlpha = clamp(p.opacity, 0, 1);
-    if (p.blend && p.blend !== "normal" && BLEND_MODES.includes(p.blend)) main.globalCompositeOperation = p.blend;
-  }
-  main.drawImage(layer.canvas, 0, 0);
-  main.restore();
 }
 /** fablecut_scopes mask: how much of the clip's own picture its masks keep
  *  (rasterized alone, box-aligned) and how much of the frame the cut clip covers. */
@@ -11702,11 +11808,18 @@ async function runScopesJob(ticket, fail) {
       else if (!kcap || kcap.coverage == null) mask.error = "the clip is not on screen at that time (or its masks are all off)";
       else Object.assign(mask, { masks: Mask.describe(clipMasks(kClip)), coverage: kcap.coverage, frameCoverage: kcap.frameCoverage });
     }
-    const clips = visibleClipsAt(t).map((c) => ({
-      id: c.id, name: c.name, kind: c.kind, track: c.track,
-      grade: Color.summarizeGrade(c.props.grade),
-      ...(clipMasks(c) ? { masks: Mask.describe(clipMasks(c)) } : {}),
-    }));
+    const onScreen = visibleClipsAt(t), mattes = matteTracksAt(onScreen);
+    const clips = onScreen.map((c) => {
+      const tm = clipMatte(c);
+      return {
+        id: c.id, name: c.name, kind: c.kind, track: c.track,
+        grade: Color.summarizeGrade(c.props.grade),
+        ...(clipMasks(c) ? { masks: Mask.describe(clipMasks(c)) } : {}),
+        ...(tm ? { matte: `${tm.mode} from ${tm.track}` } : {}),
+        ...(mattes.has(c.track) ? { isMatte: true } : {}),   // cuts a clip below; not drawn itself
+        ...(c.props.blend && c.props.blend !== "normal" ? { blend: c.props.blend } : {}),
+      };
+    });
     await reportExportJob(ticket.id, { status: "done", result: { time: +t.toFixed(3), frame: { w: Math.round(r.w), h: Math.round(r.h) }, stats, clips, matte, mask } }, true);
   } catch (err) {
     fail("could not measure the frame: " + (err && err.message || err));

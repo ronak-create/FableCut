@@ -23,7 +23,15 @@
    block for text and the whole frame for an adjustment layer, so a mask moves,
    scales and turns with its clip. feather and expand are in project pixels.
    Masks combine bottom-up into one matte; the first mask starts from empty when
-   it adds and from full otherwise. invert flips a mask before it combines. */
+   it adds and from full otherwise. invert flips a mask before it combines.
+
+   Compositing (also here, so the editor and the agent agree):
+     props.blend        one of BLENDS — how the clip lays over what is under it
+     props.matte        alpha | alpha-inverted | luma | luma-inverted — a track
+                        matte: the picture on the matte track cuts the clip
+     props.matteTrack?  the video track that is the matte (default: the one
+                        directly above). The matte track is hidden from the
+                        frame while it is somebody's matte. */
 (function (root, factory) {
   const api = factory();
   if (typeof module === "object" && module.exports) module.exports = api;
@@ -42,6 +50,9 @@
     rotation: [-3600, 3600], feather: [0, 1000], expand: [-1000, 1000], opacity: [0, 1],
   };
   const DEFAULTS = { mode: "add", opacity: 1, feather: 0, expand: 0, x: 0.5, y: 0.5, w: 0.5, h: 0.5, scale: 1, rotation: 0 };
+  const BLENDS = ["normal", "multiply", "screen", "overlay", "darken", "lighten", "color-dodge", "color-burn",
+    "hard-light", "soft-light", "difference", "exclusion", "hue", "saturation", "color", "luminosity", "lighter"];
+  const MATTES = ["alpha", "alpha-inverted", "luma", "luma-inverted"];
   const KAPPA = 0.5522847498;   // cubic bezier quarter circle
   const EASES = {
     linear: (u) => u,
@@ -420,8 +431,36 @@
     return out;
   }
 
+  /* ── Track mattes ── */
+  const trackNum = (id) => parseInt(String(id).slice(1), 10) || 0;
+  /** The video track a clip's matte comes from: matteTrack when set (and another video track),
+      else the video track directly above (Vn+1, or the next one up). null = none. */
+  function matteTrackFor(clip, videoTrackIds) {
+    const p = clip && clip.props;
+    if (!p || !MATTES.includes(p.matte)) return null;
+    const ids = (videoTrackIds || []).filter((id) => id !== clip.track);
+    if (p.matteTrack) return ids.includes(p.matteTrack) ? p.matteTrack : null;
+    const own = trackNum(clip.track);
+    let best = null;
+    for (const id of ids) if (trackNum(id) > own && (!best || trackNum(id) < trackNum(best))) best = id;
+    return best;
+  }
+  /** Check props.blend / matte / matteTrack. strict: throw (agent); else drop what is invalid. */
+  function checkCompositing(props, videoTrackIds, ownTrack, strict = false) {
+    if (!isObj(props)) return props;
+    const bad = (msg) => { if (strict) throw new Error(msg); };
+    if (props.blend != null && !BLENDS.includes(props.blend)) { bad(`blend must be ${BLENDS.join(" | ")}`); delete props.blend; }
+    if (props.matte != null && !MATTES.includes(props.matte)) { bad(`matte must be ${MATTES.join(" | ")} (or null for none)`); delete props.matte; }
+    if (props.matteTrack != null) {
+      const ids = videoTrackIds || [];
+      if (typeof props.matteTrack !== "string" || !ids.includes(props.matteTrack)) { bad(`matteTrack must be a video track (${ids.join(", ")})`); delete props.matteTrack; }
+      else if (props.matteTrack === ownTrack) { bad("matteTrack must be another track than the clip's own"); delete props.matteTrack; }
+    }
+    return props;
+  }
+
   return {
-    MAX_MASKS, MAX_POINTS, SHAPES, MODES, KEYED, NUM_KEYED, RANGE, DEFAULTS, EASES,
+    MAX_MASKS, MAX_POINTS, SHAPES, MODES, KEYED, BLENDS, MATTES, matteTrackFor, checkCompositing, NUM_KEYED, RANGE, DEFAULTS, EASES,
     normalizeMasks, normalizeMask, mergeMask, maskAt, masksAt, shiftKeys,
     anchors, tracePath, flatten, polyDist, maskCoverage, combine, matteAt, fitStroke, rasterize, describe, splitPoints, editTopology,
   };

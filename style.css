@@ -2296,6 +2296,17 @@ input[type=range] {
   text-decoration: line-through;
 }
 
+/* A track matte: it cuts the clip below instead of drawing. */
+.clip.matte-src .clip-body {
+  opacity: .55;
+  background-image: repeating-linear-gradient(135deg, transparent 0 6px, rgba(255, 255, 255, .08) 6px 12px);
+}
+
+.clip.matte-src .clip-label::before {
+  content: "Matte · ";
+  opacity: .8;
+}
+
 .timeline-scroll {
   flex: 1;
   min-height: 0;

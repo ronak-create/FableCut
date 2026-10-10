@@ -22,6 +22,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   each clip's masks.
 - Color layers' masks can be bezier or free-hand too (**Draw** in the Color
   tab, or `shape:"bezier"` / `"freehand"` in `setGradeLayer`).
+- **Track mattes.** A clip can be cut by the picture on another track (the
+  video track above by default): `props.matte` = `alpha`, `alpha-inverted`,
+  `luma` or `luma-inverted`, `props.matteTrack` to pick the track. The matte
+  track stops drawing while it is in use; the timeline marks both sides. In the
+  Inspector under **Blend**; agents use the `setMatte` patch op, and
+  `fablecut_scopes` lists each clip's matte and blend.
+- Blend modes: `color-burn`, `exclusion`, `hue`, `saturation`, `color` and
+  `luminosity` join the list (17 in all). `blend`, `matte` and `matteTrack` are
+  validated on `addClip` / `updateClip`.
 
 ## [1.12.1] - 2026-10-08
 

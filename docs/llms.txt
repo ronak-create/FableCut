@@ -46,6 +46,10 @@ about 150 ms. A human and an agent can work the same timeline at once.
   combined with add / subtract / intersect / difference, with feather,
   expansion, invert and opacity, all keyframable. Agents use the `setMask`
   patch op and measure coverage with `fablecut_scopes`.
+- Track mattes and blending: a clip can be cut by the picture on the track
+  above (alpha, alpha inverted, luma, luma inverted; the matte track stops
+  drawing), and laid over the clips below with 17 blend modes. Agents use the
+  `setMatte` patch op and `props.blend`.
 - Export: fast ffmpeg export via encoding profiles, WebCodecs hardware export
   (browser encodes H.264, server muxes), and a realtime MediaRecorder fallback.
   Agents can start an export themselves (`fablecut_export`), in the open editor

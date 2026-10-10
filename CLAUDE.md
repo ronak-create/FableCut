@@ -314,7 +314,8 @@ Examples in `library/svg/`: `sparkles.svg` (loop), `lower-third.svg`,
 | `scale` | 1 | |
 | `rotation` | 0 | degrees |
 | `opacity` | 1 | 0–1 |
-| `blend` | "normal" | multiply · screen · overlay · lighter · soft-light · hard-light · color-dodge · darken · lighten · difference |
+| `blend` | "normal" | how the clip lays over what is under it (see Track mattes and blending) |
+| `matte` · `matteTrack` | — | a track matte (see Track mattes and blending) |
 
 **Layout** (video/image/svg):
 | prop | default | notes |
@@ -792,6 +793,52 @@ logo out of the background** — a bezier around it, `feather` 2–4;
 on the face** — an adjustment layer with a feathered ellipse, keyed to follow
 it; **vignette through an adjustment layer** — an inverted ellipse with
 `feather:200` and the layer's `brightness` down.
+
+### Track mattes and blending
+
+A **track matte** cuts a clip with the picture on another track: where that
+picture is opaque (alpha) or bright (luma), the clip shows. Set it on the
+clip being cut, the fill:
+
+| prop | does |
+|---|---|
+| `matte` | `alpha` · `alpha-inverted` · `luma` · `luma-inverted`. Alpha keeps the clip where the matte's pixels are opaque, luma where they are bright (white = shows, black = gone, Rec. 709 weights). The inverted modes keep the opposite |
+| `matteTrack` | the video track the matte comes from. Default: the video track directly above the clip (V2 for a clip on V1) |
+
+The matte track does not draw into the frame while a clip on screen uses it;
+it only cuts. Its clips keep their own transform, keyframes, opacity, masks
+and effects, so the matte can move, scale and animate on its own. When the
+matte track has nothing at that moment, `alpha` / `luma` show nothing of the
+clip and the inverted modes show all of it. Track mattes and masks combine:
+the matte cuts the clip, then its masks cut what is left, then `opacity` and
+`blend` composite it. A clip used as a matte is drawn without its own track
+matte. Audio clips take neither.
+
+`blend` is how a clip lays over what is under it: `normal` · `multiply` ·
+`screen` · `overlay` · `darken` · `lighten` · `color-dodge` · `color-burn` ·
+`hard-light` · `soft-light` · `difference` · `exclusion` · `hue` ·
+`saturation` · `color` · `luminosity` · `lighter` (add). Blending happens after
+masks and mattes, so a masked clip only blends where it is kept.
+
+In the editor, **Track matte** and **Matte track** sit under **Blend** in the
+Inspector's Transform section (the Adjustment layer section for an adjustment
+layer). The timeline marks a clip with a track matte ◐ and shows the clips
+that serve as its matte hatched, labelled **Matte**.
+
+**Agents:** `{op:"setMatte", id, matte:"luma"}` (or `ids:[…]`; `track:"V3"`
+picks the matte track, `track:null` goes back to the one above;
+`matte:null` removes it). `blend`, `matte` and `matteTrack` written through
+`addClip` / `updateClip` are validated too. `fablecut_scopes` lists each clip
+on screen with its `matte` (e.g. `luma from V2`), `blend`, and whether it is a
+matte itself.
+
+Recipes: **text filled with video** — the text on V2, the video on V1 with
+`matte:"alpha"`; **a shape reveal** — an svg or a masked solid on V2 whose
+scale keys up, the shot on V1 with `matte:"alpha"`; **light leaks / film
+burn** on V2 with `blend:"screen"`; **a grade only in the bright areas** — an
+adjustment layer with `matte:"luma"` over a copy of the shot;
+**a cut-out through a texture** — `luma-inverted` against a black-and-white
+texture.
 
 ### Semantics
 
