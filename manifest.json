@@ -13,7 +13,7 @@
     "type": "git",
     "url": "https://github.com/ronak-create/FableCut"
   },
-  "homepage": "https://ronak-create.github.io/FableCut/",
+  "homepage": "https://fablecut.space/",
   "documentation": "https://github.com/ronak-create/FableCut/blob/main/CLAUDE.md",
   "license": "MIT",
   "keywords": ["video-editor", "nle", "timeline", "canvas", "mcp", "ai-agent", "ffmpeg"],
