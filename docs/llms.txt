@@ -37,9 +37,15 @@ about 150 ms. A human and an agent can work the same timeline at once.
   blacks / shadows / midtones / highlights / whites, log-style contrast and
   pivot, soft rolloff, saturation, luma / RGB curves and hue vs hue / sat /
   luma and sat vs luma curves, and layers — secondaries limited by an HSL
-  qualifier and / or a keyframable ellipse, rect or polygon mask) and live scopes (waveform, RGB parade,
+  qualifier and / or a keyframable ellipse, rect, polygon, bezier or free-hand
+  mask) and live scopes (waveform, RGB parade,
   vectorscope, histogram). Agents grade with the `setGrade` patch op and read
   the result as numbers with `fablecut_scopes`.
+- Masks: cut what any clip shows (video, image, SVG, text, adjustment layer)
+  with rectangle, ellipse, bezier-pen and free-hand shapes, several per clip,
+  combined with add / subtract / intersect / difference, with feather,
+  expansion, invert and opacity, all keyframable. Agents use the `setMask`
+  patch op and measure coverage with `fablecut_scopes`.
 - Export: fast ffmpeg export via encoding profiles, WebCodecs hardware export
   (browser encodes H.264, server muxes), and a realtime MediaRecorder fallback.
   Agents can start an export themselves (`fablecut_export`), in the open editor

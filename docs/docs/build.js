@@ -54,6 +54,11 @@ const PAGES = [
     parts: [["project.json schema", "Color"]],
   },
   {
+    slug: "masks", nav: "Masks", title: "Masks", group: "The timeline",
+    lede: "Cut what a clip shows with rectangles, ellipses, bezier and free-hand shapes: feathered, expanded, inverted, combined and keyframed, from the monitor or from an agent with setMask.",
+    parts: [["project.json schema", "Masks"]],
+  },
+  {
     slug: "editing", nav: "Editing rules", title: "Editing rules", group: "The timeline",
     lede: "How tracks, links, locks, targeting and the trim tools behave, for people and agents alike.",
     parts: [["project.json schema", "Semantics"]],

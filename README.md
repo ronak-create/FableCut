@@ -178,15 +178,21 @@ same time.
   pivot, soft rolloff and saturation, plus **curves** — luma and R / G / B,
   hue vs hue, hue vs saturation, hue vs luma and saturation vs luma, with a
   picker that marks a colour from the monitor, and **layers** (secondaries):
-  a correction limited by an HSL **qualifier** and / or an ellipse, rect or
-  polygon **mask** (feathered, invertible, keyframable, dragged on the
-  monitor), with a matte view. Copy / paste a grade across shots.
+  a correction limited by an HSL **qualifier** and / or an ellipse, rect,
+  polygon, bezier or free-hand **mask** (feathered, invertible, keyframable,
+  dragged on the monitor), with a matte view. Copy / paste a grade across shots.
   Agents grade with the `setGrade` patch op and read the result as numbers
   with `fablecut_scopes` (levels, clipping, colour cast)
 - Quick filter sliders: brightness/contrast/saturation/hue, **temperature & tint**,
   blur, grayscale/sepia/invert, **vignette**, animated **film grain**
 - Blend modes (screen, multiply, overlay…), fit modes (contain/cover/stretch),
   per-edge cropping, corner radius, flip H/V
+- **Masks** — isolate any part of a clip (video, image, SVG, text or an
+  adjustment layer): rectangle, ellipse, **bezier pen** and **free-hand**
+  shapes, several per clip, combined with add / subtract / intersect /
+  difference, each with feather, expansion, invert and opacity, all
+  keyframable (outlines morph). Draw and edit them on the monitor, with a
+  matte view. Agents use the `setMask` patch op and measure with `fablecut_scopes`
 - **Chroma key** (green screen) with tolerance/softness + spill suppression
 - **AI background removal** (person cut-out, in-browser via MediaPipe)
 

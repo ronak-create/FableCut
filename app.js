@@ -779,7 +779,7 @@ const els = {
   importUrlOverlay: $("importUrlOverlay"), importUrlInput: $("importUrlInput"),
   importUrlStatus: $("importUrlStatus"), importUrlProgress: $("importUrlProgress"),
 };
-const ctx2d = els.preview.getContext("2d");
+let ctx2d = els.preview.getContext("2d");   // drawMaskedClip points it at an offscreen layer while a masked clip draws
 
 /* ── Utils ─────────────────────────────────────────────────────────────── */
 const uid = () => Math.random().toString(36).slice(2, 9);
@@ -4092,6 +4092,7 @@ function startClipGesture(e, c, mode, collapseOnClick) {
   const orig = {
     start: c.start, in: c.in, duration: c.duration, track: c.track,
     keyframes: c.keyframes ? JSON.parse(JSON.stringify(c.keyframes)) : undefined,
+    masks: c.props.masks,
   };
   // moving a clip that belongs to a multi-selection drags the whole group;
   // AV-linked partners (video+audio from one file) always move together
@@ -4146,6 +4147,7 @@ function startClipGesture(e, c, mode, collapseOnClick) {
       c.in = (c.kind === "video" || c.kind === "audio") ? orig.in + d * sp : 0;
       c.duration = orig.duration - d;
       c.keyframes = shiftKF(orig.keyframes, d, c.duration);
+      if (orig.masks) c.props.masks = Mask.shiftKeys(orig.masks, d);
       syncLinkedTiming(c);
     } else { // trim-r
       let ne = snapTime(orig.start + orig.duration + dt, groupIds);
@@ -4958,6 +4960,7 @@ function renderInspector(lite) {
   const curveSel = (label, k, tr) => tr?.type === "fade" && c.kind === "audio"
     ? row(label, `<select data-k="${k}" title="Fade shape (audio)">${[["", "Smooth (eased)"], ...Object.entries(AUDIO_FADE_CURVES)].map(([v, l]) =>
       `<option value="${v}" ${(tr.curve || "") === v ? "selected" : ""}>${l}</option>`).join("")}</select>`) : "";
+  if (c.kind !== "audio") html += maskSectionHtml(c);
   html += `<div class="insp-section"><h3>Transition</h3>
     ${tsel("In", "transIn", c.transitionIn)}
     ${curveSel("In curve", "curveIn", c.transitionIn)}
@@ -5208,6 +5211,7 @@ function renderInspector(lite) {
       toggleKfGraph(lab.dataset.kfgraph);
     });
   });
+  bindMaskControls(c);
   syncInspectorOffClip(c);
   renderKfGraphsPanel();
 }
@@ -5294,6 +5298,7 @@ function syncInspectorPlayhead() {
     const label = "◆" + (n || "");
     if (btn.textContent !== label) btn.textContent = label;
   }
+  syncMaskInspector(c);
   syncInspectorOffClip(c); // after the class pass, so ◆ titles read the fresh "on" state
 }
 
@@ -8517,6 +8522,7 @@ function drawAdjust(c, W, H, t) {
   }
   if (p.grain > 0) drawGrain(p.grain, 0, 0, W, H, t);
   ctx2d.restore();
+  return p;
 }
 function needsPixelPass(p, c) {
   return !!(p.chromaKey || p.temperature || p.tint || p.rgbSplit > 0 ||
@@ -8817,7 +8823,9 @@ function drawFrame(t = state.time) {
   ctx2d.filter = "none"; ctx2d.globalAlpha = 1;
   ctx2d.fillStyle = project.background || "#000"; ctx2d.fillRect(0, 0, W, H);
   // render video tracks bottom-up (V1 under V2)
+  if (runtime.maskView) runtime.maskView.ready = false;
   for (const c of visibleClipsAt(t)) drawClip(c, W, H, t);
+  if (!state.exporting && !runtime.sampling) drawMaskView(W, H);
   if (!runtime.sampling) updateScopes(); // before the handles, so they never reach the scopes
   // on-canvas selection handles (never during export or playback)
   if (!state.exporting && !state.playing && !runtime.sampling) drawSelectionOverlay(W, H, t);
@@ -8861,7 +8869,9 @@ function overlayHandles(b, W, H) {
 }
 function drawSelectionOverlay(W, H, t) {
   const c = getClip(state.selId);
+  if (drawingLayerMask(c)) { drawLayerStroke(c, W); if (!maskEditing(c)) return; }
   if (maskEditing(c) && drawMaskOverlay(c, W)) return;   // a layer's mask replaces the box
+  if (maskEditActive(c) && drawClipMaskOverlay(c, W)) return;   // so does a clip mask being edited
   if (!isVisualClip(c) || !activeAt(c, t) || !clipRenders(c)) return;
   const b = clipBounds(c, evalProps(c, t), W, H);
   const lw = Math.max(2, W / 640);
@@ -9094,8 +9104,20 @@ els.preview.addEventListener("pointerup", endCanvasDrag);
 els.preview.addEventListener("pointercancel", endCanvasDrag);
 
 function drawClip(c, W, H, t) {
-  if (c.kind === "adjust") { drawAdjust(c, W, H, t); return; }
+  const masks = clipMasksAt(c, t);
+  if (masks) drawMaskedClip(c, W, H, t, masks);
+  else drawClipPicture(c, W, H, t, false);
+}
+/** Draw one clip. `layered`: into a mask layer — opacity and blend wait for
+ *  the composite. Returns { p, geom } — geom = where the clip's picture landed
+ *  (canvas transform + its box), the space its masks live in. */
+function drawClipPicture(c, W, H, t, layered) {
+  if (c.kind === "adjust") {
+    const p = drawAdjust(c, W, H, t);
+    return { p, geom: noteMaskGeom(c, new DOMMatrix(), 0, 0, W, H) };
+  }
   const p = evalProps(c, t);
+  let geom = null;
   ctx2d.save();
   if (p._wipe) {
     ctx2d.beginPath();
@@ -9111,9 +9133,10 @@ function drawClip(c, W, H, t) {
     ctx2d.arc(W / 2, H / 2, Math.max(0.01, (1 - p._iris)) * Math.hypot(W, H) * 0.55, 0, Math.PI * 2);
     ctx2d.clip();
   }
-  ctx2d.globalAlpha = clamp(p.opacity, 0, 1);
-  if (p.blend && p.blend !== "normal" && BLEND_MODES.includes(p.blend))
-    ctx2d.globalCompositeOperation = p.blend === "normal" ? "source-over" : p.blend;
+  if (!layered) {
+    ctx2d.globalAlpha = clamp(p.opacity, 0, 1);
+    if (p.blend && p.blend !== "normal" && BLEND_MODES.includes(p.blend)) ctx2d.globalCompositeOperation = p.blend;
+  }
   ctx2d.translate(W / 2 + (+p.x || 0), H / 2 + (+p.y || 0));
   ctx2d.rotate((p.rotation || 0) * Math.PI / 180);
   if (p.shake > 0) { // deterministic multi-sine handheld/impact shake
@@ -9124,9 +9147,11 @@ function drawClip(c, W, H, t) {
     ctx2d.rotate(Math.sin(tt * 0.9) * a * 0.0022);
   }
   if (c.kind === "text") {
+    const b = clipBounds(c, p, W, H);
+    geom = noteMaskGeom(c, ctx2d.getTransform(), -b.hw, -b.hh, b.hw * 2, b.hh * 2);
     drawText(c, p, t - c.start);
     ctx2d.restore();
-    return;
+    return { p, geom };
   }
   let src = null, sw = 0, sh = 0;
   if (c.kind === "image") {
@@ -9164,6 +9189,7 @@ function drawClip(c, W, H, t) {
     const grade = activeGrade(c, p, t), matte = gradeMatte(c);
     let graded = null;
     noteGradeGeom(c, ctx2d.getTransform(), dw, dh, -dw / 2, -dh / 2);
+    geom = noteMaskGeom(c, ctx2d.getTransform(), -dw / 2, -dh / 2, dw, dh);
     if (needsPixelPass(p, c)) { // key / cut-out first, so the grade never shifts the key colour
       let processed = pixelPass(c, p, src, sx, sy, cw, ch, dw, dh);
       if (runtime.gradeCapture) { // pixelPass reuses its canvas — keep a copy
@@ -9189,7 +9215,597 @@ function drawClip(c, W, H, t) {
     if (p.grain > 0) drawGrain(p.grain, -dw / 2, -dh / 2, dw, dh, t);
   }
   ctx2d.restore();
+  return { p, geom };
 }
+
+/* ═══════════ MASKS (props.masks — math in mask.js) ═══════════
+   A masked clip draws into an offscreen layer instead of the program canvas;
+   the layer is cut by the masks' matte (destination-in), then composited with
+   the clip's opacity and blend. Preview and export share this path. */
+const Mask = self.FableCutMask;
+const maskCv = {};
+function maskCtx(key, W, H) {
+  let cv = maskCv[key];
+  if (!cv) cv = maskCv[key] = document.createElement("canvas");
+  if (cv.width !== W) cv.width = W;
+  if (cv.height !== H) cv.height = H;
+  return cv.getContext("2d", { willReadFrequently: false });
+}
+const maskNorm = new WeakMap();   // stored list → validated list (hand-written JSON gets defaults once)
+function clipMasks(c) {
+  const list = c.props && c.props.masks;
+  if (!Array.isArray(list) || !list.length) return null;
+  let n = maskNorm.get(list);
+  if (n === undefined) { n = Mask.normalizeMasks(list); maskNorm.set(list, n); }
+  return n;
+}
+/** The masks cutting clip c at timeline time t (keys resolved), or null. */
+function clipMasksAt(c, t) {
+  if (c.kind === "audio") return null;
+  const list = clipMasks(c);
+  return list ? Mask.masksAt(list, t - c.start) : null;
+}
+/** Remember where the clip's picture landed (the monitor's mask editor maps through it). */
+function noteMaskGeom(c, m, x0, y0, w, h) {
+  const g = { m, x0, y0, w, h };
+  if (!state.exporting && !runtime.sampling) (runtime.maskGeom ||= new Map()).set(c.id, g);
+  return g;
+}
+function drawMaskedClip(c, W, H, t, masks) {
+  const layer = maskCtx("layer", W, H);
+  layer.setTransform(1, 0, 0, 1, 0, 0);
+  layer.globalAlpha = 1; layer.globalCompositeOperation = "source-over"; layer.filter = "none";
+  layer.clearRect(0, 0, W, H);
+  const main = ctx2d;
+  let r;
+  ctx2d = layer;
+  try { r = drawClipPicture(c, W, H, t, true); } finally { ctx2d = main; }
+  if (!r || !r.geom) return;
+  const g = r.geom, matte = maskCtx("matte", W, H);
+  Mask.rasterize(matte, maskCtx("tmp", W, H), maskCtx("tmp2", W, H), masks,
+    g.m.translate(g.x0, g.y0), g.w, g.h, W / Math.max(1, project.width));
+  layer.setTransform(1, 0, 0, 1, 0, 0);
+  layer.globalCompositeOperation = "destination-in";
+  layer.drawImage(matte.canvas, 0, 0);
+  layer.globalCompositeOperation = "source-over";
+  const cap = runtime.maskCapture;
+  if (cap && cap.id === c.id && cap.coverage == null) measureMaskCoverage(cap, masks, g, layer.canvas, W, H);
+  const view = runtime.maskView;
+  if (view && view.id === c.id && !state.exporting) {   // the monitor shows this clip's matte
+    const v = maskCtx("view", W, H);
+    v.setTransform(1, 0, 0, 1, 0, 0);
+    v.globalCompositeOperation = "source-over"; v.clearRect(0, 0, W, H);
+    v.fillStyle = "#fff"; v.fillRect(0, 0, W, H);
+    v.globalCompositeOperation = "destination-in"; v.drawImage(matte.canvas, 0, 0);
+    v.globalCompositeOperation = "source-over";
+    view.ready = true;
+  }
+  main.save();
+  main.setTransform(1, 0, 0, 1, 0, 0);
+  const p = r.p;
+  if (c.kind !== "adjust") {   // an adjustment layer already drew at its own opacity
+    main.globalAlpha = clamp(p.opacity, 0, 1);
+    if (p.blend && p.blend !== "normal" && BLEND_MODES.includes(p.blend)) main.globalCompositeOperation = p.blend;
+  }
+  main.drawImage(layer.canvas, 0, 0);
+  main.restore();
+}
+/** fablecut_scopes mask: how much of the clip's own picture its masks keep
+ *  (rasterized alone, box-aligned) and how much of the frame the cut clip covers. */
+function measureMaskCoverage(cap, masks, g, layerCanvas, W, H) {
+  const mean = (cv, w, h) => {
+    const s = document.createElement("canvas"); s.width = w; s.height = h;
+    const x = s.getContext("2d", { willReadFrequently: true });
+    x.drawImage(cv, 0, 0, w, h);
+    const d = x.getImageData(0, 0, w, h).data;
+    let sum = 0;
+    for (let i = 3; i < d.length; i += 4) sum += d[i];
+    return sum / 255 / (w * h);
+  };
+  const bw = Math.max(1, g.w), bh = Math.max(1, g.h), k = Math.min(1, 480 / Math.max(bw, bh));
+  const mw = Math.max(2, Math.round(bw * k)), mh = Math.max(2, Math.round(bh * k));
+  const out = maskCtx("cap", mw, mh);
+  Mask.rasterize(out, maskCtx("cap1", mw, mh), maskCtx("cap2", mw, mh), masks, new DOMMatrix([mw / bw, 0, 0, mh / bh, 0, 0]), bw, bh,
+    W / Math.max(1, project.width) * mw / bw);
+  cap.coverage = +(100 * mean(out.canvas, mw, mh)).toFixed(2);
+  const fw = Math.max(2, Math.min(480, W)), fh = Math.max(2, Math.round(fw * H / W));
+  cap.frameCoverage = +(100 * mean(layerCanvas, fw, fh)).toFixed(2);
+}
+/** Matte view: the selected clip's mask matte, white on black, over the frame. */
+function drawMaskView(W, H) {
+  const view = runtime.maskView;
+  if (!view || !view.ready) return;
+  ctx2d.save();
+  ctx2d.setTransform(1, 0, 0, 1, 0, 0);
+  ctx2d.globalAlpha = 1; ctx2d.globalCompositeOperation = "source-over"; ctx2d.filter = "none";
+  ctx2d.fillStyle = "#000"; ctx2d.fillRect(0, 0, W, H);
+  ctx2d.drawImage(maskCv.view, 0, 0);
+  ctx2d.restore();
+}
+
+/* ── Masks in the Inspector and on the monitor ──
+   The Masks section lists the clip's masks; picking one shows its outline and
+   handles on the monitor. Pen: click to place points (drag pulls handles),
+   click the first point or press Enter to close. Draw: drag a free-hand
+   outline, fitted into an editable bezier. */
+const maskUi = { clip: null, sel: -1, pt: -1, tool: null, pen: null, stroke: null, drag: null };
+const MASK_ROWS_UI = {
+  opacity: ["Opacity", 0, 1, 0.01], feather: ["Feather", 0, 300, 1], expand: ["Expand", -200, 200, 1],
+  x: ["X", -0.5, 1.5, 0.001], y: ["Y", -0.5, 1.5, 0.001], w: ["Width", 0.01, 2, 0.001], h: ["Height", 0.01, 2, 0.001],
+  scale: ["Scale", 0.05, 4, 0.01], rotation: ["Rotation", -180, 180, 0.5],
+};
+const MASK_MODE_LABEL = { add: "Add", subtract: "Subtract", intersect: "Intersect", difference: "Difference" };
+function maskList(c) { return clipMasks(c) || []; }
+function maskUiFor(c) {
+  if (!c || maskUi.clip !== c.id) { Object.assign(maskUi, { clip: c ? c.id : null, sel: -1, pt: -1, tool: null, pen: null, stroke: null, drag: null }); if (runtime.maskView) runtime.maskView = null; }
+  const n = maskList(c).length;
+  if (maskUi.sel >= n) maskUi.sel = n - 1;
+  return maskUi;
+}
+function writeMasks(c, list) {
+  const n = list.length ? Mask.normalizeMasks(list) : null;
+  if (n) c.props.masks = n; else delete c.props.masks;
+  state.dirtyTimeline = true;
+}
+const maskLocalT = (c) => state.time - c.start;
+/** Mask i as it is at the playhead. */
+function maskNowAt(c, i) { const m = maskList(c)[i]; return m ? Mask.maskAt(m, maskLocalT(c)) : null; }
+function maskKeyIndex(m, t) {
+  const tol = 0.5 / (projectFps() || 30);
+  return m && m.keys ? m.keys.findIndex((k) => Math.abs(k.t - t) < tol) : -1;
+}
+function maskSnapshotKey(now, t) {
+  const k = { t: +Math.max(0, t).toFixed(4) };
+  for (const p of Mask.KEYED) if (now[p] != null) k[p] = p === "points" ? now.points.map((q) => q.slice()) : now[p];
+  return k;
+}
+/** Change mask i; once it has keys, keyed params land in a key at the playhead. */
+function writeMaskSet(c, i, set) {
+  const list = maskList(c).map((m) => m), m = list[i];
+  if (!m) return;
+  if (!m.keys || !m.keys.length || !Mask.KEYED.some((p) => p in set)) { list[i] = Mask.mergeMask(m, set) || m; writeMasks(c, list); return; }
+  const t = maskLocalT(c), keys = m.keys.map((k) => ({ ...k })), now = Mask.maskAt(m, t), statics = {};
+  for (const [p, v] of Object.entries(set)) if (!Mask.KEYED.includes(p)) statics[p] = v;
+  let j = maskKeyIndex(m, t);
+  if (j < 0) { const k = maskSnapshotKey(now, t); keys.push(k); keys.sort((a, b) => a.t - b.t); j = keys.indexOf(k); }
+  for (const p of Mask.KEYED) if (p in set) keys[j][p] = set[p];
+  list[i] = Mask.mergeMask(m, { ...statics, keys }) || m;
+  writeMasks(c, list);
+}
+function maskSectionHtml(c) {
+  const ui = maskUiFor(c), list = maskList(c), i = ui.sel, m = i >= 0 ? maskNowAt(c, i) : null, raw = list[i];
+  const tool = (k, label, title) => `<button type="button" class="btn tiny${ui.tool === k ? " toggle on" : ""}" data-mtool="${k}" title="${title}" ${list.length >= Mask.MAX_MASKS ? "disabled" : ""}>${label}</button>`;
+  const chips = list.map((mk, j) => `<button type="button" class="btn tiny cl-chip${j === i ? " toggle on" : ""}${mk.on === false ? " off" : ""}" data-msel="${j}"
+    title="${escapeHtml(mk.shape + (mk.mode !== "add" ? " · " + mk.mode : "") + (mk.invert ? " · inverted" : ""))} — click to edit on the monitor">${escapeHtml(mk.name || `Mask ${j + 1}`)}</button>`).join("");
+  let html = `<div class="insp-section" data-mask-section><h3>Masks</h3>
+    <div class="cl-row">${tool("rect", "+ Rect", "Add a rectangle mask")}${tool("ellipse", "+ Ellipse", "Add an ellipse mask")}${tool("pen", "Pen", "Click points on the monitor (drag to pull curve handles); click the first point or press Enter to close")}${tool("draw", "Draw", "Drag a free-hand outline on the monitor — it becomes an editable bezier")}
+      ${list.length ? `<button type="button" class="btn tiny${runtime.maskView ? " toggle on" : ""}" data-mact="view" title="Show the matte in the monitor (white = visible)">Matte</button>` : ""}</div>
+    ${ui.tool === "pen" ? `<p class="cl-note">Pen: click to add points, drag to curve. Click the first point or press Enter to close, Esc to cancel.</p>` : ""}
+    ${ui.tool === "draw" ? `<p class="cl-note">Draw: drag around what to keep. Esc cancels.</p>` : ""}
+    ${list.length ? `<div class="cl-row">${chips}</div>` : ui.tool ? "" : `<p class="cl-note">No masks: the whole clip shows. Masks keep (add), cut (subtract) or intersect parts of the picture and move with the clip.</p>`}`;
+  if (m) {
+    const keyed = raw.keys ? raw.keys.length : 0, onKey = maskKeyIndex(raw, maskLocalT(c)) >= 0;
+    const mrow = (p) => {
+      const [lab, min, max, step] = MASK_ROWS_UI[p];
+      return `<div class="insp-row cp-row"><label class="cp-label">${lab}</label>
+        <input type="range" data-mk="${p}" min="${min}" max="${max}" step="${step}" value="${m[p]}">
+        <input type="number" class="cp-num" data-mknum="${p}" step="${step}" value="${fmtG(m[p], step)}"></div>`;
+    };
+    html += `<div class="cl-row"><input type="text" class="cl-name" data-mname value="${escapeHtml(raw.name || "")}" placeholder="Mask ${i + 1}" maxlength="40" title="Mask name">
+        <button type="button" class="btn tiny${raw.on === false ? "" : " toggle on"}" data-mact="on" title="Mask on / off">${raw.on === false ? "Off" : "On"}</button>
+        <button type="button" class="btn tiny" data-mact="up" ${i === 0 ? "disabled" : ""} title="Move down the stack (combined earlier)">↑</button>
+        <button type="button" class="btn tiny" data-mact="down" ${i >= list.length - 1 ? "disabled" : ""} title="Move up the stack (combined later)">↓</button>
+        <button type="button" class="btn tiny" data-mact="dup" ${list.length >= Mask.MAX_MASKS ? "disabled" : ""} title="Duplicate">Copy</button>
+        <button type="button" class="btn tiny" data-mact="del" title="Delete this mask">Delete</button></div>
+      <div class="cl-row"><select data-mmode title="How this mask combines with the masks before it">${Mask.MODES.map((md) => `<option value="${md}" ${raw.mode === md ? "selected" : ""}>${MASK_MODE_LABEL[md]}</option>`).join("")}</select>
+        <button type="button" class="btn tiny${raw.invert ? " toggle on" : ""}" data-mact="invert" title="Use everything outside the shape">Invert</button>
+        <button type="button" class="btn tiny${onKey ? " toggle on" : ""}" data-mact="key" title="${onKey ? "Remove the key at the playhead" : "Key the mask at the playhead — with keys, every change keys"}">◆ Key</button>
+        <span class="cl-note">${keyed ? `${keyed} key${keyed > 1 ? "s" : ""}` : ""}</span>
+        ${keyed ? `<button type="button" class="btn tiny" data-mact="clearkeys" title="Remove every key (keeps the mask as it is at the playhead)">Clear keys</button>` : ""}</div>
+      ${mrow("opacity")}${mrow("feather")}${mrow("expand")}${mrow("x")}${mrow("y")}${m.shape !== "bezier" ? mrow("w") + mrow("h") : ""}${mrow("scale")}${mrow("rotation")}
+      <p class="cl-note">On the monitor: drag inside to move, the knob rotates (Shift: 15° steps)${m.shape === "bezier"
+        ? "; drag a point to move it, its handles to curve it (Alt: break the pair), Alt-drag a point to pull new handles, Ctrl-click the outline to add a point, double-click a point to remove it"
+        : ", the edge handles resize"}. Esc deselects.</p>`;
+  }
+  return html + `</div>`;
+}
+function bindMaskControls(c) {
+  const root = els.inspector.querySelector("[data-mask-section]");
+  if (!root) return;
+  const guard = () => { if (isGroupLocked(c)) { toastLocked(); return false; } return true; };
+  const rerender = () => { state.dirtyTimeline = true; renderInspector(); };
+  for (const b of root.querySelectorAll("[data-mtool]")) b.addEventListener("click", () => {
+    const k = b.dataset.mtool;
+    if (!guard()) return;
+    if (k === "rect" || k === "ellipse") {
+      pushUndo();
+      const list = maskList(c).slice();
+      list.push({ shape: k, x: 0.5, y: 0.5, w: k === "rect" ? 0.5 : 0.45, h: k === "rect" ? 0.5 : 0.6 });
+      writeMasks(c, list); maskUi.sel = list.length - 1; maskUi.tool = null; maskUi.pt = -1;
+      scheduleSave(); rerender();
+      if (!activeAt(c, state.time)) toast("Move the playhead over the clip to see the mask on the monitor");
+      return;
+    }
+    maskUi.tool = maskUi.tool === k ? null : k; maskUi.pen = null; maskUi.stroke = null;
+    if (maskUi.tool) { maskUi.sel = -1; if (state.playing) pause(); if (!activeAt(c, state.time)) toast("Move the playhead over the clip, then draw on the monitor"); }
+    rerender();
+  });
+  for (const b of root.querySelectorAll("[data-msel]")) b.addEventListener("click", () => {
+    const j = +b.dataset.msel;
+    maskUi.sel = maskUi.sel === j ? -1 : j; maskUi.pt = -1; maskUi.tool = null;
+    rerender();
+  });
+  for (const b of root.querySelectorAll("[data-mact]")) b.addEventListener("click", () => {
+    const a = b.dataset.mact, i = maskUi.sel;
+    if (a === "view") { runtime.maskView = runtime.maskView ? null : { id: c.id }; rerender(); return; }
+    const list = maskList(c).slice(), m = list[i];
+    if (!m || !guard()) return;
+    pushUndo();
+    if (a === "on") list[i] = Mask.mergeMask(m, { on: m.on === false ? null : false });
+    else if (a === "invert") list[i] = Mask.mergeMask(m, { invert: m.invert ? null : true });
+    else if (a === "del") { list.splice(i, 1); maskUi.sel = Math.min(i, list.length - 1); maskUi.pt = -1; }
+    else if (a === "dup") { list.splice(i + 1, 0, JSON.parse(JSON.stringify({ ...m, name: m.name ? `${m.name} copy`.slice(0, 40) : undefined }))); maskUi.sel = i + 1; }
+    else if (a === "up" || a === "down") { const j = a === "up" ? i - 1 : i + 1; [list[i], list[j]] = [list[j], list[i]]; maskUi.sel = j; }
+    else if (a === "clearkeys") { const now = Mask.maskAt(m, maskLocalT(c)); list[i] = Mask.mergeMask(m, { ...maskSnapshotKey(now, 0), t: null, keys: null }); }
+    else if (a === "key") {
+      const t = maskLocalT(c), j = maskKeyIndex(m, t), now = Mask.maskAt(m, t);
+      const keys = (m.keys || []).map((k) => ({ ...k }));
+      if (j >= 0) keys.splice(j, 1); else keys.push(maskSnapshotKey(now, t));
+      const set = { keys: keys.length ? keys : null };
+      if (!keys.length) Object.assign(set, maskSnapshotKey(now, 0), { t: null });
+      list[i] = Mask.mergeMask(m, set);
+    }
+    writeMasks(c, list); scheduleSave(); rerender();
+  });
+  const mode = root.querySelector("[data-mmode]");
+  if (mode) mode.addEventListener("change", () => {
+    if (!guard()) return;
+    pushUndo(); writeMaskSet(c, maskUi.sel, { mode: mode.value }); scheduleSave(); rerender();
+  });
+  const name = root.querySelector("[data-mname]");
+  if (name) name.addEventListener("change", () => {
+    if (!guard()) return;
+    pushUndo(); writeMaskSet(c, maskUi.sel, { name: name.value.trim() || null }); scheduleSave(); rerender();
+  });
+  for (const r of root.querySelectorAll("[data-mk]")) {
+    const p = r.dataset.mk;
+    r.addEventListener("pointerdown", () => { if (guard()) pushUndo(); });
+    r.addEventListener("input", () => {
+      if (isGroupLocked(c)) return;
+      writeMaskSet(c, maskUi.sel, { [p]: +r.value }); scheduleSave();
+      const n = root.querySelector(`[data-mknum="${p}"]`); if (n) n.value = fmtG(+r.value, MASK_ROWS_UI[p][3]);
+    });
+  }
+  for (const n of root.querySelectorAll("[data-mknum]")) {
+    const p = n.dataset.mknum;
+    n.addEventListener("change", () => {
+      const x = parseFloat(n.value);
+      if (!Number.isFinite(x) || !guard()) return;
+      pushUndo(); writeMaskSet(c, maskUi.sel, { [p]: x }); scheduleSave(); rerender();
+    });
+  }
+}
+/** Keyed masks: the sliders and ◆ follow the playhead (called from the inspector sync). */
+function syncMaskInspector(c) {
+  const root = els.inspector.querySelector("[data-mask-section]");
+  if (!root || maskUi.clip !== c.id || maskUi.sel < 0 || maskUi.drag) return;
+  const raw = maskList(c)[maskUi.sel], m = maskNowAt(c, maskUi.sel);
+  if (!m) return;
+  const active = document.activeElement;
+  for (const p of Object.keys(MASK_ROWS_UI)) {
+    const r = root.querySelector(`[data-mk="${p}"]`), n = root.querySelector(`[data-mknum="${p}"]`);
+    if (r && r !== active) r.value = m[p];
+    if (n && n !== active) n.value = fmtG(m[p], MASK_ROWS_UI[p][3]);
+  }
+  const k = root.querySelector("[data-mact=key]"), on = maskKeyIndex(raw, maskLocalT(c)) >= 0;
+  if (k) { k.classList.toggle("on", on); k.classList.toggle("toggle", on); }
+}
+
+/* Monitor geometry: the picture box (bw × bh px, origin top-left) ↔ canvas px. */
+function maskBox(c) {
+  const g = runtime.maskGeom && runtime.maskGeom.get(c.id);
+  if (!g) return null;
+  const M = g.m.translate(g.x0, g.y0), inv = M.inverse();
+  return {
+    bw: g.w, bh: g.h,
+    toCanvas: (x, y) => { const p = M.transformPoint(new DOMPoint(x, y)); return { x: p.x, y: p.y }; },
+    toBox: (pt) => { const p = inv.transformPoint(new DOMPoint(pt.x, pt.y)); return { x: p.x, y: p.y }; },
+  };
+}
+/** Box px ↔ a mask's own frame (fractions of the picture, before its scale / rotation). */
+function maskBoxToLocal(m, B, bx, by, vector = false) {
+  const th = (m.rotation || 0) * Math.PI / 180, s = m.scale || 1, cs = Math.cos(th), sn = Math.sin(th);
+  const dx = bx - (vector ? 0 : m.x * B.bw), dy = by - (vector ? 0 : m.y * B.bh);
+  return { x: (dx * cs + dy * sn) / s / B.bw, y: (-dx * sn + dy * cs) / s / B.bh };
+}
+function maskLocalToBox(m, B, lx, ly) {
+  const th = (m.rotation || 0) * Math.PI / 180, s = m.scale || 1, cs = Math.cos(th), sn = Math.sin(th);
+  const px = lx * B.bw * s, py = ly * B.bh * s;
+  return { x: m.x * B.bw + px * cs - py * sn, y: m.y * B.bh + px * sn + py * cs };
+}
+function maskEditActive(c) {
+  return !!c && maskUi.clip === c.id && state.selId === c.id && (maskUi.sel >= 0 || !!maskUi.tool) &&
+    activeAt(c, state.time) && !!maskBox(c) && !state.playing;
+}
+/** Handles for the selected mask, in canvas px. */
+function clipMaskHandles(c) {
+  const m = maskNowAt(c, maskUi.sel), B = m && maskBox(c);
+  if (!B) return null;
+  const at = (lx, ly) => { const q = maskLocalToBox(m, B, lx, ly); return B.toCanvas(q.x, q.y); };
+  const A = Mask.anchors(m, B.bw, B.bh).map((a) => ({ a: B.toCanvas(a.x, a.y), i: B.toCanvas(a.ix, a.iy), o: B.toCanvas(a.ox, a.oy) }));
+  const top = m.shape === "bezier" ? Math.min(...m.points.map((p) => p[1])) : -m.h / 2;
+  const base = at(0, top), up = at(0, top - 0.01), d = Math.hypot(up.x - base.x, up.y - base.y) || 1;
+  const W = els.preview.width, H = els.preview.height, gap = Math.max(24, W / 34), inset = Math.max(8, W / 110);
+  const knob = { x: clamp(base.x + (up.x - base.x) / d * gap, inset, W - inset), y: clamp(base.y + (up.y - base.y) / d * gap, inset, H - inset) };
+  const edges = m.shape === "bezier" ? [] : [["w", m.w / 2, 0], ["w", -m.w / 2, 0], ["h", 0, m.h / 2], ["h", 0, -m.h / 2]].map(([k, x, y]) => ({ k, ...at(x, y) }));
+  return { m, B, A, centre: at(0, 0), knob, knobBase: base, edges };
+}
+function strokeOutline(ctx, pts, closed) {
+  ctx.beginPath();
+  pts.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])));
+  if (closed) ctx.closePath();
+  ctx.stroke();
+}
+/** Drawn instead of the selection box while a mask is picked or a mask tool is on. */
+function drawClipMaskOverlay(c, W) {
+  const B = maskBox(c);
+  if (!B) return false;
+  const lw = Math.max(1.5, W / 800), hs = Math.max(5, W / 170);
+  ctx2d.save();
+  ctx2d.setTransform(1, 0, 0, 1, 0, 0);
+  ctx2d.lineJoin = "round";
+  const outline = (m) => Mask.flatten(Mask.anchors(m, B.bw, B.bh), 24).map(([x, y]) => { const q = B.toCanvas(x, y); return [q.x, q.y]; });
+  maskList(c).forEach((raw, j) => {   // the other masks, faint
+    if (j === maskUi.sel) return;
+    ctx2d.setLineDash([lw * 3, lw * 3]); ctx2d.lineWidth = lw; ctx2d.strokeStyle = "rgba(255,210,90,0.45)";
+    strokeOutline(ctx2d, outline(Mask.maskAt(raw, maskLocalT(c))), true);
+  });
+  ctx2d.setLineDash([]);
+  const dot = (p, r, fill, square) => {
+    ctx2d.beginPath();
+    if (square) ctx2d.rect(p.x - r, p.y - r, r * 2, r * 2); else ctx2d.arc(p.x, p.y, r, 0, Math.PI * 2);
+    ctx2d.fillStyle = fill; ctx2d.fill(); ctx2d.lineWidth = lw; ctx2d.strokeStyle = "rgba(0,0,0,0.7)"; ctx2d.stroke();
+  };
+  const h = maskUi.sel >= 0 ? clipMaskHandles(c) : null;
+  if (h) {
+    const pts = outline(h.m);
+    ctx2d.lineWidth = lw * 2.2; ctx2d.strokeStyle = "rgba(0,0,0,0.55)"; strokeOutline(ctx2d, pts, true);
+    ctx2d.lineWidth = lw; ctx2d.strokeStyle = h.m.invert ? "#ff9f5a" : "#ffd25a"; strokeOutline(ctx2d, pts, true);
+    ctx2d.beginPath(); ctx2d.moveTo(h.knobBase.x, h.knobBase.y); ctx2d.lineTo(h.knob.x, h.knob.y); ctx2d.stroke();
+    for (const e of h.edges) dot(e, hs * 0.8, "#fff");
+    if (h.m.shape === "bezier") {
+      const sp = h.A[maskUi.pt];
+      if (sp) {
+        ctx2d.lineWidth = lw; ctx2d.strokeStyle = "#9fd0ff";
+        for (const q of [sp.i, sp.o]) { ctx2d.beginPath(); ctx2d.moveTo(sp.a.x, sp.a.y); ctx2d.lineTo(q.x, q.y); ctx2d.stroke(); }
+        dot(sp.i, hs * 0.6, "#9fd0ff"); dot(sp.o, hs * 0.6, "#9fd0ff");
+      }
+      h.A.forEach((p, j) => dot(p.a, hs * 0.62, j === maskUi.pt ? "#ffd25a" : "#fff", true));
+    }
+    dot(h.centre, hs * 0.5, "#ffd25a");
+    dot(h.knob, hs * 0.9, "#ffce5c");
+  }
+  if (maskUi.tool === "pen" && maskUi.pen && maskUi.pen.pts.length) {
+    const P = maskUi.pen.pts, A = P.map((p) => ({ x: p[0], y: p[1], ix: p[0] + p[2], iy: p[1] + p[3], ox: p[0] + p[4], oy: p[1] + p[5] }));
+    const open = Mask.flatten(A, 24).slice(0, (A.length - 1) * 24 + 1).map(([x, y]) => { const q = B.toCanvas(x, y); return [q.x, q.y]; });
+    ctx2d.lineWidth = lw; ctx2d.strokeStyle = "#ffd25a";
+    if (A.length > 1) strokeOutline(ctx2d, open, false);
+    A.forEach((a, j) => dot(B.toCanvas(a.x, a.y), hs * (j === 0 && A.length >= 3 ? 0.9 : 0.62), j === 0 ? "#ffd25a" : "#fff", true));
+  }
+  if (maskUi.tool === "draw" && maskUi.stroke && maskUi.stroke.length > 1) {
+    ctx2d.lineWidth = lw * 1.5; ctx2d.strokeStyle = "#ffd25a";
+    strokeOutline(ctx2d, maskUi.stroke.map(([u, v]) => { const q = B.toCanvas(u * B.bw, v * B.bh); return [q.x, q.y]; }), false);
+  }
+  ctx2d.restore();
+  return true;
+}
+function addMaskFrom(c, mask) {
+  const list = maskList(c).slice();
+  if (list.length >= Mask.MAX_MASKS) { toast(`A clip has at most ${Mask.MAX_MASKS} masks`); return; }
+  const m = Mask.normalizeMask(mask);
+  if (!m) return;
+  pushUndo();
+  list.push(m); writeMasks(c, list);
+  maskUi.sel = list.length - 1; maskUi.pt = -1; maskUi.tool = null; maskUi.pen = null; maskUi.stroke = null;
+  scheduleSave(); renderInspector();
+}
+function finishPen(c) {
+  const B = maskBox(c), P = maskUi.pen && maskUi.pen.pts;
+  if (!B || !P || P.length < 3) { toast("A pen mask needs at least 3 points"); return; }
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (const [x, y] of P) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+  const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+  addMaskFrom(c, {
+    shape: "bezier", x: cx / B.bw, y: cy / B.bh,
+    points: P.slice(0, Mask.MAX_POINTS).map(([x, y, ix, iy, ox, oy]) => [(x - cx) / B.bw, (y - cy) / B.bh, ix / B.bw, iy / B.bh, ox / B.bw, oy / B.bh]),
+  });
+}
+/** Split the selected bezier's outline at the point nearest `bp` (box px): a new anchor, the curve unchanged. */
+function insertMaskPoint(m, B, bp) {
+  const A = Mask.anchors(m, B.bw, B.bh);
+  let best = null;
+  for (let i = 0; i < A.length; i++) {
+    const a = A[i], b = A[(i + 1) % A.length];
+    for (let k = 1; k < 24; k++) {
+      const t = k / 24, u = 1 - t;
+      const x = u * u * u * a.x + 3 * u * u * t * a.ox + 3 * u * t * t * b.ix + t * t * t * b.x;
+      const y = u * u * u * a.y + 3 * u * u * t * a.oy + 3 * u * t * t * b.iy + t * t * t * b.y;
+      const d = Math.hypot(x - bp.x, y - bp.y);
+      if (!best || d < best.d) best = { d, i, t };
+    }
+  }
+  if (!best) return null;
+  const { i, t } = best, a = A[i], b = A[(i + 1) % A.length];
+  const L = (p, q) => [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t];
+  const p0 = [a.x, a.y], p1 = [a.ox, a.oy], p2 = [b.ix, b.iy], p3 = [b.x, b.y];
+  const q0 = L(p0, p1), q1 = L(p1, p2), q2 = L(p2, p3), r0 = L(q0, q1), r1 = L(q1, q2), s = L(r0, r1);
+  const loc = (x, y) => maskBoxToLocal(m, B, x, y), vec = (x, y) => maskBoxToLocal(m, B, x, y, true);
+  const pts = m.points.map((p) => [p[0], p[1], p[2] || 0, p[3] || 0, p[4] || 0, p[5] || 0]);
+  const j = (i + 1) % pts.length;
+  const ao = vec(q0[0] - a.x, q0[1] - a.y), bi = vec(q2[0] - b.x, q2[1] - b.y);
+  pts[i][4] = ao.x; pts[i][5] = ao.y; pts[j][2] = bi.x; pts[j][3] = bi.y;
+  const sl = loc(s[0], s[1]), si = vec(r0[0] - s[0], r0[1] - s[1]), so = vec(r1[0] - s[0], r1[1] - s[1]);
+  pts.splice(i + 1, 0, [sl.x, sl.y, si.x, si.y, so.x, so.y]);
+  return { points: pts.map((p) => p.map((v) => +v.toFixed(4))), index: i + 1 };
+}
+els.preview.addEventListener("pointerdown", (e) => {
+  if (e.button !== 0 || isSourceMode()) return;
+  const c = getClip(state.selId);
+  if (!maskEditActive(c)) return;
+  const B = maskBox(c), pt = canvasPt(e), bp = B.toBox(pt), W = els.preview.width, grab = Math.max(8, W / 110);
+  const near = (p) => Math.hypot(p.x - pt.x, p.y - pt.y) <= grab;
+  if (maskUi.tool) {
+    e.preventDefault(); e.stopImmediatePropagation();
+    if (isGroupLocked(c)) { toastLocked(); return; }
+    if (maskUi.tool === "draw") maskUi.stroke = [[bp.x / B.bw, bp.y / B.bh]];
+    else if (maskUi.tool === "pen") {
+      const P = (maskUi.pen ||= { pts: [] }).pts;
+      if (P.length >= 3 && near(B.toCanvas(P[0][0], P[0][1]))) { finishPen(c); return; }
+      if (P.length >= Mask.MAX_POINTS) { toast(`A mask has at most ${Mask.MAX_POINTS} points`); return; }
+      P.push([bp.x, bp.y, 0, 0, 0, 0]);
+      maskUi.pen.dragging = true;
+    } else return;
+    maskUi.drag = { tool: true };
+    els.preview.setPointerCapture(e.pointerId);
+    state.dirtyTimeline = true;
+    return;
+  }
+  const h = clipMaskHandles(c);
+  if (!h) return;
+  const { m } = h;
+  let drag = null;
+  const sp = m.shape === "bezier" ? h.A[maskUi.pt] : null;
+  if (near(h.knob)) drag = { mode: "rotate" };
+  else if (sp && near(sp.o)) drag = { mode: "handle", side: "o" };
+  else if (sp && near(sp.i)) drag = { mode: "handle", side: "i" };
+  else if (m.shape === "bezier" && h.A.some((p) => near(p.a))) {
+    maskUi.pt = h.A.findIndex((p) => near(p.a));
+    drag = { mode: e.altKey ? "pull" : "point" };
+  } else if (h.edges.some(near)) drag = { mode: h.edges.find(near).k };
+  else if (m.shape === "bezier" && (e.ctrlKey || e.metaKey)) {
+    if (m.points.length >= Mask.MAX_POINTS) { toast(`A mask has at most ${Mask.MAX_POINTS} points`); e.stopImmediatePropagation(); return; }
+    if (isGroupLocked(c)) { toastLocked(); e.stopImmediatePropagation(); return; }
+    const r = insertMaskPoint(m, h.B, bp);
+    if (!r) return;
+    pushUndo(); writeMaskSet(c, maskUi.sel, { points: r.points }); scheduleSave();
+    maskUi.pt = r.index;
+    drag = { mode: "point", pushed: true };
+  } else if (Mask.matteAt([{ ...m, mode: "add", invert: false, feather: 0, opacity: 1 }], bp.x, bp.y, h.B.bw, h.B.bh, 0) > 0.5) drag = { mode: "move" };
+  if (!drag) return;     // outside the mask: the monitor's usual clicks
+  e.preventDefault(); e.stopImmediatePropagation();
+  if (isGroupLocked(c)) { toastLocked(); return; }
+  if (!drag.pushed) pushUndo();
+  maskUi.drag = { ...drag, id: c.id, start: bp, m0: JSON.parse(JSON.stringify(maskNowAt(c, maskUi.sel))) };
+  els.preview.setPointerCapture(e.pointerId);
+  state.dirtyTimeline = true;
+}, true);
+els.preview.addEventListener("pointermove", (e) => {
+  const d = maskUi.drag;
+  if (!d) return;
+  e.stopImmediatePropagation();
+  const c = getClip(state.selId), B = c && maskBox(c);
+  if (!B) return;
+  const bp = B.toBox(canvasPt(e));
+  if (d.tool) {
+    if (maskUi.tool === "draw" && maskUi.stroke) {
+      const last = maskUi.stroke[maskUi.stroke.length - 1], u = bp.x / B.bw, v = bp.y / B.bh;
+      if (Math.hypot((u - last[0]) * B.bw, (v - last[1]) * B.bh) > 2) maskUi.stroke.push([u, v]);
+    } else if (maskUi.tool === "pen" && maskUi.pen && maskUi.pen.dragging) {
+      const p = maskUi.pen.pts[maskUi.pen.pts.length - 1], ox = bp.x - p[0], oy = bp.y - p[1];
+      if (Math.hypot(ox, oy) > 3) { p[2] = -ox; p[3] = -oy; p[4] = ox; p[5] = oy; }
+    }
+    state.dirtyTimeline = true;
+    return;
+  }
+  const m0 = d.m0;
+  let set;
+  if (d.mode === "move") set = { x: +(m0.x + (bp.x - d.start.x) / B.bw).toFixed(4), y: +(m0.y + (bp.y - d.start.y) / B.bh).toFixed(4) };
+  else if (d.mode === "w" || d.mode === "h") {
+    const l = maskBoxToLocal(m0, B, bp.x, bp.y);
+    set = d.mode === "w" ? { w: +clamp(Math.abs(l.x) * 2, 0.01, 8).toFixed(4) } : { h: +clamp(Math.abs(l.y) * 2, 0.01, 8).toFixed(4) };
+  } else if (d.mode === "rotate") {
+    let r = Math.atan2(bp.x - m0.x * B.bw, -(bp.y - m0.y * B.bh)) * 180 / Math.PI;
+    if (e.shiftKey) r = Math.round(r / 15) * 15;
+    set = { rotation: +r.toFixed(1) };
+  } else if (m0.shape === "bezier") {
+    const pts = m0.points.map((p) => [p[0], p[1], p[2] || 0, p[3] || 0, p[4] || 0, p[5] || 0]), p = pts[maskUi.pt];
+    if (!p) return;
+    const l = maskBoxToLocal(m0, B, bp.x, bp.y);
+    if (d.mode === "point") { p[0] = l.x; p[1] = l.y; }
+    else if (d.mode === "pull") { const ox = l.x - p[0], oy = l.y - p[1]; p[2] = -ox; p[3] = -oy; p[4] = ox; p[5] = oy; }
+    else if (d.mode === "handle") {
+      const hx = l.x - p[0], hy = l.y - p[1], o = d.side === "o" ? 4 : 2, q = d.side === "o" ? 2 : 4;
+      p[o] = hx; p[o + 1] = hy;
+      if (!e.altKey) {   // keep the pair smooth: the other handle mirrors the direction, keeps its length
+        const len = Math.hypot(p[q], p[q + 1]) || Math.hypot(hx, hy), k = Math.hypot(hx, hy) || 1;
+        p[q] = -hx / k * len; p[q + 1] = -hy / k * len;
+      }
+    }
+    set = { points: pts.map((r) => r.map((v) => +v.toFixed(4))) };
+  }
+  if (set) { writeMaskSet(c, maskUi.sel, set); syncMaskInspector(c); }
+}, true);
+const endClipMaskDrag = (e) => {
+  const d = maskUi.drag;
+  if (!d) return;
+  e.stopImmediatePropagation();
+  maskUi.drag = null;
+  const c = getClip(state.selId);
+  if (d.tool) {
+    if (maskUi.tool === "draw" && maskUi.stroke) {
+      const B = c && maskBox(c), st = maskUi.stroke;
+      maskUi.stroke = null;
+      if (c && B && st.length >= 6) addMaskFrom(c, { shape: "freehand", stroke: st, aspect: B.bw / B.bh });
+      else toast("Drag around what the mask should keep");
+    } else if (maskUi.pen) maskUi.pen.dragging = false;
+    state.dirtyTimeline = true;
+    return;
+  }
+  scheduleSave(); renderInspector();
+};
+els.preview.addEventListener("pointerup", endClipMaskDrag, true);
+els.preview.addEventListener("pointercancel", endClipMaskDrag, true);
+els.preview.addEventListener("dblclick", (e) => {
+  const c = getClip(state.selId);
+  if (!maskEditActive(c) || maskUi.tool) return;
+  const h = clipMaskHandles(c), pt = canvasPt(e), grab = Math.max(8, els.preview.width / 110);
+  if (!h || h.m.shape !== "bezier") return;
+  const i = h.A.findIndex((p) => Math.hypot(p.a.x - pt.x, p.a.y - pt.y) <= grab);
+  if (i < 0) return;
+  e.preventDefault(); e.stopImmediatePropagation();
+  if (h.m.points.length <= 3) { toast("A mask needs at least 3 points"); return; }
+  if (isGroupLocked(c)) { toastLocked(); return; }
+  const pts = h.m.points.map((p) => p.slice()); pts.splice(i, 1);
+  const raw = maskList(c)[maskUi.sel];
+  pushUndo();
+  if (raw.keys && raw.keys.some((k) => k.points)) {   // keyed outlines lose the same point in every key
+    const keys = raw.keys.map((k) => (k.points ? { ...k, points: k.points.filter((_, j) => j !== i) } : k));
+    const list = maskList(c).slice(); list[maskUi.sel] = Mask.mergeMask(raw, { points: raw.points.filter((_, j) => j !== i), keys }); writeMasks(c, list);
+  } else writeMaskSet(c, maskUi.sel, { points: pts });
+  maskUi.pt = -1; scheduleSave(); renderInspector();
+}, true);
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && colorState.maskDraw) {   // the Color tab's Draw
+    e.preventDefault(); e.stopImmediatePropagation();
+    colorState.maskDraw = false; colorState.maskStroke = null; state.dirtyTimeline = true; renderColorPage(true);
+    return;
+  }
+  if (!maskUi.clip || (maskUi.sel < 0 && !maskUi.tool)) return;
+  const tg = e.target;
+  if (tg && (tg.tagName === "INPUT" || tg.tagName === "TEXTAREA" || tg.tagName === "SELECT" || tg.isContentEditable)) return;
+  const c = getClip(state.selId);
+  if (!c || c.id !== maskUi.clip) return;
+  if (e.key === "Escape") {
+    e.preventDefault(); e.stopImmediatePropagation();
+    if (maskUi.tool) { maskUi.tool = null; maskUi.pen = null; maskUi.stroke = null; }
+    else if (maskUi.pt >= 0) maskUi.pt = -1;
+    else maskUi.sel = -1;
+    state.dirtyTimeline = true; renderInspector();
+  } else if (e.key === "Enter" && maskUi.tool === "pen") {
+    e.preventDefault(); e.stopImmediatePropagation();
+    finishPen(c);
+  }
+}, true);
 
 /* ── Text direction (LTR / RTL) — per-line when direction is "auto".
    Auto-detect uses a DOM probe + getComputedStyle; cache by line text so
@@ -11023,7 +11639,12 @@ async function runScopesJob(ticket, fail) {
     runtime.matte = null;   // measure the graded picture, not the matte the user may be looking at
     const mClip = ticket.matte && getClip(ticket.matte.clip);
     if (mClip) runtime.gradeCapture = { id: mClip.id, args: null };
-    try { await renderStillAt(t); } finally { runtime.matte = shown; }
+    const kClip = ticket.mask && getClip(ticket.mask.clip), view = runtime.maskView;
+    runtime.maskCapture = kClip ? { id: kClip.id } : null;
+    runtime.maskView = null;
+    try { await renderStillAt(t); } finally { runtime.matte = shown; runtime.maskView = view; }
+    const kcap = runtime.maskCapture;
+    runtime.maskCapture = null;
     const cap = runtime.gradeCapture;
     runtime.gradeCapture = null;
     const W = els.preview.width, H = els.preview.height;
@@ -11067,15 +11688,25 @@ async function runScopesJob(ticket, fail) {
         }
       }
     }
+    let mask = null;
+    if (ticket.mask) {
+      mask = { clip: ticket.mask.clip };
+      if (!kClip) mask.error = "no such clip";
+      else if (!clipMasks(kClip)) mask.error = "the clip has no masks";
+      else if (!kcap || kcap.coverage == null) mask.error = "the clip is not on screen at that time (or its masks are all off)";
+      else Object.assign(mask, { masks: Mask.describe(clipMasks(kClip)), coverage: kcap.coverage, frameCoverage: kcap.frameCoverage });
+    }
     const clips = visibleClipsAt(t).map((c) => ({
       id: c.id, name: c.name, kind: c.kind, track: c.track,
       grade: Color.summarizeGrade(c.props.grade),
+      ...(clipMasks(c) ? { masks: Mask.describe(clipMasks(c)) } : {}),
     }));
-    await reportExportJob(ticket.id, { status: "done", result: { time: +t.toFixed(3), frame: { w: Math.round(r.w), h: Math.round(r.h) }, stats, clips, matte } }, true);
+    await reportExportJob(ticket.id, { status: "done", result: { time: +t.toFixed(3), frame: { w: Math.round(r.w), h: Math.round(r.h) }, stats, clips, matte, mask } }, true);
   } catch (err) {
     fail("could not measure the frame: " + (err && err.message || err));
   } finally {
     runtime.gradeCapture = null;
+    runtime.maskCapture = null;
     state.rendering = false;
     seekMediaWhilePaused(); // the videos sat on the job's frame — back to the playhead
     if (wasPlaying) play();
@@ -12845,12 +13476,13 @@ function layerSectionsHtml(c) {
     </div>
     <div class="insp-section cp-mask"><h3>Mask</h3>
       <div class="cl-row">${["none", "ellipse", "rect", "poly"].map((s) => `<button type="button" class="btn tiny${(m ? m.shape : "none") === s ? " toggle on" : ""}" data-mshape="${s}">${s === "none" ? "None" : s === "rect" ? "Rect" : s[0].toUpperCase() + s.slice(1)}</button>`).join("")}
+        <button type="button" class="btn tiny${colorState.maskDraw || (m && m.shape === "bezier") ? " toggle on" : ""}" data-mdraw title="Drag a free-hand outline on the monitor — it becomes an editable bezier">Draw</button>
         ${m ? `<button type="button" class="btn tiny${m.invert ? " toggle on" : ""}" data-mact="invert" title="Grade outside the shape">Invert</button>` : ""}</div>
       ${m ? `<div class="cl-row"><button type="button" class="btn tiny${onKey ? " toggle on" : ""}" data-mact="key" title="${onKey ? "Remove the key at the playhead" : "Key the shape at the playhead — with keys, every change keys"}">◆ Key</button>
         <span class="cl-note">${keyed ? `${keyed} key${keyed > 1 ? "s" : ""}` : "not animated"}</span>
         ${keyed ? `<button type="button" class="btn tiny" data-mact="clearkeys" title="Remove every key (keeps the shape at the playhead)">Clear keys</button>` : ""}</div>
       ${mrow("x")}${mrow("y")}${m.shape !== "poly" ? mrow("w") + mrow("h") : ""}${mrow("rotation")}${mrow("feather")}
-      <p class="cl-note">Drag it on the monitor: inside moves, handles resize, the knob rotates${m.shape === "poly" ? "; Ctrl-click adds a point, double-click one removes it" : ""}.</p>` : ""}
+      <p class="cl-note">Drag it on the monitor: inside moves, handles resize, the knob rotates${m.points ? "; Ctrl-click adds a point, double-click one removes it" : ""}.</p>` : colorState.maskDraw ? `<p class="cl-note">Drag around what this layer should grade. Esc cancels.</p>` : ""}
     </div>`;
 }
 function bindLayerControls(c, guard) {
@@ -12919,6 +13551,13 @@ function bindLayerControls(c, guard) {
     scheduleSave(); rerender();
   });
   // mask
+  const draw = root.querySelector("[data-mdraw]");
+  if (draw) draw.addEventListener("click", () => {
+    if (!guard()) return;
+    colorState.maskDraw = !colorState.maskDraw; colorState.maskStroke = null;
+    if (colorState.maskDraw) { if (state.playing) pause(); toast("Drag around what this layer should grade"); }
+    rerender();
+  });
   for (const b of root.querySelectorAll("[data-mshape]")) b.addEventListener("click", () => {
     if (!guard()) return;
     const s = b.dataset.mshape, cur = maskNow(c);
@@ -13044,11 +13683,11 @@ function maskHandles(c) {
   if (!sp) return null;
   const a = sp.aspect, at = (px, py) => { const q = maskLocalToUv(m, a, px, py); return sp.toCanvas(q.u, q.v); };
   const rx = (m.w / 2) * a, ry = m.h / 2;
-  const top = m.shape === "poly" ? Math.min(...m.points.map(([, y]) => y)) : -ry;
+  const top = m.points ? Math.min(...m.points.map((p) => p[1])) : -ry;
   const W = els.preview.width, H = els.preview.height, inset = Math.max(8, W / 110), knob = at(0, top - 0.08);
   knob.x = clamp(knob.x, inset, W - inset); knob.y = clamp(knob.y, inset, H - inset);   // stays grabbable above the frame
   const h = { m, sp, centre: at(0, 0), knob, knobBase: at(0, top), edges: [], points: [] };
-  if (m.shape === "poly") h.points = m.points.map(([x, y]) => at(x * a, y));
+  if (m.points) h.points = m.points.map(([x, y]) => at(x * a, y));
   else h.edges = [["w", rx, 0], ["w", -rx, 0], ["h", 0, ry], ["h", 0, -ry]].map(([k, x, y]) => ({ k, ...at(x, y) }));
   return h;
 }
@@ -13058,6 +13697,9 @@ function maskOutline(c, h) {
     for (let i = 0; i < 64; i++) { const t = i / 64 * Math.PI * 2; const q = maskLocalToUv(m, a, Math.cos(t) * m.w / 2 * a, Math.sin(t) * m.h / 2); pts.push(sp.toCanvas(q.u, q.v)); }
   } else if (m.shape === "rect") {
     for (const [x, y] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) { const q = maskLocalToUv(m, a, x * m.w / 2 * a, y * m.h / 2); pts.push(sp.toCanvas(q.u, q.v)); }
+  } else if (m.shape === "bezier") {
+    const A = Mask.anchors({ shape: "bezier", x: 0, y: 0, scale: 1, rotation: 0, points: m.points }, 1, 1);
+    for (const [x, y] of Mask.flatten(A, 16)) { const q = maskLocalToUv(m, a, x * a, y); pts.push(sp.toCanvas(q.u, q.v)); }
   } else pts.push(...h.points);
   return pts;
 }
@@ -13085,10 +13727,34 @@ function drawMaskOverlay(c, W) {
   ctx2d.restore();
   return true;
 }
+/** Color tab Draw: a free-hand outline for the selected layer's mask. */
+function drawingLayerMask(c) {
+  return colorState.maskDraw && colorState.ws === "color" && colorState.layer >= 0 && c && state.selId === c.id && activeAt(c, state.time) && !!maskSpace(c);
+}
+function drawLayerStroke(c, W) {
+  const sp = maskSpace(c), st = colorState.maskStroke;
+  if (!sp || !st || st.length < 2) return;
+  ctx2d.save();
+  ctx2d.setTransform(1, 0, 0, 1, 0, 0);
+  ctx2d.lineWidth = Math.max(2, W / 600); ctx2d.strokeStyle = "#ffd25a";
+  ctx2d.beginPath();
+  st.forEach(([u, v], i) => { const p = sp.toCanvas(u, v); if (i) ctx2d.lineTo(p.x, p.y); else ctx2d.moveTo(p.x, p.y); });
+  ctx2d.stroke();
+  ctx2d.restore();
+}
 let maskDrag = null;
 els.preview.addEventListener("pointerdown", (e) => {
   if (e.button !== 0 || e.altKey || isSourceMode() || colorState.pick || colorState.curvePick || colorState.qualPick) return;
   const c = getClip(state.selId);
+  if (drawingLayerMask(c)) {
+    e.preventDefault(); e.stopImmediatePropagation();
+    if (isGroupLocked(c)) { toastLocked(); return; }
+    const uv = maskSpace(c).toUv(canvasPt(e));
+    colorState.maskStroke = [[uv.u, uv.v]];
+    maskDrag = { mode: "draw", id: c.id };
+    els.preview.setPointerCapture(e.pointerId);
+    return;
+  }
   if (!maskEditing(c)) return;
   const h = maskHandles(c);
   if (!h) return;
@@ -13099,7 +13765,7 @@ els.preview.addEventListener("pointerdown", (e) => {
   if (near(h.knob)) drag = { mode: "rotate" };
   else if (h.points.some(near)) drag = { mode: "point", i: h.points.findIndex(near) };
   else if (h.edges.some(near)) drag = { mode: h.edges.find(near).k };
-  else if (m.shape === "poly" && (e.ctrlKey || e.metaKey)) { // add a point on the nearest edge
+  else if (m.points && (e.ctrlKey || e.metaKey)) { // add a point on the nearest edge
     const lp = uvToMaskLocal(m, a, uv.u, uv.v), P = m.points.map(([x, y]) => [x * a, y]);
     let best = 0, bd = Infinity;
     for (let i = 0; i < P.length; i++) {
@@ -13108,7 +13774,8 @@ els.preview.addEventListener("pointerdown", (e) => {
       const d = Math.hypot(lp.x - x1 - ex * k, lp.y - y1 - ey * k);
       if (d < bd) { bd = d; best = i; }
     }
-    if (m.points.length >= Color.MAX_POLY) { toast(`A mask has at most ${Color.MAX_POLY} points`); e.stopImmediatePropagation(); return; }
+    const most = m.shape === "bezier" ? Color.MAX_BEZIER : Color.MAX_POLY;
+    if (m.points.length >= most) { toast(`A mask has at most ${most} points`); e.stopImmediatePropagation(); return; }
     if (isGroupLocked(c)) { toastLocked(); e.stopImmediatePropagation(); return; }
     const pts = m.points.map((p) => p.slice());
     pts.splice(best + 1, 0, [lp.x / a, lp.y]);
@@ -13128,6 +13795,11 @@ els.preview.addEventListener("pointermove", (e) => {
   e.stopImmediatePropagation();
   const c = getClip(maskDrag.id), sp = c && maskSpace(c);
   if (!sp) return;
+  if (maskDrag.mode === "draw") {
+    const uv = sp.toUv(canvasPt(e)), st = colorState.maskStroke, last = st && st[st.length - 1];
+    if (last && Math.hypot((uv.u - last[0]) * sp.aspect, uv.v - last[1]) > 0.003) { st.push([uv.u, uv.v]); state.dirtyTimeline = true; }
+    return;
+  }
   const uv = sp.toUv(canvasPt(e)), m0 = maskDrag.m0, a = sp.aspect, d = maskDrag;
   const lp = uvToMaskLocal(m0, a, uv.u, uv.v);
   let set;
@@ -13141,7 +13813,7 @@ els.preview.addEventListener("pointermove", (e) => {
     set = { rotation: +r.toFixed(1) };
   } else if (d.mode === "point") {
     const pts = (curLayer(c)?.mask?.points || m0.points).map((p) => p.slice());
-    pts[d.i] = [+(lp.x / a).toFixed(4), +lp.y.toFixed(4)];
+    pts[d.i] = [+(lp.x / a).toFixed(4), +lp.y.toFixed(4), ...pts[d.i].slice(2)];   // a bezier anchor keeps its handles
     set = { points: pts };
   }
   if (set) { writeMask(c, set); syncMaskInputs(c); state.dirtyTimeline = true; }
@@ -13149,6 +13821,19 @@ els.preview.addEventListener("pointermove", (e) => {
 const endMaskDrag = (e) => {
   if (!maskDrag) return;
   e.stopImmediatePropagation();
+  if (maskDrag.mode === "draw") {
+    const c = getClip(maskDrag.id), sp = c && maskSpace(c), st = colorState.maskStroke;
+    maskDrag = null; colorState.maskStroke = null; state.dirtyTimeline = true;
+    if (!c || !sp || !st || st.length < 6) { toast("Drag around what this layer should grade"); return; }
+    const cur = maskNow(c), m = { shape: "freehand", stroke: st, aspect: sp.aspect, feather: cur ? cur.feather : 0.03 };
+    if (cur && cur.invert) m.invert = true;
+    pushUndo();
+    writeLayer(c, colorState.layer, { mask: null });
+    writeLayer(c, colorState.layer, { mask: m });
+    colorState.maskDraw = false;
+    scheduleSave(); renderColorPage(true);
+    return;
+  }
   maskDrag = null; colorState.mdrag = false;
   scheduleSave(); renderColorPage(true);
 };

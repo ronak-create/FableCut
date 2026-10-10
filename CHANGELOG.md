@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Masks.** Any video, image, SVG, text or adjustment clip can carry a stack of
+  masks (`props.masks`, up to 8): rectangle, ellipse, bezier (pen tool with
+  curve handles) and free-hand (a drawn outline fitted into an editable
+  bezier). Each has a mode (add, subtract, intersect, difference), invert,
+  opacity, feather and expansion, and every shape parameter can be keyframed,
+  bezier outlines included. Masks follow the clip's transform and render the
+  same in preview and export. The Inspector's **Masks** section draws and edits
+  them on the monitor and has a matte view.
+- Agents: patch ops `setMask`, `removeMask` and `setMaskKeys`; `props.masks`
+  is validated on `addClip` / `updateClip`; `fablecut_scopes {mask:{clip}}`
+  reports how much of the clip its masks keep; the compact project view lists
+  each clip's masks.
+- Color layers' masks can be bezier or free-hand too (**Draw** in the Color
+  tab, or `shape:"bezier"` / `"freehand"` in `setGradeLayer`).
+
 ## [1.12.1] - 2026-10-08
 
 ### Changed
