@@ -920,7 +920,7 @@ headless Chrome / Edge) and saves the result:
 
 Recipes: **a title that follows a car** — track a point on the car, attach
 the title; **blur a face or a plate** — an ellipse mask on a blurred copy of
-the shot on the track above, then `apply:{mask}`; **a screen replacement** —
+the shot on the track above, then `apply:{mask:"Face"}`; **a screen replacement** —
 track the screen with Scale and Rotate on and attach the new picture, cropped
 to fit; **a highlight that stays on a UI element** in a screen recording —
 track the button, attach a rect svg.

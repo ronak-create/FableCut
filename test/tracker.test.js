@@ -110,6 +110,8 @@ test("agents: tracks are validated on updateClip, summarized in the compact view
   assert.match(r.text, /text clip — tracking follows a video clip's picture/);
   r = await mcp.callTool("fablecut_track", { clip: "c_a", point: { x: "a" } });
   assert.match(r.text, /point needs numbers x, y/);
+  r = await mcp.callTool("fablecut_track", { clip: "c_a", region: { x: 0.5, y: 0.5 } });
+  assert.match(r.text, /region needs numbers x, y, w, h/);
   r = await mcp.callTool("fablecut_track", { clip: "c_a", apply: {} });
   assert.match(r.text, /apply must be \{mask/);
 });

@@ -9571,6 +9571,8 @@ async function runTrack(c, { box, from, to, dir, scale = false, rotation = false
     return { samples, lostAt, cancelled: !!run.cancel };
   } finally { el.removeAttribute("src"); el.load(); }
 }
+/** What a tracking result was measured against: the clip object and its timing. */
+function trackStamp(c) { return c ? [c.mediaId, c.start, c.in, c.duration, clipSpeed(c), JSON.stringify(c.keyframes?.speed || null)].join("|") : ""; }
 /** Merge new samples into track `name` (replacing the old ones in their time range). */
 function storeTrack(c, name, kind, w, h, samples) {
   const list = clipTracks(c).map((x) => ({ ...x })), t0 = samples[0][0], t1 = samples[samples.length - 1][0];
@@ -9668,6 +9670,7 @@ async function trackWithUi(c, label, job, after) {
   if (trackUi.run) { toast("Already tracking — wait, or press Esc to stop"); return null; }
   if (state.playing) pause();
   const run = trackUi.run = { cancel: false, clip: c.id, label, pct: 0 };
+  const stamp = trackStamp(c), maskStamp = job.mask != null ? JSON.stringify(maskList(c)[job.mask]?.name ?? null) + maskList(c).length : null;
   renderInspector();
   try {
     const r = await runTrack(c, { ...job, run, onProgress: (f) => {
@@ -9675,6 +9678,10 @@ async function trackWithUi(c, label, job, after) {
       for (const el of els.inspector.querySelectorAll("[data-track-progress]")) el.textContent = `${label}: ${Math.round(f * 100)}% — Esc stops`;
     } });
     if (r.samples.length < 2) { toast(r.lostAt != null ? "Lost the region on the next frame — try a spot with more detail, or a bigger region" : "Nothing to track there"); return r; }
+    if (getClip(c.id) !== c || trackStamp(c) !== stamp || (maskStamp != null && JSON.stringify(maskList(c)[job.mask]?.name ?? null) + maskList(c).length !== maskStamp)) {
+      toast("The clip changed while tracking — nothing was applied; track it again");
+      return null;
+    }
     pushUndo();
     after(r);
     scheduleSave();
@@ -9696,7 +9703,7 @@ function trackMaskFromPlayhead(c, i, dir) {
   const box = maskBoundsAt(c, raw, t);
   if (!box) { toast("The mask is outside the picture here"); return; }
   const name = raw.name || `Mask ${i + 1}`, opts = { scale: trackUi.scale, rotation: trackUi.rotation };
-  trackWithUi(c, `Tracking ${name}`, { box, from: t, to: dir > 0 ? c.duration : 0, dir, ...opts }, (r) => {
+  trackWithUi(c, `Tracking ${name}`, { box, from: t, to: dir > 0 ? c.duration : 0, dir, mask: i, ...opts }, (r) => {
     storeTrack(c, name, "box", box.w, box.h, r.samples);
     bakeTrackIntoMask(c, i, r.samples, opts);
   });
@@ -12088,7 +12095,7 @@ async function runTrackJob(ticket, fail) {
   let name = typeof spec.name === "string" && spec.name.trim() ? spec.name.trim().slice(0, 60) : null;
   if (!name && maskIdx >= 0) name = list[maskIdx].name || `Mask ${maskIdx + 1}`;
   if (!name) { let n = 1; while (tracks.some((x) => x.name === `Track ${n}`)) n++; name = `Track ${n}`; }
-  const g = pictureRect(c, evalProps(c, at));
+  const g = pictureRect(c, evalProps(c, at)) || pictureRect(c, evalProps(c, c.start));
   let box = null;
   if (spec.region) box = { x: +spec.region.x, y: +spec.region.y, w: +spec.region.w, h: +spec.region.h };
   else if (spec.point) { const sz = clamp(+spec.size || 0.08, 0.02, 0.4); box = { x: +spec.point.x, y: +spec.point.y, w: sz, h: sz * g.dw / g.dh }; }
@@ -12101,6 +12108,7 @@ async function runTrackJob(ticket, fail) {
   const to = Number.isFinite(spec.to) ? clamp(spec.to - c.start, 0, c.duration) : null;
   if (state.playing) pause();
   renderCancelled = false;
+  const stamp = trackStamp(c), otherStamp = other ? trackStamp(other) : "";
   let samples = [], cancelled = false;
   const lostAt = [];
   try {
@@ -12120,6 +12128,10 @@ async function runTrackJob(ticket, fail) {
       samples = samples.filter((sm, i) => i === 0 || sm[0] > samples[i - 1][0] + 1e-6);
       if (samples.length < 2) return fail(lostAt.length ? "lost the region on the very next frame — pick a spot with more detail, or a bigger region" : "nothing to track in that range");
     }
+    // the project may have been reloaded or edited while tracking: apply only onto what was measured
+    if (getClip(c.id) !== c || trackStamp(c) !== stamp || (other && (getClip(other.id) !== other || trackStamp(other) !== otherStamp)) ||
+      (maskIdx >= 0 && maskList(c)[maskIdx]?.name !== list[maskIdx].name))
+      return fail("the clip changed while tracking (an edit or a reload) — nothing was applied; run it again");
     pushUndo();
     const tr = box ? storeTrack(c, name, opts.scale || opts.rotation ? "box" : "point", box.w, box.h, samples) : existing;
     const used = box ? samples : tr.samples;
@@ -12135,7 +12147,10 @@ async function runTrackJob(ticket, fail) {
       clearTimeout(runtime.saveTimer); runtime.saveTimer = null;
       project.revision++;
       const res = await fetch("/api/project", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(projectJSON(), null, 2) });
-      if (!res.ok) return fail(res.status === 409 ? "the project changed while tracking — run it again" : `could not save the project (${res.status})`);
+      if (!res.ok) {
+        await syncFromServer(true);   // drop the unsaved result so a later save can't persist it
+        return fail(res.status === 409 ? "the project changed while tracking — nothing was saved; run it again" : `could not save the project (${res.status}) — nothing was kept`);
+      }
     }
     renderInspector(); drawFrame();
     const qs = used.map((sm) => sm[5]);
