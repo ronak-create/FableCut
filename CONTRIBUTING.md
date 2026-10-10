@@ -101,9 +101,9 @@ these agree. CI's **Release readiness** job checks the starred (★) items for y
   CHANGELOG and rebuild the docs.
 - Pack the `.mcpb` bundle from a clean `git archive` copy and put its sha256 in
   `server.json`.
-- Merge the release PR, then publish a GitHub release on that commit: npm
-  (`publish-npm.yml`) and the Discord announcement run from it. Publishing to the
-  MCP registry (`mcp-publisher`) is a separate step.
+- Merge the release PR, then publish a GitHub release on that commit, with the
+  `.mcpb` attached: npm and the MCP registry (`publish-npm.yml`) and the Discord
+  announcement run from it.
 
 Run the CI checks locally with `node .github/scripts/release-check.js`.
 
