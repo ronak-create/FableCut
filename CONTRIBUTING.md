@@ -59,6 +59,51 @@ recommended) **ffmpeg on PATH** for fast export and upload remuxing.
 5. Open a pull request against `main` using the PR template. Describe what changed
    and how you verified it.
 
+## Shipping a feature: the checklist
+
+FableCut is published in several places (npm, the MCP registry, the `.mcpb`
+bundle, the Claude Code plugin, Glama, the website and its playground), and
+an agent reads the same manual a person does. A feature is done when all of
+these agree. CI's **Release readiness** job checks the starred (★) items for you.
+
+**The code**
+- Preview and export go through the same compositor path; check both by hand.
+- A new shared module (UMD, like `color.js` or `mask.js`) is loaded in
+  `index.html` in dependency order and added to the copy list in
+  `docs/demo/sync.js`. Root `*.js` files ship in the npm package automatically. ★
+- No runtime dependencies, and nothing fetched at load time.
+- `npm test` passes; add tests for anything an agent or the REST API can reach.
+
+**Agent parity** (whatever a person can do in the editor, an agent can do too)
+- A new patch op is listed in the `fablecut_patch_project` description and in
+  the unknown-op error, validated strictly (a bad op refuses the whole patch),
+  and respects locks (`refuseLocked`, `force:true`).
+- A new MCP tool is added to `manifest.json` `tools` ★ and to the tool list at
+  the top of `CLAUDE.md`.
+- A new prop shows up in the compact project view when it is set.
+
+**Docs and site**
+- `CLAUDE.md` describes it (schema, props, ops, a recipe), then run
+  `node docs/docs/build.js` ★. A new `###` section needs a page entry in that
+  script, plus a `docs/sitemap.xml` entry.
+- `node docs/demo/sync.js` refreshes the playground ★.
+- The English `README.md` feature list, `docs/llms.txt`, and the feature list
+  in `docs/index.html` (JSON-LD) mention it.
+- `CHANGELOG.md` gets an entry under **Unreleased**.
+
+**Releasing** (maintainers)
+- Bump the version in every place it is written ★: `package.json`,
+  `server.json` (twice, plus the `.mcpb` URL), `manifest.json`,
+  `.claude-plugin/plugin.json`, and `serverInfo` in `mcp-server.js`; date the
+  CHANGELOG and rebuild the docs.
+- Pack the `.mcpb` bundle from a clean `git archive` copy and put its sha256 in
+  `server.json`.
+- Merge the release PR, then publish a GitHub release on that commit: npm
+  (`publish-npm.yml`) and the Discord announcement run from it. Publishing to the
+  MCP registry (`mcp-publisher`) is a separate step.
+
+Run the CI checks locally with `node .github/scripts/release-check.js`.
+
 ## Adding common things
 
 - **A transition** — extend the `TRANSITIONS` array and `applyTransition()` in

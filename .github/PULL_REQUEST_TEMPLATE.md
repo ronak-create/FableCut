@@ -23,6 +23,13 @@ Closes #
 
 ## Checklist
 
+See [Shipping a feature](../CONTRIBUTING.md#shipping-a-feature-the-checklist) for the details.
+
 - [ ] No new runtime dependencies added
 - [ ] Preview and export render identically (single compositor)
+- [ ] Agents can do it too: patch op / MCP tool (+ `manifest.json` tools), validated, respects locks
+- [ ] A new shared module is in `index.html` and `docs/demo/sync.js`
+- [ ] `CLAUDE.md` updated, then `node docs/docs/build.js` and `node docs/demo/sync.js` rerun
+- [ ] README feature list, `docs/llms.txt` and the site feature list mention user-facing features
+- [ ] `CHANGELOG.md` entry under Unreleased
 - [ ] Commits are focused and messages are descriptive

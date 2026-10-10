@@ -8,7 +8,8 @@ The complete agent manual is in [CLAUDE.md](CLAUDE.md). Read it before changing 
 - Keep preview and export on the same compositor path.
 - Prefer small, focused changes and preserve the existing terse browser-native style.
 - If a schema, prop, text animation, API, or MCP surface changes, update `CLAUDE.md` and the English `README.md` in the same change.
-- Run `node --check server.js && node --check app.js && node --check mcp-server.js && node --test` before opening a PR.
+- Follow the "Shipping a feature" checklist in [CONTRIBUTING.md](CONTRIBUTING.md#shipping-a-feature-the-checklist): agent parity, docs and site, changelog.
+- Run `npm test` and `node .github/scripts/release-check.js` before opening a PR.
 
 ## MCP entry point
 
