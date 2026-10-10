@@ -59,6 +59,11 @@ const PAGES = [
     parts: [["project.json schema", "Masks"]],
   },
   {
+    slug: "compositing", nav: "Track mattes and blending", title: "Track mattes and blending", group: "The timeline",
+    lede: "Cut a clip with the picture on another track by its alpha or its brightness, and lay clips over each other with blend modes, from the Inspector or from an agent with setMatte.",
+    parts: [["project.json schema", "Track mattes and blending"]],
+  },
+  {
     slug: "editing", nav: "Editing rules", title: "Editing rules", group: "The timeline",
     lede: "How tracks, links, locks, targeting and the trim tools behave, for people and agents alike.",
     parts: [["project.json schema", "Semantics"]],

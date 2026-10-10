@@ -263,3 +263,62 @@ test("a split or head trim re-bases mask keys, so the animation plays on unchang
   const trimmed = readProject(dir).clips.find((c) => c.id === right.id);
   near(M.maskAt(trimmed.props.masks[0], 0).x, 0.4, 1e-6, "after a 1 s head trim the mask starts where the shot now starts");
 });
+
+test("track mattes: the matte track is the video track above unless named; blend and matte values are checked", () => {
+  const ids = ["V3", "V2", "V1"];
+  assert.equal(M.matteTrackFor({ track: "V1", props: { matte: "luma" } }, ids), "V2");
+  assert.equal(M.matteTrackFor({ track: "V2", props: { matte: "alpha" } }, ids), "V3");
+  assert.equal(M.matteTrackFor({ track: "V3", props: { matte: "alpha" } }, ids), null, "nothing above the top track");
+  assert.equal(M.matteTrackFor({ track: "V1", props: { matte: "alpha", matteTrack: "V3" } }, ids), "V3");
+  assert.equal(M.matteTrackFor({ track: "V1", props: { matte: "alpha", matteTrack: "V1" } }, ids), null, "never its own track");
+  assert.equal(M.matteTrackFor({ track: "V1", props: { matte: "glow" } }, ids), null);
+  assert.equal(M.matteTrackFor({ track: "V2", props: { matte: "luma" } }, ["V10", "V3", "V2"]), "V3", "numeric order, not text");
+  assert.throws(() => M.checkCompositing({ blend: "add" }, ids, "V1", true), /blend must be normal/);
+  assert.throws(() => M.checkCompositing({ matte: "luma", matteTrack: "A1" }, ids, "V1", true), /matteTrack must be a video track/);
+  assert.deepEqual(M.checkCompositing({ blend: "add", matte: "luma", matteTrack: "V1" }, ids, "V1"), { matte: "luma" }, "lenient: drops what is invalid");
+  for (const b of ["color-burn", "exclusion", "hue", "saturation", "color", "luminosity"]) assert.ok(M.BLENDS.includes(b), b);
+});
+
+test("setMatte sets and clears a track matte; blend, matte and matteTrack are validated on updateClip", async (t) => {
+  const dir = makeDataDir(t, masked());
+  const mcp = startMcp(t, dir);
+  await mcp.request("initialize", { protocolVersion: "2025-11-25" });
+  const patch = (...ops) => mcp.callTool("fablecut_patch_project", { ops });
+  const props = (id) => readProject(dir).clips.find((c) => c.id === id).props || {};
+
+  let r = await patch({ op: "setMatte", id: "c_a", matte: "luma" });
+  assert.equal(r.isError, false, r.text);
+  assert.match(r.text, /c_a\.matte\(luma from V2\)/);
+  assert.equal(props("c_a").matte, "luma");
+  r = await patch({ op: "setMatte", id: "c_a", matte: "alpha-inverted", track: "V3" });
+  assert.match(r.text, /alpha-inverted from V3/);
+  assert.equal(props("c_a").matteTrack, "V3");
+  r = await patch({ op: "setMatte", id: "c_a", matte: null });
+  assert.equal(props("c_a").matte, undefined);
+  assert.equal(props("c_a").matteTrack, undefined, "the track goes with it");
+
+  r = await patch({ op: "setMatte", id: "c_a", matte: "glow" });
+  assert.match(r.text, /setMatte needs matte: alpha \| alpha-inverted \| luma \| luma-inverted/);
+  r = await patch({ op: "setMatte", id: "c_a", matte: "luma", track: "V1" });
+  assert.match(r.text, /another track than the clip's own/);
+  r = await patch({ op: "setMatte", id: "c_t", matte: "luma" });
+  assert.match(r.text, /audio clip/);
+  r = await patch({ op: "setMatte", id: "c_b", matte: "luma" });
+  assert.equal(r.isError, true, "locked");
+  r = await patch({ op: "updateClip", id: "c_txt", set: { props: { matte: "luma" } } });
+  assert.equal(r.isError, false, "updateClip may set a matte too: " + r.text);
+  assert.equal(props("c_txt").matte, "luma");
+  r = await patch({ op: "updateClip", id: "c_a", set: { props: { blend: "exclusion" } } });
+  assert.equal(r.isError, false, r.text);
+  assert.equal(props("c_a").blend, "exclusion");
+  r = await patch({ op: "updateClip", id: "c_a", set: { props: { blend: "add" } } });
+  assert.match(r.text, /props\.blend must be normal/);
+  r = await patch({ op: "updateClip", id: "c_a", set: { props: { matte: "luma", matteTrack: "A1" } } });
+  assert.match(r.text, /props\.matteTrack must be a video track/);
+  r = await patch({ op: "setMatte", id: "c_a", matte: "luma", track: "V3" }, { op: "updateClip", id: "c_a", set: { track: "V3" } });
+  assert.match(r.text, /another track than the clip's own/, "moving onto its own matte track is refused");
+  assert.equal(props("c_a").blend, "exclusion", "nothing saved by the refused patches");
+  await patch({ op: "setMatte", id: "c_a", matte: "luma", track: "V3" });
+  r = await patch({ op: "updateClip", id: "c_a", set: { props: { matte: null } } });
+  assert.equal(props("c_a").matteTrack, undefined, "matte:null through updateClip clears its track too");
+});

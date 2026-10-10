@@ -185,7 +185,8 @@ same time.
   with `fablecut_scopes` (levels, clipping, colour cast)
 - Quick filter sliders: brightness/contrast/saturation/hue, **temperature & tint**,
   blur, grayscale/sepia/invert, **vignette**, animated **film grain**
-- Blend modes (screen, multiply, overlay…), fit modes (contain/cover/stretch),
+- 17 blend modes (screen, multiply, overlay, color-burn, exclusion, hue,
+  luminosity…), fit modes (contain/cover/stretch),
   per-edge cropping, corner radius, flip H/V
 - **Masks** — isolate any part of a clip (video, image, SVG, text or an
   adjustment layer): rectangle, ellipse, **bezier pen** and **free-hand**
@@ -193,6 +194,9 @@ same time.
   difference, each with feather, expansion, invert and opacity, all
   keyframable (outlines morph). Draw and edit them on the monitor, with a
   matte view. Agents use the `setMask` patch op and measure with `fablecut_scopes`
+- **Track mattes** — cut a clip with the picture on the track above by its
+  alpha or its luma (inverted or not): text filled with video, shape reveals,
+  texture cut-outs. The matte track hides itself. Agents use `setMatte`
 - **Chroma key** (green screen) with tolerance/softness + spill suppression
 - **AI background removal** (person cut-out, in-browser via MediaPipe)
 
