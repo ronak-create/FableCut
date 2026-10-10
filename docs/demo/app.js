@@ -9518,9 +9518,9 @@ function cropFrac(p) {
 function picToMedia(p, u, v) { const k = cropFrac(p); return { x: k.l + u * (1 - k.l - k.r), y: k.t + v * (1 - k.t - k.b) }; }
 function mediaToPic(p, x, y) { const k = cropFrac(p); return { u: (x - k.l) / Math.max(1e-6, 1 - k.l - k.r), v: (y - k.t) / Math.max(1e-6, 1 - k.t - k.b) }; }
 function seekFrame(el, t) {
-  return new Promise((res) => {
+  return new Promise((res, rej) => {
     const done = () => { el.removeEventListener("seeked", done); clearTimeout(tm); res(); };
-    const tm = setTimeout(done, 4000);
+    const tm = setTimeout(() => { el.removeEventListener("seeked", done); rej(new Error(`the video did not seek to ${t.toFixed(2)} s`)); }, 4000);
     el.addEventListener("seeked", done);
     el.currentTime = t;
   });
@@ -9649,7 +9649,11 @@ function attachToTrack(c, track, b, { scale, rotation, at = state.time }) {
   const pb = evalProps(b, tRef), W = project.width, H = project.height;
   const off = { x: (+pb.x || 0) - (ref.x - W / 2), y: (+pb.y || 0) - (ref.y - H / 2) };
   const g = pictureRect(c, evalProps(c, tRef));
-  const inRange = S.filter((sm) => c.start + sm[0] >= a - 1e-4 && c.start + sm[0] <= z + 1e-4);
+  // the samples inside the overlap, plus the track at its edges and at the reference (between samples, too)
+  const edge = (T) => { const q = Tracker.trackAt(tr, T - c.start); return [+(T - c.start).toFixed(4), q.x, q.y, q.s, q.r, q.q]; };
+  const inRange = S.filter((sm) => c.start + sm[0] > a + 1e-4 && c.start + sm[0] < z - 1e-4);
+  for (const T of [a, z, tRef]) if (!inRange.some((sm) => Math.abs(c.start + sm[0] - T) < 1e-4)) inRange.push(edge(T));
+  inRange.sort((p, q) => p[0] - q[0]);
   const pts = Tracker.simplify(inRange, 1.5 / Math.max(1, g ? g.dw : 1000));
   const props = ["x", "y", ...(scale ? ["scale"] : []), ...(rotation ? ["rotation"] : [])];
   b.keyframes = b.keyframes || {};
@@ -12162,7 +12166,12 @@ async function runTrackJob(ticket, fail) {
       const res = await fetch("/api/project", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(projectJSON(), null, 2) });
       if (!res.ok) {
         project.revision--;
-        restoreSnapshot(beforeJob);   // exactly the state before the job, and no undo step for it
+        // put back only the clips this job changed (edits elsewhere since stay), and drop its undo step
+        const was = JSON.parse(beforeJob), wasClips = Array.isArray(was) ? was : was.clips;
+        for (const id of [c.id, other && other.id].filter(Boolean)) {
+          const i = project.clips.findIndex((x) => x.id === id), old = wasClips.find((x) => x.id === id);
+          if (i >= 0 && old) project.clips[i] = old;
+        }
         const u = runtime.undo.lastIndexOf(beforeJob);
         if (u >= 0) runtime.undo.splice(u, 1);
         pruneSelection(); renderInspector(); drawFrame();
