@@ -9594,10 +9594,14 @@ function bakeTrackIntoMask(c, i, samples, { scale, rotation }, from = samples[0]
   const list = maskList(c).slice(), raw = list[i];
   if (!raw || samples.length < 2) return 0;
   const g = pictureRect(c, evalProps(c, c.start + samples[0][0]));
-  const S = Tracker.simplify(Tracker.smooth(samples, 3, 1), 1.5 / Math.max(1, g ? g.dw : 1000));   // keys within ~1.5 px
-  // the mask is where it was drawn at `from` (where tracking started): motion is measured from there,
-  // so a backward or two-way track keeps it anchored at the playhead
-  const anchor = samples.find((sm) => Math.abs(sm[0] - from) < 1e-4) || (() => { const q = Tracker.trackAt({ samples }, from); return [from, q.x, q.y, q.s, q.r, q.q]; })();
+  // the mask is where it was drawn at `from` (where tracking started): motion is measured from there, on the
+  // smoothed path, and a key stays at `from` — so a backward or two-way track keeps it exactly at the playhead
+  const sm3 = Tracker.smooth(samples, 3, 1);
+  const anchor = sm3.find((sm) => Math.abs(sm[0] - from) < 1e-4) || (() => { const q = Tracker.trackAt({ samples: sm3 }, from); return [from, q.x, q.y, q.s, q.r, q.q]; })();
+  const S = Tracker.simplify(sm3, 1.5 / Math.max(1, g ? g.dw : 1000));   // keys within ~1.5 px
+  if (from >= samples[0][0] && from <= samples[samples.length - 1][0] && !S.some((sm) => Math.abs(sm[0] - from) < 1e-4)) {
+    S.push(anchor); S.sort((a, b) => a[0] - b[0]);
+  }
   const first = samples[0], base = Mask.maskAt(raw, from);
   const motion = ["x", "y", ...(scale ? ["scale"] : []), ...(rotation ? ["rotation"] : [])];
   const t0 = first[0] - 1e-4, t1 = samples[samples.length - 1][0] + 1e-4;
@@ -12140,11 +12144,12 @@ async function runTrackJob(ticket, fail) {
     if (getClip(c.id) !== c || trackStamp(c) !== stamp || (other && (getClip(other.id) !== other || trackStamp(other) !== otherStamp)) ||
       (maskStamp != null && JSON.stringify(maskList(c)[maskIdx] ?? null) !== maskStamp))
       return fail("the clip changed while tracking (an edit or a reload) — nothing was applied; run it again");
-    pushUndo();
+    const beforeJob = undoSnapshot();
+    pushUndo(beforeJob);
     const tr = box ? storeTrack(c, name, opts.scale || opts.rotation ? "box" : "point", box.w, box.h, samples) : existing;
     const used = box ? samples : tr.samples;
     let applied = null;
-    if (maskIdx >= 0) applied = `mask ${JSON.stringify(list[maskIdx].name || maskIdx)}: ${bakeTrackIntoMask(c, maskIdx, used, opts, box ? from : used[0][0])} keys`;
+    if (maskIdx >= 0) applied = `mask ${JSON.stringify(list[maskIdx].name || maskIdx)}: ${bakeTrackIntoMask(c, maskIdx, used, opts, from)} keys`;
     else if (other) {
       const o = { scale: ap.scale === true, rotation: ap.rotation === true, at: Number.isFinite(ap.at) ? ap.at : at };
       const n = attachToTrack(c, tr, other, o);
@@ -12157,7 +12162,9 @@ async function runTrackJob(ticket, fail) {
       const res = await fetch("/api/project", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(projectJSON(), null, 2) });
       if (!res.ok) {
         project.revision--;
-        restoreSnapshot(runtime.undo.pop());   // exactly the state before the job, and no undo step for it
+        restoreSnapshot(beforeJob);   // exactly the state before the job, and no undo step for it
+        const u = runtime.undo.lastIndexOf(beforeJob);
+        if (u >= 0) runtime.undo.splice(u, 1);
         pruneSelection(); renderInspector(); drawFrame();
         return fail(res.status === 409 ? "the project changed while tracking — nothing was saved; run it again" : `could not save the project (${res.status}) — nothing was kept`);
       }
