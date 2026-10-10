@@ -870,7 +870,9 @@ the template fresh while anchoring it to the first frame so it does not
 drift. It stops where the match quality drops below 0.45 (the region was
 covered, left the frame or changed too much) and keeps what it tracked up to
 there. Pick regions with detail: corners, text, edges. Flat sky or a blank
-wall can't be tracked. Tracks are stored in clip time, so they move with the clip and follow
+wall can't be tracked. A track without scale follows position only: if the
+thing grows, shrinks or turns noticeably, turn on Scale / Rotate (`scale` /
+`rotation`), or the match fades and the track stops early. Tracks are stored in clip time, so they move with the clip and follow
 trims and splits (re-track after changing its speed).
 
 In the editor:
@@ -879,7 +881,7 @@ In the editor:
   **◀ Back** and **On ▶** follow what the mask covers from the playhead to
   the clip's start or end, and key the mask's `x` / `y`. Turn on **Scale**
   and **Rotate** to key those too. The keys are linear and simplified (a key
-  only where the motion turns). Keys the mask had in that range lose their
+  only where the motion turns, within ~1.5 px). Keys the mask had in that range lose their
   position and keep everything else.
 - **Point tracking.** The Inspector's **Tracking** section (video clips):
   **+ Track point**, then click the spot on the monitor. It tracks from the

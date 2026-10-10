@@ -120,9 +120,9 @@
       for (let dy = -st; dy <= st; dy++) for (let dx = -st; dx <= st; dx++) look(best.x + dx, best.y + dy, s, r);
       // 3. scale / rotation, then the position again
       if (opts.scale || opts.rotation) {
-        for (let it = 0; it < 2; it++) {
+        for (const [fs, fr] of [[1.03, 0.035], [1.01, 0.012], [1.004, 0.005]]) {   // coarse to fine
           const c0 = fb;
-          for (const ds of opts.scale ? [1 / 1.03, 1, 1.03] : [1]) for (const dr of opts.rotation ? [-0.035, 0, 0.035] : [0])
+          for (const ds of opts.scale ? [1 / fs, 1, fs] : [1]) for (const dr of opts.rotation ? [-fr, 0, fr] : [0])
             if (ds !== 1 || dr !== 0) look(c0.x, c0.y, c0.s * ds, c0.r + dr);
           const c1 = fb;
           for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (dx || dy) look(c1.x + dx, c1.y + dy, c1.s, c1.r);
@@ -205,19 +205,30 @@
     return out;
   }
 
+  /** Centred moving averages: scale and rotation over ±k frames, position over ±kp (0 = as tracked). */
+  function smooth(samples, k = 3, kp = 0) {
+    if (samples.length < 3) return samples.slice();
+    const avg = (i, col, w) => {
+      let v = 0, n = 0;
+      for (let j = Math.max(0, i - w); j <= Math.min(samples.length - 1, i + w); j++) { v += samples[j][col]; n++; }
+      return v / n;
+    };
+    return samples.map((sm, i) => [sm[0], kp ? avg(i, 1, kp) : sm[1], kp ? avg(i, 2, kp) : sm[2], avg(i, 3, k), avg(i, 4, k), sm[5]]);
+  }
+
   /**
    * The samples worth keying: drops samples a straight line between their
-   * neighbours already explains within `tol` (in the units of x / y; scale and
-   * rotation get matching tolerances). Ramer–Douglas–Peucker over time.
+   * neighbours already explains within `tol` (in the units of x / y), 0.4 % of
+   * scale or 0.3° of rotation. Ramer–Douglas–Peucker over time.
    */
-  function simplify(samples, tol = 0.001) {
+  function simplify(samples, tol = 0.001, sTol = 0.004, rTol = 0.3) {
     if (samples.length <= 2) return samples.slice();
     const keep = new Uint8Array(samples.length);
     keep[0] = keep[samples.length - 1] = 1;
     const err = (a, b, m) => {
       const u = (m[0] - a[0]) / Math.max(1e-9, b[0] - a[0]);
       const L = (i) => a[i] + (b[i] - a[i]) * u;
-      return Math.max(Math.hypot(m[1] - L(1), m[2] - L(2)) / tol, Math.abs(m[3] - L(3)) / (tol * 2), Math.abs(m[4] - L(4)) / (tol * 200));
+      return Math.max(Math.hypot(m[1] - L(1), m[2] - L(2)) / tol, Math.abs(m[3] - L(3)) / sTol, Math.abs(m[4] - L(4)) / rTol);
     };
     const stack = [[0, samples.length - 1]];
     while (stack.length) {
@@ -237,5 +248,5 @@
     }).join(", ");
   }
 
-  return { MAX_TRACKS, MAX_SAMPLES, KINDS, MIN_SCORE, toGray, sample, createTracker, normalizeTracks, trackAt, shiftTracks, simplify, describe };
+  return { MAX_TRACKS, MAX_SAMPLES, KINDS, MIN_SCORE, toGray, sample, createTracker, normalizeTracks, trackAt, shiftTracks, smooth, simplify, describe };
 });

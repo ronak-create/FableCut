@@ -9576,7 +9576,8 @@ function storeTrack(c, name, kind, w, h, samples) {
   const list = clipTracks(c).map((x) => ({ ...x })), t0 = samples[0][0], t1 = samples[samples.length - 1][0];
   const i = list.findIndex((x) => x.name === name);
   const keep = i >= 0 ? list[i].samples.filter((s) => s[0] < t0 - 1e-4 || s[0] > t1 + 1e-4) : [];
-  const tr = { name, kind, w: i >= 0 ? list[i].w : w, h: i >= 0 ? list[i].h : h, samples: [...keep, ...samples].sort((a, b) => a[0] - b[0]) };
+  const fresh = kind === "box" ? Tracker.smooth(samples) : samples;   // scale / rotation steadied once, for every use
+  const tr = { name, kind, w: i >= 0 ? list[i].w : w, h: i >= 0 ? list[i].h : h, samples: [...keep, ...fresh].sort((a, b) => a[0] - b[0]) };
   if (i >= 0) list[i] = tr; else list.push(tr);
   writeTracks(c, list.slice(-Tracker.MAX_TRACKS));
   return clipTracks(c).find((x) => x.name === name);
@@ -9586,7 +9587,7 @@ function bakeTrackIntoMask(c, i, samples, { scale, rotation }) {
   const list = maskList(c).slice(), raw = list[i];
   if (!raw || samples.length < 2) return 0;
   const g = pictureRect(c, evalProps(c, c.start + samples[0][0]));
-  const S = Tracker.simplify(samples, 0.35 / Math.max(1, g ? g.dw : 1000));
+  const S = Tracker.simplify(Tracker.smooth(samples, 3, 1), 1.5 / Math.max(1, g ? g.dw : 1000));   // keys within ~1.5 px
   const first = samples[0], base = Mask.maskAt(raw, first[0]);
   const motion = ["x", "y", ...(scale ? ["scale"] : []), ...(rotation ? ["rotation"] : [])];
   const t0 = first[0] - 1e-4, t1 = samples[samples.length - 1][0] + 1e-4;
@@ -9626,8 +9627,8 @@ function trackOnFrame(c, tr, T) {
   return { x: g.cx + lx * cs - ly * sn, y: g.cy + lx * sn + ly * cs, s: s.s * (p.scale || 1), r: (g.fx * g.fy < 0 ? -s.r : s.r) + (p.rotation || 0) };
 }
 /** Bake clip c's track into clip b's x / y (and scale / rotation) keyframes so b rides on it. */
-function attachToTrack(c, tr, b, { scale, rotation, at = state.time }) {
-  const S = tr.samples, a = Math.max(c.start + S[0][0], b.start), z = Math.min(c.start + S[S.length - 1][0], b.start + b.duration);
+function attachToTrack(c, track, b, { scale, rotation, at = state.time }) {
+  const tr = { ...track, samples: Tracker.smooth(track.samples, 3, 1) }, S = tr.samples, a = Math.max(c.start + S[0][0], b.start), z = Math.min(c.start + S[S.length - 1][0], b.start + b.duration);
   if (z - a < 1e-3) return 0;
   const tRef = clamp(at, a, z), ref = trackOnFrame(c, tr, tRef);
   if (!ref) return 0;
@@ -9635,7 +9636,7 @@ function attachToTrack(c, tr, b, { scale, rotation, at = state.time }) {
   const off = { x: (+pb.x || 0) - (ref.x - W / 2), y: (+pb.y || 0) - (ref.y - H / 2) };
   const g = pictureRect(c, evalProps(c, tRef));
   const inRange = S.filter((sm) => c.start + sm[0] >= a - 1e-4 && c.start + sm[0] <= z + 1e-4);
-  const pts = Tracker.simplify(inRange, 0.35 / Math.max(1, g ? g.dw : 1000));
+  const pts = Tracker.simplify(inRange, 1.5 / Math.max(1, g ? g.dw : 1000));
   const props = ["x", "y", ...(scale ? ["scale"] : []), ...(rotation ? ["rotation"] : [])];
   b.keyframes = b.keyframes || {};
   const l0 = a - b.start - 1e-4, l1 = z - b.start + 1e-4;
