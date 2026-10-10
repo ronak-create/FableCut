@@ -57,3 +57,31 @@ jobs:
       - name: Publish
         if: steps.ver.outputs.skip != 'true'
         run: npm publish --access public
+
+  # Lists the release in the official MCP Registry from server.json. Runs after
+  # npm because the registry checks the npm package's mcpName. Auth is GitHub
+  # OIDC, which owns the io.github.ronak-create/* namespace — no token to store.
+  mcp-registry:
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the registry
+        id: reg
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./server.json').version")
+          # Already listed (re-run)? The registry refuses duplicate versions.
+          if curl -fsS "https://registry.modelcontextprotocol.io/v0/servers?search=fablecut&version=$version" | grep -q "\"version\":\"$version\""; then
+            echo "Version $version is already in the MCP Registry, skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish
+        if: steps.reg.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish
