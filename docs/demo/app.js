@@ -4092,6 +4092,7 @@ function startClipGesture(e, c, mode, collapseOnClick) {
   const orig = {
     start: c.start, in: c.in, duration: c.duration, track: c.track,
     keyframes: c.keyframes ? JSON.parse(JSON.stringify(c.keyframes)) : undefined,
+    masks: c.props.masks,
   };
   // moving a clip that belongs to a multi-selection drags the whole group;
   // AV-linked partners (video+audio from one file) always move together
@@ -4146,6 +4147,7 @@ function startClipGesture(e, c, mode, collapseOnClick) {
       c.in = (c.kind === "video" || c.kind === "audio") ? orig.in + d * sp : 0;
       c.duration = orig.duration - d;
       c.keyframes = shiftKF(orig.keyframes, d, c.duration);
+      if (orig.masks) c.props.masks = Mask.shiftKeys(orig.masks, d);
       syncLinkedTiming(c);
     } else { // trim-r
       let ne = snapTime(orig.start + orig.duration + dt, groupIds);
@@ -9378,7 +9380,7 @@ function maskSectionHtml(c) {
   let html = `<div class="insp-section" data-mask-section><h3>Masks</h3>
     <div class="cl-row">${tool("rect", "+ Rect", "Add a rectangle mask")}${tool("ellipse", "+ Ellipse", "Add an ellipse mask")}${tool("pen", "Pen", "Click points on the monitor (drag to pull curve handles); click the first point or press Enter to close")}${tool("draw", "Draw", "Drag a free-hand outline on the monitor — it becomes an editable bezier")}
       ${list.length ? `<button type="button" class="btn tiny${runtime.maskView ? " toggle on" : ""}" data-mact="view" title="Show the matte in the monitor (white = visible)">Matte</button>` : ""}</div>
-    ${ui.tool === "pen" ? `<p class="cl-note">Pen: click to add points, drag to curve. Click the first point or press Enter to close, Esc to cancel.</p>` : ""}
+    ${ui.tool === "pen" ? `<p class="cl-note">Pen: click to add points, drag to curve. Click the first point or press Enter to close. Ctrl+Z / Backspace removes the last point, Ctrl+Shift+Z puts it back, Esc cancels.</p>` : ""}
     ${ui.tool === "draw" ? `<p class="cl-note">Draw: drag around what to keep. Esc cancels.</p>` : ""}
     ${list.length ? `<div class="cl-row">${chips}</div>` : ui.tool ? "" : `<p class="cl-note">No masks: the whole clip shows. Masks keep (add), cut (subtract) or intersect parts of the picture and move with the clip.</p>`}`;
   if (m) {
@@ -9403,7 +9405,7 @@ function maskSectionHtml(c) {
       ${mrow("opacity")}${mrow("feather")}${mrow("expand")}${mrow("x")}${mrow("y")}${m.shape !== "bezier" ? mrow("w") + mrow("h") : ""}${mrow("scale")}${mrow("rotation")}
       <p class="cl-note">On the monitor: drag inside to move, the knob rotates (Shift: 15° steps)${m.shape === "bezier"
         ? "; drag a point to move it, its handles to curve it (Alt: break the pair), Alt-drag a point to pull new handles, Ctrl-click the outline to add a point, double-click a point to remove it"
-        : ", the edge handles resize"}. Esc deselects.</p>`;
+        : ", the edge handles resize"}. Esc deselects. Every change undoes with Ctrl+Z (redo: Ctrl+Shift+Z or Ctrl+Y).</p>`;
   }
   return html + `</div>`;
 }
@@ -9459,6 +9461,7 @@ function bindMaskControls(c) {
   if (mode) mode.addEventListener("change", () => {
     if (!guard()) return;
     pushUndo(); writeMaskSet(c, maskUi.sel, { mode: mode.value }); scheduleSave(); rerender();
+    document.activeElement?.blur?.();   // hand Ctrl+Z back to the editor
   });
   const name = root.querySelector("[data-mname]");
   if (name) name.addEventListener("change", () => {
@@ -9480,6 +9483,7 @@ function bindMaskControls(c) {
       const x = parseFloat(n.value);
       if (!Number.isFinite(x) || !guard()) return;
       pushUndo(); writeMaskSet(c, maskUi.sel, { [p]: x }); scheduleSave(); rerender();
+      document.activeElement?.blur?.();
     });
   }
 }
@@ -9661,6 +9665,7 @@ els.preview.addEventListener("pointerdown", (e) => {
       if (P.length >= 3 && near(B.toCanvas(P[0][0], P[0][1]))) { finishPen(c); return; }
       if (P.length >= Mask.MAX_POINTS) { toast(`A mask has at most ${Mask.MAX_POINTS} points`); return; }
       P.push([bp.x, bp.y, 0, 0, 0, 0]);
+      maskUi.pen.redo = [];
       maskUi.pen.dragging = true;
     } else return;
     maskUi.drag = { tool: true };
@@ -9802,6 +9807,17 @@ window.addEventListener("keydown", (e) => {
   } else if (e.key === "Enter" && maskUi.tool === "pen") {
     e.preventDefault(); e.stopImmediatePropagation();
     finishPen(c);
+  } else if (maskUi.tool === "pen" && maskUi.pen && !maskUi.drag) {
+    // while placing points the outline is not in the project yet: undo / redo step through the points
+    const mod = e.ctrlKey || e.metaKey, k = e.key.toLowerCase();
+    const back = (mod && k === "z" && !e.shiftKey) || ((e.key === "Backspace" || e.key === "Delete") && !mod);
+    const fwd = mod && ((k === "z" && e.shiftKey) || k === "y");
+    if (!back && !fwd) return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    const P = maskUi.pen.pts, R = (maskUi.pen.redo ||= []);
+    if (back && P.length) R.push(P.pop());
+    else if (fwd && R.length) P.push(R.pop());
+    state.dirtyTimeline = true;
   }
 }, true);
 

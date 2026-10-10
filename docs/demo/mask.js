@@ -186,6 +186,24 @@
     }
     return out;
   }
+  /** Re-base mask keys when a clip's head moves by `offset` seconds (a split's
+   *  right half, a head trim): keys before the new start fold into one key at 0
+   *  holding the mask as it was there, so the animation plays on unchanged. */
+  function shiftKeys(list, offset) {
+    if (!Array.isArray(list) || !offset || !list.some((m) => m && m.keys && m.keys.length)) return list;
+    return list.map((m) => {
+      if (!m || !m.keys || !m.keys.length) return m;
+      const keys = m.keys.map((k) => ({ ...k, t: r4(k.t - offset) }));
+      const after = keys.filter((k) => k.t > 1e-4);
+      if (after.length === keys.length) return { ...m, keys };
+      const now = maskAt(m, offset), k0 = { t: 0 };
+      for (const p of KEYED) {
+        if (!m.keys.some((k) => k[p] != null)) continue;
+        k0[p] = p === "points" ? now.points.map((q) => q.map(r4)) : r4(now[p]);
+      }
+      return { ...m, keys: [k0, ...after] };
+    });
+  }
   /** The masks that cut the clip at clip-local time t, or null when none do. */
   function masksAt(list, t) {
     if (!Array.isArray(list) || !list.length) return null;
@@ -383,7 +401,7 @@
 
   return {
     MAX_MASKS, MAX_POINTS, SHAPES, MODES, KEYED, NUM_KEYED, RANGE, DEFAULTS, EASES,
-    normalizeMasks, normalizeMask, mergeMask, maskAt, masksAt,
+    normalizeMasks, normalizeMask, mergeMask, maskAt, masksAt, shiftKeys,
     anchors, tracePath, flatten, polyDist, maskCoverage, combine, matteAt, fitStroke, rasterize, describe,
   };
 });
