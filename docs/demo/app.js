@@ -3273,7 +3273,7 @@ function rebuildClips() {
   els.ruler.style.width = els.timelineScroll.clientWidth + "px";
   for (const row of els.tracks.children) row.innerHTML = "";
   const matted = project.clips.map((x) => [x, clipMatte(x)]).filter(([, m]) => m);
-  const isMatte = (c) => matted.some(([x, m]) => m.track === c.track && x.disabled !== true &&
+  const isMatte = (c) => matted.some(([x, m]) => m.track === c.track && clipRenders(x) &&
     x.start < c.start + c.duration && c.start < x.start + x.duration);   // hidden while it cuts that clip
   for (const c of project.clips) {
     const tr = trackOf(c); if (!tr) continue;

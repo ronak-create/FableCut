@@ -930,7 +930,8 @@ async function callTool(name, args, attempt = 0) {
             }
             mergeInto(c, op.set);
             checkMasks(c, "updateClip");
-            checkCompositing(c, "updateClip", op.set && op.set.props);
+            // a track move re-checks the matte too (a clip can't be its own matte)
+            checkCompositing(c, "updateClip", op.set && op.set.track ? c.props : op.set && op.set.props);
             notes.push("~" + op.id);
             break;
           }

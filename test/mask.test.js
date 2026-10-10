@@ -315,5 +315,7 @@ test("setMatte sets and clears a track matte; blend, matte and matteTrack are va
   assert.match(r.text, /props\.blend must be normal/);
   r = await patch({ op: "updateClip", id: "c_a", set: { props: { matte: "luma", matteTrack: "A1" } } });
   assert.match(r.text, /props\.matteTrack must be a video track/);
+  r = await patch({ op: "setMatte", id: "c_a", matte: "luma", track: "V3" }, { op: "updateClip", id: "c_a", set: { track: "V3" } });
+  assert.match(r.text, /another track than the clip's own/, "moving onto its own matte track is refused");
   assert.equal(props("c_a").blend, "exclusion", "nothing saved by the refused patches");
 });
