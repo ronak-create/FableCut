@@ -209,9 +209,10 @@
   function smooth(samples, k = 3, kp = 0) {
     if (samples.length < 3) return samples.slice();
     const avg = (i, col, w) => {
-      let v = 0, n = 0;
-      for (let j = Math.max(0, i - w); j <= Math.min(samples.length - 1, i + w); j++) { v += samples[j][col]; n++; }
-      return v / n;
+      w = Math.min(w, i, samples.length - 1 - i);   // symmetric: no lean at the ends, which stay as tracked
+      let v = 0;
+      for (let j = i - w; j <= i + w; j++) v += samples[j][col];
+      return v / (2 * w + 1);
     };
     return samples.map((sm, i) => [sm[0], kp ? avg(i, 1, kp) : sm[1], kp ? avg(i, 2, kp) : sm[2], avg(i, 3, k), avg(i, 4, k), sm[5]]);
   }
