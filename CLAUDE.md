@@ -39,6 +39,8 @@ Every Claude Code session then has these tools:
 - `fablecut_scopes` — measure the graded picture at a moment (levels, clipping, colour
   cast), as the editor's scopes see it; also what a grade layer or a clip's masks
   select. See "Color" and "Masks" below.
+- `fablecut_track` — motion tracking: follow a region of a video clip, store it as
+  a track, and make a mask or another clip follow it. See "Tracking" below.
 
 ### Token-efficient editing (important for agents)
 
@@ -839,6 +841,87 @@ burn** on V2 with `blend:"screen"`; **a grade only in the bright areas** — an
 adjustment layer with `matte:"luma"` over a copy of the shot;
 **a cut-out through a texture** — `luma-inverted` against a black-and-white
 texture.
+
+### Tracking
+
+Motion tracking follows something in a video clip frame by frame: a corner, a
+logo, a face, a sign. The result is a **track** stored on the clip, and masks
+and other clips **follow** it by having it written into their keys. Rendering
+never reads a track, so a followed mask or title renders and exports exactly
+like a hand-keyed one, and you can edit its keys afterwards.
+
+```jsonc
+"tracks": [
+  { "name": "Logo", "kind": "point", "w": 0.08, "h": 0.14,
+    "samples": [[0, 0.31, 0.42, 1, 0, 1], [0.0333, 0.312, 0.421, 1, 0, 0.98]] }
+]
+```
+
+| key | does |
+|---|---|
+| `name` | how masks, clips and agents refer to it (default `Track n`, or the mask's name) |
+| `kind` | `point` (position) or `box` (position, size and rotation were followed) |
+| `w` · `h` | the region that was matched, fractions of the clip's picture |
+| `samples` | one per frame: `[t, x, y, s, r, q]`. `t` is seconds from the clip's start, `x, y` is the centre (fractions of the picture, like masks), `s` is the scale and `r` the rotation (°) relative to the first sample, `q` is the match quality 0…1 |
+
+The tracker matches a small greyscale template of the region (normalized
+cross-correlation, sub-pixel, optionally over scale and rotation) and keeps
+the template fresh while anchoring it to the first frame so it does not
+drift. It stops where the match quality drops below 0.45 (the region was
+covered, left the frame or changed too much) and keeps what it tracked up to
+there. Pick regions with detail: corners, text, edges. Flat sky or a blank
+wall can't be tracked. Tracks are stored in clip time, so they move with the clip and follow
+trims and splits (re-track after changing its speed).
+
+In the editor:
+
+- **Mask tracking.** Select a mask on a video clip. Under its mode row,
+  **◀ Back** and **On ▶** follow what the mask covers from the playhead to
+  the clip's start or end, and key the mask's `x` / `y`. Turn on **Scale**
+  and **Rotate** to key those too. The keys are linear and simplified (a key
+  only where the motion turns). Keys the mask had in that range lose their
+  position and keep everything else.
+- **Point tracking.** The Inspector's **Tracking** section (video clips):
+  **+ Track point**, then click the spot on the monitor. It tracks from the
+  playhead to the clip's end. **Region** sets the matched area (% of the
+  picture's width). Pick a track's chip to see its path and region on the
+  monitor, **◀ Track back** / **Track on ▶** to extend it from the playhead,
+  and **Delete** it.
+- **Attach a clip.** With a track picked, choose a clip in **Attach**
+  (any visual clip that overlaps it in time) and press **Attach to the track**. The clip
+  gets `x` / `y` keyframes (plus `scale` / `rotation` with those toggles on)
+  that ride on the track and keep it where it is at the playhead. Stickers,
+  titles, a blur box or a highlight then stay pinned to the moving thing.
+- Tracking runs from a private copy of the video, so the monitor does not
+  move. Progress shows in the Inspector, and **Esc** stops it and keeps what
+  it has. Each finished track is one undo step.
+
+**Agents:** `fablecut_track` runs the tracker in the editor (an open tab, else
+headless Chrome / Edge) and saves the result:
+
+- `{clip, point:{x:0.62, y:0.4}, at:12}` follows a spot from `at` to the
+  clip's end. `region:{x, y, w, h}` gives the area instead, `size` sets a
+  point's region (default 0.08 of the width), `direction:"backward"|"both"`
+  and `to` (timeline seconds) set the range, and `scale` / `rotation` follow
+  those too.
+- `apply:{mask:"Face"}` bakes the result into that mask's keys. Leave out
+  `point` / `region` and the mask's own outline is what gets followed.
+- `apply:{clip:"c_sticker", scale?, rotation?, at?}` pins another clip to
+  the track.
+- `name` names the track. Passing an existing name with `apply` and no
+  region re-applies the stored track without tracking again.
+- The reply gives the range, the match quality (min / mean; ≥ 0.8 is solid),
+  where it was lost, and what was keyed.
+- `{op:"removeTrack", id, track}` deletes a stored track; what followed it
+  keeps its keys. The compact project view lists tracks as
+  `[tracks: "Logo" point 0.00–4.20 s (127 samples)]`, never their samples.
+
+Recipes: **a title that follows a car** — track a point on the car, attach
+the title; **blur a face or a plate** — an ellipse mask on a blurred copy of
+the shot on the track above, then `apply:{mask}`; **a screen replacement** —
+track the screen with Scale and Rotate on and attach the new picture, cropped
+to fit; **a highlight that stays on a UI element** in a screen recording —
+track the button, attach a rect svg.
 
 ### Semantics
 

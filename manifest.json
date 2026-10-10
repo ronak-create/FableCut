@@ -38,7 +38,8 @@
     { "name": "fablecut_auto_duck", "description": "Duck music under dialogue: write duck keyframes wherever the voice tracks speak" },
     { "name": "fablecut_denoise", "description": "Reduce background noise on audio clips: render a cleaned copy of the file and switch the clips to it" },
     { "name": "fablecut_export", "description": "Render the timeline to a video file with the editor's Fast export, in an open editor tab or a headless browser" },
-    { "name": "fablecut_scopes", "description": "Measure the graded picture at a moment: luma levels, clipping, mean RGB, saturation and colour cast — and what a grade layer's matte or a clip's masks select" }
+    { "name": "fablecut_scopes", "description": "Measure the graded picture at a moment: luma levels, clipping, mean RGB, saturation and colour cast — and what a grade layer's matte or a clip's masks select" },
+    { "name": "fablecut_track", "description": "Motion tracking: follow a region of a video clip frame by frame, store it as a track, and make a mask follow it or pin another clip to it" }
   ],
   "compatibility": {
     "runtimes": { "node": ">=18" }

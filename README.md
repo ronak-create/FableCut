@@ -194,6 +194,10 @@ same time.
   difference, each with feather, expansion, invert and opacity, all
   keyframable (outlines morph). Draw and edit them on the monitor, with a
   matte view. Agents use the `setMask` patch op and measure with `fablecut_scopes`
+- **Motion tracking** — follow a point or a region (with its scale and
+  rotation) through a video clip, then make a mask follow it or pin a title,
+  sticker or any clip to it; the result is ordinary editable keys. Agents use
+  `fablecut_track`
 - **Track mattes** — cut a clip with the picture on the track above by its
   alpha or its luma (inverted or not): text filled with video, shape reveals,
   texture cut-outs. The matte track hides itself. Agents use `setMatte`
@@ -389,7 +393,7 @@ Three equivalent control surfaces:
    `fablecut_get_project`, `fablecut_set_project`, `fablecut_patch_project`,
    `fablecut_import_media`, `fablecut_analyze_reference`,
    `fablecut_encode_profiles`, `fablecut_normalize_audio`, `fablecut_auto_duck`,
-   `fablecut_denoise`, `fablecut_export`, `fablecut_scopes`.
+   `fablecut_denoise`, `fablecut_export`, `fablecut_scopes`, `fablecut_track`.
 
    FableCut is also published on the **official MCP registry** as
    [`io.github.ronak-create/fablecut`](https://registry.modelcontextprotocol.io/v0/servers?search=fablecut)

@@ -551,6 +551,23 @@ const server = http.createServer(async (req, res) => {
     }
     return;
   }
+  /* API: follow a region of a clip (fablecut_track) — a "track" job on the
+     same queue; the tab that runs it saves the track into the project. */
+  if (p === "/api/track/request" && req.method === "POST") {
+    try {
+      const opts = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+      let revision = null;
+      try { revision = JSON.parse(fs.readFileSync(PROJECT_FILE, "utf8").replace(/^﻿/, "")).revision ?? null; } catch {}
+      const t = opts.track;
+      if (!t || typeof t !== "object" || Array.isArray(t) || typeof t.clip !== "string") { sendJSON(res, 400, { error: "track must be {clip: \"<clip id>\", …}" }); return; }
+      const body = JSON.stringify(t);
+      if (body.length > 8192) { sendJSON(res, 400, { error: "track spec too large" }); return; }
+      sendJSON(res, 200, exportJobs.request({ kind: "track", where: opts.where, revision, track: JSON.parse(body) }));
+    } catch (e) {
+      sendJSON(res, e.code === 409 || e.code === 400 ? e.code : 500, { error: String(e.message || e) });
+    }
+    return;
+  }
   if (p.startsWith("/api/export/job")) {
     const id = url.searchParams.get("id") || "";
     const action = p.slice("/api/export/job".length);

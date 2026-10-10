@@ -103,14 +103,15 @@ function createExportJobs(opts) {
 
   return {
     /** Queue an export. where: auto (open tab, else headless) · tab · headless.
-     *  kind "scopes" measures one still at `time` instead (fablecut_scopes). */
-    request({ kind = "export", range, profile, time, revision, where = "auto", matte = null, mask = null }) {
+     *  kind "scopes" measures one still at `time` instead (fablecut_scopes);
+     *  kind "track" follows a region of a clip and saves it (fablecut_track). */
+    request({ kind = "export", range, profile, time, revision, where = "auto", matte = null, mask = null, track = null }) {
       if (!["auto", "tab", "headless"].includes(where)) throw Object.assign(new Error("where must be auto, tab or headless"), { code: 400 });
-      if (kind !== "export" && kind !== "scopes") throw Object.assign(new Error("kind must be export or scopes"), { code: 400 });
+      if (!["export", "scopes", "track"].includes(kind)) throw Object.assign(new Error("kind must be export, scopes or track"), { code: 400 });
       if (time != null && !(Number.isFinite(time) && time >= 0)) throw Object.assign(new Error("time must be seconds ≥ 0"), { code: 400 });
       if (range != null && range !== "entire" && range !== "in-out") throw Object.assign(new Error("range must be \"entire\" or \"in-out\""), { code: 400 });
       const busy = [...jobs.values()].find((j) => !isEnded(j));
-      if (busy) throw Object.assign(new Error(`${busy.kind === "scopes" ? "scope reading" : "export"} ${busy.id} is still ${busy.status} — wait for it, or cancel it`), { code: 409 });
+      if (busy) throw Object.assign(new Error(`${busy.kind === "scopes" ? "scope reading" : busy.kind === "track" ? "tracking job" : "export"} ${busy.id} is still ${busy.status} — wait for it, or cancel it`), { code: 409 });
       const tabs = opts.editors();
       if (where === "tab" && !tabs) throw Object.assign(new Error("no editor tab is open — open the editor, or use where:\"headless\""), { code: 409 });
       const now = Date.now();
@@ -119,6 +120,7 @@ function createExportJobs(opts) {
         range: range || null, profile: profile || null, time: time ?? null, revision: Number.isFinite(revision) ? revision : null,
         matte: kind === "scopes" && matte ? { clip: String(matte.clip), layer: matte.layer } : null,
         mask: kind === "scopes" && mask ? { clip: String(mask.clip) } : null,
+        track: kind === "track" && track ? track : null,
         via: where === "headless" || (where === "auto" && !tabs) ? "headless" : "tab",
         created: now, updated: now,
       };
@@ -130,7 +132,7 @@ function createExportJobs(opts) {
     },
     get(id) { const j = jobs.get(id); return j ? view(j) : null; },
     /** What a tab needs to run the job (headless pages fetch it by id). */
-    ticket(id) { const j = jobs.get(id); return j ? { id: j.id, kind: j.kind, range: j.range, profile: j.profile, time: j.time, revision: j.revision, matte: j.matte || null, mask: j.mask || null, status: j.status } : null; },
+    ticket(id) { const j = jobs.get(id); return j ? { id: j.id, kind: j.kind, range: j.range, profile: j.profile, time: j.time, revision: j.revision, matte: j.matte || null, mask: j.mask || null, track: j.track || null, status: j.status } : null; },
     /** First tab to claim a pending job runs it. */
     claim(id) {
       const j = jobs.get(id);
