@@ -16,7 +16,13 @@ const path = require("path");
 const { spawn, spawnSync } = require("child_process");
 
 const ROOT = path.resolve(__dirname, "..", "..");
-const arg = (name) => { const i = process.argv.indexOf(name); return i > 0 ? process.argv[i + 1] : null; };
+const arg = (name) => {
+  const i = process.argv.indexOf(name);
+  if (i < 0) return null;
+  const v = process.argv[i + 1];
+  if (!v || v.startsWith("--")) { console.error(`${name} needs a folder`); process.exit(2); }
+  return v;
+};
 const INSTALLED = arg("--installed");
 
 let failed = 0;
