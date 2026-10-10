@@ -541,7 +541,11 @@ const server = http.createServer(async (req, res) => {
       if (m != null && (typeof m !== "object" || typeof m.clip !== "string" || !Number.isInteger(m.layer) || m.layer < 0)) {
         sendJSON(res, 400, { error: "matte must be {clip: \"<clip id>\", layer: <index ≥ 0>}" }); return;
       }
-      sendJSON(res, 200, exportJobs.request({ kind: "scopes", time, where: opts.where, revision, matte: m || null }));
+      const mk = opts.mask;
+      if (mk != null && (typeof mk !== "object" || typeof mk.clip !== "string")) {
+        sendJSON(res, 400, { error: "mask must be {clip: \"<clip id>\"}" }); return;
+      }
+      sendJSON(res, 200, exportJobs.request({ kind: "scopes", time, where: opts.where, revision, matte: m || null, mask: mk || null }));
     } catch (e) {
       sendJSON(res, e.code === 409 || e.code === 400 ? e.code : 500, { error: String(e.message || e) });
     }

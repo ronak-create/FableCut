@@ -72,6 +72,9 @@ these agree. CI's **Release readiness** job checks the starred (★) items for y
   `index.html` in dependency order and added to the copy list in
   `docs/demo/sync.js`. Root `*.js` files ship in the npm package automatically. ★
 - No runtime dependencies, and nothing fetched at load time.
+- A new keyboard shortcut or monitor gesture gets a row in the Keyboard shortcuts
+  dialog (`#helpOverlay` in `index.html`). `test/shortcuts.test.js` checks the
+  keys ★; mouse gestures you check yourself.
 - `npm test` passes; add tests for anything an agent or the REST API can reach.
 
 **Agent parity** (whatever a person can do in the editor, an agent can do too)

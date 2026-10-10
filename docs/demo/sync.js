@@ -23,7 +23,7 @@ fs.writeFileSync(path.join(OUT, "index.html"), html);
 
 /* app.js and style.css are copied verbatim. Some of these only exist on
    branches that add them, so a missing one is skipped rather than fatal. */
-for (const f of ["app.js", "loudness.js", "ducking.js", "audio-fx.js", "color.js", "edit-ops.js", "fx-worklet.js", "style.css", "favicon.svg", "ruler-worker.js", "meter-worklet.js", "svg-sanitize.js", "credits.js"]) {
+for (const f of ["app.js", "loudness.js", "ducking.js", "audio-fx.js", "mask.js", "color.js", "edit-ops.js", "fx-worklet.js", "style.css", "favicon.svg", "ruler-worker.js", "meter-worklet.js", "svg-sanitize.js", "credits.js"]) {
   const from = path.join(ROOT, f);
   if (!fs.existsSync(from)) continue;
   fs.copyFileSync(from, path.join(OUT, f));

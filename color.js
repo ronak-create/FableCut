@@ -42,16 +42,20 @@
      layers: [{ name?, on?, qualifier?, mask?, …grade keys }]
      qualifier: { hue?: [centre°, width°, soft°], sat?: [lo, hi, soft],
                   luma?: [lo, hi, soft], invert? }   — measured on the layer's input
-     mask: { shape: ellipse | rect | poly, x, y (centre, 0…1 of the picture),
+     mask: { shape: ellipse | rect | poly | bezier, x, y (centre, 0…1 of the picture),
              w, h (size, 0…1), rotation°, feather (0…0.5 of the height),
              invert?, points?: [[dx, dy], …] (poly, relative to x, y),
+             bezier: [[dx, dy, inX?, inY?, outX?, outY?], …] — anchors with
+             handles, the outline mask.js draws (a free-hand stroke,
+             { shape: "freehand", stroke: [[u, v], …] }, is fitted into one),
              keys?: [{ t, ease?, x?, y?, w?, h?, rotation?, feather? }] }
    matte = qualifier × mask (each 1 when absent); out = mix(in, graded, matte). */
 (function (root, factory) {
-  const api = factory();
-  if (typeof module === "object" && module.exports) module.exports = api;
+  const node = typeof module === "object" && module.exports;
+  const api = factory(node ? require("./mask") : root.FableCutMask);
+  if (node) module.exports = api;
   else root.FableCutColor = api;
-})(typeof self !== "undefined" ? self : this, function () {
+})(typeof self !== "undefined" ? self : this, function (MaskLib) {
   "use strict";
 
   const WHEELS = ["lift", "gamma", "gain", "offset"];
@@ -91,7 +95,9 @@
   const HUE_N = 360;          // hue-curve lookup-table size (also sat 0…1 for satLuma)
   const MAX_LAYERS = 8;
   const MAX_POLY = 16;
-  const MASK_SHAPES = ["ellipse", "rect", "poly"];
+  const MAX_BEZIER = 24;      // bezier anchors on a grade mask
+  const MAX_OUTLINE = 96;     // the flattened outline the shader walks
+  const MASK_SHAPES = ["ellipse", "rect", "poly", "bezier"];
   const MASK_KEYED = ["x", "y", "w", "h", "rotation", "feather"];
   const KEY_RANGE = { x: [-1, 2], y: [-1, 2], w: [0.001, 4], h: [0.001, 4], rotation: [-720, 720], feather: [0, 0.5] };
   const WB_STOPS = 1 / 100;   // temp / tint ±100 → ±1 stop per channel
@@ -487,6 +493,12 @@
     if (m == null) return null;
     const bad = (msg) => { if (strict) throw new Error(`${where}.mask${msg}`); return null; };
     if (typeof m !== "object" || Array.isArray(m)) return bad(" must be {shape, x, y, w, h, rotation?, feather?, invert?}");
+    if (m.shape === "freehand") {
+      if (!Array.isArray(m.stroke) || m.stroke.length < 3 || m.stroke.some((p) => !Array.isArray(p) || !isNum(p[0]) || !isNum(p[1])))
+        return bad(".stroke must be at least 3 [u, v] points (fractions of the picture)");
+      m = { ...m, ...MaskLib.fitStroke(m.stroke, m.aspect, MAX_BEZIER), shape: "bezier" };
+      delete m.stroke; delete m.aspect;
+    }
     const shape = m.shape == null ? "ellipse" : m.shape;
     if (!MASK_SHAPES.includes(shape)) return bad(`.shape must be ${MASK_SHAPES.join(" | ")}`);
     for (const k of Object.keys(m)) if (![...MASK_KEYED, "shape", "invert", "points", "keys"].includes(k)) bad(`.${k}: unknown key`);
@@ -509,6 +521,11 @@
       if (!Array.isArray(pts) || pts.length < 3 || pts.length > MAX_POLY || pts.some((p) => !Array.isArray(p) || p.length !== 2 || !p.every(isNum)))
         return bad(`.points must be 3…${MAX_POLY} [dx, dy] pairs around x, y (fractions of the picture)`);
       out.points = pts.map(([a, b]) => [+clamp(a, -2, 2).toFixed(4), +clamp(b, -2, 2).toFixed(4)]);
+    } else if (shape === "bezier") {
+      const pts = m.points;
+      if (!Array.isArray(pts) || pts.length < 3 || pts.length > MAX_BEZIER || pts.some((p) => !Array.isArray(p) || (p.length !== 2 && p.length !== 6) || !p.every(isNum)))
+        return bad(`.points must be 3…${MAX_BEZIER} anchors [dx, dy] or [dx, dy, inX, inY, outX, outY] around x, y (fractions of the picture)`);
+      out.points = pts.map((p) => p.map((v) => +clamp(v, -2, 2).toFixed(4)));
     }
     if (m.keys != null) {
       if (!Array.isArray(m.keys)) return bad(".keys must be a list of {t, x?, y?, w?, h?, rotation?, feather?}");
@@ -596,9 +613,25 @@
       const qx = Math.abs(px) - rx, qy = Math.abs(py) - ry;
       return Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0);
     }
-    if (m.shape === "poly") return polyDist(m.points.map(([a, b]) => [a * aspect, b]), px, py);
+    if (m.shape === "poly" || m.shape === "bezier") return polyDist(outlineAt(m, aspect), px, py);
     const k0 = Math.hypot(px / rx, py / ry), k1 = Math.hypot(px / (rx * rx), py / (ry * ry));
     return k0 < 1e-6 ? -Math.min(rx, ry) : k0 * (k0 - 1) / k1;
+  }
+  /** A bezier mask's outline as a polygon around its centre (fractions of the
+   *  picture, unrotated) — at most MAX_OUTLINE corners, the shader's budget. */
+  /** The poly / bezier outline in aspect-scaled units, cached per points array — the CPU path asks per pixel. */
+  const outlines = new WeakMap();
+  function outlineAt(m, aspect) {
+    let o = outlines.get(m.points);
+    if (!o || o.aspect !== aspect) {
+      o = { aspect, pts: (m.shape === "bezier" ? bezierOutline(m) : m.points).map(([a, b]) => [a * aspect, b]) };
+      outlines.set(m.points, o);
+    }
+    return o.pts;
+  }
+  function bezierOutline(m) {
+    const A = MaskLib.anchors({ shape: "bezier", x: 0, y: 0, scale: 1, rotation: 0, points: m.points }, 1, 1);
+    return MaskLib.flatten(A, Math.max(1, Math.min(16, Math.floor(MAX_OUTLINE / A.length))));
   }
   function polyDist(pts, px, py) {
     let d = (px - pts[0][0]) ** 2 + (py - pts[0][1]) ** 2, s = 1;
@@ -757,10 +790,10 @@
       u.uMRot = m ? m.rotation * Math.PI / 180 : 0;
       u.uMFeather = m ? Math.max(0.002, m.feather) : 0.002;
       u.uMInv = m && m.invert ? 1 : 0;
-      const pts = new Float32Array(MAX_POLY * 2);
-      if (m && m.points) m.points.forEach(([a, b], i) => { pts[i * 2] = a; pts[i * 2 + 1] = b; });
+      const pts = new Float32Array(MAX_OUTLINE * 2), P = m && m.points ? (m.shape === "bezier" ? bezierOutline(m) : m.points) : [];
+      P.forEach(([a, b], i) => { pts[i * 2] = a; pts[i * 2 + 1] = b; });
       u.uMPts = pts;
-      u.uMN = m && m.points ? m.points.length : 0;
+      u.uMN = P.length;
       passes.push(u);
     }
     return passes;
@@ -800,10 +833,10 @@ uniform int uLayer, uMatte, uPremul;   // layer pass: mix by its matte · show t
 uniform int uQOn, uQInv;
 uniform ivec3 uQUse;                   // hue, sat, luma ranges in use
 uniform vec3 uQHue, uQSat, uQLuma;     // hue: centre, half width, soft (turns) · sat / luma: low, high, soft
-uniform int uMShape, uMInv, uMN;       // 0 none · 1 ellipse · 2 rect · 3 poly
+uniform int uMShape, uMInv, uMN;       // 0 none · 1 ellipse · 2 rect · 3 poly · 4 bezier (flattened)
 uniform vec2 uMC, uMW;
 uniform float uMRot, uMFeather, uAspect;
-uniform vec2 uMPts[${MAX_POLY}];
+uniform vec2 uMPts[${MAX_OUTLINE}];
 in vec2 vPos;
 out vec4 outColor;
 vec4 lutAt(sampler2D t, int n, float x) {
@@ -862,10 +895,10 @@ float maskDist(vec2 uv) {
     vec2 q = abs(p) - r;
     return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0);
   }
-  if (uMShape == 3) {
+  if (uMShape >= 3) {
     vec2 v0 = uMPts[0] * vec2(uAspect, 1.0);
     float dd = dot(p - v0, p - v0), s = 1.0;
-    for (int i = 0; i < ${MAX_POLY}; i++) {
+    for (int i = 0; i < ${MAX_OUTLINE}; i++) {
       if (i >= uMN) break;
       int j = i == 0 ? uMN - 1 : i - 1;
       vec2 vi = uMPts[i] * vec2(uAspect, 1.0), vj = uMPts[j] * vec2(uAspect, 1.0);
@@ -1034,7 +1067,7 @@ void main() {
     GRADE_PARAMS, GRADE_KEYS, WHEELS, GRADE_VERT, GRADE_FRAG, SKIN_ANGLE,
     CURVE_CHANNELS, HUE_CURVES, HUE_KEYS, CURVE_N, HUE_N, BAND,
     normalizeGrade, fullGrade, isNeutral, mergeGrade, summarizeGrade, withoutCurves,
-    MAX_LAYERS, MAX_POLY, MASK_SHAPES, MASK_KEYED, mergeLayer, layerGrade, maskAt, gradeAt, qualAlpha, maskAlpha, maskDist, gradePasses,
+    MAX_LAYERS, MAX_POLY, MAX_BEZIER, MASK_SHAPES, MASK_KEYED, mergeLayer, layerGrade, maskAt, gradeAt, qualAlpha, maskAlpha, maskDist, gradePasses,
     monotone, curveFn, rgbToHsv, hsvToRgb,
     wbGains, solveWhiteBalance, srgbToLinear, linearToSrgb, wheelToRgb, rgbToWheel, ycbcr,
     prepareGrade, gradePixel, gradeImageData, gradeUniforms,

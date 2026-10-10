@@ -37,7 +37,8 @@ Every Claude Code session then has these tools:
 - `fablecut_export` — render the timeline to a file in `exports/` with the editor's own
   Fast export (open tab, or headless Chrome / Edge). See "Export" below.
 - `fablecut_scopes` — measure the graded picture at a moment (levels, clipping, colour
-  cast), as the editor's scopes see it. See "Color" below.
+  cast), as the editor's scopes see it; also what a grade layer or a clip's masks
+  select. See "Color" and "Masks" below.
 
 ### Token-efficient editing (important for agents)
 
@@ -424,6 +425,10 @@ intensity. Keyframe/transition it like any clip. Put it on V2/V3 above the
 footage. Example: 0.3 s impact shake over everything =
 `{kind:"adjust", track:"V3", duration:0.3, props:{shake:18}}`.
 
+**Masks** (`masks`, video/image/svg/text/adjust): shapes that cut what the clip
+shows — rect, ellipse, bezier, free-hand; feather, expand, invert, add /
+subtract / intersect, keyframes. See "Masks" below.
+
 **Animatable props** (usable in `keyframes`): x, y, scale, rotation, opacity,
 volume, pan, duck, speed, brightness, contrast, saturation, hue, blur, grayscale, sepia,
 invert, temperature, tint, vignette, cornerRadius, shake, rgbSplit, grain,
@@ -619,12 +624,12 @@ each one's qualifier looks at the picture as it reaches that layer.
 | `qualifier.hue` | `[centre°, width°, soft°]` — hues within ±width/2 of the centre, easing out over `soft`; wraps through red. Greys carry no hue, so a hue range leaves them out |
 | `qualifier.sat` · `qualifier.luma` | `[low, high, soft]` on 0…1 — saturation (HSV) / Rec.709 luma between low and high |
 | `qualifier.invert` | select everything else |
-| `mask.shape` | `ellipse` · `rect` · `poly` |
+| `mask.shape` | `ellipse` · `rect` · `poly` · `bezier` (or `freehand` with a `stroke`, fitted into a bezier — see "Masks") |
 | `mask.x` · `mask.y` | centre, as fractions of the clip's picture (0…1, y down) |
 | `mask.w` · `mask.h` | size, fractions of the picture's width / height (ellipse, rect) |
 | `mask.rotation` | degrees, clockwise |
 | `mask.feather` | soft edge, a fraction of the picture's height (0…0.5), centred on the outline |
-| `mask.points` | poly: 3–16 `[dx, dy]` corners around `x, y` (fractions of width / height) |
+| `mask.points` | poly: 3–16 `[dx, dy]` corners around `x, y` (fractions of width / height); bezier: 3–24 anchors `[dx, dy]` or `[dx, dy, inX, inY, outX, outY]` with curve handles |
 | `mask.invert` | grade outside the shape |
 | `mask.keys` | animate it: `[{t, x?, y?, w?, h?, rotation?, feather?, ease?}]`, `t` in seconds from the clip's start; each param eases between the keys that set it (`ease` on the arriving key, as for clip keyframes) |
 
@@ -639,8 +644,9 @@ curves edit that layer, and three more sections appear: the layer's name,
 reorder, **Delete**; **Qualifier** — **Pick** then click a colour in the
 monitor to select its hue, saturation and luma, then tune the ranges; and
 **Mask** — pick a shape and drag it on the monitor (inside moves it, the
-handles resize it, the knob rotates it, Shift snaps to 15°; on a poly,
-Ctrl-click adds a point and double-click removes one). **◆ Key** keys the
+handles resize it, the knob rotates it, Shift snaps to 15°; on a poly or
+bezier, Ctrl-click adds a point and double-click removes one), or **Draw** a
+free-hand outline on the monitor (it becomes a bezier). **◆ Key** keys the
 shape at the playhead; once it has keys, every change to the shape keys.
 
 **Wheel colours.** A wheel's `r, g, b` normally carry no brightness: they are a
@@ -702,6 +708,90 @@ Workflow for matching shots: grade the hero shot, measure it, then grade every
 other shot of the scene until its median and cast land near the hero's. In the
 editor, **Copy** / **Paste** on the Color tab pastes one clip's grade onto every
 selected clip.
+
+### Masks
+
+A clip's masks cut what it shows: only the parts the masks keep reach the
+frame, so a clip can be isolated, revealed or cut through, and anything under
+it shows in the gaps. They live in `props.masks` on any video, image, svg,
+text or adjustment clip. On an adjustment layer they limit where its effects
+and grade apply. They run in preview and export alike. The clip draws as usual,
+the masks cut it, and then its `opacity` and `blend` composite it.
+
+```jsonc
+"masks": [
+  { "name": "Subject", "shape": "ellipse", "x": 0.52, "y": 0.45, "w": 0.4, "h": 0.7, "feather": 40 },
+  { "name": "Hole", "shape": "rect", "mode": "subtract", "x": 0.6, "y": 0.4, "w": 0.1, "h": 0.1 },
+  { "shape": "bezier", "x": 0.3, "y": 0.7, "expand": 8,
+    "points": [[0, -0.1], [0.12, 0.08, 0, -0.05, 0, 0.05], [-0.12, 0.08]],
+    "keys": [{ "t": 0, "x": 0.3 }, { "t": 2, "x": 0.6, "ease": "linear" }] }
+]
+```
+
+| key | default | does |
+|---|---|---|
+| `shape` | — | `rect` · `ellipse` · `bezier` (write `freehand` with a `stroke` to have one drawn for you) |
+| `x` · `y` | 0.5 | centre, as fractions of the clip's picture (0…1, y down) |
+| `w` · `h` | 0.5 | size, fractions of the picture's width / height (rect, ellipse) |
+| `points` | — | bezier: 3–64 anchors around `x, y`, each `[dx, dy]` (a corner) or `[dx, dy, inX, inY, outX, outY]` (with curve handles relative to the anchor), all fractions of the picture's width / height |
+| `stroke` | — | freehand only: `[[u, v], …]` picture fractions along an outline; it is simplified and stored as an editable `bezier` |
+| `scale` · `rotation` | 1 · 0 | about the centre; degrees clockwise |
+| `mode` | `add` | how this mask combines with the ones before it: `add` · `subtract` · `intersect` · `difference` |
+| `invert` | false | use everything outside the shape |
+| `opacity` | 1 | 0…1, how strongly this mask counts |
+| `feather` | 0 | soft edge, project pixels, centred on the outline |
+| `expand` | 0 | grow (+) or shrink (−) the outline, project pixels |
+| `name` · `on` | — | a label; `on:false` turns the mask off |
+| `keys` | — | animate it: `[{t, x?, y?, w?, h?, scale?, rotation?, feather?, expand?, opacity?, points?, ease?}]`, `t` in seconds from the clip's start; each param eases between the keys that set it (`ease` on the arriving key, as for clip keyframes). `points` keys morph the outline and need the shape's point count |
+
+Masks combine bottom-up (first in the list first). The first one starts from
+nothing when it adds and from the whole picture otherwise, so a lone
+`subtract` cuts a hole in a full picture. At most 8 masks per clip.
+
+The picture a mask lives in is the clip's drawn rectangle for video, image
+and svg (after fit and crop), the text block for text, and the whole canvas
+for an adjustment layer. Masks follow the clip when it is moved, scaled,
+rotated or flipped, and keep the clip's keyframes.
+
+In the editor, the **Masks** section of the Inspector has **+ Rect**,
+**+ Ellipse**, **Pen** (click points on the monitor, drag while placing one to
+pull curve handles, click the first point or press Enter to close) and
+**Draw** (drag a free-hand outline). **Matte** shows the clip's matte in the
+monitor (white = visible). Pick a mask's chip to edit it: mode, **Invert**,
+the sliders, ↑ ↓ to reorder, **Copy**, **Delete**, and on the monitor, drag
+inside to move it, the edge handles to resize it and the knob to rotate it
+(Shift snaps to 15°). On a bezier, drag a point to move it, drag its handles
+to curve it (Alt breaks the pair), Alt-drag a point to pull fresh handles,
+Ctrl-click the outline to add a point, and double-click a point to remove
+it. **◆ Key** keys the whole mask at the playhead; once it has keys, every
+change keys. Esc steps back (point, then mask).
+
+**Agents** edit masks with patch ops:
+
+- `{op:"setMask", id, set:{shape:"ellipse", x:0.5, y:0.45, w:0.4, h:0.7, feather:40}}`
+  adds a mask (no `mask`, an index one past the end or a new name adds one; a
+  new mask needs `shape`). `{op:"setMask", id, mask:"Subject", set:{x:0.6}}`
+  edits one, by index (0 = first) or name, merging key by key (`null` resets a
+  key). `replace:true` starts it over, keeping its name. `ids:[…]` edits several clips.
+- A drawn outline: `set:{shape:"freehand", stroke:[[0.4, 0.3], [0.6, 0.32], …]}`.
+  It is stored as an editable bezier.
+- `{op:"setMaskKeys", id, mask, keys:[{t:0, x:0.3}, {t:2, x:0.7}]}` animates
+  one (`keys:null` stops it); `{op:"removeMask", id, mask}` deletes one.
+- `props.masks` written through `addClip` / `updateClip` is validated the same
+  way. Bad keys, shapes or values refuse the whole patch. Locks apply
+  (`force:true` as elsewhere).
+- `fablecut_scopes {time, mask:{clip}}` measures them: the % of the clip's
+  picture its masks keep (the feathered matte, measured alone) and the % of
+  the frame the masked clip covers. The compact project view lists each
+  clip's masks as `[2 masks: ellipse feather 40, rect subtract]`.
+
+Recipes: **spotlight** — a feathered ellipse on the clip; **split screen** —
+two clips on V1 / V2, a `rect` on the top one covering its half; **cut a
+logo out of the background** — a bezier around it, `feather` 2–4;
+**reveal** — a rect whose `w` (or `x`) keys from 0 to full; **effects only
+on the face** — an adjustment layer with a feathered ellipse, keyed to follow
+it; **vignette through an adjustment layer** — an inverted ellipse with
+`feather:200` and the layer's `brightness` down.
 
 ### Semantics
 
