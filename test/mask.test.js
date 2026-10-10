@@ -318,4 +318,7 @@ test("setMatte sets and clears a track matte; blend, matte and matteTrack are va
   r = await patch({ op: "setMatte", id: "c_a", matte: "luma", track: "V3" }, { op: "updateClip", id: "c_a", set: { track: "V3" } });
   assert.match(r.text, /another track than the clip's own/, "moving onto its own matte track is refused");
   assert.equal(props("c_a").blend, "exclusion", "nothing saved by the refused patches");
+  await patch({ op: "setMatte", id: "c_a", matte: "luma", track: "V3" });
+  r = await patch({ op: "updateClip", id: "c_a", set: { props: { matte: null } } });
+  assert.equal(props("c_a").matteTrack, undefined, "matte:null through updateClip clears its track too");
 });

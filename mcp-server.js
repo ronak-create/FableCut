@@ -932,6 +932,7 @@ async function callTool(name, args, attempt = 0) {
             checkMasks(c, "updateClip");
             // a track move re-checks the matte too (a clip can't be its own matte)
             checkCompositing(c, "updateClip", op.set && op.set.track ? c.props : op.set && op.set.props);
+            if (c.props && c.props.matteTrack && !c.props.matte) delete c.props.matteTrack;   // matte:null clears its track too
             notes.push("~" + op.id);
             break;
           }
