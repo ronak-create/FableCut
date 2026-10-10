@@ -613,13 +613,22 @@
       const qx = Math.abs(px) - rx, qy = Math.abs(py) - ry;
       return Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0);
     }
-    if (m.shape === "poly") return polyDist(m.points.map(([a, b]) => [a * aspect, b]), px, py);
-    if (m.shape === "bezier") return polyDist(bezierOutline(m).map(([a, b]) => [a * aspect, b]), px, py);
+    if (m.shape === "poly" || m.shape === "bezier") return polyDist(outlineAt(m, aspect), px, py);
     const k0 = Math.hypot(px / rx, py / ry), k1 = Math.hypot(px / (rx * rx), py / (ry * ry));
     return k0 < 1e-6 ? -Math.min(rx, ry) : k0 * (k0 - 1) / k1;
   }
   /** A bezier mask's outline as a polygon around its centre (fractions of the
    *  picture, unrotated) — at most MAX_OUTLINE corners, the shader's budget. */
+  /** The poly / bezier outline in aspect-scaled units, cached per points array — the CPU path asks per pixel. */
+  const outlines = new WeakMap();
+  function outlineAt(m, aspect) {
+    let o = outlines.get(m.points);
+    if (!o || o.aspect !== aspect) {
+      o = { aspect, pts: (m.shape === "bezier" ? bezierOutline(m) : m.points).map(([a, b]) => [a * aspect, b]) };
+      outlines.set(m.points, o);
+    }
+    return o.pts;
+  }
   function bezierOutline(m) {
     const A = MaskLib.anchors({ shape: "bezier", x: 0, y: 0, scale: 1, rotation: 0, points: m.points }, 1, 1);
     return MaskLib.flatten(A, Math.max(1, Math.min(16, Math.floor(MAX_OUTLINE / A.length))));

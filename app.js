@@ -3904,6 +3904,7 @@ function startTrimToolGesture(e, c, mode) {
   const base = new Map(project.clips.map((x) => [x.id, {
     start: x.start, in: x.in, duration: x.duration, keyframes: x.keyframes,
     transitionIn: cloneTr(x.transitionIn), transitionOut: cloneTr(x.transitionOut),
+    masks: x.props && x.props.masks,   // head trims re-base mask keys: each step starts from the originals
   }]));
   const restore = () => {
     for (const x of project.clips) {
@@ -3911,6 +3912,7 @@ function startTrimToolGesture(e, c, mode) {
       if (!b) continue;
       x.start = b.start; x.in = b.in; x.duration = b.duration; x.keyframes = b.keyframes;
       x.transitionIn = cloneTr(b.transitionIn); x.transitionOut = cloneTr(b.transitionOut);
+      if (x.props) { if (b.masks) x.props.masks = b.masks; else delete x.props.masks; }
     }
   };
   // Snap targets ignore everything this edit moves.
@@ -9271,7 +9273,7 @@ function drawMaskedClip(c, W, H, t, masks) {
   const cap = runtime.maskCapture;
   if (cap && cap.id === c.id && cap.coverage == null) measureMaskCoverage(cap, masks, g, layer.canvas, W, H);
   const view = runtime.maskView;
-  if (view && view.id === c.id && !state.exporting) {   // the monitor shows this clip's matte
+  if (view && view.id === c.id && state.selId === c.id && !state.exporting) {   // the monitor shows the selected clip's matte
     const v = maskCtx("view", W, H);
     v.setTransform(1, 0, 0, 1, 0, 0);
     v.globalCompositeOperation = "source-over"; v.clearRect(0, 0, W, H);
@@ -9314,7 +9316,7 @@ function measureMaskCoverage(cap, masks, g, layerCanvas, W, H) {
 /** Matte view: the selected clip's mask matte, white on black, over the frame. */
 function drawMaskView(W, H) {
   const view = runtime.maskView;
-  if (!view || !view.ready) return;
+  if (!view || !view.ready || state.selId !== view.id) return;   // off once the clip is deselected
   ctx2d.save();
   ctx2d.setTransform(1, 0, 0, 1, 0, 0);
   ctx2d.globalAlpha = 1; ctx2d.globalCompositeOperation = "source-over"; ctx2d.filter = "none";
@@ -9622,8 +9624,8 @@ function finishPen(c) {
     points: P.slice(0, Mask.MAX_POINTS).map(([x, y, ix, iy, ox, oy]) => [(x - cx) / B.bw, (y - cy) / B.bh, ix / B.bw, iy / B.bh, ox / B.bw, oy / B.bh]),
   });
 }
-/** Split the selected bezier's outline at the point nearest `bp` (box px): a new anchor, the curve unchanged. */
-function insertMaskPoint(m, B, bp) {
+/** The segment and parameter of the selected bezier's outline nearest `bp` (box px). */
+function nearestMaskSegment(m, B, bp) {
   const A = Mask.anchors(m, B.bw, B.bh);
   let best = null;
   for (let i = 0; i < A.length; i++) {
@@ -9636,19 +9638,14 @@ function insertMaskPoint(m, B, bp) {
       if (!best || d < best.d) best = { d, i, t };
     }
   }
-  if (!best) return null;
-  const { i, t } = best, a = A[i], b = A[(i + 1) % A.length];
-  const L = (p, q) => [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t];
-  const p0 = [a.x, a.y], p1 = [a.ox, a.oy], p2 = [b.ix, b.iy], p3 = [b.x, b.y];
-  const q0 = L(p0, p1), q1 = L(p1, p2), q2 = L(p2, p3), r0 = L(q0, q1), r1 = L(q1, q2), s = L(r0, r1);
-  const loc = (x, y) => maskBoxToLocal(m, B, x, y), vec = (x, y) => maskBoxToLocal(m, B, x, y, true);
-  const pts = m.points.map((p) => [p[0], p[1], p[2] || 0, p[3] || 0, p[4] || 0, p[5] || 0]);
-  const j = (i + 1) % pts.length;
-  const ao = vec(q0[0] - a.x, q0[1] - a.y), bi = vec(q2[0] - b.x, q2[1] - b.y);
-  pts[i][4] = ao.x; pts[i][5] = ao.y; pts[j][2] = bi.x; pts[j][3] = bi.y;
-  const sl = loc(s[0], s[1]), si = vec(r0[0] - s[0], r0[1] - s[1]), so = vec(r1[0] - s[0], r1[1] - s[1]);
-  pts.splice(i + 1, 0, [sl.x, sl.y, si.x, si.y, so.x, so.y]);
-  return { points: pts.map((p) => p.map((v) => +v.toFixed(4))), index: i + 1 };
+  return best;
+}
+/** Add or remove bezier points on mask i: the base outline and every keyed outline change together. */
+function writeMaskTopology(c, i, edit) {
+  const list = maskList(c).slice();
+  if (!list[i]) return;
+  list[i] = Mask.mergeMask(list[i], Mask.editTopology(list[i], edit)) || list[i];
+  writeMasks(c, list);
 }
 els.preview.addEventListener("pointerdown", (e) => {
   if (e.button !== 0 || isSourceMode()) return;
@@ -9688,10 +9685,10 @@ els.preview.addEventListener("pointerdown", (e) => {
   else if (m.shape === "bezier" && (e.ctrlKey || e.metaKey)) {
     if (m.points.length >= Mask.MAX_POINTS) { toast(`A mask has at most ${Mask.MAX_POINTS} points`); e.stopImmediatePropagation(); return; }
     if (isGroupLocked(c)) { toastLocked(); e.stopImmediatePropagation(); return; }
-    const r = insertMaskPoint(m, h.B, bp);
+    const r = nearestMaskSegment(m, h.B, bp);
     if (!r) return;
-    pushUndo(); writeMaskSet(c, maskUi.sel, { points: r.points }); scheduleSave();
-    maskUi.pt = r.index;
+    pushUndo(); writeMaskTopology(c, maskUi.sel, (pts) => Mask.splitPoints(pts, r.i, r.t)); scheduleSave();
+    maskUi.pt = r.i + 1;
     drag = { mode: "point", pushed: true };
   } else if (Mask.matteAt([{ ...m, mode: "add", invert: false, feather: 0, opacity: 1 }], bp.x, bp.y, h.B.bw, h.B.bh, 0) > 0.5) drag = { mode: "move" };
   if (!drag) return;     // outside the mask: the monitor's usual clicks
@@ -9778,13 +9775,8 @@ els.preview.addEventListener("dblclick", (e) => {
   e.preventDefault(); e.stopImmediatePropagation();
   if (h.m.points.length <= 3) { toast("A mask needs at least 3 points"); return; }
   if (isGroupLocked(c)) { toastLocked(); return; }
-  const pts = h.m.points.map((p) => p.slice()); pts.splice(i, 1);
-  const raw = maskList(c)[maskUi.sel];
   pushUndo();
-  if (raw.keys && raw.keys.some((k) => k.points)) {   // keyed outlines lose the same point in every key
-    const keys = raw.keys.map((k) => (k.points ? { ...k, points: k.points.filter((_, j) => j !== i) } : k));
-    const list = maskList(c).slice(); list[maskUi.sel] = Mask.mergeMask(raw, { points: raw.points.filter((_, j) => j !== i), keys }); writeMasks(c, list);
-  } else writeMaskSet(c, maskUi.sel, { points: pts });
+  writeMaskTopology(c, maskUi.sel, (pts) => pts.filter((_, j) => j !== i));
   maskUi.pt = -1; scheduleSave(); renderInspector();
 }, true);
 window.addEventListener("keydown", (e) => {

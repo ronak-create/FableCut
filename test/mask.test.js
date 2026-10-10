@@ -104,6 +104,24 @@ test("a free-hand stroke becomes an editable bezier that keeps the drawn area", 
   assert.throws(() => M.normalizeMask({ shape: "freehand", stroke: [[0, 0]] }, true), /stroke must be at least 3/);
 });
 
+test("adding or removing a bezier point keeps the curve and changes every keyed outline alike", () => {
+  const diamond = [[0, -0.4, -0.2, 0, 0.2, 0], [0.4, 0, 0, -0.2, 0, 0.2], [0, 0.4, 0.2, 0, -0.2, 0], [-0.4, 0, 0, 0.2, 0, -0.2]];
+  const m = M.normalizeMask({ shape: "bezier", points: diamond });
+  const split = { ...m, points: M.splitPoints(m.points, 1, 0.5) };
+  assert.equal(split.points.length, 5);
+  for (const [x, y] of [[100, 50], [150, 75], [100, 15], [30, 50], [178, 50], [100, 92]])   // same pixels covered
+    assert.equal(M.matteAt([split], x, y, BW, BH, 0) > 0.5, M.matteAt([m], x, y, BW, BH, 0) > 0.5, `pixel ${x},${y}`);
+  const keyed = M.normalizeMask({ shape: "bezier", points: diamond, keys: [{ t: 0, x: 0.4 }, { t: 1, points: diamond.map((p) => [p[0] * 0.5, p[1] * 0.5, p[2], p[3], p[4], p[5]]) }] });
+  const added = M.normalizeMask(M.editTopology(keyed, (pts) => M.splitPoints(pts, 0, 0.5)), true);
+  assert.equal(added.points.length, 5);
+  assert.equal(added.keys[1].points.length, 5, "the keyed outline gained the point too");
+  assert.equal(M.maskAt(added, 0.5).points.length, 5, "and still morphs");
+  const removed = M.normalizeMask(M.editTopology(added, (pts) => pts.filter((_, j) => j !== 1)), true);
+  assert.equal(removed.points.length, 4);
+  assert.equal(removed.keys[1].points.length, 4);
+  assert.equal(removed.keys[0].x, 0.4, "numeric keys untouched");
+});
+
 test("mergeMask merges key by key, resets with null, and a new shape starts fresh", () => {
   const a = M.normalizeMask({ shape: "rect", x: 0.2, w: 0.3, feather: 12, keys: [{ t: 0, x: 0.1 }] });
   const b = M.mergeMask(a, { x: 0.6, feather: null, invert: true });

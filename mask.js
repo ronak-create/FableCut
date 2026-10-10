@@ -399,9 +399,30 @@
     }).join(", ");
   }
 
+  /** Split segment i (anchor i → i+1) of a bezier outline at t ∈ (0,1): a new anchor at i+1, the curve
+      unchanged. Works on the mask's local points, so it applies the same way to every keyed outline. */
+  function splitPoints(points, i, t) {
+    const pts = points.map((p) => [p[0], p[1], p[2] || 0, p[3] || 0, p[4] || 0, p[5] || 0]);
+    const n = pts.length, j = (i + 1) % n, a = pts[i], b = pts[j];
+    const L = (p, q) => [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t];
+    const p0 = [a[0], a[1]], p1 = [a[0] + a[4], a[1] + a[5]], p2 = [b[0] + b[2], b[1] + b[3]], p3 = [b[0], b[1]];
+    const q0 = L(p0, p1), q1 = L(p1, p2), q2 = L(p2, p3), r0 = L(q0, q1), r1 = L(q1, q2), s = L(r0, r1);
+    a[4] = q0[0] - a[0]; a[5] = q0[1] - a[1]; b[2] = q2[0] - b[0]; b[3] = q2[1] - b[1];
+    pts.splice(i + 1, 0, [s[0], s[1], r0[0] - s[0], r0[1] - s[1], r1[0] - s[0], r1[1] - s[1]]);
+    return pts.map((p) => p.map(r4));
+  }
+
+  /** A bezier mask with its outline changed by `edit(points)` (split, remove) on the base points and every
+      keyed outline alike: the point count is the shape's topology, not a keyable value. */
+  function editTopology(m, edit) {
+    const out = { ...m, points: edit(m.points) };
+    if (m.keys) out.keys = m.keys.map((k) => (k.points ? { ...k, points: edit(k.points) } : k));
+    return out;
+  }
+
   return {
     MAX_MASKS, MAX_POINTS, SHAPES, MODES, KEYED, NUM_KEYED, RANGE, DEFAULTS, EASES,
     normalizeMasks, normalizeMask, mergeMask, maskAt, masksAt, shiftKeys,
-    anchors, tracePath, flatten, polyDist, maskCoverage, combine, matteAt, fitStroke, rasterize, describe,
+    anchors, tracePath, flatten, polyDist, maskCoverage, combine, matteAt, fitStroke, rasterize, describe, splitPoints, editTopology,
   };
 });
