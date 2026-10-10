@@ -3908,6 +3908,7 @@ function startTrimToolGesture(e, c, mode) {
     start: x.start, in: x.in, duration: x.duration, keyframes: x.keyframes,
     transitionIn: cloneTr(x.transitionIn), transitionOut: cloneTr(x.transitionOut),
     masks: x.props && x.props.masks,   // head trims re-base mask keys: each step starts from the originals
+    tracks: x.props && x.props.tracks,
   }]));
   const restore = () => {
     for (const x of project.clips) {
@@ -3915,7 +3916,10 @@ function startTrimToolGesture(e, c, mode) {
       if (!b) continue;
       x.start = b.start; x.in = b.in; x.duration = b.duration; x.keyframes = b.keyframes;
       x.transitionIn = cloneTr(b.transitionIn); x.transitionOut = cloneTr(b.transitionOut);
-      if (x.props) { if (b.masks) x.props.masks = b.masks; else delete x.props.masks; }
+      if (x.props) {
+        if (b.masks) x.props.masks = b.masks; else delete x.props.masks;
+        if (b.tracks) x.props.tracks = b.tracks; else delete x.props.tracks;
+      }
     }
   };
   // Snap targets ignore everything this edit moves.
@@ -4098,6 +4102,7 @@ function startClipGesture(e, c, mode, collapseOnClick) {
     start: c.start, in: c.in, duration: c.duration, track: c.track,
     keyframes: c.keyframes ? JSON.parse(JSON.stringify(c.keyframes)) : undefined,
     masks: c.props.masks,
+    tracks: c.props.tracks,
   };
   // moving a clip that belongs to a multi-selection drags the whole group;
   // AV-linked partners (video+audio from one file) always move together
@@ -4153,6 +4158,7 @@ function startClipGesture(e, c, mode, collapseOnClick) {
       c.duration = orig.duration - d;
       c.keyframes = shiftKF(orig.keyframes, d, c.duration);
       if (orig.masks) c.props.masks = Mask.shiftKeys(orig.masks, d);
+      if (orig.tracks) { const tr = Tracker.shiftTracks(orig.tracks, d); if (tr.length) c.props.tracks = tr; else delete c.props.tracks; }
       syncLinkedTiming(c);
     } else { // trim-r
       let ne = snapTime(orig.start + orig.duration + dt, groupIds);
@@ -4976,6 +4982,7 @@ function renderInspector(lite) {
     ? row(label, `<select data-k="${k}" title="Fade shape (audio)">${[["", "Smooth (eased)"], ...Object.entries(AUDIO_FADE_CURVES)].map(([v, l]) =>
       `<option value="${v}" ${(tr.curve || "") === v ? "selected" : ""}>${l}</option>`).join("")}</select>`) : "";
   if (c.kind !== "audio") html += maskSectionHtml(c);
+  if (c.kind === "video") html += trackSectionHtml(c);
   html += `<div class="insp-section"><h3>Transition</h3>
     ${tsel("In", "transIn", c.transitionIn)}
     ${curveSel("In curve", "curveIn", c.transitionIn)}
@@ -5233,6 +5240,7 @@ function renderInspector(lite) {
     });
   });
   bindMaskControls(c);
+  bindTrackControls(c);
   syncInspectorOffClip(c);
   renderKfGraphsPanel();
 }
@@ -8894,6 +8902,7 @@ function drawSelectionOverlay(W, H, t) {
   if (drawingLayerMask(c)) { drawLayerStroke(c, W); if (!maskEditing(c)) return; }
   if (maskEditing(c) && drawMaskOverlay(c, W)) return;   // a layer's mask replaces the box
   if (maskEditActive(c) && drawClipMaskOverlay(c, W)) return;   // so does a clip mask being edited
+  drawTrackOverlay(c, W);
   if (!isVisualClip(c) || !activeAt(c, t) || !clipRenders(c)) return;
   const b = clipBounds(c, evalProps(c, t), W, H);
   const lw = Math.max(2, W / 640);
@@ -9480,6 +9489,355 @@ function writeMaskSet(c, i, set) {
   list[i] = Mask.mergeMask(m, { ...statics, keys }) || m;
   writeMasks(c, list);
 }
+/* ── Tracking ──
+   tracker.js follows a region of the clip's own video frame by frame. The
+   frames come from a private <video> (the monitor never moves), drawn small
+   enough that the region is ~56 px across. A track is stored on its clip as
+   picture fractions (props.tracks); masks and other clips follow it by having
+   it baked into their keys, so rendering never depends on it. */
+const Tracker = self.FableCutTracker;
+const trackUi = { clip: null, sel: -1, tool: null, size: 0.08, scale: false, rotation: false, run: null };
+const trackNorm = new WeakMap();
+function clipTracks(c) {
+  const list = c && c.props && c.props.tracks;
+  if (!Array.isArray(list) || !list.length) return [];
+  let n = trackNorm.get(list);
+  if (n === undefined) { n = Tracker.normalizeTracks(list) || []; trackNorm.set(list, n); }
+  return n;
+}
+function writeTracks(c, list) {
+  const n = list.length ? Tracker.normalizeTracks(list) : null;
+  if (n) c.props.tracks = n; else delete c.props.tracks;
+  state.dirtyTimeline = true;
+}
+/** Crop as fractions; picture (u, v) ↔ media (x, y), both 0…1. */
+function cropFrac(p) {
+  const k = (v) => clamp(+v || 0, 0, 95) / 100;
+  return { l: k(p.cropL), t: k(p.cropT), r: k(p.cropR), b: k(p.cropB) };
+}
+function picToMedia(p, u, v) { const k = cropFrac(p); return { x: k.l + u * (1 - k.l - k.r), y: k.t + v * (1 - k.t - k.b) }; }
+function mediaToPic(p, x, y) { const k = cropFrac(p); return { u: (x - k.l) / Math.max(1e-6, 1 - k.l - k.r), v: (y - k.t) / Math.max(1e-6, 1 - k.t - k.b) }; }
+function seekFrame(el, t) {
+  return new Promise((res, rej) => {
+    const done = () => { el.removeEventListener("seeked", done); clearTimeout(tm); res(); };
+    const tm = setTimeout(() => { el.removeEventListener("seeked", done); rej(new Error(`the video did not seek to ${t.toFixed(2)} s`)); }, 4000);
+    el.addEventListener("seeked", done);
+    el.currentTime = t;
+  });
+}
+/**
+ * Follow `box` (picture fractions {x, y, w, h}) through clip c from clip-local
+ * `from` towards `to` (dir ±1), one sample per project frame. Returns
+ * { samples: [[t, x, y, s, r, q], …] in time order, lostAt, cancelled }.
+ */
+async function runTrack(c, { box, from, to, dir, scale = false, rotation = false, onProgress, run = {} }) {
+  const m = getMedia(c.mediaId);
+  if (c.kind !== "video" || !m) throw new Error("tracking needs a video clip");
+  const el = document.createElement("video");
+  el.muted = true; el.preload = "auto"; el.playsInline = true; el.src = m.src;
+  try {
+    await new Promise((res, rej) => {
+      const tm = setTimeout(() => rej(new Error("the video did not load")), 15000);
+      el.addEventListener("loadeddata", () => { clearTimeout(tm); res(); }, { once: true });
+      el.addEventListener("error", () => { clearTimeout(tm); rej(new Error("the video could not be read")); }, { once: true });
+    });
+    const vw = el.videoWidth, vh = el.videoHeight, p0 = evalProps(c, c.start + from), k = cropFrac(p0);
+    const bw = Math.max(4, box.w * (1 - k.l - k.r) * vw), bh = Math.max(4, box.h * (1 - k.t - k.b) * vh);
+    const sc = clamp(56 / Math.max(bw, bh), 160 / vw, Math.min(1, 1280 / vw));
+    const aw = Math.max(16, Math.round(vw * sc)), ah = Math.max(16, Math.round(vh * sc));
+    const cv = document.createElement("canvas"); cv.width = aw; cv.height = ah;
+    const x = cv.getContext("2d", { willReadFrequently: true });
+    const grab = async (local) => {
+      await seekFrame(el, Math.max(0, mediaTimeAt(c, c.start + local)) + 0.001);
+      x.drawImage(el, 0, 0, aw, ah);
+      return Tracker.toGray(x.getImageData(0, 0, aw, ah).data, aw, ah);
+    };
+    const mc = picToMedia(p0, box.x, box.y);
+    const tr = Tracker.createTracker(await grab(from), aw, ah, { cx: mc.x * aw, cy: mc.y * ah, w: bw * sc, h: bh * sc }, { scale, rotation });
+    if (tr.flat) throw new Error("that region has no detail to follow — pick a spot with texture or edges");
+    const dt = 1 / (projectFps() || 30), end = clamp(to, 0, c.duration);
+    const n = Math.floor(Math.abs(end - from) / dt + 1e-6);
+    const samples = [[+from.toFixed(4), box.x, box.y, 1, 0, 1]];
+    let lostAt = null;
+    for (let i = 1; i <= n; i++) {
+      if (run.cancel) break;
+      const t = from + dir * i * dt, r = tr.step(await grab(t));
+      if (r.lost) { lostAt = t; break; }
+      const pic = mediaToPic(p0, r.cx / aw, r.cy / ah);
+      samples.push([+t.toFixed(4), pic.u, pic.v, r.s, r.r, r.q]);
+      if (onProgress) onProgress(i / n, t);
+    }
+    if (dir < 0) samples.reverse();
+    return { samples, lostAt, cancelled: !!run.cancel };
+  } finally { el.removeAttribute("src"); el.load(); }
+}
+/** What a tracking result was measured against: the clip object and its timing. */
+function trackStamp(c) {
+  if (!c) return "";
+  const p = c.props || {}, k = c.keyframes || {};
+  return JSON.stringify([c.mediaId, c.start, c.in, c.duration, clipSpeed(c), k.speed || null,
+    p.cropL, p.cropR, p.cropT, p.cropB, k.cropL || null, k.cropR || null, k.cropT || null, k.cropB || null]);
+}
+/** Merge new samples into track `name` (replacing the old ones in their time range). */
+function storeTrack(c, name, kind, w, h, samples) {
+  const list = clipTracks(c).map((x) => ({ ...x })), t0 = samples[0][0], t1 = samples[samples.length - 1][0];
+  const i = list.findIndex((x) => x.name === name);
+  const keep = i >= 0 ? list[i].samples.filter((s) => s[0] < t0 - 1e-4 || s[0] > t1 + 1e-4) : [];
+  const fresh = kind === "box" ? Tracker.smooth(samples) : samples;   // scale / rotation steadied once, for every use
+  const tr = { name, kind, w: i >= 0 ? list[i].w : w, h: i >= 0 ? list[i].h : h, samples: [...keep, ...fresh].sort((a, b) => a[0] - b[0]) };
+  if (i >= 0) list[i] = tr; else list.push(tr);
+  writeTracks(c, list.slice(-Tracker.MAX_TRACKS));
+  return clipTracks(c).find((x) => x.name === name);
+}
+/** Bake samples into mask i's keys: x / y (and scale / rotation) move by what the samples moved. */
+function bakeTrackIntoMask(c, i, samples, { scale, rotation }, from = samples[0][0]) {
+  const list = maskList(c).slice(), raw = list[i];
+  if (!raw || samples.length < 2) return 0;
+  const g = pictureRect(c, evalProps(c, c.start + samples[0][0]));
+  // the mask is where it was drawn at `from` (where tracking started): motion is measured from there, on the
+  // smoothed path, and a key stays at `from` — so a backward or two-way track keeps it exactly at the playhead
+  const sm3 = Tracker.smooth(samples, 3, 1);
+  const anchor = sm3.find((sm) => Math.abs(sm[0] - from) < 1e-4) || (() => { const q = Tracker.trackAt({ samples: sm3 }, from); return [from, q.x, q.y, q.s, q.r, q.q]; })();
+  const S = Tracker.simplify(sm3, 1.5 / Math.max(1, g ? g.dw : 1000));   // keys within ~1.5 px
+  if (from >= samples[0][0] && from <= samples[samples.length - 1][0] && !S.some((sm) => Math.abs(sm[0] - from) < 1e-4)) {
+    S.push(anchor); S.sort((a, b) => a[0] - b[0]);
+  }
+  const first = samples[0], base = Mask.maskAt(raw, from);
+  const motion = ["x", "y", ...(scale ? ["scale"] : []), ...(rotation ? ["rotation"] : [])];
+  const t0 = first[0] - 1e-4, t1 = samples[samples.length - 1][0] + 1e-4;
+  let keys = (raw.keys || []).map((k) => ({ ...k }));
+  for (const k of keys) if (k.t >= t0 && k.t <= t1) for (const p of motion) delete k[p];
+  keys = keys.filter((k) => Object.keys(k).some((p) => p !== "t" && p !== "ease"));
+  for (const sm of S) {
+    const v = { x: +(base.x + sm[1] - anchor[1]).toFixed(4), y: +(base.y + sm[2] - anchor[2]).toFixed(4) };
+    if (scale) v.scale = +(base.scale * sm[3] / (anchor[3] || 1)).toFixed(4);
+    if (rotation) v.rotation = +(base.rotation + sm[4] - anchor[4]).toFixed(3);
+    const at = keys.find((k) => Math.abs(k.t - sm[0]) < 1e-4);
+    if (at) Object.assign(at, v, { ease: "linear" }); else keys.push({ t: sm[0], ease: "linear", ...v });
+  }
+  keys.sort((a, b) => a.t - b.t);
+  list[i] = Mask.mergeMask(raw, { keys }) || raw;
+  writeMasks(c, list);
+  return S.length;
+}
+/** Where the clip's video is drawn at props p: centre, size, rotation, flips (project px). */
+function pictureRect(c, p) {
+  const el = c.kind === "video" ? getClipEl(c) : null, W = project.width, H = project.height;
+  const sw = el && el.videoWidth, sh = el && el.videoHeight;
+  if (!sw || !sh) return null;
+  const k = cropFrac(p), cw = Math.max(1, sw * (1 - k.l - k.r)), ch = Math.max(1, sh * (1 - k.t - k.b)), sc = p.scale || 1;
+  let dw, dh;
+  if (p.fit === "cover") { const f = Math.max(W / cw, H / ch) * sc; dw = cw * f; dh = ch * f; }
+  else if (p.fit === "stretch") { dw = W * sc; dh = H * sc; }
+  else if (p.fit === "none") { dw = cw * sc; dh = ch * sc; }
+  else { const f = Math.min(W / cw, H / ch) * sc; dw = cw * f; dh = ch * f; }
+  return { cx: W / 2 + (+p.x || 0), cy: H / 2 + (+p.y || 0), dw, dh, rot: (p.rotation || 0) * Math.PI / 180, fx: p.flipH ? -1 : 1, fy: p.flipV ? -1 : 1 };
+}
+/** A track's point on the frame at timeline time T (project px), with its scale and rotation there. */
+function trackOnFrame(c, tr, T) {
+  const s = Tracker.trackAt(tr, T - c.start), p = evalProps(c, T), g = pictureRect(c, p);
+  if (!g) return null;
+  const lx = (s.x - 0.5) * g.dw * g.fx, ly = (s.y - 0.5) * g.dh * g.fy, cs = Math.cos(g.rot), sn = Math.sin(g.rot);
+  return { x: g.cx + lx * cs - ly * sn, y: g.cy + lx * sn + ly * cs, s: s.s * (p.scale || 1), r: (g.fx * g.fy < 0 ? -s.r : s.r) + (p.rotation || 0) };
+}
+/** Bake clip c's track into clip b's x / y (and scale / rotation) keyframes so b rides on it. */
+function attachToTrack(c, track, b, { scale, rotation, at = state.time }) {
+  const tr = { ...track, samples: Tracker.smooth(track.samples, 3, 1) }, S = tr.samples, a = Math.max(c.start + S[0][0], b.start), z = Math.min(c.start + S[S.length - 1][0], b.start + b.duration);
+  if (z - a < 1e-3) return 0;
+  const tRef = clamp(at, a, z), ref = trackOnFrame(c, tr, tRef);
+  if (!ref) return 0;
+  const pb = evalProps(b, tRef), W = project.width, H = project.height;
+  const off = { x: (+pb.x || 0) - (ref.x - W / 2), y: (+pb.y || 0) - (ref.y - H / 2) };
+  const g = pictureRect(c, evalProps(c, tRef));
+  // the samples inside the overlap, plus the track at its edges and at the reference (between samples, too)
+  const edge = (T) => { const q = Tracker.trackAt(tr, T - c.start); return [+(T - c.start).toFixed(4), q.x, q.y, q.s, q.r, q.q]; };
+  const inRange = S.filter((sm) => c.start + sm[0] > a + 1e-4 && c.start + sm[0] < z - 1e-4);
+  for (const T of [a, z, tRef]) if (!inRange.some((sm) => Math.abs(c.start + sm[0] - T) < 1e-4)) inRange.push(edge(T));
+  inRange.sort((p, q) => p[0] - q[0]);
+  const pts = Tracker.simplify(inRange, 1.5 / Math.max(1, g ? g.dw : 1000));
+  const props = ["x", "y", ...(scale ? ["scale"] : []), ...(rotation ? ["rotation"] : [])];
+  b.keyframes = b.keyframes || {};
+  const l0 = a - b.start - 1e-4, l1 = z - b.start + 1e-4;
+  for (const k of props) b.keyframes[k] = (b.keyframes[k] || []).filter((kf) => kf.t < l0 || kf.t > l1);
+  for (const sm of pts) {
+    const T = c.start + sm[0], v = trackOnFrame(c, tr, T), t = +(T - b.start).toFixed(4);
+    if (!v) continue;
+    const vals = { x: v.x - W / 2 + off.x, y: v.y - H / 2 + off.y, scale: (+pb.scale || 1) * v.s / ref.s, rotation: (+pb.rotation || 0) + v.r - ref.r };
+    for (const k of props) b.keyframes[k].push({ t, v: +vals[k].toFixed(k === "scale" ? 4 : 2), ease: "linear" });
+  }
+  for (const k of props) { b.keyframes[k].sort((p, q) => p.t - q.t); if (!b.keyframes[k].length) delete b.keyframes[k]; }
+  if (!Object.keys(b.keyframes).length) delete b.keyframes;
+  state.dirtyTimeline = true; inspPropGen++;
+  return pts.length;
+}
+/** The mask's outline bounds at clip-local t, as picture fractions (clamped into the picture). */
+function maskBoundsAt(c, raw, t) {
+  const g = pictureRect(c, evalProps(c, c.start + t)), m = Mask.maskAt(raw, t);
+  if (!g) return null;
+  const B = { bw: g.dw, bh: g.dh };
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const a of Mask.anchors(m, B.bw, B.bh)) { x0 = Math.min(x0, a.x); y0 = Math.min(y0, a.y); x1 = Math.max(x1, a.x); y1 = Math.max(y1, a.y); }
+  x0 = clamp(x0 / B.bw, 0, 1); x1 = clamp(x1 / B.bw, 0, 1); y0 = clamp(y0 / B.bh, 0, 1); y1 = clamp(y1 / B.bh, 0, 1);
+  if (x1 - x0 < 0.01 || y1 - y0 < 0.01) return null;
+  return { x: (x0 + x1) / 2, y: (y0 + y1) / 2, w: x1 - x0, h: y1 - y0 };
+}
+/** Run a track from the playhead with progress in the Inspector; Esc stops it. */
+async function trackWithUi(c, label, job, after) {
+  if (trackUi.run) { toast("Already tracking — wait, or press Esc to stop"); return null; }
+  if (state.playing) pause();
+  const run = trackUi.run = { cancel: false, clip: c.id, label, pct: 0 };
+  const stamp = trackStamp(c), maskStamp = job.mask != null ? JSON.stringify(maskList(c)[job.mask] ?? null) : null;
+  renderInspector();
+  try {
+    const r = await runTrack(c, { ...job, run, onProgress: (f) => {
+      run.pct = f;
+      for (const el of els.inspector.querySelectorAll("[data-track-progress]")) el.textContent = `${label}: ${Math.round(f * 100)}% — Esc stops`;
+    } });
+    if (r.samples.length < 2) { toast(r.lostAt != null ? "Lost the region on the next frame — try a spot with more detail, or a bigger region" : "Nothing to track there"); return r; }
+    if (getClip(c.id) !== c || trackStamp(c) !== stamp || (maskStamp != null && JSON.stringify(maskList(c)[job.mask] ?? null) !== maskStamp)) {
+      toast("The clip changed while tracking — nothing was applied; track it again");
+      return null;
+    }
+    pushUndo();
+    after(r);
+    scheduleSave();
+    const span = Math.abs(r.samples[r.samples.length - 1][0] - r.samples[0][0]);
+    toast(r.cancelled ? `Stopped — kept ${span.toFixed(2)} s` : r.lostAt != null ? `Lost the region at ${fmt(c.start + r.lostAt)} — kept ${span.toFixed(2)} s up to there` : `Tracked ${span.toFixed(2)} s (${r.samples.length} frames)`);
+    return r;
+  } catch (err) {
+    toast("Tracking failed: " + (err && err.message || err));
+    return null;
+  } finally {
+    trackUi.run = null;
+    state.dirtyTimeline = true;
+    renderInspector(); drawFrame();
+  }
+}
+function trackMaskFromPlayhead(c, i, dir) {
+  const raw = maskList(c)[i], t = maskLocalT(c);
+  if (!raw || !activeAt(c, state.time)) { toast("Move the playhead over the clip first"); return; }
+  const box = maskBoundsAt(c, raw, t);
+  if (!box) { toast("The mask is outside the picture here"); return; }
+  const name = raw.name || `Mask ${i + 1}`, opts = { scale: trackUi.scale, rotation: trackUi.rotation };
+  trackWithUi(c, `Tracking ${name}`, { box, from: t, to: dir > 0 ? c.duration : 0, dir, mask: i, ...opts }, (r) => {
+    storeTrack(c, name, "box", box.w, box.h, r.samples);
+    bakeTrackIntoMask(c, i, r.samples, opts, t);
+  });
+}
+function trackPointFromPlayhead(c, name, box, dir) {
+  const t = clamp(state.time - c.start, 0, c.duration);
+  trackWithUi(c, `Tracking ${name}`, { box, from: t, to: dir > 0 ? c.duration : 0, dir, scale: trackUi.scale, rotation: trackUi.rotation }, (r) => {
+    storeTrack(c, name, trackUi.scale || trackUi.rotation ? "box" : "point", box.w, box.h, r.samples);
+    trackUi.sel = clipTracks(c).findIndex((x) => x.name === name);
+  });
+}
+/** The region a track continues from at the playhead: its position there, its size. */
+function trackBoxAt(c, tr) {
+  const s = Tracker.trackAt(tr, state.time - c.start);
+  return { x: s.x, y: s.y, w: tr.w * s.s, h: tr.h * s.s };
+}
+function trackSectionHtml(c) {
+  if (trackUi.clip !== c.id) Object.assign(trackUi, { clip: c.id, sel: -1, tool: null });
+  const list = clipTracks(c), tr = list[trackUi.sel], run = trackUi.run && trackUi.run.clip === c.id ? trackUi.run : null;
+  const others = project.clips.filter((x) => x.id !== c.id && isVisualClip(x) && x.start < c.start + c.duration && c.start < x.start + x.duration);
+  const chips = list.map((x, j) => `<button type="button" class="btn tiny cl-chip${j === trackUi.sel ? " toggle on" : ""}" data-tsel="${j}" title="${escapeHtml(Tracker.describe([x]))}">${escapeHtml(x.name)}</button>`).join("");
+  let html = `<div class="insp-section" data-track-section><h3>Tracking</h3>
+    <div class="cl-row"><button type="button" class="btn tiny${trackUi.tool === "point" ? " toggle on" : ""}" data-tact="point" ${run ? "disabled" : ""} title="Click a spot on the monitor to follow it from the playhead to the clip's end">+ Track point</button>
+      <button type="button" class="btn tiny${trackUi.scale ? " toggle on" : ""}" data-tact="scale" title="Also follow the region's size (tracking, and attaching)">Scale</button>
+      <button type="button" class="btn tiny${trackUi.rotation ? " toggle on" : ""}" data-tact="rotation" title="Also follow the region's rotation (tracking, and attaching)">Rotate</button></div>
+    <div class="insp-row cp-row"><label class="cp-label" title="The area matched around a picked point, % of the picture's width">Region %</label>
+      <input type="number" class="cp-num" data-tsize min="2" max="40" step="1" value="${Math.round(trackUi.size * 100)}"></div>
+    ${run ? `<p class="cl-note" data-track-progress>${escapeHtml(run.label)}: ${Math.round(run.pct * 100)}% — Esc stops</p>` : ""}
+    ${trackUi.tool === "point" ? `<p class="cl-note">Click the spot to follow on the monitor — something with detail: a corner, a logo, an eye. Esc cancels.</p>` : ""}
+    ${list.length ? `<div class="cl-row">${chips}</div>` : trackUi.tool || run ? "" : `<p class="cl-note">Follow a spot in the video, then pin a title, sticker or another clip to it. A mask tracks from the Masks section.</p>`}`;
+  if (tr) {
+    const S = tr.samples;
+    html += `<div class="cl-row"><button type="button" class="btn tiny" data-tact="back" ${run ? "disabled" : ""} title="Track from the playhead back to the clip's start">◀ Track back</button>
+        <button type="button" class="btn tiny" data-tact="fwd" ${run ? "disabled" : ""} title="Track from the playhead to the clip's end">Track on ▶</button>
+        <button type="button" class="btn tiny" data-tact="del" title="Delete this track (what follows it keeps its keys)">Delete</button></div>
+      <div class="insp-row"><label title="A clip to pin to this track">Attach</label><select data-tattach title="A clip to pin to this track"><option value="">Pick a clip…</option>${others.map((x) => `<option value="${x.id}">${escapeHtml(x.track + " · " + (x.kind === "text" ? (x.props.text || "").split("\n")[0] : x.name || x.kind))}</option>`).join("")}</select></div>
+      <div class="cl-row"><button type="button" class="btn tiny" data-tact="attach" ${others.length ? "" : "disabled"} title="Key the clip's position (and scale / rotation when those are on) so it rides on the track, keeping where it is at the playhead">Attach to the track</button></div>
+      <p class="cl-note">${S.length} samples, ${S[0][0].toFixed(2)}–${S[S.length - 1][0].toFixed(2)} s of the clip. Attaching writes keyframes — edit them like any others.</p>`;
+  }
+  return html + `</div>`;
+}
+function bindTrackControls(c) {
+  const root = els.inspector.querySelector("[data-track-section]");
+  if (!root) return;
+  const guard = () => { if (isGroupLocked(c)) { toastLocked(); return false; } return true; };
+  const size = root.querySelector("[data-tsize]");
+  if (size) size.addEventListener("change", () => { trackUi.size = clamp((+size.value || 8) / 100, 0.02, 0.4); size.blur(); });
+  for (const b of root.querySelectorAll("[data-tsel]")) b.addEventListener("click", () => {
+    const j = +b.dataset.tsel;
+    trackUi.sel = trackUi.sel === j ? -1 : j; trackUi.tool = null;
+    renderInspector(); drawFrame();
+  });
+  for (const b of root.querySelectorAll("[data-tact]")) b.addEventListener("click", () => {
+    const a = b.dataset.tact, tr = clipTracks(c)[trackUi.sel];
+    if (a === "scale" || a === "rotation") { trackUi[a] = !trackUi[a]; renderInspector(); return; }
+    if (!guard()) return;
+    if (a === "point") {
+      trackUi.tool = trackUi.tool === "point" ? null : "point";
+      if (trackUi.tool && !activeAt(c, state.time)) toast("Move the playhead over the clip, then click the spot to follow");
+      renderInspector(); return;
+    }
+    if (!tr) return;
+    if (a === "del") { pushUndo(); writeTracks(c, clipTracks(c).filter((x) => x !== tr)); trackUi.sel = -1; scheduleSave(); renderInspector(); drawFrame(); return; }
+    if (a === "back" || a === "fwd") {
+      if (!activeAt(c, state.time)) { toast("Move the playhead over the clip first"); return; }
+      trackPointFromPlayhead(c, tr.name, trackBoxAt(c, tr), a === "fwd" ? 1 : -1);
+      return;
+    }
+    if (a === "attach") {
+      const other = getClip(root.querySelector("[data-tattach]").value);
+      if (!other) { toast("Pick a clip to attach first"); return; }
+      if (isGroupLocked(other)) { toastLocked(); return; }
+      pushUndo();
+      const n = attachToTrack(c, tr, other, { scale: trackUi.scale, rotation: trackUi.rotation });
+      scheduleSave(); renderInspector(); drawFrame();
+      toast(n ? `${other.name || other.kind} follows ${tr.name} (${n} keys)` : "That clip and the track don't overlap in time");
+    }
+  });
+}
+/** Monitor: the selected track's path, and its region at the playhead. */
+function drawTrackOverlay(c, W) {
+  if (!c || trackUi.clip !== c.id || !els.inspector.querySelector("[data-track-section]")) return;
+  const tr = clipTracks(c)[trackUi.sel], B = maskBox(c);
+  if (!tr || !B || !activeAt(c, state.time)) return;
+  const lw = Math.max(1.5, W / 900), S = tr.samples, step = Math.max(1, Math.floor(S.length / 400));
+  ctx2d.save(); ctx2d.setTransform(1, 0, 0, 1, 0, 0);
+  ctx2d.lineWidth = lw; ctx2d.strokeStyle = "rgba(255, 196, 64, .8)";
+  ctx2d.beginPath();
+  for (let i = 0; i < S.length; i += step) { const p = B.toCanvas(S[i][1] * B.bw, S[i][2] * B.bh); if (i) ctx2d.lineTo(p.x, p.y); else ctx2d.moveTo(p.x, p.y); }
+  ctx2d.stroke();
+  const s = Tracker.trackAt(tr, state.time - c.start), p = B.toCanvas(s.x * B.bw, s.y * B.bh);
+  const q = B.toCanvas((s.x + tr.w * s.s / 2) * B.bw, s.y * B.bh), r = Math.max(6, Math.hypot(q.x - p.x, q.y - p.y));
+  ctx2d.strokeStyle = s.inside ? "#ffc440" : "rgba(255, 196, 64, .45)";
+  ctx2d.strokeRect(p.x - r, p.y - r, r * 2, r * 2);
+  ctx2d.beginPath(); ctx2d.moveTo(p.x - r * 0.5, p.y); ctx2d.lineTo(p.x + r * 0.5, p.y); ctx2d.moveTo(p.x, p.y - r * 0.5); ctx2d.lineTo(p.x, p.y + r * 0.5); ctx2d.stroke();
+  ctx2d.restore();
+}
+els.preview.addEventListener("pointerdown", (e) => {
+  if (e.button !== 0 || trackUi.tool !== "point" || isSourceMode()) return;
+  const c = getClip(state.selId);
+  if (!c || c.id !== trackUi.clip || !activeAt(c, state.time)) return;
+  const B = maskBox(c);
+  if (!B) return;
+  e.preventDefault(); e.stopImmediatePropagation();
+  const bp = B.toBox(canvasPt(e)), u = bp.x / B.bw, v = bp.y / B.bh;
+  if (u < 0 || u > 1 || v < 0 || v > 1) { toast("Click inside the clip's picture"); return; }
+  const used = new Set(clipTracks(c).map((x) => x.name));
+  let n = 1;
+  while (used.has(`Track ${n}`)) n++;
+  trackUi.tool = null;
+  trackPointFromPlayhead(c, `Track ${n}`, { x: u, y: v, w: trackUi.size, h: trackUi.size * B.bw / B.bh }, 1);
+}, true);
+window.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || (!trackUi.run && trackUi.tool !== "point")) return;
+  e.preventDefault(); e.stopImmediatePropagation();
+  if (trackUi.run) trackUi.run.cancel = true;
+  else { trackUi.tool = null; renderInspector(); }
+}, true);
 function maskSectionHtml(c) {
   const ui = maskUiFor(c), list = maskList(c), i = ui.sel, m = i >= 0 ? maskNowAt(c, i) : null, raw = list[i];
   const tool = (k, label, title) => `<button type="button" class="btn tiny${ui.tool === k ? " toggle on" : ""}" data-mtool="${k}" title="${title}" ${list.length >= Mask.MAX_MASKS ? "disabled" : ""}>${label}</button>`;
@@ -9510,6 +9868,12 @@ function maskSectionHtml(c) {
         <button type="button" class="btn tiny${onKey ? " toggle on" : ""}" data-mact="key" title="${onKey ? "Remove the key at the playhead" : "Key the mask at the playhead — with keys, every change keys"}">◆ Key</button>
         <span class="cl-note">${keyed ? `${keyed} key${keyed > 1 ? "s" : ""}` : ""}</span>
         ${keyed ? `<button type="button" class="btn tiny" data-mact="clearkeys" title="Remove every key (keeps the mask as it is at the playhead)">Clear keys</button>` : ""}</div>
+      ${c.kind === "video" ? `<div class="cl-row"><span class="cl-note">Track</span>
+        <button type="button" class="btn tiny" data-mtrack="-1" ${trackUi.run ? "disabled" : ""} title="Follow what the mask covers from the playhead back to the clip's start — keys its position">◀ Back</button>
+        <button type="button" class="btn tiny" data-mtrack="1" ${trackUi.run ? "disabled" : ""} title="Follow what the mask covers from the playhead to the clip's end — keys its position">On ▶</button>
+        <button type="button" class="btn tiny${trackUi.scale ? " toggle on" : ""}" data-mtrackopt="scale" title="Also key its scale">Scale</button>
+        <button type="button" class="btn tiny${trackUi.rotation ? " toggle on" : ""}" data-mtrackopt="rotation" title="Also key its rotation">Rotate</button></div>
+        ${trackUi.run && trackUi.run.clip === c.id ? `<p class="cl-note" data-track-progress>${escapeHtml(trackUi.run.label)}: ${Math.round(trackUi.run.pct * 100)}% — Esc stops</p>` : ""}` : ""}
       ${mrow("opacity")}${mrow("feather")}${mrow("expand")}${mrow("x")}${mrow("y")}${m.shape !== "bezier" ? mrow("w") + mrow("h") : ""}${mrow("scale")}${mrow("rotation")}
       <p class="cl-note">On the monitor: drag inside to move, the knob rotates (Shift: 15° steps)${m.shape === "bezier"
         ? "; drag a point to move it, its handles to curve it (Alt: break the pair), Alt-drag a point to pull new handles, Ctrl-click the outline to add a point, double-click a point to remove it"
@@ -9537,6 +9901,11 @@ function bindMaskControls(c) {
     maskUi.tool = maskUi.tool === k ? null : k; maskUi.pen = null; maskUi.stroke = null;
     if (maskUi.tool) { maskUi.sel = -1; if (state.playing) pause(); if (!activeAt(c, state.time)) toast("Move the playhead over the clip, then draw on the monitor"); }
     rerender();
+  });
+  for (const b of root.querySelectorAll("[data-mtrackopt]")) b.addEventListener("click", () => { trackUi[b.dataset.mtrackopt] = !trackUi[b.dataset.mtrackopt]; rerender(); });
+  for (const b of root.querySelectorAll("[data-mtrack]")) b.addEventListener("click", () => {
+    if (!guard() || maskUi.sel < 0) return;
+    trackMaskFromPlayhead(c, maskUi.sel, +b.dataset.mtrack);
   });
   for (const b of root.querySelectorAll("[data-msel]")) b.addEventListener("click", () => {
     const j = +b.dataset.msel;
@@ -11698,6 +12067,7 @@ async function runExportJob(ticket) {
     await new Promise((r) => setTimeout(r, 100));
   if (ticket.revision != null && (project.revision || 0) < ticket.revision) await syncFromServer();
   if (ticket.kind === "scopes") return runScopesJob(ticket, fail);
+  if (ticket.kind === "track") return runTrackJob(ticket, fail);
   if (!state.ffmpeg) {
     const j = await fetch("/api/export/ffmpeg").then((r) => r.json()).catch(() => ({}));
     state.ffmpeg = !!j.available;
@@ -11715,6 +12085,110 @@ async function runExportJob(ticket) {
     await fastExport({ job: ticket.id, profile: ticket.profile });
   } finally {
     exportRangeForced = null;
+  }
+}
+/* fablecut_track: follow a region of a clip in this tab, store the track,
+   optionally bake it into a mask or another clip, save, and report. */
+async function runTrackJob(ticket, fail) {
+  const spec = ticket.track || {}, c = getClip(spec.clip);
+  if (!c) return fail(`no clip ${spec.clip}`);
+  if (c.kind !== "video") return fail(`${c.id} is a ${c.kind} clip — tracking follows a video clip's picture`);
+  if (isGroupLocked(c) && spec.force !== true) return fail(`${c.id} is locked — pass force:true only if the user asked to change it`);
+  const el = getClipEl(c);
+  if (el && !el.videoWidth) await new Promise((r) => { el.addEventListener("loadedmetadata", r, { once: true }); setTimeout(r, 15000); });
+  if (!pictureRect(c, evalProps(c, c.start))) return fail("the clip's video did not load");
+  const list = maskList(c), tracks = clipTracks(c), ap = spec.apply || null;
+  let maskIdx = -1, other = null;
+  if (ap && ap.mask != null) {
+    maskIdx = typeof ap.mask === "string" ? list.findIndex((m) => m.name === ap.mask) : ap.mask;
+    if (!list[maskIdx]) return fail(`${c.id} has no mask ${JSON.stringify(ap.mask)}${list.length ? ` (it has ${Mask.describe(list)})` : " — add one with setMask first"}`);
+  } else if (ap && ap.clip != null) {
+    other = getClip(ap.clip);
+    if (!other || !isVisualClip(other) || other.id === c.id) return fail(`apply.clip must be another visual clip (${ap.clip} is not)`);
+    if (isGroupLocked(other) && spec.force !== true) return fail(`${other.id} is locked`);
+  }
+  const at = clamp(Number.isFinite(spec.at) ? spec.at : c.start, c.start, c.start + c.duration), from = at - c.start;
+  let name = typeof spec.name === "string" && spec.name.trim() ? spec.name.trim().slice(0, 60) : null;
+  if (!name && maskIdx >= 0) name = list[maskIdx].name || `Mask ${maskIdx + 1}`;
+  if (!name) { let n = 1; while (tracks.some((x) => x.name === `Track ${n}`)) n++; name = `Track ${n}`; }
+  const g = pictureRect(c, evalProps(c, at)) || pictureRect(c, evalProps(c, c.start));
+  let box = null;
+  if (spec.region) box = { x: +spec.region.x, y: +spec.region.y, w: +spec.region.w, h: +spec.region.h };
+  else if (spec.point) { const sz = clamp(+spec.size || 0.08, 0.02, 0.4); box = { x: +spec.point.x, y: +spec.point.y, w: sz, h: sz * g.dw / g.dh }; }
+  else if (maskIdx >= 0 && !tracks.some((x) => x.name === name)) box = maskBoundsAt(c, list[maskIdx], from);
+  const existing = tracks.find((x) => x.name === name);
+  if (!box && !existing) return fail("say what to follow: region {x, y, w, h} or point {x, y} (fractions of the clip's picture), or a mask to apply it to");
+  if (box && !(box.x >= 0 && box.x <= 1 && box.y >= 0 && box.y <= 1 && box.w > 0 && box.h > 0)) return fail("region / point must lie inside the clip's picture (x, y in 0…1)");
+  const opts = { scale: spec.scale === true, rotation: spec.rotation === true };
+  const dirs = spec.direction === "backward" ? [-1] : spec.direction === "both" ? [-1, 1] : [1];
+  const to = Number.isFinite(spec.to) ? clamp(spec.to - c.start, 0, c.duration) : null;
+  if (state.playing) pause();
+  renderCancelled = false;
+  const stamp = trackStamp(c), otherStamp = other ? trackStamp(other) : "", maskStamp = maskIdx >= 0 ? JSON.stringify(list[maskIdx]) : null;
+  let samples = [], cancelled = false;
+  const lostAt = [];
+  try {
+    if (box) {
+      for (const [k, dir] of dirs.entries()) {
+        const run = { cancel: false };
+        const end = to != null && Math.sign(to - from) === dir ? to : dir > 0 ? c.duration : 0;
+        const r = await runTrack(c, { box, from, to: end, dir, ...opts, run, onProgress: (f) => {
+          run.cancel = renderCancelled;
+          reportExportJob(ticket.id, { progress: (k + f) / dirs.length });
+        } });
+        if (r.lostAt != null) lostAt.push(+(c.start + r.lostAt).toFixed(3));
+        cancelled = cancelled || r.cancelled;
+        samples = dir < 0 ? [...r.samples, ...samples] : [...samples, ...r.samples];
+        if (cancelled) break;
+      }
+      samples = samples.filter((sm, i) => i === 0 || sm[0] > samples[i - 1][0] + 1e-6);
+      if (samples.length < 2) return fail(lostAt.length ? "lost the region on the very next frame — pick a spot with more detail, or a bigger region" : "nothing to track in that range");
+    }
+    // the project may have been reloaded or edited while tracking: apply only onto what was measured
+    if (getClip(c.id) !== c || trackStamp(c) !== stamp || (other && (getClip(other.id) !== other || trackStamp(other) !== otherStamp)) ||
+      (maskStamp != null && JSON.stringify(maskList(c)[maskIdx] ?? null) !== maskStamp))
+      return fail("the clip changed while tracking (an edit or a reload) — nothing was applied; run it again");
+    const beforeJob = undoSnapshot();
+    pushUndo(beforeJob);
+    const tr = box ? storeTrack(c, name, opts.scale || opts.rotation ? "box" : "point", box.w, box.h, samples) : existing;
+    const used = box ? samples : tr.samples;
+    let applied = null;
+    if (maskIdx >= 0) applied = `mask ${JSON.stringify(list[maskIdx].name || maskIdx)}: ${bakeTrackIntoMask(c, maskIdx, used, opts, from)} keys`;
+    else if (other) {
+      const o = { scale: ap.scale === true, rotation: ap.rotation === true, at: Number.isFinite(ap.at) ? ap.at : at };
+      const n = attachToTrack(c, tr, other, o);
+      applied = n ? `clip ${other.id}: ${n} keys on ${["x", "y", ...(o.scale ? ["scale"] : []), ...(o.rotation ? ["rotation"] : [])].join(", ")}` : `clip ${other.id}: it does not overlap the track in time — nothing keyed`;
+    }
+    state.dirtyTimeline = true;
+    if (state.connected) {
+      clearTimeout(runtime.saveTimer); runtime.saveTimer = null;
+      project.revision++;
+      const res = await fetch("/api/project", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(projectJSON(), null, 2) });
+      if (!res.ok) {
+        project.revision--;
+        // put back only the clips this job changed (edits elsewhere since stay), and drop its undo step
+        const was = JSON.parse(beforeJob), wasClips = Array.isArray(was) ? was : was.clips;
+        for (const id of [c.id, other && other.id].filter(Boolean)) {
+          const i = project.clips.findIndex((x) => x.id === id), old = wasClips.find((x) => x.id === id);
+          if (i >= 0 && old) project.clips[i] = old;
+        }
+        const u = runtime.undo.lastIndexOf(beforeJob);
+        if (u >= 0) runtime.undo.splice(u, 1);
+        pruneSelection(); renderInspector(); drawFrame();
+        return fail(res.status === 409 ? "the project changed while tracking — nothing was saved; run it again" : `could not save the project (${res.status}) — nothing was kept`);
+      }
+    }
+    renderInspector(); drawFrame();
+    const qs = used.map((sm) => sm[5]);
+    await reportExportJob(ticket.id, { status: "done", result: {
+      clip: c.id, track: tr.name, kind: tr.kind, describe: Tracker.describe([tr]),
+      from: +(c.start + used[0][0]).toFixed(3), to: +(c.start + used[used.length - 1][0]).toFixed(3),
+      samples: used.length, tracked: !!box, lostAt, cancelled,
+      quality: { min: +Math.min(...qs).toFixed(3), mean: +(qs.reduce((a, b) => a + b, 0) / qs.length).toFixed(3) },
+      applied, revision: project.revision,
+    } }, true);
+  } catch (err) {
+    fail("tracking failed: " + (err && err.message || err));
   }
 }
 /* fablecut_scopes: render one still exactly as export would (graded, all

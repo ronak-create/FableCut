@@ -28,6 +28,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   track stops drawing while it is in use; the timeline marks both sides. In the
   Inspector under **Blend**; agents use the `setMatte` patch op, and
   `fablecut_scopes` lists each clip's matte and blend.
+- **Motion tracking.** Follow a point or a region of a video clip frame by
+  frame (template matching, sub-pixel, optionally with scale and rotation);
+  the track is stored on the clip (`props.tracks`). A mask's **◀ Back / On ▶**
+  buttons track what it covers and key its position (and scale / rotation);
+  the Inspector's **Tracking** section tracks points and **attaches** any
+  visual clip to a track as editable keyframes. Esc stops a running track.
+- Agents: the `fablecut_track` tool (track a point, a region or a mask, then
+  `apply` it to a mask or a clip) and the `removeTrack` patch op; tracks are
+  validated on `addClip` / `updateClip` and summarized in the compact view.
 - Blend modes: `color-burn`, `exclusion`, `hue`, `saturation`, `color` and
   `luminosity` join the list (17 in all). `blend`, `matte` and `matteTrack` are
   validated on `addClip` / `updateClip`.

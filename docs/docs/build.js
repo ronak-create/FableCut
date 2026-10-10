@@ -64,6 +64,11 @@ const PAGES = [
     parts: [["project.json schema", "Track mattes and blending"]],
   },
   {
+    slug: "tracking", nav: "Tracking", title: "Motion tracking", group: "The timeline",
+    lede: "Follow a point or a region through a video clip, then make a mask follow it or pin a title, sticker or another clip to it, from the Inspector or from an agent with fablecut_track.",
+    parts: [["project.json schema", "Tracking"]],
+  },
+  {
     slug: "editing", nav: "Editing rules", title: "Editing rules", group: "The timeline",
     lede: "How tracks, links, locks, targeting and the trim tools behave, for people and agents alike.",
     parts: [["project.json schema", "Semantics"]],
@@ -355,13 +360,14 @@ function pageBody(pg, ctx) {
   let html = "";
   for (const [name, which] of pg.parts) {
     const s = find(name);
-    ctx.lines.push(s.line);
     if (which && which !== "*") {
       const x = findSub(s, which);
+      ctx.lines.push(x.line);   // the edit link opens the subsection itself
       if (multi) html += heading(2, x.title, ctx);
       html += render(x.lines, { ...ctx, level: multi ? 3 : 2 });
       continue;
     }
+    ctx.lines.push(s.line);
     if (multi) html += heading(2, shortTitle(s.title), ctx);
     html += render(s.intro, { ...ctx, level: multi ? 3 : 2 });
     if (which === "*") for (const x of s.subs) {

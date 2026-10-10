@@ -406,6 +406,8 @@
         <tr><td>Pen</td><td>Click to place points, drag while placing to pull curve handles · click the first point or <kbd>Enter</kbd> closes · <kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Backspace</kbd> removes the last point, <kbd>Ctrl</kbd>+<kbd>⇧</kbd>+<kbd>Z</kbd> puts it back · <kbd>Esc</kbd> cancels</td></tr>
         <tr><td>Draw</td><td>Drag a free-hand outline — it becomes an editable bezier</td></tr>
         <tr><td>Mask on the monitor</td><td>Drag inside to move · edge handles resize · the knob rotates (<kbd>⇧</kbd> snaps to 15°) · drag a point or its handles (<kbd>Alt</kbd> breaks the pair) · <kbd>Alt</kbd>+drag a point pulls new handles · <kbd>Ctrl/Cmd</kbd>+click the outline adds a point · double-click a point removes it · <kbd>Esc</kbd> deselects</td></tr>
+        <tr class="keys-head"><td colspan="2">Tracking (Inspector → Tracking, or a mask's Track buttons)</td></tr>
+        <tr><td>Track point</td><td>Click the spot to follow on the monitor — it tracks from the playhead to the clip's end · <kbd>Esc</kbd> cancels the pick, or stops a track that is running (what was tracked so far is kept)</td></tr>
       </table>
     </div>
     <div class="dialog-actions"><button class="btn primary" id="btnCloseHelp">Close</button></div>
@@ -418,6 +420,7 @@
 <script src="ducking.js"></script>
 <script src="audio-fx.js"></script>
 <script src="mask.js"></script>
+<script src="tracker.js"></script>
 <script src="color.js"></script>
 <script src="edit-ops.js"></script>
 <script src="static-shim.js"></script>
