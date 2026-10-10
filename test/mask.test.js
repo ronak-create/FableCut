@@ -111,11 +111,12 @@ test("adding or removing a bezier point keeps the curve and changes every keyed 
   assert.equal(split.points.length, 5);
   for (const [x, y] of [[100, 50], [150, 75], [100, 15], [30, 50], [178, 50], [100, 92]])   // same pixels covered
     assert.equal(M.matteAt([split], x, y, BW, BH, 0) > 0.5, M.matteAt([m], x, y, BW, BH, 0) > 0.5, `pixel ${x},${y}`);
-  const keyed = M.normalizeMask({ shape: "bezier", points: diamond, keys: [{ t: 0, x: 0.4 }, { t: 1, points: diamond.map((p) => [p[0] * 0.5, p[1] * 0.5, p[2], p[3], p[4], p[5]]) }] });
+  const keyed = M.normalizeMask({ shape: "bezier", points: diamond, keys: [{ t: 0, x: 0.4, points: diamond }, { t: 1, ease: "linear", points: diamond.map((p) => [p[0] * 0.5, p[1] * 0.5, p[2], p[3], p[4], p[5]]) }] });
   const added = M.normalizeMask(M.editTopology(keyed, (pts) => M.splitPoints(pts, 0, 0.5)), true);
   assert.equal(added.points.length, 5);
   assert.equal(added.keys[1].points.length, 5, "the keyed outline gained the point too");
   assert.equal(M.maskAt(added, 0.5).points.length, 5, "and still morphs");
+  near(M.maskAt(added, 0.5).points[1][0], 0.225, 1e-6, "the new point morphs between its keyed positions");
   const removed = M.normalizeMask(M.editTopology(added, (pts) => pts.filter((_, j) => j !== 1)), true);
   assert.equal(removed.points.length, 4);
   assert.equal(removed.keys[1].points.length, 4);
