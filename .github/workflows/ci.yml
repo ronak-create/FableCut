@@ -41,7 +41,7 @@ jobs:
 
       - name: Syntax-check JavaScript
         run: |
-          for f in server.js app.js mcp-server.js analyze.js paths.js; do
+          for f in *.js; do
             echo "checking $f"
             node --check "$f"
           done
@@ -88,3 +88,49 @@ jobs:
             }
             console.log('split layout OK');
           "
+
+  release:
+    # What npm, the MCP registry and Glama will see — checked here, before a
+    # release, instead of after one. See .github/scripts/release-check.js.
+    name: Release readiness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Versions, metadata, syntax, MCP tools vs manifest.json
+        run: node .github/scripts/release-check.js
+
+      - name: Pack and install the npm package, then check what it ships
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/pkg"
+          mkdir -p "$out/app"
+          npm pack --pack-destination "$out"
+          cd "$out/app"
+          npm init -y > /dev/null
+          npm install --no-audit --no-fund "$out"/fablecut-*.tgz
+          cd "$GITHUB_WORKSPACE"
+          node .github/scripts/release-check.js --installed "$out/app/node_modules/fablecut"
+
+      - name: Docs and playground are rebuilt from CLAUDE.md / the editor
+        run: |
+          node docs/docs/build.js
+          node docs/demo/sync.js
+          if [ -n "$(git status --porcelain -- docs/)" ]; then
+            git status --short -- docs/
+            echo "::error::docs/ is stale — run node docs/docs/build.js and node docs/demo/sync.js, then commit"
+            exit 1
+          fi
+
+      # Last: it rewrites package.json in the runner. The dry run refuses a
+      # version that is already on npm — true between releases — so it packs a
+      # throwaway prerelease of the same version instead.
+      - name: npm publish dry run
+        run: |
+          npm version "$(node -p "require('./package.json').version")-ci.${GITHUB_RUN_NUMBER}" --no-git-tag-version
+          npm publish --dry-run --tag ci
