@@ -278,8 +278,8 @@ Examples in `library/svg/`: `sparkles.svg` (loop), `lower-third.svg`,
   "clips": [
     {
       "id": "c_xyz",             // unique string
-      "mediaId": "m_abc",        // null for kind:"text" and kind:"adjust"
-      "kind": "video",           // video | audio | image | svg | text | adjust
+      "mediaId": "m_abc",        // null for kind:"text", "adjust", "shape" and "null"
+      "kind": "video",           // video | audio | image | svg | text | adjust | shape | null
       "track": "V1",             // Vn…V1 (video) | A1…An (audio); extras via UI +V/+A or tracks[]
       "start": 0,                // timeline position, seconds
       "in": 2.5,                 // offset into source media, seconds (0 for image/svg/text)
@@ -289,6 +289,7 @@ Examples in `library/svg/`: `sparkles.svg` (loop), `lower-third.svg`,
       "locked": true,            // OPTIONAL — locked by the user: leave it alone (MCP patch refuses edits)
       "disabled": true,          // OPTIONAL — stays on the timeline, hidden from preview / audio / export
       "unlinked": true,          // OPTIONAL — the user unlinked this clip; never auto-relinked on load
+      "parent": "c_null",        // OPTIONAL — moves, turns and scales with that clip (see "Shapes, nulls and parenting")
       "props": { /* all optional — see the props reference below */ },
       // OPTIONAL — keyframe animation. Times are seconds RELATIVE TO CLIP START.
       // "ease" sits on the DESTINATION keyframe of each segment:
@@ -316,6 +317,7 @@ Examples in `library/svg/`: `sparkles.svg` (loop), `lower-third.svg`,
 | `scale` | 1 | |
 | `rotation` | 0 | degrees |
 | `opacity` | 1 | 0–1 |
+| `anchorX`, `anchorY` | 0 | anchor point, px from the picture's centre: the point `x`/`y` place and `rotation`/`scale` turn around |
 | `blend` | "normal" | how the clip lays over what is under it (see Track mattes and blending) |
 | `matte` · `matteTrack` | — | a track matte (see Track mattes and blending) |
 
@@ -432,7 +434,12 @@ footage. Example: 0.3 s impact shake over everything =
 shows — rect, ellipse, bezier, free-hand; feather, expand, invert, add /
 subtract / intersect, keyframes. See "Masks" below.
 
-**Animatable props** (usable in `keyframes`): x, y, scale, rotation, opacity,
+**Shape layers** (`kind:"shape"`): `props.shapes` (rectangles, ellipses,
+polygons, stars, lines, bezier paths, groups) and `trimStart` / `trimEnd` /
+`trimOffset` (%, a draw-on of every path). **Null objects** (`kind:"null"`)
+never render; other clips are parented to them. See "Shapes, nulls and parenting".
+
+**Animatable props** (usable in `keyframes`): x, y, scale, rotation, opacity, anchorX, anchorY, trimStart, trimEnd, trimOffset,
 volume, pan, duck, speed, brightness, contrast, saturation, hue, blur, grayscale, sepia,
 invert, temperature, tint, vignette, cornerRadius, shake, rgbSplit, grain,
 fontSize, letterSpacing, glow.
@@ -924,6 +931,125 @@ the shot on the track above, then `apply:{mask:"Face"}`; **a screen replacement*
 track the screen with Scale and Rotate on and attach the new picture, cropped
 to fit; **a highlight that stays on a UI element** in a screen recording —
 track the button, attach a rect svg.
+
+### Shapes, nulls and parenting
+
+Motion graphics are built from three pieces: **shape layers** (vector shapes
+drawn by the editor, crisp at any size), **null objects** (invisible layers that
+carry a transform) and **parenting** (a clip moves, turns and scales with
+another clip). Every visual clip also has an **anchor point**. All of it runs
+the same in preview and export.
+
+**Shape layers.** A clip with `kind:"shape"` (no `mediaId`) draws
+`props.shapes`, a list drawn bottom-up (first = bottom):
+
+```jsonc
+{ "id": "c_lt", "kind": "shape", "mediaId": null, "track": "V2", "start": 0, "duration": 5,
+  "props": { "x": -300, "y": 220, "shapes": [
+    { "type": "rect", "name": "Bar", "w": 520, "h": 90, "radius": 12, "fill": "#ffd166",
+      "keys": [ { "t": 0, "w": 0 }, { "t": 0.6, "w": 520, "ease": "ease-out" } ] },
+    { "type": "line", "y": 60, "points": [[-260, 0], [260, 0]], "stroke": "#ffffff", "strokeWidth": 6,
+      "keys": [ { "t": 0.3, "trimEnd": 0 }, { "t": 1.1, "trimEnd": 100 } ] },
+    { "type": "group", "x": 300, "items": [
+      { "type": "star", "sides": 5, "inner": 0.45, "w": 80, "h": 80, "fill": "#ff7ac8" },
+      { "type": "ellipse", "w": 120, "h": 120, "fill": "none", "stroke": "#ff7ac8", "strokeWidth": 4 } ],
+      "keys": [ { "t": 0, "rotation": 0 }, { "t": 5, "rotation": 360, "ease": "linear" } ] }
+  ] } }
+```
+
+| key | default | does |
+|---|---|---|
+| `type` | `rect` | `rect` · `ellipse` · `polygon` · `star` · `line` · `path` · `group` |
+| `x` · `y` | 0 | position in layer px, from the layer's origin (the clip's `x`/`y`, y down) |
+| `rotation` · `scale` · `opacity` | 0 · 1 · 1 | about the item's own `x, y` |
+| `w` · `h` | 200 | size, px (rect, ellipse, polygon, star) |
+| `radius` | 0 | rect corner radius, px |
+| `sides` · `inner` | 6 / 5 · 0.5 | polygon / star point count (3–64); a star's inner radius as a fraction of the outer |
+| `points` | — | line: exactly 2 · path: 2–128 points `[x, y]` or `[x, y, inX, inY, outX, outY]` (curve handles relative to the point), px around the item's `x, y` |
+| `closed` | true | path only; `false` leaves it open (lines are always open) |
+| `fill` · `stroke` | `#ffffff` · `none` | `"#rrggbb"`, `"#rrggbbaa"` or `"none"`; lines and open paths default to a white stroke and no fill |
+| `strokeWidth` | 6 (8 open) | px; set with `stroke` |
+| `lineCap` · `lineJoin` | `round` · `round` | `butt` · `round` · `square` / `miter` · `round` · `bevel` |
+| `dash` | — | `[on, off, …]` px, e.g. `[24, 12]` |
+| `trimStart` · `trimEnd` | 0 · 100 | the part of the outline drawn, % — key `trimEnd` 0→100 to draw a path on |
+| `trimOffset` | 0 | % of the outline the drawn part is shifted round by (key it to make a dash run round a loop) |
+| `items` | — | group only: its items. A group moves, turns, scales, fades and trims them together (groups nest 4 deep) |
+| `name` · `on` | — | a label (agents address items by it); `on:false` hides it |
+| `keys` | — | `[{t, ease?, …}]`, `t` in seconds from the clip's start. Keyable: `x y rotation scale opacity w h radius inner strokeWidth trimStart trimEnd trimOffset fill stroke points`. Each value eases between the keys that set it (`ease` on the arriving key); colours blend; `points` keys morph the path and need its point count |
+
+At most 64 items per layer (group children included). The layer itself is a
+normal visual clip: its `x`, `y`, `scale`, `rotation`, `opacity`, `blend`,
+masks, transitions and keyframes all work, as do `blur` and `shake`. Its own
+`trimStart` / `trimEnd` / `trimOffset` (clip props, keyframable) trim every
+path in it at once. A trimmed shape fills the part that is drawn.
+
+**Null objects.** `kind:"null"` (no `mediaId`) is a clip that never renders.
+Give it `x`, `y`, `rotation`, `scale` (and keyframes), and parent clips to it to
+move them as one. The monitor shows it as a red square while it is on screen.
+
+**Parenting.** `"parent": "<clip id>"` (top-level, next to `track`) makes a
+clip move, turn and scale with that clip. Its own `x`/`y` are then measured
+in the parent's space: from the parent's centre, turned and scaled with it.
+Parents chain (a parent can have a parent), and loops are refused. Only the
+transform follows: the parent's opacity, transitions, shake and effects do
+not, and the parent's keyframes are read even outside its time range (held
+at its first or last value). Splitting a parent leaves the children on the
+left half.
+
+**Anchor point.** `anchorX` / `anchorY` (px from the picture's centre, for any
+visual clip) pick the point that `x`/`y` place and that `rotation` and `scale`
+turn around: `anchorY: 200` on a 400 px tall shape spins it about its bottom
+edge. Moving the anchor without moving the picture means changing `x`/`y`
+with it (the editor's anchor tool does that).
+
+In the editor: **+ Shape** (rectangle, ellipse, polygon, star, line or a pen
+path) and **+ Null** in the bin header. The **Shape layer** section lists the
+items; pick one to edit it — the sliders, Fill / Stroke (colour or **None**),
+ends and joins, trim, **Group** / **Ungroup** / **Out**, ↑ ↓, **Copy**,
+**Delete** — and on the monitor drag it to move, the knob to turn it (Shift:
+15°) and the corners to resize it. On a line or path, drag points and their
+handles (Alt breaks the pair, Alt-drag pulls new handles); on a path,
+Ctrl-click the outline to add a point and double-click one to remove it.
+**Pen** draws a new path: click points (drag to curve), click the first point
+to close it or press Enter to keep it open. Each value has its own **◆**: key
+it at the playhead, and from then on changing it keys it. Every visual clip's
+Transform section has **Anchor** (**✥ Move**: drag on the monitor to move the
+anchor point while the picture stays put, Shift snaps to the centre;
+**Centre** puts it back) and **Parent**. Right-click clips → **Parent to a
+new null** groups them under a fresh null at their centre.
+
+**Agents:**
+
+- Add a layer with `addClip {kind:"shape", track, start, duration, props:{shapes:[…]}}`,
+  a null with `addClip {kind:"null", track, start, duration, props:{x, y}}`.
+- `{op:"setShape", id, set:{type:"rect", w:400, h:80, fill:"#ffd166"}}` adds an
+  item (no `shape`, an index one past the end or a new name adds one; a new
+  item needs `type`). `{op:"setShape", id, shape:"Bar", set:{fill:"#22d3ee"}}`
+  edits one — by index (0 = first), name, or a path into groups like `"2.0"`
+  (item 0 of group 2; `"2.3"` with 3 items adds one there) — merging key by
+  key (`null` resets a key; a new `type` keeps the position and paint).
+  `replace:true` starts it over. `keys` in `set` replaces its keys.
+  `{op:"removeShape", id, shape}` deletes one. `ids:[…]` edits several clips.
+- `{op:"setParent", id | ids, parent:"c_null"}` parents clips and keeps them
+  where they are on screen (at time `at`, default each clip's start; keyed
+  channels are left as they are). `keep:false` keeps the numbers instead.
+  `parent:null` unparents. Removing a parent clip unparents its children
+  where they stand.
+- `props.shapes` and `parent` written through `addClip` / `updateClip` are
+  validated the same way; bad input refuses the whole patch. The compact
+  view lists a layer as `[3 shapes: rect #ffd166 2 keys, line stroke #ffffff/6, group(star(5) #ff7ac8)]`
+  and a child as `parent:c_null`.
+
+Recipes: **draw-on logo** — the logo as `path` items with a stroke and no fill,
+`trimEnd` keyed 0→100 (stagger the items' keys), then `fill` keyed from
+`"#ffffff00"` to `"#ffffff"`; **lower third** — a `rect` bar whose `w` keys
+from 0, a `line` drawn on under it, a title on the track above parented to the
+shape layer so they slide out together; **loading ring** — an ellipse with a
+stroke, `trimEnd: 25`, `trimOffset` keyed 0→100 with `ease:"linear"`;
+**orbit** — a null at the centre with `rotation` keyed 0→360, a shape parented
+to it with `x: 300`; **swing from the top** — `anchorY` at the top edge
+(minus half the height) and `rotation` keyed −10↔10; **burst** — a group of
+lines at different `rotation`s with `scale` keyed 0→1 and `opacity` 1→0.
 
 ### Semantics
 

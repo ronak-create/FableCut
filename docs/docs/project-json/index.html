@@ -70,7 +70,7 @@
 <div class="wrap docs" id="main">
   <nav class="docs-side" aria-label="Docs">
     <button class="docs-menu" type="button" aria-expanded="false" aria-controls="docsNav"><svg class="i" aria-hidden="true"><use href="#i-menu"/></svg><span>project.json</span></button>
-    <div class="docs-nav" id="docsNav"><p class="docs-group">Start</p><a href="../">Overview</a><a href="../mcp/">MCP tools</a><p class="docs-group">The timeline</p><a href="../project-json/" aria-current="page">project.json</a><a href="../props/">Clip props</a><a href="../audio/">Audio mix</a><a href="../color/">Color</a><a href="../masks/">Masks</a><a href="../compositing/">Track mattes and blending</a><a href="../tracking/">Tracking</a><a href="../editing/">Editing rules</a><a href="../library/">Asset library</a><p class="docs-group">Guides</p><a href="../recipes/">Recipes</a><a href="../remake/">Remake a reference</a><p class="docs-group">Reference</p><a href="../rest-api/">REST API</a><a href="../export/">Export</a></div>
+    <div class="docs-nav" id="docsNav"><p class="docs-group">Start</p><a href="../">Overview</a><a href="../mcp/">MCP tools</a><p class="docs-group">The timeline</p><a href="../project-json/" aria-current="page">project.json</a><a href="../props/">Clip props</a><a href="../audio/">Audio mix</a><a href="../color/">Color</a><a href="../masks/">Masks</a><a href="../compositing/">Track mattes and blending</a><a href="../tracking/">Tracking</a><a href="../motion/">Shapes and parenting</a><a href="../editing/">Editing rules</a><a href="../library/">Asset library</a><p class="docs-group">Guides</p><a href="../recipes/">Recipes</a><a href="../remake/">Remake a reference</a><p class="docs-group">Reference</p><a href="../rest-api/">REST API</a><a href="../export/">Export</a></div>
   </nav>
   <article class="docs-main prose">
     <h1>project.json</h1>
@@ -128,8 +128,8 @@
   <span class="tk-k">"clips"</span>: [
     {
       <span class="tk-k">"id"</span>: <span class="tk-s">"c_xyz"</span>,             <span class="tk-c">// unique string</span>
-      <span class="tk-k">"mediaId"</span>: <span class="tk-s">"m_abc"</span>,        <span class="tk-c">// null for kind:"text" and kind:"adjust"</span>
-      <span class="tk-k">"kind"</span>: <span class="tk-s">"video"</span>,           <span class="tk-c">// video | audio | image | svg | text | adjust</span>
+      <span class="tk-k">"mediaId"</span>: <span class="tk-s">"m_abc"</span>,        <span class="tk-c">// null for kind:"text", "adjust", "shape" and "null"</span>
+      <span class="tk-k">"kind"</span>: <span class="tk-s">"video"</span>,           <span class="tk-c">// video | audio | image | svg | text | adjust | shape | null</span>
       <span class="tk-k">"track"</span>: <span class="tk-s">"V1"</span>,             <span class="tk-c">// Vn…V1 (video) | A1…An (audio); extras via UI +V/+A or tracks[]</span>
       <span class="tk-k">"start"</span>: <span class="tk-n">0</span>,                <span class="tk-c">// timeline position, seconds</span>
       <span class="tk-k">"in"</span>: <span class="tk-n">2.5</span>,                 <span class="tk-c">// offset into source media, seconds (0 for image/svg/text)</span>
@@ -139,6 +139,7 @@
       <span class="tk-k">"locked"</span>: <span class="tk-n">true</span>,            <span class="tk-c">// OPTIONAL — locked by the user: leave it alone (MCP patch refuses edits)</span>
       <span class="tk-k">"disabled"</span>: <span class="tk-n">true</span>,          <span class="tk-c">// OPTIONAL — stays on the timeline, hidden from preview / audio / export</span>
       <span class="tk-k">"unlinked"</span>: <span class="tk-n">true</span>,          <span class="tk-c">// OPTIONAL — the user unlinked this clip; never auto-relinked on load</span>
+      <span class="tk-k">"parent"</span>: <span class="tk-s">"c_null"</span>,        <span class="tk-c">// OPTIONAL — moves, turns and scales with that clip (see "Shapes, nulls and parenting")</span>
       <span class="tk-k">"props"</span>: { <span class="tk-c">/* all optional — see the props reference below */</span> },
       <span class="tk-c">// OPTIONAL — keyframe animation. Times are seconds RELATIVE TO CLIP START.</span>
       <span class="tk-c">// "ease" sits on the DESTINATION keyframe of each segment:</span>

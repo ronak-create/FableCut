@@ -46,6 +46,8 @@ const TIMELINE_FIT_FILL = 0.95; // ⇧Z / Fit — clip content fills this fracti
 
 const DEFAULT_PROPS = {
   x: 0, y: 0, scale: 1, rotation: 0, opacity: 1, volume: 1, pan: 0,
+  anchorX: 0, anchorY: 0,                      // anchor point, px from the picture's centre (motion.js)
+  trimStart: 0, trimEnd: 100, trimOffset: 0,   // shape layers: the part of every path that draws (%)
   gain: 0,                                     // clip gain, dB — applied before volume
   channelMode: "stereo",                       // stereo | mono | left | right | swap
   duck: 0,                                     // ducking, dB (≤ 0) — keyframed by Auto-duck, multiplies volume
@@ -77,7 +79,7 @@ const DEFAULT_PROPS = {
 const ANIMATABLE = ["x", "y", "scale", "rotation", "opacity", "volume", "pan", "duck", "speed",
   "brightness", "contrast", "saturation", "hue", "blur", "grayscale", "sepia", "invert",
   "temperature", "tint", "vignette", "cornerRadius", "shake", "rgbSplit", "grain",
-  "fontSize", "letterSpacing", "glow"];
+  "fontSize", "letterSpacing", "glow", "anchorX", "anchorY", "trimStart", "trimEnd", "trimOffset"];
 const TRANSITIONS = ["none", "fade", "slide-left", "slide-right", "slide-up", "slide-down",
   "zoom", "wipe", "wipe-right", "wipe-up", "wipe-down", "iris", "spin", "blur", "whip",
   "glitch", "pop"];
@@ -429,6 +431,8 @@ function showClipCtxMenu(clientX, clientY, c) {
     item("Crossfade with neighbours", "Shift+D", () => crossfadeSelected(), locked ? "Locked — unlock to change" : null);
     item("Auto-duck under other tracks", "", () => autoDuckClips(selectedClips()), locked ? "Locked — unlock to change" : null);
   }
+  if (selectedClips().some((x) => isVisualClip(x) && x.kind !== "null"))
+    item("Parent to a new null", "", parentSelectionToNull, locked ? "Locked — unlock to change" : null);
   const linked = selectedClips().some((x) => x.linkGroup || x.linkedId);
   if (linked) item("Unlink audio / video", "Ctrl+L", toggleLinkSelected, locked ? "Locked — unlock to change" : null);
   else if (c.kind === "video" || c.kind === "audio") {
@@ -1507,7 +1511,7 @@ function projectJSON() {
       if (derivedFrom) { mo.derivedFrom = derivedFrom; if (denoise) mo.denoise = denoise; }
       return mo;
     }),
-    clips: clips.map(({ id, mediaId, kind, track, start, in: inn, duration, name, props, keyframes, transitionIn, transitionOut, linkedId, linkGroup, locked, disabled, unlinked, fx }) => {
+    clips: clips.map(({ id, mediaId, kind, track, start, in: inn, duration, name, props, keyframes, transitionIn, transitionOut, linkedId, linkGroup, locked, disabled, unlinked, fx, parent }) => {
       const clipOut = { id, mediaId, kind, track, start, in: inn, duration, name, props, keyframes, transitionIn, transitionOut };
       if (fx?.length) clipOut.fx = fx;
       if (linkGroup) clipOut.linkGroup = linkGroup;
@@ -1516,6 +1520,7 @@ function projectJSON() {
       if (locked === true) clipOut.locked = true;
       if (disabled === true) clipOut.disabled = true;
       if (unlinked === true) clipOut.unlinked = true;
+      if (parent) clipOut.parent = parent;
       return clipOut;
     }),
     markers: normalizeMarkers(markers),
@@ -3302,6 +3307,8 @@ function rebuildClips() {
     })();
     const label = c.kind === "text" ? "T · " + (c.props.text || "").split("\n")[0]
       : c.kind === "adjust" ? "FX · " + (c.name || "")
+      : c.kind === "shape" ? "◆ · " + (c.name || "")
+      : c.kind === "null" ? "✥ · " + (c.name || "")
       : c.kind === "audio" ? chTag + (c.name || "")
       : (c.name || "");
     body += `<div class="fade"></div>
@@ -4882,6 +4889,16 @@ function renderInspector(lite) {
       ${slider("opacity", 0, 1, 0.01, p.opacity)}
       ${matteRows()}
     </div>`;
+  } else if (c.kind === "null") {
+    html += `<div class="insp-section"><h3>Null object</h3>
+      <p class="cl-note">A null never shows in the picture. Parent clips to it (their Parent field), then move, turn or scale the null to move them together.</p>
+      ${row("Position X", `<input type="number" data-k="x" value="${fmtInspNum(p.x)}">`, "x")}
+      ${row("Position Y", `<input type="number" data-k="y" value="${fmtInspNum(p.y)}">`, "y")}
+      ${slider("scale", 0.1, 4, 0.01, p.scale)}
+      ${slider("rotation", -180, 180, 1, p.rotation, "°")}
+      ${anchorRowsHtml(c, p, row)}
+      ${parentRowHtml(c)}
+    </div>`;
   } else if (c.kind !== "audio") {
     html += `<div class="insp-section"><h3>Transform</h3>
       ${row("Position X", `<input type="number" data-k="x" value="${fmtInspNum(p.x)}">`, "x")}
@@ -4889,10 +4906,13 @@ function renderInspector(lite) {
       ${slider("scale", 0.1, 4, 0.01, p.scale)}
       ${slider("rotation", -180, 180, 1, p.rotation, "°")}
       ${slider("opacity", 0, 1, 0.01, p.opacity)}
+      ${anchorRowsHtml(c, p, row)}
+      ${parentRowHtml(c)}
       ${sel("Blend", "blend", BLEND_MODES, p.blend)}
       ${matteRows()}
     </div>`;
   }
+  if (c.kind === "shape") html += shapeSectionHtml(c, p, row) + `<div class="insp-section"><h3>Look</h3>${slider("blur", 0, 40, 0.5, p.blur, "px")}${slider("shake", 0, 40, 0.5, p.shake, "px")}${slider("shakeSpeed", 1, 30, 0.5, p.shakeSpeed)}</div>`;
   if (c.kind === "video" || c.kind === "image" || c.kind === "svg") {
     html += `<div class="insp-section"><h3>Layout</h3>
       ${sel("Fit", "fit", ["contain", "cover", "stretch", "none"], p.fit)}
@@ -4981,7 +5001,7 @@ function renderInspector(lite) {
   const curveSel = (label, k, tr) => tr?.type === "fade" && c.kind === "audio"
     ? row(label, `<select data-k="${k}" title="Fade shape (audio)">${[["", "Smooth (eased)"], ...Object.entries(AUDIO_FADE_CURVES)].map(([v, l]) =>
       `<option value="${v}" ${(tr.curve || "") === v ? "selected" : ""}>${l}</option>`).join("")}</select>`) : "";
-  if (c.kind !== "audio") html += maskSectionHtml(c);
+  if (c.kind !== "audio" && c.kind !== "null") html += maskSectionHtml(c);
   if (c.kind === "video") html += trackSectionHtml(c);
   html += `<div class="insp-section"><h3>Transition</h3>
     ${tsel("In", "transIn", c.transitionIn)}
@@ -5241,6 +5261,8 @@ function renderInspector(lite) {
   });
   bindMaskControls(c);
   bindTrackControls(c);
+  bindLayerControls(c);
+  bindShapeControls(c);
   syncInspectorOffClip(c);
   renderKfGraphsPanel();
 }
@@ -5328,6 +5350,7 @@ function syncInspectorPlayhead() {
     if (btn.textContent !== label) btn.textContent = label;
   }
   syncMaskInspector(c);
+  syncShapeInspector(c);
   syncInspectorOffClip(c); // after the class pass, so ◆ titles read the fresh "on" state
 }
 
@@ -5339,6 +5362,7 @@ const KF_GRAPH_LABEL = {
   invert: "Invert", temperature: "Temp", tint: "Tint", vignette: "Vignette",
   cornerRadius: "Radius", shake: "Shake", rgbSplit: "RGB", grain: "Grain",
   fontSize: "Size", letterSpacing: "Track", glow: "Glow",
+  anchorX: "Anchor X", anchorY: "Anchor Y", trimStart: "Trim start", trimEnd: "Trim end", trimOffset: "Trim offset",
 };
 function toggleKfGraph(key) {
   if (!ANIMATABLE.includes(key)) return;
@@ -5893,8 +5917,8 @@ function loadSourceFromMedia(m, opts = {}) {
 }
 function loadSourceFromClip(c, opts = {}) {
   if (!c || !c.mediaId) {
-    if (c && (c.kind === "text" || c.kind === "adjust"))
-      toast("Titles and adjustment layers have no source media");
+    if (c && (c.kind === "text" || c.kind === "adjust" || c.kind === "shape" || c.kind === "null"))
+      toast("Titles, shapes, nulls and adjustment layers have no source media");
     return;
   }
   const m = getMedia(c.mediaId);
@@ -8858,28 +8882,97 @@ function drawFrame(t = state.time) {
   if (!state.exporting && !runtime.sampling) drawMaskView(W, H);
   if (!runtime.sampling) updateScopes(); // before the handles, so they never reach the scopes
   // on-canvas selection handles (never during export or playback)
-  if (!state.exporting && !state.playing && !runtime.sampling) drawSelectionOverlay(W, H, t);
+  if (!state.exporting && !state.playing && !runtime.sampling) { drawNullGuides(clips, W, H, t); drawSelectionOverlay(W, H, t); }
+}
+/** Nulls never render; the monitor shows where they are (never in export or the scopes). */
+function drawNullGuides(clips, W, H, t) {
+  for (const c of clips) {
+    if (c.kind !== "null" || c.id === state.selId) continue;
+    drawNullMark(clipBounds(c, evalProps(c, t), W, H), W, 0.45);
+  }
+}
+function drawNullMark(b, W, alpha) {
+  const lw = Math.max(1.5, W / 800);
+  ctx2d.save();
+  ctx2d.setTransform(1, 0, 0, 1, 0, 0);
+  ctx2d.globalAlpha = alpha; ctx2d.globalCompositeOperation = "source-over"; ctx2d.filter = "none";
+  ctx2d.translate(b.cx, b.cy); ctx2d.rotate(b.rot);
+  ctx2d.lineWidth = lw; ctx2d.strokeStyle = "#ff6b6b";
+  ctx2d.strokeRect(-b.hw, -b.hh, b.hw * 2, b.hh * 2);
+  ctx2d.beginPath(); ctx2d.moveTo(-b.hw * 0.4, 0); ctx2d.lineTo(b.hw * 0.4, 0); ctx2d.moveTo(0, -b.hh * 0.4); ctx2d.lineTo(0, b.hh * 0.4); ctx2d.stroke();
+  ctx2d.restore();
+}
+/** Where the clip's anchor point is on screen (its x / y in its parents' space). */
+function anchorScreenPt(c, p, W, H, t = state.time) {
+  const q = parentScreenMatrix(c, W, H, t).transformPoint(new DOMPoint(+p.x || 0, +p.y || 0));
+  return { x: q.x, y: q.y };
 }
 
 /* ═══════════ Direct manipulation on the program monitor ═══════════
    Drag a clip to move it, corner handles to resize (scale), the top
    handle to rotate. Maps gestures straight onto props.x/y/scale/rotation. */
-function clipBounds(c, p, W, H) {
-  const cx = W / 2 + (+p.x || 0), cy = H / 2 + (+p.y || 0);
-  const rot = (p.rotation || 0) * Math.PI / 180, sc = +p.scale || 1;
-  let hw, hh;
-  if (c.kind === "text") {
-    if (hasTextBox(p)) {
-      hw = +p.boxW / 2; hh = +p.boxH / 2;
-    } else {
-      const half = measureTextHalfSize(p);
-      hw = half.hw; hh = half.hh;
-    }
-  } else {                       // media/svg: canvas-sized base box, scaled
-    hw = (W / 2) * sc; hh = (H / 2) * sc;
-  }
-  return { cx, cy, hw, hh, rot };
+function clipBounds(c, p, W, H, t = state.time) {
+  const box = layerBox(c, p, W, H, t), m = layerScreenMatrix(c, p, W, H, t);
+  const o = m.transformPoint(new DOMPoint(box.ox, box.oy)), k = Math.hypot(m.a, m.b) || 1;
+  return { cx: o.x, cy: o.y, hw: box.hw * k, hh: box.hh * k, rot: Math.atan2(m.b, m.a) };
 }
+/** The picture's box in its drawn space (content scale applied): centre offset and half size. */
+const NULL_HALF = 40;
+function layerBox(c, p, W, H, t) {
+  const sc = +p.scale || 1;
+  if (c.kind === "text") {
+    if (hasTextBox(p)) return { ox: 0, oy: 0, hw: +p.boxW / 2, hh: +p.boxH / 2 };
+    const half = measureTextHalfSize(p);
+    return { ox: 0, oy: 0, hw: half.hw, hh: half.hh };
+  }
+  if (c.kind === "null") return { ox: 0, oy: 0, hw: NULL_HALF * sc, hh: NULL_HALF * sc };
+  if (c.kind === "shape") {
+    const b = Motion.bounds(shapeItemsAt(c, t));
+    if (!b) return { ox: 0, oy: 0, hw: NULL_HALF * sc, hh: NULL_HALF * sc };
+    return { ox: (b.x0 + b.x1) / 2 * sc, oy: (b.y0 + b.y1) / 2 * sc, hw: Math.max(4, (b.x1 - b.x0) / 2) * sc, hh: Math.max(4, (b.y1 - b.y0) / 2) * sc };
+  }
+  return { ox: 0, oy: 0, hw: (W / 2) * sc, hh: (H / 2) * sc };   // media/svg: canvas-sized base box, scaled
+}
+/* ── Layer transforms (motion.js): the anchor point and parenting ──
+   A clip draws at canvas centre · its parents · translate(x, y) · rotate ·
+   (its picture at its scale, shifted so the anchor point sits at x / y). */
+const Motion = self.FableCutMotion;
+function parentM(c, t) { return c.parent ? Motion.parentMatrix(c, getClip, t) : null; }
+/** Canvas centre and the parents: the space a clip's x / y live in. */
+function parentScreenMatrix(c, W, H, t) {
+  const m = new DOMMatrix().translate(W / 2, H / 2), pm = parentM(c, t);
+  return pm ? m.multiply(new DOMMatrix(pm)) : m;
+}
+/** Canvas px of the clip's drawn space, before its content scale (shake left out). */
+function layerScreenMatrix(c, p, W, H, t) {
+  const as = Motion.contentScale(c, p);
+  return parentScreenMatrix(c, W, H, t).translate(+p.x || 0, +p.y || 0).rotate(+p.rotation || 0)
+    .translate(-(+p.anchorX || 0) * as, -(+p.anchorY || 0) * as);
+}
+/** How much the clip's parents scale it (1 without a parent). */
+function parentScaleAt(c, t = state.time) { const m = parentScreenMatrix(c, 0, 0, t); return Math.hypot(m.a, m.b) || 1; }
+/** The x / y that put the centre of the clip's (unshifted) picture at screen (sx, sy). */
+function posForScreenCentre(c, p, sx, sy, W, H, t = state.time) {
+  const q = parentScreenMatrix(c, W, H, t).inverse().transformPoint(new DOMPoint(sx, sy));
+  const th = (+p.rotation || 0) * Math.PI / 180, as = Motion.contentScale(c, p), ax = (+p.anchorX || 0) * as, ay = (+p.anchorY || 0) * as;
+  return { x: q.x + ax * Math.cos(th) - ay * Math.sin(th), y: q.y + ax * Math.sin(th) + ay * Math.cos(th) };
+}
+/** A screen-space drag delta in the clip's x / y space (its parents undone). */
+function screenDeltaToParent(c, dx, dy, t = state.time) {
+  const m = parentScreenMatrix(c, els.preview.width, els.preview.height, t), det = m.a * m.d - m.b * m.c || 1;
+  return { x: (m.d * dx - m.c * dy) / det, y: (-m.b * dx + m.a * dy) / det };
+}
+/* ── Shape layers (props.shapes — math in motion.js) ── */
+const shapeNorm = new WeakMap();   // stored list → validated list
+function clipShapes(c) {
+  const list = c && c.props && c.props.shapes;
+  if (!Array.isArray(list) || !list.length) return null;
+  let n = shapeNorm.get(list);
+  if (n === undefined) { n = Motion.normalizeShapes(list); shapeNorm.set(list, n); }
+  return n;
+}
+/** The shape layer's items at timeline time t (keys resolved). */
+function shapeItemsAt(c, t) { const l = clipShapes(c); return l ? Motion.shapesAt(l, t - c.start) : null; }
 function isVisualClip(c) { return c && c.kind !== "adjust" && c.kind !== "audio"; }
 /* Screen-space handle positions for the selection overlay. Each handle is
    clamped into the visible canvas (inset by its own size) so it stays visible
@@ -8904,7 +8997,9 @@ function drawSelectionOverlay(W, H, t) {
   if (maskEditActive(c) && drawClipMaskOverlay(c, W)) return;   // so does a clip mask being edited
   drawTrackOverlay(c, W);
   if (!isVisualClip(c) || !activeAt(c, t) || !clipRenders(c)) return;
-  const b = clipBounds(c, evalProps(c, t), W, H);
+  if (shapeEditActive(c) && drawShapeOverlay(c, W, H, t)) return;   // a picked shape item replaces the box
+  const ep = evalProps(c, t), b = clipBounds(c, ep, W, H, t);
+  if (c.kind === "null") drawNullMark(b, W, 1);
   const lw = Math.max(2, W / 640);
   const hd = overlayHandles(b, W, H), hs = hd.hs;
   ctx2d.setTransform(1, 0, 0, 1, 0, 0);
@@ -8923,6 +9018,12 @@ function drawSelectionOverlay(W, H, t) {
   }
   ctx2d.beginPath(); ctx2d.arc(hd.rotate.x, hd.rotate.y, hs * 1.1, 0, Math.PI * 2);
   ctx2d.fillStyle = "#ffce5c"; ctx2d.fill(); ctx2d.stroke();
+  // the anchor point: what x / y place and what rotation and scale turn around
+  const ap = anchorScreenPt(c, ep, W, H, t), ar = hs * (runtime.anchorTool ? 1.3 : 0.9);
+  ctx2d.lineWidth = lw; ctx2d.strokeStyle = runtime.anchorTool ? "#ffce5c" : "#ffffff";
+  ctx2d.beginPath(); ctx2d.arc(ap.x, ap.y, ar, 0, Math.PI * 2);
+  ctx2d.moveTo(ap.x - ar * 1.7, ap.y); ctx2d.lineTo(ap.x + ar * 1.7, ap.y);
+  ctx2d.moveTo(ap.x, ap.y - ar * 1.7); ctx2d.lineTo(ap.x, ap.y + ar * 1.7); ctx2d.stroke();
   ctx2d.restore();
 }
 function canvasPt(e) {
@@ -8939,9 +9040,13 @@ function toLocal(pt, b) {
 function pickClipAt(pt, W, H) {
   const all = visibleClipsAt(state.time), mattes = matteTracksAt(all);
   const seq = all.filter((c) => isVisualClip(c) && !mattes.has(c.track));
-  for (let i = seq.length - 1; i >= 0; i--) {
-    const c = seq[i], b = clipBounds(c, evalProps(c, state.time), W, H), lp = toLocal(pt, b);
-    if (Math.abs(lp.x) <= b.hw && Math.abs(lp.y) <= b.hh) return c;
+  for (const nulls of [false, true]) {   // a null (invisible) is picked only where nothing else is
+    for (let i = seq.length - 1; i >= 0; i--) {
+      const c = seq[i];
+      if ((c.kind === "null") !== nulls) continue;
+      const b = clipBounds(c, evalProps(c, state.time), W, H), lp = toLocal(pt, b);
+      if (Math.abs(lp.x) <= b.hw && Math.abs(lp.y) <= b.hh) return c;
+    }
   }
   return null;
 }
@@ -8975,7 +9080,10 @@ els.preview.addEventListener("pointerdown", (e) => {
   if (isVisualClip(cur) && activeAt(cur, state.time)) {
     const b = clipBounds(cur, evalProps(cur, state.time), W, H), lp = toLocal(pt, b);
     const hd = overlayHandles(b, W, H), grab = hd.hs * 1.8;
-    if (Math.hypot(pt.x - hd.rotate.x, pt.y - hd.rotate.y) <= grab) {
+    if (runtime.anchorTool) {   // Anchor tool: the anchor point follows the pointer, the picture stays put
+      const p0 = propsAtPlayhead(cur);
+      canvasDrag = { mode: "anchor", id: cur.id, p0, m: layerScreenMatrix(cur, p0, W, H, state.time).scale(Motion.contentScale(cur, p0)).inverse() };
+    } else if (Math.hypot(pt.x - hd.rotate.x, pt.y - hd.rotate.y) <= grab) {
       const ep = propsAtPlayhead(cur);
       canvasDrag = { mode: "rotate", id: cur.id, startRot: +ep.rotation || 0, startAng: Math.atan2(pt.y - b.cy, pt.x - b.cx), cx: b.cx, cy: b.cy };
     } else if (hd.corners.some((h) => Math.abs(pt.x - h.x) <= grab && Math.abs(pt.y - h.y) <= grab)) {
@@ -9029,7 +9137,8 @@ function updateCanvasCursor(e) {
   const W = els.preview.width, H = els.preview.height, pt = canvasPt(e);
   const cur = getClip(state.selId);
   let cursor = "default";
-  if (isVisualClip(cur) && activeAt(cur, state.time) && !state.playing && !state.exporting) {
+  if (runtime.anchorTool && isVisualClip(cur) && activeAt(cur, state.time) && !state.playing && !state.exporting) cursor = "crosshair";
+  else if (isVisualClip(cur) && activeAt(cur, state.time) && !state.playing && !state.exporting) {
     const b = clipBounds(cur, evalProps(cur, state.time), W, H);
     const hd = overlayHandles(b, W, H), grab = hd.hs * 1.8;
     const corner = hd.corners.find((h) => Math.abs(pt.x - h.x) <= grab && Math.abs(pt.y - h.y) <= grab);
@@ -9060,8 +9169,9 @@ els.preview.addEventListener("pointermove", (e) => {
     }
   }
   if (canvasDrag.mode === "move") {
-    setAnimProp(c, "x", Math.round(canvasDrag.startX + (pt.x - canvasDrag.startPt.x)));
-    setAnimProp(c, "y", Math.round(canvasDrag.startY + (pt.y - canvasDrag.startPt.y)));
+    const d = screenDeltaToParent(c, pt.x - canvasDrag.startPt.x, pt.y - canvasDrag.startPt.y);
+    setAnimProp(c, "x", Math.round(canvasDrag.startX + d.x));
+    setAnimProp(c, "y", Math.round(canvasDrag.startY + d.y));
   } else if (canvasDrag.mode === "box") {
     const aspect = canvasDrag.aspect || 1;
     const lockAR = e.shiftKey;
@@ -9072,8 +9182,8 @@ els.preview.addEventListener("pointermove", (e) => {
     const env = transOffsetAt(c, state.time);
     if (e.ctrlKey || e.metaKey) {
       // Ctrl/Cmd: resize from center (all corners move).
-      const b = clipBounds(c, evalProps(c, state.time), W, H), lp = toLocal(pt, b);
-      let bw = Math.abs(lp.x) * 2, bh = Math.abs(lp.y) * 2;
+      const b = clipBounds(c, evalProps(c, state.time), W, H), lp = toLocal(pt, b), pk = parentScaleAt(c);
+      let bw = Math.abs(lp.x) * 2 / pk, bh = Math.abs(lp.y) * 2 / pk;
       if (lockAR) {
         if (bw / aspect >= bh) bh = bw / aspect;
         else bw = bh * aspect;
@@ -9110,11 +9220,22 @@ els.preview.addEventListener("pointermove", (e) => {
       const c2 = Math.cos(rot), s2 = Math.sin(rot);
       const freeX = fix.x + ldx * c2 - ldy * s2;
       const freeY = fix.y + ldx * s2 + ldy * c2;
-      setAnimProp(c, "x", Math.round((fix.x + freeX) / 2 - W / 2 - env.x));
-      setAnimProp(c, "y", Math.round((fix.y + freeY) / 2 - H / 2 - env.y));
-      c.props.boxW = +Math.abs(ldx).toFixed(1);
-      c.props.boxH = +Math.abs(ldy).toFixed(1);
+      // the box's centre on screen → the clip's x / y (its parents and anchor undone)
+      const pos = posForScreenCentre(c, propsAtPlayhead(c), (fix.x + freeX) / 2, (fix.y + freeY) / 2, W, H);
+      setAnimProp(c, "x", Math.round(pos.x - env.x));
+      setAnimProp(c, "y", Math.round(pos.y - env.y));
+      const pk = parentScaleAt(c);
+      c.props.boxW = +(Math.abs(ldx) / pk).toFixed(1);
+      c.props.boxH = +(Math.abs(ldy) / pk).toFixed(1);
     }
+  } else if (canvasDrag.mode === "anchor") {
+    let q = canvasDrag.m.transformPoint(new DOMPoint(pt.x, pt.y));
+    const box = layerBox(c, canvasDrag.p0, W, H, state.time), as = Motion.contentScale(c, canvasDrag.p0);
+    const snap = Math.max(6, W / 120) * Math.hypot(canvasDrag.m.a, canvasDrag.m.b);   // screen px → layer px
+    const cx = box.ox / as, cy = box.oy / as;
+    if (e.shiftKey || Math.hypot(q.x - cx, q.y - cy) < snap) q = { x: cx, y: cy };   // snaps to the picture's centre
+    const v = Motion.anchorMoveValues(c, canvasDrag.p0, Math.round(q.x), Math.round(q.y));
+    for (const k of ["anchorX", "anchorY", "x", "y"]) setAnimProp(c, k, v[k]);
   } else if (canvasDrag.mode === "scale") {
     const b = clipBounds(c, evalProps(c, state.time), W, H), lp = toLocal(pt, b);
     setAnimProp(c, "scale", clamp(+(canvasDrag.startScale * (Math.hypot(lp.x, lp.y) / canvasDrag.startDist)).toFixed(3), 0.05, 12));
@@ -9136,6 +9257,7 @@ els.preview.addEventListener("pointerup", endCanvasDrag);
 els.preview.addEventListener("pointercancel", endCanvasDrag);
 
 function drawClip(c, W, H, t, asMatte = false) {
+  if (c.kind === "null") return;   // a null only carries a transform for its children
   const masks = clipMasksAt(c, t), matte = asMatte ? null : clipMatte(c);
   if (masks || matte) drawMaskedClip(c, W, H, t, masks, matte);
   else drawClipPicture(c, W, H, t, false);
@@ -9169,7 +9291,10 @@ function drawClipPicture(c, W, H, t, layered) {
     ctx2d.globalAlpha = clamp(p.opacity, 0, 1);
     if (p.blend && p.blend !== "normal" && BLEND_MODES.includes(p.blend)) ctx2d.globalCompositeOperation = p.blend;
   }
-  ctx2d.translate(W / 2 + (+p.x || 0), H / 2 + (+p.y || 0));
+  ctx2d.translate(W / 2, H / 2);
+  const pm = parentM(c, t);
+  if (pm) ctx2d.transform(pm[0], pm[1], pm[2], pm[3], pm[4], pm[5]);
+  ctx2d.translate(+p.x || 0, +p.y || 0);
   ctx2d.rotate((p.rotation || 0) * Math.PI / 180);
   if (p.shake > 0) { // deterministic multi-sine handheld/impact shake
     const a = +p.shake, tt = t * clamp(+p.shakeSpeed || 8, 0.5, 40) * Math.PI * 2;
@@ -9178,8 +9303,22 @@ function drawClipPicture(c, W, H, t, layered) {
       Math.cos(tt * 1.7) * a * 0.5 + Math.sin(tt * 3.13) * a * 0.35);
     ctx2d.rotate(Math.sin(tt * 0.9) * a * 0.0022);
   }
+  if (+p.anchorX || +p.anchorY) {   // the anchor point sits at x / y; rotation and scale turn around it
+    const as = Motion.contentScale(c, p);
+    ctx2d.translate(-(+p.anchorX || 0) * as, -(+p.anchorY || 0) * as);
+  }
+  if (c.kind === "shape") {
+    const s = +p.scale || 1;
+    ctx2d.scale(s, s);
+    geom = noteMaskGeom(c, ctx2d.getTransform(), -W / 2, -H / 2, W, H);   // masks live in the canvas-sized layer box
+    ctx2d.filter = buildFilter(p);
+    Motion.draw(ctx2d, shapeItemsAt(c, t), [+p.trimStart || 0, p.trimEnd == null ? 100 : +p.trimEnd, +p.trimOffset || 0]);
+    ctx2d.filter = "none";
+    ctx2d.restore();
+    return { p, geom };
+  }
   if (c.kind === "text") {
-    const b = clipBounds(c, p, W, H);
+    const b = layerBox(c, p, W, H, t);
     geom = noteMaskGeom(c, ctx2d.getTransform(), -b.hw, -b.hh, b.hw * 2, b.hh * 2);
     drawText(c, p, t - c.start);
     ctx2d.restore();
@@ -9910,6 +10049,7 @@ function bindMaskControls(c) {
   for (const b of root.querySelectorAll("[data-msel]")) b.addEventListener("click", () => {
     const j = +b.dataset.msel;
     maskUi.sel = maskUi.sel === j ? -1 : j; maskUi.pt = -1; maskUi.tool = null;
+    if (maskUi.sel >= 0) { shapeUi.sel = null; shapeUi.tool = null; }
     rerender();
   });
   for (const b of root.querySelectorAll("[data-mact]")) b.addEventListener("click", () => {
@@ -10282,6 +10422,663 @@ window.addEventListener("keydown", (e) => {
     if (!back && !fwd) return;
     e.preventDefault(); e.stopImmediatePropagation();
     const P = maskUi.pen.pts, R = (maskUi.pen.redo ||= []);
+    if (back && P.length) R.push(P.pop());
+    else if (fwd && R.length) P.push(R.pop());
+    state.dirtyTimeline = true;
+  }
+}, true);
+
+/* ── Shape layers, nulls and parenting in the editor ──
+   A shape clip draws props.shapes (motion.js). The Shape layer section lists
+   its items; picking one shows its box, knob and points on the monitor. Pen:
+   click to place points (drag pulls handles), click the first point to close,
+   Enter to finish an open path. Item values with ◆ keys animate per value. */
+const SHAPE_PRESETS = {
+  rect: { label: "Rectangle", item: { type: "rect", w: 420, h: 240, radius: 24, fill: "#ffd166" } },
+  ellipse: { label: "Ellipse", item: { type: "ellipse", w: 260, h: 260, fill: "#7b6cff" } },
+  polygon: { label: "Polygon", item: { type: "polygon", sides: 6, w: 260, h: 260, fill: "#22d3ee" } },
+  star: { label: "Star", item: { type: "star", sides: 5, inner: 0.45, w: 280, h: 280, fill: "#ff7ac8" } },
+  line: { label: "Line", item: { type: "line", points: [[-220, 0], [220, 0]], stroke: "#ffffff", strokeWidth: 10 } },
+};
+const shapeUi = { clip: null, sel: null, pt: -1, tool: null, pen: null, drag: null };
+const SHAPE_ROWS_UI = {
+  x: ["X", -2000, 2000, 1], y: ["Y", -2000, 2000, 1], rotation: ["Rotation", -360, 360, 0.5], scale: ["Scale", 0.05, 6, 0.01],
+  opacity: ["Opacity", 0, 1, 0.01], w: ["Width", 0, 2000, 1], h: ["Height", 0, 2000, 1], radius: ["Radius", 0, 500, 1],
+  inner: ["Inner", 0.05, 1, 0.01], strokeWidth: ["Stroke px", 0, 100, 0.5],
+  trimStart: ["Trim start", 0, 100, 0.5], trimEnd: ["Trim end", 0, 100, 0.5], trimOffset: ["Trim offset", -100, 100, 0.5],
+};
+const pathKey = (path) => (path || []).join(".");
+const samePath = (a, b) => !!a && !!b && pathKey(a) === pathKey(b);
+function trackFree(id) { return !isTrackLocked(id); }
+function shapeTrack() { return ["V2", "V3", "V1"].find((id) => TRACKS.some((tr) => tr.id === id) && trackFree(id)) || null; }
+function newVisualClip(kind, name, track, props = {}) {
+  return { id: "c_" + uid(), mediaId: null, kind, track, start: state.time, in: 0, duration: 4, name, props: { ...DEFAULT_PROPS, ...props } };
+}
+function addShapeLayer(kind) {
+  const track = shapeTrack();
+  if (!track) { toast("V1–V3 are locked — unlock a video track to add a shape"); return; }
+  pushUndo();
+  const pre = SHAPE_PRESETS[kind];
+  const c = newVisualClip("shape", pre ? pre.label : "Shape", track);
+  const list = pre ? Motion.normalizeShapes([pre.item]) : null;
+  if (list) c.props.shapes = list;
+  project.clips.push(c);
+  selectClip(c.id);
+  Object.assign(shapeUi, { clip: c.id, sel: list ? [0] : null, pt: -1, tool: pre ? null : "pen", pen: null, drag: null });
+  if (!pre && state.playing) pause();
+  scheduleSave(); renderInspector();
+  if (!pre) toast("Pen: click points on the monitor (drag to curve); click the first point to close, Enter for an open path");
+}
+function addNull() {
+  const track = ["V3", "V2", "V1"].find((id) => TRACKS.some((tr) => tr.id === id) && trackFree(id));
+  if (!track) { toast("V1–V3 are locked — unlock a video track to add a null"); return; }
+  pushUndo();
+  const c = newVisualClip("null", "Null", track);
+  project.clips.push(c);
+  selectClip(c.id); scheduleSave(); renderInspector();
+}
+function showShapeMenu(anchor) {
+  hideTrackCtxMenu();
+  const menu = document.createElement("div");
+  menu.className = "ctx-menu"; menu.id = "trackCtxMenu";
+  const item = (label, run) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "ctx-item"; b.innerHTML = `<span>${escapeHtml(label)}</span>`;
+    b.addEventListener("click", () => { hideTrackCtxMenu(); run(); });
+    menu.appendChild(b);
+  };
+  for (const [k, pre] of Object.entries(SHAPE_PRESETS)) item(pre.label, () => addShapeLayer(k));
+  item("Pen path", () => addShapeLayer("pen"));
+  document.body.appendChild(menu);
+  trackCtxMenu = menu;
+  const r = anchor.getBoundingClientRect(), pad = 6;
+  menu.style.left = Math.max(pad, Math.min(r.left, innerWidth - menu.offsetWidth - pad)) + "px";
+  menu.style.top = Math.max(pad, Math.min(r.bottom + 4, innerHeight - menu.offsetHeight - pad)) + "px";
+}
+/** Parent the selected visual clips to a new null at their centre (a layer group). */
+function parentSelectionToNull() {
+  const sel = selectedClips().filter((x) => isVisualClip(x) && x.kind !== "null");
+  if (!sel.length) return;
+  if (sel.some(isGroupLocked)) { toastLocked(); return; }
+  const track = ["V3", "V2", "V1"].find((id) => TRACKS.some((tr) => tr.id === id) && trackFree(id));
+  if (!track) { toast("V1–V3 are locked — unlock a video track for the null"); return; }
+  pushUndo();
+  const W = els.preview.width, H = els.preview.height;
+  let sx = 0, sy = 0;
+  for (const x of sel) { const b = clipBounds(x, evalProps(x, clamp(state.time, x.start, x.start + x.duration - 1e-3)), W, H); sx += b.cx; sy += b.cy; }
+  const start = Math.min(...sel.map((x) => x.start)), end = Math.max(...sel.map((x) => x.start + x.duration));
+  const n = { ...newVisualClip("null", "Null", track, { x: Math.round(sx / sel.length - W / 2), y: Math.round(sy / sel.length - H / 2) }), start, duration: +(end - start).toFixed(4) };
+  project.clips.push(n);
+  for (const x of sel) setClipParent(x, n.id);
+  selectClip(n.id); scheduleSave(); renderInspector();
+  toast(`${sel.length} clip${sel.length > 1 ? "s" : ""} now follow the null — move, turn or scale it`);
+}
+/** Change a clip's parent, keeping it where it is at the playhead (static values; keyed ones get a key). */
+function setClipParent(c, parentId) {
+  if (parentId && Motion.wouldCycle(c.id, parentId, getClip)) { toast("That would parent the clip to itself"); return false; }
+  const t = clamp(state.time, c.start, c.start + c.duration);
+  const v = Motion.reparentValues(c, parentId || null, getClip, t);
+  if (parentId) c.parent = parentId; else delete c.parent;
+  for (const [k, val] of Object.entries(v)) {
+    if (c.keyframes?.[k]?.length && playheadOverClip(c)) setAnimProp(c, k, val);
+    else if (!c.keyframes?.[k]?.length) c.props[k] = val;
+  }
+  state.dirtyTimeline = true; inspPropGen++;
+  return true;
+}
+/** Clips this clip may be parented to: other visual clips that are not its children. */
+function parentCandidates(c) {
+  return project.clips.filter((x) => x.id !== c.id && isVisualClip(x) && !Motion.wouldCycle(c.id, x.id, getClip));
+}
+const clipShortLabel = (x) => x.track + " · " + (x.kind === "text" ? (x.props.text || "").split("\n")[0] : x.name || x.kind);
+function parentRowHtml(c) {
+  const cands = parentCandidates(c), cur = c.parent && getClip(c.parent);
+  const opts = [`<option value="">None</option>`, ...cands.map((x) => `<option value="${x.id}" ${x.id === c.parent ? "selected" : ""}>${escapeHtml(clipShortLabel(x))}${x.kind === "null" ? " (null)" : ""}</option>`)];
+  if (c.parent && !cur) opts.push(`<option value="${escapeHtml(c.parent)}" selected>Missing clip</option>`);
+  return `<div class="insp-row"><label title="Move, turn and scale with another clip (its opacity and effects are not inherited)">Parent</label><select data-parent>${opts.join("")}</select></div>`;
+}
+function anchorRowsHtml(c, p, row) {
+  return `<div class="insp-row"><label>Anchor</label><span class="insp-ctrls">
+      <button type="button" class="btn tiny${runtime.anchorTool ? " toggle on" : ""}" data-anchor-tool title="Drag on the monitor to move the anchor point — the picture stays put (Shift: snap to its centre)">✥ Move</button>
+      <button type="button" class="btn tiny" data-anchor-centre title="Put the anchor point back on the picture's centre, keeping the picture where it is">Centre</button></span></div>
+    ${row("Anchor X", `<input type="number" data-k="anchorX" value="${fmtInspNum(p.anchorX)}">`, "anchorX")}
+    ${row("Anchor Y", `<input type="number" data-k="anchorY" value="${fmtInspNum(p.anchorY)}">`, "anchorY")}`;
+}
+function bindLayerControls(c) {
+  const root = els.inspector;
+  root.querySelector("[data-parent]")?.addEventListener("change", (e) => {
+    if (isGroupLocked(c)) { toastLocked(); renderInspector(); return; }
+    pushUndo();
+    setClipParent(c, e.target.value || null);
+    scheduleSave(); renderInspector();
+  });
+  root.querySelector("[data-anchor-tool]")?.addEventListener("click", () => { runtime.anchorTool = !runtime.anchorTool; state.dirtyTimeline = true; renderInspector(); });
+  root.querySelector("[data-anchor-centre]")?.addEventListener("click", () => {
+    if (isGroupLocked(c)) { toastLocked(); return; }
+    if (!playheadOverClip(c)) { toast("Move the playhead over the clip"); return; }
+    pushUndo();
+    const p = propsAtPlayhead(c), box = layerBox(c, p, els.preview.width, els.preview.height, state.time), as = Motion.contentScale(c, p);
+    const v = Motion.anchorMoveValues(c, p, Math.round(box.ox / as), Math.round(box.oy / as));
+    for (const k of ["anchorX", "anchorY", "x", "y"]) setAnimProp(c, k, v[k]);
+    scheduleSave(); renderInspector();
+  });
+}
+
+/* ── The Shape layer section ── */
+function shapeList(c) { return clipShapes(c) || []; }
+function shapeUiFor(c) {
+  if (!c || shapeUi.clip !== c.id) Object.assign(shapeUi, { clip: c ? c.id : null, sel: null, pt: -1, tool: null, pen: null, drag: null });
+  if (shapeUi.sel && !Motion.getItem(shapeList(c), shapeUi.sel)) { shapeUi.sel = null; shapeUi.pt = -1; }
+  return shapeUi;
+}
+function writeShapes(c, list) {
+  const n = list && list.length ? Motion.normalizeShapes(list) : null;
+  if (n) c.props.shapes = n; else delete c.props.shapes;
+  state.dirtyTimeline = true; inspPropGen++;
+}
+const shapeLocalT = (c) => state.time - c.start;
+function shapeKeyIndex(keys, t) {
+  const tol = 0.5 / (projectFps() || 30);
+  return keys ? keys.findIndex((k) => Math.abs(k.t - t) < tol) : -1;
+}
+const isAnimated = (it, k) => !!(it.keys && it.keys.some((x) => x[k] != null));
+/** The selected item as it is at the playhead. */
+function shapeNow(c, path = shapeUi.sel) { return path ? Motion.getItem(shapeItemsAt(c, state.time), path) : null; }
+/** Change item `path`; values that are animated land in a key at the playhead. */
+function writeShapeSet(c, path, set) {
+  const list = shapeList(c), it = Motion.getItem(list, path);
+  if (!it) return;
+  const t = shapeLocalT(c), statics = {}, keyed = {};
+  for (const [k, v] of Object.entries(set)) (Motion.KEYED.includes(k) && isAnimated(it, k) ? keyed : statics)[k] = v;
+  const next = { ...statics };
+  if (Object.keys(keyed).length) {
+    const keys = it.keys.map((k) => ({ ...k }));
+    let j = shapeKeyIndex(keys, t);
+    if (j < 0) { keys.push({ t: +clamp(t, 0, c.duration).toFixed(4) }); keys.sort((a, b) => a.t - b.t); j = shapeKeyIndex(keys, t); }
+    Object.assign(keys[j], keyed);
+    next.keys = keys;
+  }
+  writeShapes(c, Motion.updateItem(list, path, (x) => Motion.mergeItem(x, next) || x));
+}
+/** ◆ on an item value: key it at the playhead, or remove the key there. */
+function toggleShapeKey(c, path, k) {
+  const list = shapeList(c), it = Motion.getItem(list, path), now = shapeNow(c, path);
+  if (!it || !now || now[k] == null) return;
+  const t = shapeLocalT(c), keys = (it.keys || []).map((x) => ({ ...x })), j = shapeKeyIndex(keys, t);
+  const set = {};
+  if (j >= 0 && keys[j][k] != null) {
+    delete keys[j][k];
+    if (!Object.keys(keys[j]).some((p) => Motion.KEYED.includes(p))) keys.splice(j, 1);
+    if (!keys.some((x) => x[k] != null)) set[k] = k === "points" ? now.points.map((q) => q.map((v) => +v.toFixed(3))) : now[k];   // last key gone: keep the value
+  } else {
+    const v = k === "points" ? now.points.map((q) => q.map((x) => +x.toFixed(3))) : typeof now[k] === "number" ? +now[k].toFixed(4) : now[k];
+    if (j >= 0) keys[j][k] = v; else { keys.push({ t: +clamp(t, 0, c.duration).toFixed(4), [k]: v }); keys.sort((a, b) => a.t - b.t); }
+  }
+  set.keys = keys.length ? keys : null;
+  writeShapes(c, Motion.updateItem(list, path, (x) => Motion.mergeItem(x, set) || x));
+}
+function shapeItemLabel(it, path) { return it.name || `${it.type[0].toUpperCase() + it.type.slice(1)} ${path.map((i) => i + 1).join(".")}`; }
+function shapeSectionHtml(c, p, row) {
+  const ui = shapeUiFor(c), list = shapeList(c), full = Motion.countItems(list) >= Motion.MAX_ITEMS;
+  const btn = (attr, label, title, on, dis) => `<button type="button" class="btn tiny${on ? " toggle on" : ""}" ${attr} title="${title}" ${dis ? "disabled" : ""}>${label}</button>`;
+  const chips = Motion.itemPaths(list).map((path) => {
+    const it = Motion.getItem(list, path);
+    return `<button type="button" class="btn tiny cl-chip${samePath(path, ui.sel) ? " toggle on" : ""}${it.on === false ? " off" : ""}" data-ssel="${pathKey(path)}"
+      title="${escapeHtml(it.type)} — click to edit on the monitor">${"› ".repeat(path.length - 1)}${escapeHtml(shapeItemLabel(it, path))}</button>`;
+  }).join("");
+  const slider = (k, min, max, step, unit = "") => {
+    const shown = fmtInspNum(p[k], step);
+    return row(KF_GRAPH_LABEL[k], `<input type="range" data-k="${k}" min="${min}" max="${max}" step="${step}" value="${shown}" title="Ctrl/Cmd-click: reset to default">
+      <span class="val" data-val="${k}" data-unit="${unit}">${shown}${unit}</span>`, k);
+  };
+  let html = `<div class="insp-section" data-shape-section><h3>Shape layer</h3>
+    <div class="cl-row">${Object.entries(SHAPE_PRESETS).map(([k, pre]) => btn(`data-sadd="${k}"`, "+ " + pre.label, `Add a ${pre.label.toLowerCase()} to this layer`, false, full)).join("")}
+      ${btn('data-stool="pen"', "Pen", "Click points on the monitor (drag to curve); click the first point to close, Enter for an open path", ui.tool === "pen", full)}</div>
+    ${ui.tool === "pen" ? `<p class="cl-note">Pen: click to add points, drag to curve. Click the first point to close, Enter keeps the path open. Backspace / Ctrl+Z removes the last point, Esc cancels.</p>` : ""}
+    ${list.length ? `<div class="cl-row shape-items">${chips}</div>` : ui.tool ? "" : `<p class="cl-note">No shapes yet — add one above.</p>`}
+    ${slider("trimStart", 0, 100, 0.5, "%")}${slider("trimEnd", 0, 100, 0.5, "%")}${slider("trimOffset", -100, 100, 0.5, "%")}`;
+  const raw = ui.sel && Motion.getItem(list, ui.sel), now = raw && shapeNow(c);
+  if (raw && now) {
+    const t = shapeLocalT(c), j = shapeKeyIndex(raw.keys, t);
+    const kbtn = (k) => `<button type="button" class="kf-btn${isAnimated(raw, k) ? " has" : ""}${j >= 0 && raw.keys[j][k] != null ? " on" : ""}" data-skey="${k}" title="Key this value at the playhead / remove the key there">◆</button>`;
+    const srow = (k) => {
+      const [lab, min, max, step] = SHAPE_ROWS_UI[k];
+      return `<div class="insp-row cp-row"><label class="cp-label">${lab}</label>
+        <input type="range" data-sk="${k}" min="${min}" max="${max}" step="${step}" value="${now[k]}">
+        <input type="number" class="cp-num" data-sknum="${k}" step="${step}" value="${fmtG(now[k], step)}">${kbtn(k)}</div>`;
+    };
+    const color = (k, lab) => `<div class="insp-row"><label>${lab}</label><span class="insp-ctrls">
+        <input type="color" data-scolor="${k}" value="${now[k] && now[k] !== "none" ? now[k].slice(0, 7) : "#ffffff"}">
+        ${btn(`data-snone="${k}"`, "None", `No ${lab.toLowerCase()}`, now[k] === "none")}${kbtn(k)}</span></div>`;
+    const path = ui.sel, inGroup = path.length > 1, siblings = inGroup ? Motion.getItem(list, path.slice(0, -1)).items : list, i = path[path.length - 1];
+    const own = Motion.OWN[raw.type];
+    html += `<div class="cl-row"><input type="text" class="cl-name" data-sname value="${escapeHtml(raw.name || "")}" placeholder="${escapeHtml(shapeItemLabel({ type: raw.type }, path))}" maxlength="40" title="Item name">
+        ${btn('data-sact="on"', raw.on === false ? "Off" : "On", "Item on / off", raw.on !== false)}
+        ${btn('data-sact="up"', "↑", "Move down the stack (drawn earlier)", false, i === 0)}
+        ${btn('data-sact="down"', "↓", "Move up the stack (drawn later)", false, i >= siblings.length - 1)}
+        ${btn('data-sact="dup"', "Copy", "Duplicate", false, full)}
+        ${btn('data-sact="group"', "Group", "Put this item in a new group (move, turn, scale and trim them together)", false, full || path.length >= Motion.MAX_DEPTH)}
+        ${raw.type === "group" ? btn('data-sact="ungroup"', "Ungroup", "Take the items out of this group") : ""}
+        ${inGroup ? btn('data-sact="out"', "Out", "Move this item out of its group") : ""}
+        ${btn('data-sact="del"', "Delete", "Delete this item")}
+        ${raw.keys ? btn('data-sact="clearkeys"', "Clear keys", "Remove every key (keeps the item as it is at the playhead)") : ""}</div>
+      ${srow("x")}${srow("y")}${srow("rotation")}${srow("scale")}${srow("opacity")}
+      ${own.includes("w") ? srow("w") + srow("h") : ""}${own.includes("radius") ? srow("radius") : ""}
+      ${own.includes("sides") ? `<div class="insp-row"><label>Points</label><input type="number" data-ssides min="3" max="64" step="1" value="${raw.sides}"></div>` : ""}
+      ${own.includes("inner") ? srow("inner") : ""}
+      ${raw.type === "path" ? `<div class="insp-row"><label>Closed</label><input type="checkbox" data-sclosed ${raw.closed !== false ? "checked" : ""}>${kbtn("points")}</div>` : ""}
+      ${raw.type !== "group" ? color("fill", "Fill") + color("stroke", "Stroke") + srow("strokeWidth") +
+        `<div class="insp-row"><label>Ends / joins</label><span class="insp-ctrls"><select data-scap>${Motion.CAPS.map((v) => `<option ${raw.lineCap === v ? "selected" : ""}>${v}</option>`).join("")}</select>
+          <select data-sjoin>${Motion.JOINS.map((v) => `<option ${raw.lineJoin === v ? "selected" : ""}>${v}</option>`).join("")}</select></span></div>` : ""}
+      ${srow("trimStart")}${srow("trimEnd")}${srow("trimOffset")}
+      <p class="cl-note">On the monitor: drag the item to move it, the knob turns it (Shift: 15° steps), the corners resize it${raw.type === "line" || raw.type === "path"
+        ? "; drag a point to move it, its handles to curve it (Alt: break the pair), Alt-drag a point to pull new handles" + (raw.type === "path" ? ", Ctrl-click the outline to add a point, double-click a point to remove it" : "")
+        : ""}. Esc deselects.</p>`;
+  }
+  return html + `</div>`;
+}
+function bindShapeControls(c) {
+  const root = els.inspector.querySelector("[data-shape-section]");
+  if (!root) return;
+  const guard = () => { if (isGroupLocked(c)) { toastLocked(); return false; } return true; };
+  const rerender = () => { state.dirtyTimeline = true; renderInspector(); };
+  const sel = () => shapeUi.sel;
+  const edit = (set) => { writeShapeSet(c, sel(), set); scheduleSave(); };
+  for (const b of root.querySelectorAll("[data-sadd]")) b.addEventListener("click", () => {
+    if (!guard()) return;
+    pushUndo();
+    const list = shapeList(c).slice();
+    list.push(SHAPE_PRESETS[b.dataset.sadd].item);
+    writeShapes(c, list);
+    Object.assign(shapeUi, { sel: [shapeList(c).length - 1], pt: -1, tool: null, pen: null });
+    maskUi.sel = -1;
+    scheduleSave(); rerender();
+  });
+  root.querySelector('[data-stool="pen"]')?.addEventListener("click", () => {
+    if (!guard()) return;
+    shapeUi.tool = shapeUi.tool === "pen" ? null : "pen"; shapeUi.pen = null; shapeUi.sel = null; maskUi.sel = -1; maskUi.tool = null;
+    if (shapeUi.tool && state.playing) pause();
+    if (shapeUi.tool && !activeAt(c, state.time)) toast("Move the playhead over the clip, then draw on the monitor");
+    rerender();
+  });
+  for (const b of root.querySelectorAll("[data-ssel]")) b.addEventListener("click", () => {
+    const path = b.dataset.ssel.split(".").map(Number);
+    shapeUi.sel = samePath(shapeUi.sel, path) ? null : path; shapeUi.pt = -1; shapeUi.tool = null;
+    if (shapeUi.sel) { maskUi.sel = -1; maskUi.tool = null; }
+    rerender();
+  });
+  for (const b of root.querySelectorAll("[data-sact]")) b.addEventListener("click", () => {
+    const a = b.dataset.sact, path = sel(), list = shapeList(c), it = path && Motion.getItem(list, path);
+    if (!it || !guard()) return;
+    pushUndo();
+    const parentPath = path.slice(0, -1), i = path[path.length - 1];
+    const withSiblings = (fn) => parentPath.length
+      ? Motion.updateItem(list, parentPath, (g) => ({ ...g, items: fn(g.items.slice()) }))
+      : fn(list.slice());
+    let next = list;
+    if (a === "on") next = Motion.updateItem(list, path, (x) => Motion.mergeItem(x, { on: x.on === false ? null : false }));
+    else if (a === "del") { next = Motion.updateItem(list, path, () => null); shapeUi.sel = null; }
+    else if (a === "dup") { next = withSiblings((s) => { s.splice(i + 1, 0, JSON.parse(JSON.stringify({ ...it, name: it.name ? `${it.name} copy`.slice(0, 40) : undefined }))); return s; }); shapeUi.sel = [...parentPath, i + 1]; }
+    else if (a === "up" || a === "down") {
+      const j = a === "up" ? i - 1 : i + 1;
+      next = withSiblings((s) => { [s[i], s[j]] = [s[j], s[i]]; return s; });
+      shapeUi.sel = [...parentPath, j];
+    } else if (a === "group") next = Motion.updateItem(list, path, (x) => ({ type: "group", x: x.x, y: x.y, items: [{ ...x, x: 0, y: 0 }] }));
+    else if (a === "ungroup") {
+      // the children keep their place: fold the group's transform into each (position, rotation, scale)
+      const M = Motion.itemMatrix(it);
+      const kids = (it.items || []).map((k) => {
+        const m = Motion.mul(M, Motion.itemMatrix(k));
+        return { ...k, x: +m[4].toFixed(3), y: +m[5].toFixed(3), rotation: +(Math.atan2(m[1], m[0]) * 180 / Math.PI).toFixed(3),
+          scale: +Math.hypot(m[0], m[1]).toFixed(4), opacity: +((k.opacity ?? 1) * (it.opacity ?? 1)).toFixed(4) };
+      });
+      next = withSiblings((s) => { s.splice(i, 1, ...kids); return s; });
+      shapeUi.sel = kids.length ? [...parentPath, i] : null;
+    } else if (a === "out") {
+      const gm = Motion.itemMatrix(Motion.getItem(list, parentPath)), m = Motion.mul(gm, Motion.itemMatrix(it));
+      const moved = { ...it, x: +m[4].toFixed(3), y: +m[5].toFixed(3), rotation: +(Math.atan2(m[1], m[0]) * 180 / Math.PI).toFixed(3), scale: +Math.hypot(m[0], m[1]).toFixed(4) };
+      const gp = parentPath.slice(0, -1), gi = parentPath[parentPath.length - 1];
+      next = Motion.updateItem(list, path, () => null);
+      next = gp.length ? Motion.updateItem(next, gp, (g) => { const s = g.items.slice(); s.splice(gi + 1, 0, moved); return { ...g, items: s }; })
+        : (() => { const s = next.slice(); s.splice(gi + 1, 0, moved); return s; })();
+      shapeUi.sel = [...gp, gi + 1];
+    } else if (a === "clearkeys") {
+      const now = shapeNow(c, path), set = { keys: null };
+      for (const k of Motion.KEYED) if (isAnimated(it, k)) set[k] = k === "points" ? now.points.map((q) => q.map((v) => +v.toFixed(3))) : now[k];
+      next = Motion.updateItem(list, path, (x) => Motion.mergeItem(x, set));
+    }
+    writeShapes(c, next); shapeUi.pt = -1; scheduleSave(); rerender();
+  });
+  for (const b of root.querySelectorAll("[data-skey]")) b.addEventListener("click", () => {
+    if (!guard() || !sel()) return;
+    if (!playheadOverClip(c)) { toast("Move the playhead over the clip to key it"); return; }
+    pushUndo(); toggleShapeKey(c, sel(), b.dataset.skey); scheduleSave(); rerender();
+  });
+  root.querySelector("[data-sname]")?.addEventListener("change", (e) => { if (!guard()) return; pushUndo(); edit({ name: e.target.value.trim() || null }); rerender(); });
+  root.querySelector("[data-ssides]")?.addEventListener("change", (e) => { const v = Math.round(+e.target.value); if (!guard() || !(v >= 3 && v <= 64)) return; pushUndo(); edit({ sides: v }); rerender(); });
+  root.querySelector("[data-sclosed]")?.addEventListener("change", (e) => { if (!guard()) return; pushUndo(); edit({ closed: e.target.checked ? null : false }); rerender(); });
+  root.querySelector("[data-scap]")?.addEventListener("change", (e) => { if (!guard()) return; pushUndo(); edit({ lineCap: e.target.value }); rerender(); });
+  root.querySelector("[data-sjoin]")?.addEventListener("change", (e) => { if (!guard()) return; pushUndo(); edit({ lineJoin: e.target.value }); rerender(); });
+  for (const inp of root.querySelectorAll("[data-scolor]")) {
+    const k = inp.dataset.scolor;
+    inp.addEventListener("pointerdown", () => { if (guard()) pushUndo(); });
+    inp.addEventListener("input", () => {
+      if (isGroupLocked(c)) return;
+      const set = { [k]: inp.value };
+      if (k === "stroke" && !(shapeNow(c)?.strokeWidth > 0)) set.strokeWidth = 6;
+      edit(set);
+    });
+    inp.addEventListener("change", rerender);
+  }
+  for (const b of root.querySelectorAll("[data-snone]")) b.addEventListener("click", () => {
+    if (!guard()) return;
+    pushUndo(); edit({ [b.dataset.snone]: "none" }); rerender();
+  });
+  for (const r of root.querySelectorAll("[data-sk]")) {
+    const k = r.dataset.sk;
+    r.addEventListener("pointerdown", () => { if (guard()) pushUndo(); });
+    r.addEventListener("input", () => {
+      if (isGroupLocked(c)) return;
+      edit({ [k]: +r.value });
+      const n = root.querySelector(`[data-sknum="${k}"]`); if (n) n.value = fmtG(+r.value, SHAPE_ROWS_UI[k][3]);
+    });
+  }
+  for (const n of root.querySelectorAll("[data-sknum]")) {
+    const k = n.dataset.sknum;
+    n.addEventListener("change", () => {
+      const x = parseFloat(n.value);
+      if (!Number.isFinite(x) || !guard()) return;
+      pushUndo(); edit({ [k]: x }); rerender();
+      document.activeElement?.blur?.();
+    });
+  }
+}
+/** Animated items: the rows and ◆ follow the playhead (called from the inspector sync). */
+function syncShapeInspector(c) {
+  const root = els.inspector.querySelector("[data-shape-section]");
+  if (!root || shapeUi.clip !== c.id || !shapeUi.sel || shapeUi.drag) return;
+  const raw = Motion.getItem(shapeList(c), shapeUi.sel), now = shapeNow(c);
+  if (!raw || !now) return;
+  const active = document.activeElement, j = shapeKeyIndex(raw.keys, shapeLocalT(c));
+  for (const k of Object.keys(SHAPE_ROWS_UI)) {
+    const r = root.querySelector(`[data-sk="${k}"]`), n = root.querySelector(`[data-sknum="${k}"]`);
+    if (r && r !== active) r.value = now[k];
+    if (n && n !== active) n.value = fmtG(now[k], SHAPE_ROWS_UI[k][3]);
+  }
+  for (const b of root.querySelectorAll("[data-skey]")) b.classList.toggle("on", j >= 0 && raw.keys[j][b.dataset.skey] != null);
+  for (const inp of root.querySelectorAll("[data-scolor]")) {
+    const v = now[inp.dataset.scolor];
+    if (inp !== active && v && v !== "none") inp.value = v.slice(0, 7);
+  }
+}
+
+/* ── Shape items on the monitor ── */
+function shapeEditActive(c) {
+  return !!c && c.kind === "shape" && shapeUi.clip === c.id && state.selId === c.id && (!!shapeUi.sel || !!shapeUi.tool) &&
+    activeAt(c, state.time) && !state.playing && !maskEditActive(c);
+}
+/** Layer px → canvas px for a shape clip at the playhead. */
+function shapeLayerMatrix(c, W, H, t = state.time) {
+  const p = evalProps(c, t);
+  return layerScreenMatrix(c, p, W, H, t).scale(+p.scale || 1);
+}
+/** The picked item's frames and handles in canvas px. */
+function shapeHandles(c, W, H) {
+  const items = shapeItemsAt(c, state.time), path = shapeUi.sel, it = path && Motion.getItem(items, path);
+  if (!it) return null;
+  const L = shapeLayerMatrix(c, W, H);
+  const F = L.multiply(new DOMMatrix(Motion.itemFrame(items, path.slice(0, -1))));   // the space the item's x / y live in
+  const I = F.multiply(new DOMMatrix(Motion.itemMatrix(it)));                          // the item's own frame
+  const own = it.type === "group" ? Motion.bounds(it.items) : Motion.bounds([{ ...it, x: 0, y: 0, rotation: 0, scale: 1, opacity: 1, on: true }]);
+  const b = own || { x0: -20, y0: -20, x1: 20, y1: 20 };
+  const at = (x, y) => { const q = I.transformPoint(new DOMPoint(x, y)); return { x: q.x, y: q.y }; };
+  const corners = [[b.x0, b.y0], [b.x1, b.y0], [b.x1, b.y1], [b.x0, b.y1]].map(([x, y]) => ({ ...at(x, y), lx: x, ly: y }));
+  const topMid = at((b.x0 + b.x1) / 2, b.y0), up = at((b.x0 + b.x1) / 2, b.y0 - 1), d = Math.hypot(up.x - topMid.x, up.y - topMid.y) || 1;
+  const gap = Math.max(24, W / 34), inset = Math.max(8, W / 110);
+  const knob = { x: clamp(topMid.x + (up.x - topMid.x) / d * gap, inset, W - inset), y: clamp(topMid.y + (up.y - topMid.y) / d * gap, inset, H - inset) };
+  const ol = it.type === "group" ? null : Motion.outline(it);
+  const A = ol ? ol.A.map((a) => ({ a: at(a.x, a.y), i: at(a.ix, a.iy), o: at(a.ox, a.oy) })) : [];
+  return { it, F, I, corners, topMid, knob, centre: at(0, 0), outline: ol, A, editable: it.type === "line" || it.type === "path" };
+}
+function drawShapeOverlay(c, W, H) {
+  const lw = Math.max(1.5, W / 800), hs = Math.max(5, W / 170);
+  const L = shapeLayerMatrix(c, W, H);
+  ctx2d.save();
+  ctx2d.setTransform(1, 0, 0, 1, 0, 0);
+  ctx2d.lineJoin = "round";
+  const dot = (p, r, fill, square) => {
+    ctx2d.beginPath();
+    if (square) ctx2d.rect(p.x - r, p.y - r, r * 2, r * 2); else ctx2d.arc(p.x, p.y, r, 0, Math.PI * 2);
+    ctx2d.fillStyle = fill; ctx2d.fill(); ctx2d.lineWidth = lw; ctx2d.strokeStyle = "rgba(0,0,0,0.7)"; ctx2d.stroke();
+  };
+  const h = shapeUi.sel ? shapeHandles(c, W, H) : null;
+  if (h) {
+    if (h.outline) {
+      const pts = Motion.flatten(h.outline.A, h.outline.closed, 24).map(([x, y]) => { const q = h.I.transformPoint(new DOMPoint(x, y)); return [q.x, q.y]; });
+      ctx2d.lineWidth = lw * 2.2; ctx2d.strokeStyle = "rgba(0,0,0,0.55)"; strokeOutline(ctx2d, pts, h.outline.closed);
+      ctx2d.lineWidth = lw; ctx2d.strokeStyle = "#5ad1ff"; strokeOutline(ctx2d, pts, h.outline.closed);
+    }
+    ctx2d.setLineDash([lw * 4, lw * 3]); ctx2d.strokeStyle = "#4f8cff";
+    strokeOutline(ctx2d, h.corners.map((q) => [q.x, q.y]), true);
+    ctx2d.setLineDash([]);
+    ctx2d.beginPath(); ctx2d.moveTo(h.topMid.x, h.topMid.y); ctx2d.lineTo(h.knob.x, h.knob.y); ctx2d.stroke();
+    for (const q of h.corners) dot(q, hs * 0.8, "#fff", true);
+    if (h.editable) {
+      const sp = h.A[shapeUi.pt];
+      if (sp) {
+        ctx2d.lineWidth = lw; ctx2d.strokeStyle = "#9fd0ff";
+        for (const q of [sp.i, sp.o]) { ctx2d.beginPath(); ctx2d.moveTo(sp.a.x, sp.a.y); ctx2d.lineTo(q.x, q.y); ctx2d.stroke(); }
+        dot(sp.i, hs * 0.6, "#9fd0ff"); dot(sp.o, hs * 0.6, "#9fd0ff");
+      }
+      h.A.forEach((p, j) => dot(p.a, hs * 0.62, j === shapeUi.pt ? "#5ad1ff" : "#fff", true));
+    }
+    dot(h.centre, hs * 0.5, "#5ad1ff");
+    dot(h.knob, hs * 0.9, "#ffce5c");
+  }
+  if (shapeUi.tool === "pen" && shapeUi.pen && shapeUi.pen.pts.length) {
+    const P = shapeUi.pen.pts, A = P.map((p) => ({ x: p[0], y: p[1], ix: p[0] + p[2], iy: p[1] + p[3], ox: p[0] + p[4], oy: p[1] + p[5] }));
+    const open = Motion.flatten(A, false, 24).map(([x, y]) => { const q = L.transformPoint(new DOMPoint(x, y)); return [q.x, q.y]; });
+    ctx2d.lineWidth = lw; ctx2d.strokeStyle = "#5ad1ff";
+    if (A.length > 1) strokeOutline(ctx2d, open, false);
+    A.forEach((a, j) => { const q = L.transformPoint(new DOMPoint(a.x, a.y)); dot(q, hs * (j === 0 && A.length >= 3 ? 0.9 : 0.62), j === 0 ? "#5ad1ff" : "#fff", true); });
+  }
+  ctx2d.restore();
+  return true;
+}
+/** Finish the pen: a path item around the points' centre (closed when it was closed on the first point). */
+function finishShapePen(c, closed) {
+  const P = shapeUi.pen && shapeUi.pen.pts;
+  if (!P || P.length < (closed ? 3 : 2)) { toast(closed ? "A closed path needs at least 3 points" : "A path needs at least 2 points"); return; }
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (const [x, y] of P) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+  const cx = Math.round((x0 + x1) / 2), cy = Math.round((y0 + y1) / 2);
+  const item = { type: "path", x: cx, y: cy, points: P.slice(0, Motion.MAX_POINTS).map(([x, y, ix, iy, ox, oy]) => [x - cx, y - cy, ix, iy, ox, oy].map((v) => +v.toFixed(2))) };
+  if (closed) Object.assign(item, { fill: "#ffffff" }); else Object.assign(item, { closed: false, stroke: "#ffffff", strokeWidth: 8 });
+  pushUndo();
+  const list = shapeList(c).slice();
+  list.push(item);
+  writeShapes(c, list);
+  Object.assign(shapeUi, { sel: [shapeList(c).length - 1], pt: -1, tool: null, pen: null });
+  scheduleSave(); renderInspector();
+}
+function nearestShapeSegment(h, pt) {
+  let best = null;
+  Motion.segments(h.outline.A, h.outline.closed).forEach(([a, b], i) => {
+    for (let k = 1; k < 24; k++) {
+      const t = k / 24, u = 1 - t;
+      const x = u * u * u * a.x + 3 * u * u * t * a.ox + 3 * u * t * t * b.ix + t * t * t * b.x;
+      const y = u * u * u * a.y + 3 * u * u * t * a.oy + 3 * u * t * t * b.iy + t * t * t * b.y;
+      const q = h.I.transformPoint(new DOMPoint(x, y)), d = Math.hypot(q.x - pt.x, q.y - pt.y);
+      if (!best || d < best.d) best = { d, i, t };
+    }
+  });
+  return best;
+}
+/** Add or remove points of a path: the base points and every keyed outline change together. */
+function writeShapeTopology(c, path, edit) {
+  writeShapes(c, Motion.updateItem(shapeList(c), path, (it) => Motion.mergeItem(it, {
+    points: edit(it.points), keys: it.keys ? it.keys.map((k) => (k.points ? { ...k, points: edit(k.points) } : k)) : null,
+  }) || it));
+}
+els.preview.addEventListener("pointerdown", (e) => {
+  if (e.button !== 0 || isSourceMode()) return;
+  const c = getClip(state.selId);
+  if (!shapeEditActive(c)) return;
+  const W = els.preview.width, H = els.preview.height, pt = canvasPt(e), grab = Math.max(8, W / 110);
+  const near = (p) => Math.hypot(p.x - pt.x, p.y - pt.y) <= grab;
+  if (shapeUi.tool === "pen") {
+    e.preventDefault(); e.stopImmediatePropagation();
+    if (isGroupLocked(c)) { toastLocked(); return; }
+    const L = shapeLayerMatrix(c, W, H), lp = L.inverse().transformPoint(new DOMPoint(pt.x, pt.y));
+    const P = (shapeUi.pen ||= { pts: [] }).pts;
+    if (P.length >= 3 && near(L.transformPoint(new DOMPoint(P[0][0], P[0][1])))) { finishShapePen(c, true); return; }
+    if (P.length >= Motion.MAX_POINTS) { toast(`A path has at most ${Motion.MAX_POINTS} points`); return; }
+    P.push([lp.x, lp.y, 0, 0, 0, 0]);
+    shapeUi.pen.redo = []; shapeUi.pen.dragging = true;
+    shapeUi.drag = { tool: true, L };
+    els.preview.setPointerCapture(e.pointerId);
+    state.dirtyTimeline = true;
+    return;
+  }
+  const h = shapeHandles(c, W, H);
+  if (!h) return;
+  const it = h.it, sp = h.editable ? h.A[shapeUi.pt] : null;
+  const lp = h.I.inverse().transformPoint(new DOMPoint(pt.x, pt.y));
+  let drag = null;
+  if (near(h.knob)) drag = { mode: "rotate", a0: Math.atan2(pt.y - h.centre.y, pt.x - h.centre.x) };
+  else if (sp && near(sp.o)) drag = { mode: "handle", side: "o" };
+  else if (sp && near(sp.i)) drag = { mode: "handle", side: "i" };
+  else if (h.editable && h.A.some((p) => near(p.a))) { shapeUi.pt = h.A.findIndex((p) => near(p.a)); drag = { mode: e.altKey ? "pull" : "point" }; }
+  else if (h.corners.some(near)) { const q = h.corners.find(near); drag = { mode: "size", lx0: q.lx, ly0: q.ly, d0: Math.hypot(pt.x - h.centre.x, pt.y - h.centre.y) || 1 }; }
+  else if (it.type === "path" && (e.ctrlKey || e.metaKey)) {
+    if (it.points.length >= Motion.MAX_POINTS) { toast(`A path has at most ${Motion.MAX_POINTS} points`); e.stopImmediatePropagation(); return; }
+    if (isGroupLocked(c)) { toastLocked(); e.stopImmediatePropagation(); return; }
+    const r = nearestShapeSegment(h, pt);
+    if (!r || r.d > grab * 3) return;
+    pushUndo(); writeShapeTopology(c, shapeUi.sel, (pts) => Mask.splitPoints(pts, r.i, r.t)); scheduleSave();
+    shapeUi.pt = r.i + 1;
+    drag = { mode: "point", pushed: true };
+  } else {
+    const xs = h.corners.map((q) => q.lx), ys = h.corners.map((q) => q.ly);
+    if (lp.x >= Math.min(...xs) && lp.x <= Math.max(...xs) && lp.y >= Math.min(...ys) && lp.y <= Math.max(...ys)) drag = { mode: "move" };
+  }
+  if (!drag) return;   // outside the item: the monitor's usual clicks
+  e.preventDefault(); e.stopImmediatePropagation();
+  if (isGroupLocked(c)) { toastLocked(); return; }
+  if (!drag.pushed) pushUndo();
+  shapeUi.drag = { ...drag, start: pt, it0: JSON.parse(JSON.stringify(shapeNow(c))), F: h.F, I: h.I };
+  els.preview.setPointerCapture(e.pointerId);
+  state.dirtyTimeline = true;
+}, true);
+els.preview.addEventListener("pointermove", (e) => {
+  const d = shapeUi.drag;
+  if (!d) return;
+  e.stopImmediatePropagation();
+  const c = getClip(state.selId);
+  if (!c) return;
+  const pt = canvasPt(e);
+  if (d.tool) {
+    const P = shapeUi.pen && shapeUi.pen.pts, p = P && P[P.length - 1];
+    if (p && shapeUi.pen.dragging) {
+      const q = d.L.inverse().transformPoint(new DOMPoint(pt.x, pt.y)), ox = q.x - p[0], oy = q.y - p[1];
+      if (Math.hypot(ox, oy) > 3) { p[2] = -ox; p[3] = -oy; p[4] = ox; p[5] = oy; }
+    }
+    state.dirtyTimeline = true;
+    return;
+  }
+  const it0 = d.it0, r3 = (v) => +v.toFixed(3);
+  let set = null;
+  if (d.mode === "move") {
+    const Fi = d.F.inverse(), a = Fi.transformPoint(new DOMPoint(d.start.x, d.start.y)), b = Fi.transformPoint(new DOMPoint(pt.x, pt.y));
+    set = { x: Math.round(it0.x + b.x - a.x), y: Math.round(it0.y + b.y - a.y) };
+  } else if (d.mode === "rotate") {
+    const c0 = d.I.transformPoint(new DOMPoint(0, 0));
+    let r = it0.rotation + (Math.atan2(pt.y - c0.y, pt.x - c0.x) - d.a0) * 180 / Math.PI;
+    if (e.shiftKey) r = Math.round(r / 15) * 15;
+    set = { rotation: r3(r) };
+  } else if (d.mode === "size") {
+    const l = d.I.inverse().transformPoint(new DOMPoint(pt.x, pt.y));
+    if (Motion.OWN[it0.type].includes("w")) {
+      let kx = Math.abs(l.x) / Math.max(1e-6, Math.abs(d.lx0)), ky = Math.abs(l.y) / Math.max(1e-6, Math.abs(d.ly0));
+      if (e.shiftKey) kx = ky = Math.max(kx, ky);
+      set = { w: Math.round(clamp(it0.w * kx, 1, 20000)), h: Math.round(clamp(it0.h * ky, 1, 20000)) };
+    } else {
+      const c0 = d.I.transformPoint(new DOMPoint(0, 0));
+      set = { scale: +clamp(it0.scale * Math.hypot(pt.x - c0.x, pt.y - c0.y) / d.d0, 0.01, 100).toFixed(4) };
+    }
+  } else if (it0.points) {
+    const pts = it0.points.map((p) => [p[0], p[1], p[2] || 0, p[3] || 0, p[4] || 0, p[5] || 0]), p = pts[shapeUi.pt];
+    if (!p) return;
+    const l = d.I.inverse().transformPoint(new DOMPoint(pt.x, pt.y));
+    if (d.mode === "point") { p[0] = l.x; p[1] = l.y; }
+    else if (d.mode === "pull") { const ox = l.x - p[0], oy = l.y - p[1]; p[2] = -ox; p[3] = -oy; p[4] = ox; p[5] = oy; }
+    else if (d.mode === "handle") {
+      const hx = l.x - p[0], hy = l.y - p[1], o = d.side === "o" ? 4 : 2, q = d.side === "o" ? 2 : 4;
+      p[o] = hx; p[o + 1] = hy;
+      if (!e.altKey) {   // keep the pair smooth: the other handle mirrors the direction, keeps its length
+        const len = Math.hypot(p[q], p[q + 1]) || Math.hypot(hx, hy), k = Math.hypot(hx, hy) || 1;
+        p[q] = -hx / k * len; p[q + 1] = -hy / k * len;
+      }
+    }
+    set = { points: pts.map((r) => r.map(r3)) };
+  }
+  if (set) { writeShapeSet(c, shapeUi.sel, set); syncShapeInspector(c); }
+}, true);
+const endShapeDrag = (e) => {
+  const d = shapeUi.drag;
+  if (!d) return;
+  e.stopImmediatePropagation();
+  shapeUi.drag = null;
+  if (d.tool) { if (shapeUi.pen) shapeUi.pen.dragging = false; state.dirtyTimeline = true; return; }
+  scheduleSave(); renderInspector();
+};
+els.preview.addEventListener("pointerup", endShapeDrag, true);
+els.preview.addEventListener("pointercancel", endShapeDrag, true);
+els.preview.addEventListener("dblclick", (e) => {
+  const c = getClip(state.selId);
+  if (!shapeEditActive(c) || shapeUi.tool) return;
+  const h = shapeHandles(c, els.preview.width, els.preview.height), pt = canvasPt(e), grab = Math.max(8, els.preview.width / 110);
+  if (!h || h.it.type !== "path") return;
+  const i = h.A.findIndex((p) => Math.hypot(p.a.x - pt.x, p.a.y - pt.y) <= grab);
+  if (i < 0) return;
+  e.preventDefault(); e.stopImmediatePropagation();
+  if (h.it.points.length <= (h.it.closed === false ? 2 : 3)) { toast("The path needs the points it has"); return; }
+  if (isGroupLocked(c)) { toastLocked(); return; }
+  pushUndo();
+  writeShapeTopology(c, shapeUi.sel, (pts) => pts.filter((_, j) => j !== i));
+  shapeUi.pt = -1; scheduleSave(); renderInspector();
+}, true);
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && runtime.anchorTool && !shapeUi.sel && !shapeUi.tool) {
+    const tg0 = e.target;
+    if (!(tg0 && (tg0.tagName === "INPUT" || tg0.tagName === "TEXTAREA" || tg0.tagName === "SELECT"))) {
+      e.preventDefault(); e.stopImmediatePropagation();
+      runtime.anchorTool = false; state.dirtyTimeline = true; renderInspector();
+      return;
+    }
+  }
+  if (!shapeUi.clip || (!shapeUi.sel && !shapeUi.tool)) return;
+  const tg = e.target;
+  if (tg && (tg.tagName === "INPUT" || tg.tagName === "TEXTAREA" || tg.tagName === "SELECT" || tg.isContentEditable)) return;
+  const c = getClip(state.selId);
+  if (!c || c.id !== shapeUi.clip) return;
+  if (e.key === "Escape") {
+    e.preventDefault(); e.stopImmediatePropagation();
+    if (shapeUi.tool) { shapeUi.tool = null; shapeUi.pen = null; }
+    else if (shapeUi.pt >= 0) shapeUi.pt = -1;
+    else shapeUi.sel = null;
+    state.dirtyTimeline = true; renderInspector();
+  } else if (e.key === "Enter" && shapeUi.tool === "pen") {
+    e.preventDefault(); e.stopImmediatePropagation();
+    finishShapePen(c, false);
+  } else if (shapeUi.tool === "pen" && shapeUi.pen && !shapeUi.drag) {
+    // while placing points the path is not in the project yet: undo / redo step through the points
+    const mod = e.ctrlKey || e.metaKey, k = e.key.toLowerCase();
+    const back = (mod && k === "z" && !e.shiftKey) || ((e.key === "Backspace" || e.key === "Delete") && !mod);
+    const fwd = mod && ((k === "z" && e.shiftKey) || k === "y");
+    if (!back && !fwd) return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    const P = shapeUi.pen.pts, R = (shapeUi.pen.redo ||= []);
     if (back && P.length) R.push(P.pop());
     else if (fwd && R.length) P.push(R.pop());
     state.dirtyTimeline = true;
@@ -12553,6 +13350,8 @@ els.importUrlOverlay?.addEventListener("click", (e) => {
 });
 $("btnTitle").addEventListener("click", addTitle);
 $("btnAdjust").addEventListener("click", addAdjust);
+$("btnShape").addEventListener("click", (e) => showShapeMenu(e.currentTarget));
+$("btnNull").addEventListener("click", addNull);
 $("btnSplit").addEventListener("click", splitAtPlayhead);
 $("btnCloseGap").addEventListener("click", closeGapAtPlayhead);
 $("btnLift").addEventListener("click", () => liftExtract(false));

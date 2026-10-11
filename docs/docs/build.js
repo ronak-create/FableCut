@@ -69,6 +69,11 @@ const PAGES = [
     parts: [["project.json schema", "Tracking"]],
   },
   {
+    slug: "motion", nav: "Shapes and parenting", title: "Shapes, nulls and parenting", group: "The timeline",
+    lede: "Motion graphics: vector shape layers with fills, strokes, groups and trim paths, null objects, parenting and the anchor point, keyframed on the monitor or by an agent with setShape and setParent.",
+    parts: [["project.json schema", "Shapes, nulls and parenting"]],
+  },
+  {
     slug: "editing", nav: "Editing rules", title: "Editing rules", group: "The timeline",
     lede: "How tracks, links, locks, targeting and the trim tools behave, for people and agents alike.",
     parts: [["project.json schema", "Semantics"]],

@@ -20,10 +20,11 @@
    lockedTracks and untargetedTracks) for headless callers. */
 (function (root, factory) {
   const node = typeof module === "object" && module.exports;
-  const api = factory(node ? require("./mask") : root.FableCutMask, node ? require("./tracker") : root.FableCutTracker);
+  const api = factory(node ? require("./mask") : root.FableCutMask, node ? require("./tracker") : root.FableCutTracker,
+    node ? require("./motion") : root.FableCutMotion);
   if (node) module.exports = api;
   else root.FableCutEdit = api;
-})(typeof self !== "undefined" ? self : this, function (MaskLib, TrackLib) {
+})(typeof self !== "undefined" ? self : this, function (MaskLib, TrackLib, MotionLib) {
   "use strict";
 
   const MIN_DUR = 0.05;
@@ -93,10 +94,11 @@
     }
     return Object.keys(out).length ? out : undefined;
   }
-  /** A clip's head moved by `offset` s: its mask keys and track samples follow, like shiftKF does for keyframes. */
+  /** A clip's head moved by `offset` s: its mask keys, shape keys and track samples follow, like shiftKF does for keyframes. */
   function shiftMasks(c, offset) {
     if (!offset || !c.props) return;
-    const ms = c.props.masks, ts = c.props.tracks;
+    const ms = c.props.masks, ts = c.props.tracks, ss = c.props.shapes;
+    if (MotionLib && Array.isArray(ss)) c.props = { ...c.props, shapes: MotionLib.shiftKeys(ss, offset) };
     if (MaskLib && Array.isArray(ms)) {
       const next = MaskLib.shiftKeys(ms, offset);
       if (next !== ms) c.props = { ...c.props, masks: next };

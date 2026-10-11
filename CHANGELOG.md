@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Shape layers.** A new clip kind, `shape`, draws vector items in
+  `props.shapes`: rectangles (with rounded corners), ellipses, polygons, stars,
+  lines and bezier paths (open or closed), nested in groups. Each has a fill and
+  a stroke (width, caps, joins, dashes) and trim paths (`trimStart`, `trimEnd`,
+  `trimOffset`) for draw-ons; the layer's own trim props trim every path at once.
+  Every item value keys on its own, colours and path outlines included. In the
+  editor: **+ Shape** (or the Pen) and a Shape layer section, with items moved,
+  turned, resized and point-edited on the monitor.
+- **Null objects and parenting.** `kind: "null"` is an invisible clip that
+  carries a transform. Any visual clip can take a `parent` and then moves,
+  turns and scales with it, through chains of parents. Choosing a parent keeps
+  the clip where it is; right-click → **Parent to a new null** groups clips.
+- **Anchor point.** `anchorX` / `anchorY` on every visual clip set the point
+  position places and rotation and scale turn around. **✥ Move** drags it on
+  the monitor while the picture stays put.
+- Agents: `setShape`, `removeShape` and `setParent` patch ops; `props.shapes`
+  and `parent` are validated on `addClip` / `updateClip`; the compact view
+  lists shapes and parents. A `motion-graphics` skill covers the recipes.
+
 ## [1.13.0] - 2026-10-10
 
 ### Added

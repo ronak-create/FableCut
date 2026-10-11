@@ -49,6 +49,11 @@ about 150 ms. A human and an agent can work the same timeline at once.
 - Motion tracking: follow a point or region (optionally its scale and
   rotation) through a video clip; masks follow it and other clips pin to it
   as editable keyframes. Agents use the `fablecut_track` tool.
+- Shapes, nulls and parenting: shape layers of rectangles, ellipses,
+  polygons, stars, lines and bezier paths in nested groups, with fill, stroke,
+  dashes and trim paths (draw-ons), every value keyframable; invisible null
+  objects; parenting chains; an anchor point on every clip. Agents use the
+  `setShape` and `setParent` patch ops.
 - Track mattes and blending: a clip can be cut by the picture on the track
   above (alpha, alpha inverted, luma, luma inverted; the matte track stops
   drawing), and laid over the clips below with 17 blend modes. Agents use the

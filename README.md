@@ -194,6 +194,11 @@ same time.
   difference, each with feather, expansion, invert and opacity, all
   keyframable (outlines morph). Draw and edit them on the monitor, with a
   matte view. Agents use the `setMask` patch op and measure with `fablecut_scopes`
+- **Shapes and motion graphics** — shape layers of rectangles, ellipses,
+  polygons, stars, lines and pen-drawn bezier paths in groups, with fill,
+  stroke, dashes and trim paths for draw-ons; null objects, parenting and an
+  anchor point on every clip; every value keyframes, edited right on the
+  monitor. Agents use the `setShape` and `setParent` patch ops
 - **Motion tracking** — follow a point or a region (with its scale and
   rotation) through a video clip, then make a mask follow it or pin a title,
   sticker or any clip to it; the result is ordinary editable keys. Agents use
@@ -323,8 +328,8 @@ you choose. Leave it unset and everything stays in the repo, exactly as before.
 /plugin install fablecut@fablecut
 ```
 
-That registers the MCP server for you and adds two skills — `edit-video` and
-`remake-reel`. Your timeline and footage live in the plugin's own data
+That registers the MCP server for you and adds three skills — `edit-video`,
+`remake-reel` and `motion-graphics`. Your timeline and footage live in the plugin's own data
 directory, so an update never touches them. Node 18+ and (optionally) ffmpeg
 still need to be on your machine.
 

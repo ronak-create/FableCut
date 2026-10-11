@@ -51,7 +51,7 @@ function makeSandbox({ fps = 50, clips = [], locked = false } = {}) {
   const sandbox = { els: { inspector: null }, document: { activeElement: null }, holdRefreshes: 0 };
   const bindings = new Function(
     "ANIMATABLE", "DEFAULT_PROPS", "EASE", "clamp", "state", "els", "document",
-    "getClip", "projectFps", "ensureFont", "scheduleAudioHoldRefresh", "isGroupLocked", "syncMaskInspector",
+    "getClip", "projectFps", "ensureFont", "scheduleAudioHoldRefresh", "isGroupLocked", "syncMaskInspector", "syncShapeInspector",
     `${LOGIC}\n${SYNC}\nreturn {
       kfChannel, kfTimeEps, playheadOverClip, kfAtPlayhead, propsAtPlayhead,
       fmtInspNum, setAnimProp, resetPropChannel, resetPropAtPlayhead,
@@ -67,6 +67,7 @@ function makeSandbox({ fps = 50, clips = [], locked = false } = {}) {
     () => { sandbox.holdRefreshes++; }, // the real one no-ops unless holding
     () => locked, // isGroupLocked — a locked clip's inspector is read-only
     () => {}, // syncMaskInspector — the Masks section has its own tests
+    () => {}, // syncShapeInspector — shape layers have their own tests
   );
   return {
     state, els: sandbox.els, document: sandbox.document,
