@@ -436,6 +436,8 @@ function showClipCtxMenu(clientX, clientY, c) {
   }
   if (selectedClips().some((x) => isVisualClip(x) && x.kind !== "null"))
     item("Parent to a new null", "", parentSelectionToNull, locked ? "Locked — unlock to change" : null);
+  item("Precompose", "", precomposeSelection, locked ? "Locked — unlock to change" : null);
+  if (c.kind === "comp") item("Open composition", "", () => enterComp(c.compId, c));
   const linked = selectedClips().some((x) => x.linkGroup || x.linkedId);
   if (linked) item("Unlink audio / video", "Ctrl+L", toggleLinkSelected, locked ? "Locked — unlock to change" : null);
   else if (c.kind === "video" || c.kind === "audio") {
@@ -616,7 +618,7 @@ const {
   listAlignedGaps, adjacentClip, rippleTrim, rollEdit, slipClip, slideClip, crossfadeCuts, crossfadeCut,
 } = EDIT;
 /** Does this clip reach the picture / the mix? Track output and clip enable. */
-function clipRenders(c) { return isTrackEnabled(c.track) && c.disabled !== true; }
+function clipRenders(c) { return c._comp ? c._on !== false : isTrackEnabled(c.track) && c.disabled !== true; }
 function toastLocked(partial = false) {
   toast(partial ? "Locked clips were left untouched — unlock them to edit"
     : "Locked — unlock the clip or its track to edit");
@@ -1411,7 +1413,16 @@ function syncExportFrameSel() {
     html += `<option value="custom" selected>Custom · ${ef.w}×${ef.h}</option>`;
   els.exportFrameSel.innerHTML = html;
 }
-function applyProject(data) {
+function applyProject(data, opts = {}) {
+  if (state.compCtx && !opts.ctx) {   // the root changed on disk (an agent, another tab): keep the open comp open
+    const x = state.compCtx;
+    x.root = data;
+    const path = x.path.filter((id) => CompLib.getComp(data, id));
+    if (path.length !== x.path.length) { state.compCtx = null; applyProject(data, { ctx: true }); syncCompCrumb(); toast("The open composition was removed"); return; }
+    applyProject(compSyntheticDoc(data, path), { ctx: true });
+    syncCompCrumb();
+    return;
+  }
   const wa = normalizeWorkArea(data.inPoint, data.outPoint);
   Object.assign(project, {
     name: data.name || "Untitled Project",
@@ -1429,7 +1440,10 @@ function applyProject(data) {
     encodeProfile: data.encodeProfile || null,
     master: normalizeMaster(data.master),
     buses: normalizeBuses(data.buses),
+    comps: (Array.isArray(data.comps) ? data.comps : []).filter((cp) => cp && cp.id).map((cp) => ({
+      ...cp, clips: (cp.clips || []).map((x) => ({ ...x, props: { ...DEFAULT_PROPS, ...(x.kind === "comp" ? { fit: "none" } : {}), ...(x.props || {}) } })) })),
   });
+  runtime.compGen = (runtime.compGen || 0) + 1;
   applyTracksFromProject(data.tracks);
   ensureTracksCoverClips();
   project.tracks = serializeTracks();
@@ -1454,7 +1468,7 @@ function applyProject(data) {
     c.fx = normFx(c.fx);
     if (!c.fx) delete c.fx;
     const raw = c.props || {};
-    c.props = { ...DEFAULT_PROPS, ...raw };
+    c.props = { ...DEFAULT_PROPS, ...(c.kind === "comp" ? { fit: "none" } : {}), ...raw };
     if (c.props.grade !== undefined) {
       const g = self.FableCutColor.normalizeGrade(c.props.grade);
       if (g) c.props.grade = g; else delete c.props.grade;
@@ -1515,7 +1529,28 @@ function scheduleSave() {
     } catch { }
   }, 400);
 }
+/** One clip as saved: only the fields the editor knows (unknown runtime fields stay out). */
+function serializeClip({ id, mediaId, kind, compId, track, start, in: inn, duration, name, props, keyframes, transitionIn, transitionOut, linkedId, linkGroup, locked, disabled, unlinked, fx, parent }) {
+  const clipOut = { id, mediaId, kind, track, start, in: inn, duration, name, props, keyframes, transitionIn, transitionOut };
+  if (compId) clipOut.compId = compId;
+  if (fx?.length) clipOut.fx = fx;
+  if (linkGroup) clipOut.linkGroup = linkGroup;
+  if (linkedId) clipOut.linkedId = linkedId;
+  // Written only when set, so untouched projects stay byte-identical.
+  if (locked === true) clipOut.locked = true;
+  if (disabled === true) clipOut.disabled = true;
+  if (unlinked === true) clipOut.unlinked = true;
+  if (parent) clipOut.parent = parent;
+  return clipOut;
+}
+/** The document to save: the root project, with the open comp (if any) written into it. */
 function projectJSON() {
+  if (!state.compCtx) return projectJSONHere();
+  const root = commitCompCtx();
+  return { ...root, revision: project.revision };
+}
+/** The project as it is loaded right now (an open comp's stand-in project, or the root). */
+function projectJSONHere() {
   const { name, width, height, fps, background, revision, folders, media, clips, markers, inPoint, outPoint, disabledTracks, encodeProfile } = project;
   const out = {
     name, width, height, fps, background, revision,
@@ -1528,18 +1563,7 @@ function projectJSON() {
       if (derivedFrom) { mo.derivedFrom = derivedFrom; if (denoise) mo.denoise = denoise; }
       return mo;
     }),
-    clips: clips.map(({ id, mediaId, kind, track, start, in: inn, duration, name, props, keyframes, transitionIn, transitionOut, linkedId, linkGroup, locked, disabled, unlinked, fx, parent }) => {
-      const clipOut = { id, mediaId, kind, track, start, in: inn, duration, name, props, keyframes, transitionIn, transitionOut };
-      if (fx?.length) clipOut.fx = fx;
-      if (linkGroup) clipOut.linkGroup = linkGroup;
-      if (linkedId) clipOut.linkedId = linkedId;
-      // Written only when set, so untouched projects stay byte-identical.
-      if (locked === true) clipOut.locked = true;
-      if (disabled === true) clipOut.disabled = true;
-      if (unlinked === true) clipOut.unlinked = true;
-      if (parent) clipOut.parent = parent;
-      return clipOut;
-    }),
+    clips: clips.map(serializeClip),
     markers: normalizeMarkers(markers),
     inPoint: inPoint == null ? null : inPoint,
     outPoint: outPoint == null ? null : outPoint,
@@ -1556,6 +1580,7 @@ function projectJSON() {
   if (master) out.master = master;
   const buses = normalizeBuses(project.buses);
   if (buses.length) out.buses = buses;
+  if (project.comps && project.comps.length) out.comps = project.comps.map((cp) => ({ ...cp, clips: (cp.clips || []).map(serializeClip) }));
   return out;
 }
 function listenSSE() {
@@ -1855,10 +1880,12 @@ async function importFromUrl(url) {
 }
 
 function renderBin() {
-  els.binList.querySelectorAll(".bin-item, .bin-folder, .bin-drop-root").forEach((n) => n.remove());
-  const empty = !project.media.length && !project.folders.length;
+  els.binList.querySelectorAll(".bin-item, .bin-folder, .bin-drop-root, .comp-item").forEach((n) => n.remove());
+  const comps = project.comps || [];
+  const empty = !project.media.length && !project.folders.length && !comps.length;
   els.binEmpty.style.display = empty ? "" : "none";
   if (empty) return;
+  for (const comp of comps) els.binList.appendChild(makeCompItem(comp));
 
   const clearBinDropHints = () => {
     els.binList.querySelectorAll(".bin-drop-over").forEach((n) => n.classList.remove("bin-drop-over"));
@@ -2191,7 +2218,7 @@ function setBinTab(tab) {
 /* Undo entries are {clips, markers} snapshots. Drag gestures still push a bare
    clips array (taken at pointerdown) — restoring one leaves markers alone. */
 function undoSnapshot() {
-  return JSON.stringify({ clips: project.clips, markers: project.markers || [] });
+  return JSON.stringify({ clips: project.clips, markers: project.markers || [], comps: project.comps || [] });
 }
 /** Record an undo step — `snap` lets an edit snapshot first and record only
  *  once it knows it changed something. */
@@ -2203,7 +2230,8 @@ function pushUndo(snap = undoSnapshot()) {
 function restoreSnapshot(json) {
   const snap = JSON.parse(json);
   if (Array.isArray(snap)) project.clips = snap;
-  else { project.clips = snap.clips; project.markers = snap.markers; }
+  else { project.clips = snap.clips; project.markers = snap.markers; if (snap.comps) project.comps = snap.comps; }
+  runtime.compGen = (runtime.compGen || 0) + 1;
 }
 function undo() {
   if (!runtime.undo.length) return;
@@ -3327,6 +3355,7 @@ function rebuildClips() {
       : c.kind === "adjust" ? "FX · " + (c.name || "")
       : c.kind === "shape" ? "◆ · " + (c.name || "")
       : c.kind === "null" ? "✥ · " + (c.name || "")
+      : c.kind === "comp" ? "▣ · " + ((getComp(c.compId) || {}).name || c.name || "missing comp")
       : c.kind === "audio" ? chTag + (c.name || "")
       : (c.name || "");
     body += `<div class="fade"></div>
@@ -4077,6 +4106,7 @@ els.tracksContent.addEventListener("dblclick", (e) => {
   }
   if (e.target.closest(".handle, .trans-mark, .trans-dur-handle, .clip-kf, .fade-grip, .vol-hit")) return;
   e.preventDefault();
+  if (c.kind === "comp") { enterComp(c.compId, c); return; }   // a comp opens on the timeline
   loadSourceFromClip(c, { timelineTime: timeAtEvent(e) });
 });
 
@@ -4652,7 +4682,7 @@ function updateWorkArea() {
 
 /* ── Drag & drop: bin → timeline, files → window ── */
 els.timelineScroll.addEventListener("dragover", (e) => {
-  if (e.dataTransfer.types.includes("text/fablecut-media")) {
+  if (e.dataTransfer.types.includes("text/fablecut-media") || e.dataTransfer.types.includes("text/fablecut-comp")) {
     e.preventDefault();
     e.dataTransfer.dropEffect = "copy";
     for (const row of els.tracks.children)
@@ -4664,6 +4694,8 @@ els.timelineScroll.addEventListener("dragleave", () => {
 });
 els.timelineScroll.addEventListener("drop", (e) => {
   for (const row of els.tracks.children) row.classList.remove("drop-hint");
+  const cid = e.dataTransfer.getData("text/fablecut-comp");
+  if (cid) { e.preventDefault(); const comp = getComp(cid); if (comp) addCompClip(comp, trackAtEvent(e), snapTime(timeAtEvent(e), null)); return; }
   const mid = e.dataTransfer.getData("text/fablecut-media");
   if (!mid) return;
   e.preventDefault();
@@ -4935,7 +4967,8 @@ function renderInspector(lite) {
     </div>`;
   }
   if (c.kind === "shape") html += shapeSectionHtml(c, p, row) + `<div class="insp-section"><h3>Look</h3>${slider("blur", 0, 40, 0.5, p.blur, "px")}${slider("shake", 0, 40, 0.5, p.shake, "px")}${slider("shakeSpeed", 1, 30, 0.5, p.shakeSpeed)}</div>`;
-  if (c.kind === "video" || c.kind === "image" || c.kind === "svg") {
+  if (c.kind === "comp") html += compSectionHtml(c, row);
+  if (c.kind === "video" || c.kind === "image" || c.kind === "svg" || c.kind === "comp") {
     html += `<div class="insp-section"><h3>Layout</h3>
       ${sel("Fit", "fit", ["contain", "cover", "stretch", "none"], p.fit)}
       ${row("Crop L/R %", `<input type="number" data-k="cropL" min="0" max="95" value="${p.cropL}" style="max-width:58px">
@@ -4947,7 +4980,7 @@ function renderInspector(lite) {
       ${check("Flip V", "flipV", p.flipV)}
     </div>`;
   }
-  if (c.kind === "video" || c.kind === "image" || c.kind === "svg" || c.kind === "adjust") {
+  if (c.kind === "video" || c.kind === "image" || c.kind === "svg" || c.kind === "adjust" || c.kind === "comp") {
     html += `<div class="insp-section"><h3>Filter / Color</h3>
       ${sel("Preset", "filterPreset", Object.keys(FILTER_PRESETS), p.filterPreset)}
       ${slider("brightness", 0, 200, 1, p.brightness, "%")}
@@ -5289,6 +5322,7 @@ function renderInspector(lite) {
   bindShapeControls(c);
   bindMotionControls(c);
   bindTextPathControls(c);
+  bindCompControls(c);
   syncInspectorOffClip(c);
   renderKfGraphsPanel();
 }
@@ -5943,7 +5977,7 @@ function loadSourceFromMedia(m, opts = {}) {
 }
 function loadSourceFromClip(c, opts = {}) {
   if (!c || !c.mediaId) {
-    if (c && (c.kind === "text" || c.kind === "adjust" || c.kind === "shape" || c.kind === "null"))
+    if (c && (c.kind === "text" || c.kind === "adjust" || c.kind === "shape" || c.kind === "null" || c.kind === "comp"))
       toast("Titles, shapes, nulls and adjustment layers have no source media");
     return;
   }
@@ -8098,7 +8132,7 @@ function refreshAudioHold() {
   for (const el of runtime.clipEls.values()) { if (!el.paused) el.pause(); }
   for (const chain of runtime.clipGain.values()) muteClipChain(chain);
 
-  for (const c of project.clips) {
+  for (const c of mediaClips()) {
     if (c.kind !== "audio" && c.kind !== "video") continue;
     if (!clipRenders(c) || !activeAt(c, t)) continue;
     const m = getMedia(c.mediaId);
@@ -8191,7 +8225,7 @@ function syncMedia() {
   const reversing = state.playing && rate < 0;
   // Timeline lookahead grows with preview rate so wall-clock budget stays ≈VIDEO_PREFETCH_SEC.
   const prefetchTl = VIDEO_PREFETCH_SEC * Math.max(rate, 1);
-  for (const c of project.clips) {
+  for (const c of mediaClips()) {
     if (c.kind === "text" || c.kind === "image" || c.kind === "svg" || c.kind === "adjust") continue;
     const el = getClipEl(c); if (!el) continue;
     const enabled = clipRenders(c);
@@ -8234,7 +8268,7 @@ function syncMedia() {
 function seekMediaWhilePaused() {
   if (state.playing) return;
   const t = state.time;
-  for (const c of project.clips) {
+  for (const c of mediaClips()) {
     if (c.kind !== "video") continue;
     if (!clipRenders(c)) continue;
     if (!activeAt(c, t)) continue;
@@ -8960,13 +8994,21 @@ function layerBox(c, p, W, H, t) {
     if (!b) return { ox: 0, oy: 0, hw: NULL_HALF * sc, hh: NULL_HALF * sc };
     return { ox: (b.x0 + b.x1) / 2 * sc, oy: (b.y0 + b.y1) / 2 * sc, hw: Math.max(4, (b.x1 - b.x0) / 2) * sc, hh: Math.max(4, (b.y1 - b.y0) / 2) * sc };
   }
+  if (c.kind === "comp") {   // a comp clip's box is the comp's own size (fit none) or fitted like a picture
+    const comp = getComp(c.compId);
+    if (comp) {
+      const cw = comp.width, ch = comp.height;
+      const f = p.fit === "none" ? 1 : p.fit === "cover" ? Math.max(W / cw, H / ch) : p.fit === "stretch" ? null : Math.min(W / cw, H / ch);
+      return f == null ? { ox: 0, oy: 0, hw: (W / 2) * sc, hh: (H / 2) * sc } : { ox: 0, oy: 0, hw: cw * f / 2 * sc, hh: ch * f / 2 * sc };
+    }
+  }
   return { ox: 0, oy: 0, hw: (W / 2) * sc, hh: (H / 2) * sc };   // media/svg: canvas-sized base box, scaled
 }
 /* ── Layer transforms (motion.js): the anchor point and parenting ──
    A clip draws at canvas centre · its parents · translate(x, y) · rotate ·
    (its picture at its scale, shifted so the anchor point sits at x / y). */
 const Motion = self.FableCutMotion;
-function parentM(c, t) { return c.parent ? Motion.parentMatrix(c, getClip, t) : null; }
+function parentM(c, t) { return c.parent ? Motion.parentMatrix(c, anyClip, t) : null; }
 /** Canvas centre and the parents: the space a clip's x / y live in. */
 function parentScreenMatrix(c, W, H, t) {
   const m = new DOMMatrix().translate(W / 2, H / 2), pm = parentM(c, t);
@@ -8991,6 +9033,242 @@ function screenDeltaToParent(c, dx, dy, t = state.time) {
   const m = parentScreenMatrix(c, els.preview.width, els.preview.height, t), det = m.a * m.d - m.b * m.c || 1;
   return { x: (m.d * dx - m.c * dy) / det, y: (-m.b * dx + m.a * dy) / det };
 }
+/* ═══════════ COMPOSITIONS (comp.js) ═══════════
+   project.comps holds nested sequences; a "comp" clip places one. The media
+   inside comps is flattened into virtual clips (mediaClips) so playback,
+   export seeking and the audio mix treat it like timeline media; the comp
+   clip draws its comp's frame like a picture (renderComp). Opening a comp
+   loads it as a stand-in project, so the whole timeline edits it; saves write
+   it back into the root document. */
+const CompLib = self.FableCutComp;
+function compCtxId() { const x = state.compCtx; return x ? x.path[x.path.length - 1] : null; }
+function getComp(id) { return CompLib.getComp(project, id); }
+let flatMemo = null;
+/** Timeline clips plus the clips every comp clip brings in (virtual, at timeline times). */
+function mediaClips() {
+  const now = performance.now();
+  if (flatMemo && flatMemo.clips === project.clips && flatMemo.comps === project.comps && flatMemo.gen === runtime.compGen && now - flatMemo.at < 4) return flatMemo.list;
+  const virt = project.comps && project.comps.length && project.clips.some((c) => c.kind === "comp")
+    ? CompLib.flatten(project, project.clips, { inComp: compCtxId(), renders: (c) => clipRenders(c) }) : [];
+  const list = virt.length ? project.clips.concat(virt) : project.clips;
+  flatMemo = { at: now, clips: project.clips, comps: project.comps, gen: runtime.compGen, list, virt, byId: new Map(virt.map((v) => [v.id, v])) };
+  return list;
+}
+function virtualClip(id) { mediaClips(); return (flatMemo && flatMemo.byId.get(id)) || null; }
+/** The clips a comp clip (or virtual comp clip) shows directly. */
+function compChildren(c) { mediaClips(); return flatMemo ? flatMemo.virt.filter((v) => v._comp === c.id) : []; }
+/** The comp's frame at timeline time t, as a canvas of the comp's size (null when it has none). */
+function renderComp(c, t) {
+  const comp = getComp(c.compId);
+  const depth = (runtime.compDepth || 0) + 1;
+  if (!comp || depth > CompLib.MAX_DEPTH) return null;
+  const W2 = comp.width, H2 = comp.height;
+  const prev = { ctx: ctx2d, scope: runtime.scope, depth: runtime.compDepth };
+  runtime.compDepth = depth;   // every scratch buffer below gets this depth's own copy
+  const cv = maskCtx("comp", W2, H2);
+  cv.setTransform(1, 0, 0, 1, 0, 0); cv.globalAlpha = 1; cv.globalCompositeOperation = "source-over"; cv.filter = "none";
+  cv.clearRect(0, 0, W2, H2);
+  if (comp.background) { cv.fillStyle = comp.background; cv.fillRect(0, 0, W2, H2); }
+  const kids = compChildren(c), order = CompLib.drawOrder(comp).video;
+  const on = kids.filter((v) => v._on && v.kind !== "audio" && activeAt(v, t))
+    .sort((a, b) => (order.indexOf(a.track) - order.indexOf(b.track)) || (a.start - b.start));
+  runtime.scope = { clips: kids, videoTracks: order };
+  ctx2d = cv;
+  try {
+    const mattes = matteTracksAt(on);
+    for (const v of on) if (!mattes.has(v.track)) drawClip(v, W2, H2, t);
+  } finally { ctx2d = prev.ctx; runtime.scope = prev.scope; runtime.compDepth = prev.depth; }
+  return cv.canvas;
+}
+const anyClip = (id) => getClip(id) || virtualClip(id);
+
+/* ── Opening a comp: it becomes the timeline until you go back ── */
+function compSyntheticDoc(root, path) {
+  const comp = CompLib.getComp(root, path[path.length - 1]);
+  if (!comp) return null;
+  const names = path.map((id) => (CompLib.getComp(root, id) || { name: id }).name);
+  return {
+    ...root, name: `${root.name} › ${names.join(" › ")}`,
+    width: comp.width, height: comp.height, background: comp.background || "#000000",
+    clips: comp.clips, tracks: CompLib.compTracks(comp), markers: comp.markers || [], inPoint: null, outPoint: null,
+    disabledTracks: comp.disabledTracks || [], lockedTracks: [], untargetedTracks: [], exportFrame: null,
+  };
+}
+/** Write the open comp's clips and tracks back into the root document (and return it). */
+function commitCompCtx() {
+  const x = state.compCtx;
+  if (!x) return null;
+  const cur = projectJSONHere();
+  const id = compCtxId();
+  const comps = (cur.comps || []).map((c) => (c.id === id
+    ? { ...c, clips: cur.clips, tracks: cur.tracks, disabledTracks: cur.disabledTracks && cur.disabledTracks.length ? cur.disabledTracks : undefined, markers: cur.markers && cur.markers.length ? cur.markers : undefined, background: c.background }
+    : c));
+  x.root = { ...x.root, media: cur.media, folders: cur.folders, fps: cur.fps, master: cur.master, buses: cur.buses, revision: cur.revision, comps };
+  return x.root;
+}
+function enterComp(compId, viaClip) {
+  if (state.exporting) return;
+  if (state.playing) pause();
+  const comp = getComp(compId);
+  if (!comp) { toast("That composition is missing"); return; }
+  const here = compCtxId();
+  if (here && CompLib.wouldCycle(state.compCtx.root, here, compId) && here === compId) return;
+  const root = state.compCtx ? commitCompCtx() : projectJSONHere();
+  const t = viaClip && activeAt(viaClip, state.time) ? state.time - viaClip.start + (viaClip.in || 0) : 0;
+  const frame = { undo: runtime.undo.slice(), redo: runtime.redo.slice(), time: state.time, sel: state.selId };
+  state.compCtx = { root, path: [...(state.compCtx ? state.compCtx.path : []), compId], frames: [...(state.compCtx ? state.compCtx.frames : []), frame] };
+  runtime.undo.length = 0; runtime.redo.length = 0;
+  applyProject(compSyntheticDoc(root, state.compCtx.path), { ctx: true });
+  setSelection([]);
+  setTime(clamp(t, 0, comp.duration));
+  syncCompCrumb();
+}
+function exitComp(levels = 1) {
+  const x = state.compCtx;
+  if (!x) return;
+  const root = commitCompCtx();
+  let frame = null;
+  for (let i = 0; i < levels && x.path.length; i++) { x.path.pop(); frame = x.frames.pop(); }
+  if (!x.path.length) { state.compCtx = null; applyProject(root, { ctx: true }); }
+  else applyProject(compSyntheticDoc(root, x.path), { ctx: true });
+  if (frame) {
+    runtime.undo.splice(0, runtime.undo.length, ...frame.undo); runtime.redo.splice(0, runtime.redo.length, ...frame.redo);
+    setSelection(frame.sel && getClip(frame.sel) ? [frame.sel] : []);
+    setTime(frame.time);
+  }
+  syncCompCrumb();
+  scheduleSave();
+}
+function syncCompCrumb() {
+  if (els.projectName) els.projectName.textContent = project.name + (state.connected ? "  ·  🟢 connected" : "  ·  ⚪ local session");
+  const el = document.getElementById("compCrumb");
+  if (!el) return;
+  const x = state.compCtx;
+  el.classList.toggle("hidden", !x);
+  if (!x) { el.innerHTML = ""; return; }
+  const names = x.path.map((id) => (CompLib.getComp(x.root, id) || { name: id }).name);
+  el.innerHTML = `<button type="button" class="btn tiny" data-crumb="${x.path.length}" title="Back to the main timeline">◀ Main</button>` +
+    names.map((n, i) => `<span class="crumb-sep">›</span>` + (i < names.length - 1
+      ? `<button type="button" class="btn tiny" data-crumb="${x.path.length - 1 - i}">${escapeHtml(n)}</button>`
+      : `<b title="You are editing this composition — Esc or ◀ Main goes back">${escapeHtml(n)}</b>`)).join("");
+  for (const b of el.querySelectorAll("[data-crumb]")) b.addEventListener("click", () => exitComp(+b.dataset.crumb));
+}
+
+/* ── Making comps ── */
+function newCompId() { let id; do id = "comp_" + uid(); while (getComp(id)); return id; }
+/** Precompose the selection: the clips move into a new comp, a comp clip takes their place. */
+function precomposeSelection() {
+  const sel = withLinked(selectedClips());
+  if (!sel.length) { toast("Select the clips to put in a composition"); return; }
+  if (sel.some(isClipLocked)) { toastLocked(); return; }
+  pushUndo();
+  const doc = { clips: project.clips, comps: project.comps || [], tracks: project.tracks, width: project.width, height: project.height };
+  const { comp, clip } = CompLib.precompose(doc, sel.map((c) => c.id), { id: newCompId(), name: "Comp " + ((project.comps || []).length + 1) });
+  project.clips = doc.clips; project.comps = doc.comps;
+  clip.id = "c_" + uid(); clip.props = { ...DEFAULT_PROPS, fit: "none" };
+  for (const c of comp.clips) c.props = { ...DEFAULT_PROPS, ...(c.props || {}) };
+  runtime.compGen = (runtime.compGen || 0) + 1;
+  setSelection([clip.id]);
+  state.dirtyTimeline = true;
+  scheduleSave(); renderBin(); renderInspector();
+  toast(`${sel.length} clip${sel.length > 1 ? "s" : ""} now live in "${comp.name}" — double-click it to open`);
+}
+function addNewComp() {
+  project.comps = project.comps || [];
+  pushUndo();
+  const comp = { id: newCompId(), name: "Comp " + (project.comps.length + 1), width: project.width, height: project.height, duration: 5, clips: [], tracks: CompLib.DEFAULT_TRACKS.map((t) => ({ ...t })) };
+  project.comps.push(comp);
+  runtime.compGen = (runtime.compGen || 0) + 1;
+  scheduleSave(); renderBin();
+  return comp;
+}
+function addCompClip(comp, trackId, at) {
+  const track = trackId && TRACKS.some((t) => t.id === trackId && t.kind === "video") ? trackId : "V1";
+  if (isTrackLocked(track)) { toast(`${track} is locked`); return; }
+  const here = compCtxId();
+  if (here && CompLib.wouldCycle(state.compCtx ? state.compCtx.root : project, here, comp.id)) { toast("A composition can't contain itself"); return; }
+  pushUndo();
+  const c = { id: "c_" + uid(), mediaId: null, kind: "comp", compId: comp.id, track, start: Math.max(0, at), in: 0, duration: comp.duration, name: comp.name, props: { ...DEFAULT_PROPS, fit: "none" } };
+  project.clips.push(c);
+  runtime.compGen = (runtime.compGen || 0) + 1;
+  selectClip(c.id); scheduleSave(); renderInspector();
+}
+/** The Project tab's compositions: drag one onto the timeline, double-click to open it. */
+function makeCompItem(comp) {
+  const item = document.createElement("div");
+  item.className = "bin-item comp-item";
+  item.draggable = true;
+  const used = CompLib.usages(state.compCtx ? state.compCtx.root : project, comp.id).length;
+  item.innerHTML = `<div class="bin-thumb comp-thumb">▣</div>
+    <div class="bin-meta"><div class="bin-name"></div><div class="bin-sub">Composition · ${comp.width}×${comp.height} · ${comp.duration}s${used ? ` · used ${used}×` : ""}</div></div>
+    <button class="btn tiny accent lib-add" title="Add at the playhead">＋</button>`;
+  item.querySelector(".bin-name").textContent = comp.name;
+  item.title = "Drag onto the timeline · double-click to open and edit";
+  item.addEventListener("dragstart", (e) => { e.dataTransfer.setData("text/fablecut-comp", comp.id); e.dataTransfer.effectAllowed = "copy"; });
+  item.addEventListener("dblclick", () => enterComp(comp.id));
+  item.querySelector(".lib-add").addEventListener("click", (e) => { e.stopPropagation(); addCompClip(comp, "V1", state.time); });
+  item.addEventListener("contextmenu", (e) => { e.preventDefault(); showCompMenu(e.clientX, e.clientY, comp); });
+  return item;
+}
+function showCompMenu(x, y, comp) {
+  hideTrackCtxMenu();
+  const menu = document.createElement("div");
+  menu.className = "ctx-menu"; menu.id = "trackCtxMenu";
+  const item = (label, run, why) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "ctx-item"; b.innerHTML = `<span>${escapeHtml(label)}</span>`;
+    if (why) { b.disabled = true; b.title = why; } else b.addEventListener("click", () => { hideTrackCtxMenu(); run(); });
+    menu.appendChild(b);
+  };
+  item("Open", () => enterComp(comp.id));
+  item("Duplicate", () => {
+    pushUndo();
+    const copy = JSON.parse(JSON.stringify(comp)); copy.id = newCompId(); copy.name = `${comp.name} copy`.slice(0, 80);
+    project.comps.push(copy); runtime.compGen = (runtime.compGen || 0) + 1; scheduleSave(); renderBin();
+  });
+  const used = CompLib.usages(state.compCtx ? state.compCtx.root : project, comp.id).length;
+  item("Delete", () => {
+    pushUndo();
+    project.comps = project.comps.filter((c) => c.id !== comp.id);
+    runtime.compGen = (runtime.compGen || 0) + 1; scheduleSave(); renderBin();
+  }, used ? `Used ${used}× — remove its clips first` : comp.id === compCtxId() ? "It is open" : null);
+  document.body.appendChild(menu);
+  trackCtxMenu = menu;
+  menu.style.left = Math.max(6, Math.min(x, innerWidth - menu.offsetWidth - 6)) + "px";
+  menu.style.top = Math.max(6, Math.min(y, innerHeight - menu.offsetHeight - 6)) + "px";
+}
+function compSectionHtml(c, row) {
+  const comp = getComp(c.compId);
+  if (!comp) return `<div class="insp-section"><h3>Composition</h3><p class="cl-note">Its composition (${escapeHtml(c.compId || "?")}) is missing.</p></div>`;
+  return `<div class="insp-section" data-comp-section><h3>Composition</h3>
+    ${row("Comp", `<span class="insp-ctrls"><input type="text" data-comp-name value="${escapeHtml(comp.name)}" maxlength="80" title="The composition's name (every clip using it shows it)"> <button type="button" class="btn tiny" data-comp-open title="Open it on the timeline (or double-click the clip)">Open</button></span>`)}
+    ${row("Size", `<span class="insp-ctrls"><input type="number" data-comp-w min="16" max="8192" value="${comp.width}" style="max-width:72px"> × <input type="number" data-comp-h min="16" max="8192" value="${comp.height}" style="max-width:72px"></span>`)}
+    ${row("Length (s)", `<input type="number" data-comp-dur min="0.05" step="0.01" value="${comp.duration}">`)}
+    ${row("Background", `<span class="insp-ctrls"><input type="color" data-comp-bg value="${comp.background || "#000000"}"><button type="button" class="btn tiny${comp.background ? "" : " toggle on"}" data-comp-bgoff title="Transparent: what is under the comp clip shows through">None</button></span>`)}
+    <p class="cl-note">The clip shows the comp from its In point (${(+c.in || 0).toFixed(2)} s). Every clip using this comp changes when you edit it.</p>
+  </div>`;
+}
+function bindCompControls(c) {
+  const root = els.inspector.querySelector("[data-comp-section]");
+  const comp = root && getComp(c.compId);
+  if (!comp) return;
+  const edit = (fn) => { pushUndo(); fn(); runtime.compGen = (runtime.compGen || 0) + 1; state.dirtyTimeline = true; scheduleSave(); renderBin(); renderInspector(); };
+  root.querySelector("[data-comp-open]")?.addEventListener("click", () => enterComp(comp.id, c));
+  root.querySelector("[data-comp-name]")?.addEventListener("change", (e) => { const n = e.target.value.trim(); if (n) edit(() => { comp.name = n.slice(0, 80); }); });
+  root.querySelector("[data-comp-w]")?.addEventListener("change", (e) => { const v = Math.round(+e.target.value); if (v >= 16 && v <= 8192) edit(() => { comp.width = v; }); });
+  root.querySelector("[data-comp-h]")?.addEventListener("change", (e) => { const v = Math.round(+e.target.value); if (v >= 16 && v <= 8192) edit(() => { comp.height = v; }); });
+  root.querySelector("[data-comp-dur]")?.addEventListener("change", (e) => { const v = +e.target.value; if (v > 0.05) edit(() => { comp.duration = +v.toFixed(3); }); });
+  root.querySelector("[data-comp-bg]")?.addEventListener("change", (e) => edit(() => { comp.background = e.target.value; }));
+  root.querySelector("[data-comp-bgoff]")?.addEventListener("click", () => edit(() => { delete comp.background; }));
+}
+window.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || !state.compCtx) return;
+  const tg = e.target;
+  if (tg && (tg.tagName === "INPUT" || tg.tagName === "TEXTAREA" || tg.tagName === "SELECT" || tg.isContentEditable)) return;
+  if (state.selIds.size || shapeUi.sel || shapeUi.tool || maskUi.sel >= 0 || maskUi.tool || runtime.anchorTool) return;   // Esc steps back through those first
+  e.preventDefault(); exitComp();
+});
+
 /* ── Shape layers (props.shapes — math in motion.js) ── */
 const shapeNorm = new WeakMap();   // stored list → validated list
 function clipShapes(c) {
@@ -9431,6 +9709,9 @@ function drawClipPicture(c, W, H, t, layered) {
   } else if (c.kind === "video") {
     src = getClipEl(c);
     if (src) { sw = src.videoWidth; sh = src.videoHeight; }
+  } else if (c.kind === "comp") {
+    src = renderComp(c, t);
+    if (src) { sw = src.width; sh = src.height; }
   }
   if (src && sw && sh) {
     // source crop (percent per edge)
@@ -9493,6 +9774,7 @@ function drawClipPicture(c, W, H, t, layered) {
 const Mask = self.FableCutMask;
 const maskCv = {};
 function maskCtx(key, W, H) {
+  if (runtime.compDepth) key += ":" + runtime.compDepth;
   let cv = maskCv[key];
   if (!cv) cv = maskCv[key] = document.createElement("canvas");
   if (cv.width !== W) cv.width = W;
@@ -9528,7 +9810,7 @@ const videoTrackIds = () => TRACKS.filter((tr) => tr.kind === "video").map((tr) 
 /** { mode, track } when the clip has a track matte with a track to take it from. */
 function clipMatte(c) {
   if (c.kind === "audio" || !c.props || !c.props.matte) return null;
-  const track = Mask.matteTrackFor(c, videoTrackIds());
+  const track = Mask.matteTrackFor(c, runtime.scope ? runtime.scope.videoTracks : videoTrackIds());
   return track ? { mode: c.props.matte, track } : null;
 }
 /** The tracks that are mattes for clips in `clips` (the frame's clips): they only cut. */
@@ -9544,7 +9826,7 @@ function trackMatteAt(matte, W, H, t) {
   src.setTransform(1, 0, 0, 1, 0, 0);
   src.globalAlpha = 1; src.globalCompositeOperation = "source-over"; src.filter = "none";
   src.clearRect(0, 0, W, H);
-  const clips = project.clips.filter((x) => x.track === matte.track && x.disabled !== true && x.kind !== "audio" &&
+  const clips = (runtime.scope ? runtime.scope.clips : project.clips).filter((x) => x.track === matte.track && clipRenders(x) && x.kind !== "audio" &&
     x.kind !== "adjust" && activeAt(x, t)).sort((a, b) => a.start - b.start);
   if (!clips.length) return { canvas: src.canvas, empty: true };
   if (luma) { src.fillStyle = "#000"; src.fillRect(0, 0, W, H); }
@@ -12173,7 +12455,7 @@ function ensureFont(name) {
    an export that frame is final. Bounded so a dead network can't stall it. */
 async function loadProjectFonts() {
   const faces = new Map(); // "italic 700 64px "Anton"" -> "Anton"
-  for (const c of project.clips) {
+  for (const c of mediaClips()) {
     if (c.kind !== "text" || c.disabled) continue;
     const p = c.props || {};
     const fams = [p.font || "Segoe UI"];
@@ -12681,7 +12963,7 @@ function waitMediaEl(el, ms = 2500) {
  *  compositor. Preview leaves them no-cors so a stream without ACAO still plays. */
 async function armExportCors() {
   const jobs = [];
-  for (const c of project.clips) {
+  for (const c of mediaClips()) {
     if (c.kind !== "video" || !clipRenders(c)) continue;
     const m = getMedia(c.mediaId);
     if (!m || !isCrossOriginSrc(m.src)) continue;
@@ -12704,7 +12986,7 @@ async function armExportCors() {
   }
   await Promise.all(jobs);
   const missing = [];
-  for (const c of project.clips) {
+  for (const c of mediaClips()) {
     if (c.kind !== "video" || !clipRenders(c)) continue;
     const m = getMedia(c.mediaId);
     if (!m || !isCrossOriginSrc(m.src)) continue;
@@ -13021,7 +13303,7 @@ function playAdvanceVideo(el, mt, eps, rate, { keepPlaying } = {}) {
 }
 const EXPORT_PREFETCH_S = 1.25;
 function prefetchExportVideos(t) {
-  for (const c of project.clips) {
+  for (const c of mediaClips()) {
     if (c.kind !== "video" || !clipRenders(c)) continue;
     if (activeAt(c, t)) continue;
     if (c.start > t + EXPORT_PREFETCH_S || clipEnd(c) <= t) continue;
@@ -13046,7 +13328,7 @@ async function seekVideosTo(t, { queueBusy } = {}) {
   const keepPlaying = fast && !behind && !queueBusy;
   const waits = [];
   const restoreGain = [];
-  for (const c of project.clips) {
+  for (const c of mediaClips()) {
     if (c.kind !== "video") continue;
     if (!clipRenders(c)) continue;
     const el = getClipEl(c); if (!el) continue;
@@ -13127,7 +13409,7 @@ function encodeWAV(buf) {
 const FX_AUTOMATION_STEP = 0.02; // export automation resolution, seconds
 async function renderAudioMix(t0, t1) {
   const jobs = [];
-  for (const c of project.clips) {
+  for (const c of mediaClips()) {
     if (c.kind !== "audio" && c.kind !== "video") continue;
     if (!clipRenders(c)) continue;
     const m = getMedia(c.mediaId); if (!m) continue;
@@ -13209,7 +13491,7 @@ async function renderAudioMix(t0, t1) {
 /* Frame-exact asset prep for the fast exporter: rasterize the SVG frame for
    this exact time, and refresh AI person masks synchronously. */
 async function prepareFrameAssets(t) {
-  for (const c of project.clips) {
+  for (const c of mediaClips()) {
     if (!activeAt(c, t) || !clipRenders(c)) continue;
     if (c.kind === "svg") await prepareSvgFrame(c, t);
     if (c.props?.bgRemove && (c.kind === "video" || c.kind === "image")) {
@@ -13517,7 +13799,7 @@ async function runTrackJob(ticket, fail) {
    stays where it is. */
 async function renderStillAt(t) {
   const waits = [];
-  for (const c of project.clips) {
+  for (const c of mediaClips()) {
     if (!clipRenders(c) || !activeAt(c, t)) continue;
     if (c.kind === "video") {
       const el = getClipEl(c);
@@ -14055,6 +14337,16 @@ function openProjectTabMenu(clientX, clientY) {
     addFolder(null);
   });
   menu.appendChild(item);
+  const compItem = document.createElement("div");
+  compItem.className = "ctx-opt";
+  compItem.textContent = "New composition";
+  compItem.addEventListener("click", () => {
+    closeBinCtxMenu();
+    if (state.binTab !== "project") setBinTab("project");
+    const comp = addNewComp();
+    enterComp(comp.id);
+  });
+  menu.appendChild(compItem);
   document.body.appendChild(menu);
   const pad = 6;
   const w = menu.offsetWidth, h = menu.offsetHeight;
@@ -14790,7 +15082,7 @@ try {
   if (Array.isArray(s) && s.length === 2 && s.every((k) => SCOPE_KINDS[k])) scopes.slots = s;
 } catch { }
 
-function isGradable(c) { return !!c && (c.kind === "video" || c.kind === "image" || c.kind === "svg" || c.kind === "adjust"); }
+function isGradable(c) { return !!c && (c.kind === "video" || c.kind === "image" || c.kind === "svg" || c.kind === "adjust" || c.kind === "comp"); }
 function setWorkspace(ws) {
   colorState.ws = ws === "color" ? "color" : "edit";
   $("app").classList.toggle("ws-color", colorState.ws === "color");

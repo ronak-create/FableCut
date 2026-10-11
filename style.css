@@ -2724,6 +2724,35 @@ body.track-size-s .clip .fade-grip {
   height: 70%;
 }
 
+.clip.c-comp .clip-body {
+  background: linear-gradient(180deg, #c084fc33, #c084fc11), #4c2a73;
+}
+
+.comp-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px 2px 2px;
+  margin-right: 6px;
+  border: 1px solid #c084fc66;
+  border-radius: 6px;
+  background: #c084fc1a;
+  font-size: 12px;
+}
+
+.comp-crumb .crumb-sep {
+  opacity: .6;
+}
+
+.lib-item .bin-thumb.comp-thumb,
+.comp-item .bin-thumb.comp-thumb {
+  display: grid;
+  place-items: center;
+  background: #4c2a73;
+  color: #e9d5ff;
+  font-size: 20px;
+}
+
 .clip.c-shape .clip-body {
   background: linear-gradient(180deg, #5ad1ff33, #5ad1ff11), #1d4f63;
 }
