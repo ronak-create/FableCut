@@ -213,3 +213,24 @@ test("agent: shape and null clips, setShape / removeShape, setParent and the com
   assert.equal(clip("c_a").parent, undefined);
   assert.equal(clip("c_a").props.x, 100);
 });
+
+test("deleting a parent leaves its children in place, under the nearest ancestor that stays", () => {
+  const doc = {
+    tracks: [{ id: "V3", kind: "video" }, { id: "V2", kind: "video" }, { id: "V1", kind: "video" }], media: [],
+    clips: [
+      { id: "g", kind: "null", mediaId: null, track: "V3", start: 0, in: 0, duration: 4, props: { x: 100, rotation: 90 } },
+      { id: "n", kind: "null", mediaId: null, track: "V2", start: 0, in: 0, duration: 4, parent: "g", props: { x: 50, scale: 2 } },
+      { id: "c", kind: "shape", mediaId: null, track: "V1", start: 0, in: 0, duration: 4, parent: "n", props: { x: 10, y: 20 } },
+    ],
+  };
+  const byId = (id) => doc.clips.find((x) => x.id === id);
+  const world = (c) => M.mul(M.parentMatrix(c, byId, 0), M.layerMatrix(c, M.transformAt(c, 0)));
+  const before = world(byId("c"));
+  E.forDoc(doc).removeClips([byId("n")]);
+  const c = byId("c");
+  assert.equal(c.parent, "g", "re-parented to the grandparent");
+  world(c).forEach((v, i) => near(v, before[i], 1e-3));
+  E.forDoc(doc).rippleDelete([byId("g")]);
+  assert.equal(c.parent, undefined, "no ancestor left: unparented");
+  world(c).forEach((v, i) => near(v, before[i], 1e-3));
+});

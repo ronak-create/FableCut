@@ -1044,14 +1044,10 @@ async function callTool(name, args, attempt = 0) {
             const doomed = proj.clips.find((x) => x.id === op.id);
             if (doomed) refuseLocked("removeClip", lockReason(doomed), op);
             const n = proj.clips.length;
-            // its children stay where they are (at their own start) and lose the parent
-            for (const kid of doomed ? proj.clips.filter((x) => x.parent === op.id) : []) {
-              const v = Motion.reparentValues(kid, null, byId, kid.start);
-              kid.props = kid.props || {};
-              for (const [k, val] of Object.entries(v)) if (!kid.keyframes?.[k]?.length) kid.props[k] = val;
-              delete kid.parent;
-              notes.push(`~${kid.id}.parent(none)`);
-            }
+            // its children stay where they are (at their own start), under its own parent if it has one
+            const kids = doomed ? proj.clips.filter((x) => x.parent === op.id).map((x) => x.id) : [];
+            if (doomed) EditOps.detachChildren(proj, new Set([op.id]));
+            for (const id of kids) notes.push(`~${id}.parent(${byId(id).parent || "none"})`);
             proj.clips = proj.clips.filter((x) => x.id !== op.id);
             if (proj.clips.length === n) throw new Error("removeClip: no clip " + op.id);
             notes.push("-" + op.id);

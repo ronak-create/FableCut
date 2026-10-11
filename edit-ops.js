@@ -109,6 +109,27 @@
       if (next.length) c.props.tracks = next; else delete c.props.tracks;
     }
   }
+  /** Clips are leaving the document: their children stay where they are. Each child is
+   *  re-parented to the nearest ancestor that stays (or to nothing), with its static
+   *  position / rotation / scale rewritten to hold its place at its own start. Keyed
+   *  channels keep their keys. Call it before the clips are removed. */
+  function detachChildren(project, goneIds) {
+    if (!MotionLib || !goneIds || !goneIds.size) return 0;
+    const byId = (id) => project.clips.find((x) => x.id === id) || null;
+    let n = 0;
+    for (const k of project.clips) {
+      if (!k.parent || goneIds.has(k.id) || !goneIds.has(k.parent)) continue;
+      let up = byId(k.parent), guard = 0;
+      while (up && goneIds.has(up.id) && guard++ < 64) up = up.parent ? byId(up.parent) : null;
+      const next = up && !goneIds.has(up.id) ? up.id : null;
+      const v = MotionLib.reparentValues(k, next, byId, k.start || 0);
+      k.props = { ...(k.props || {}) };
+      for (const [p, val] of Object.entries(v)) if (!(k.keyframes && Array.isArray(k.keyframes[p]) && k.keyframes[p].length)) k.props[p] = val;
+      if (next) k.parent = next; else delete k.parent;
+      n++;
+    }
+    return n;
+  }
   /** Default stereo pan for an isolated linked stem (L −1, R +1, else center). */
   function defaultPanForChannel(ch) {
     if (ch === 0) return -1;
@@ -125,6 +146,7 @@
     const getClip = (id) => P().clips.find((c) => c.id === id) || null;
     const dropClips = (pred) => {
       const project = P();
+      detachChildren(project, new Set(project.clips.filter(pred).map((x) => x.id)));
       const keep = [];
       for (const x of project.clips) { if (pred(x)) removed(x); else keep.push(x); }
       project.clips = keep;
@@ -979,7 +1001,7 @@
 
   return {
     MIN_DUR, MIN_TRANS_DUR, CROSSFADE_DUR, GAP_EPS, TRIM_LOCKED, DEFAULT_TRACKS,
-    clipEnd, clipSpeed, kfChannel, hasSpeedRamp, mediaTimeAt, shiftKF, shiftMasks, defaultPanForChannel,
+    clipEnd, clipSpeed, kfChannel, hasSpeedRamp, mediaTimeAt, shiftKF, shiftMasks, detachChildren, defaultPanForChannel,
     create, forDoc,
   };
 });

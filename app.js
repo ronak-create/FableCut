@@ -3917,6 +3917,7 @@ function startTrimToolGesture(e, c, mode) {
     transitionIn: cloneTr(x.transitionIn), transitionOut: cloneTr(x.transitionOut),
     masks: x.props && x.props.masks,   // head trims re-base mask keys: each step starts from the originals
     tracks: x.props && x.props.tracks,
+    shapes: x.props && x.props.shapes,
   }]));
   const restore = () => {
     for (const x of project.clips) {
@@ -3927,6 +3928,7 @@ function startTrimToolGesture(e, c, mode) {
       if (x.props) {
         if (b.masks) x.props.masks = b.masks; else delete x.props.masks;
         if (b.tracks) x.props.tracks = b.tracks; else delete x.props.tracks;
+        if (b.shapes) x.props.shapes = b.shapes; else delete x.props.shapes;
       }
     }
   };
@@ -4111,6 +4113,7 @@ function startClipGesture(e, c, mode, collapseOnClick) {
     keyframes: c.keyframes ? JSON.parse(JSON.stringify(c.keyframes)) : undefined,
     masks: c.props.masks,
     tracks: c.props.tracks,
+    shapes: c.props.shapes,
   };
   // moving a clip that belongs to a multi-selection drags the whole group;
   // AV-linked partners (video+audio from one file) always move together
@@ -4166,6 +4169,7 @@ function startClipGesture(e, c, mode, collapseOnClick) {
       c.duration = orig.duration - d;
       c.keyframes = shiftKF(orig.keyframes, d, c.duration);
       if (orig.masks) c.props.masks = Mask.shiftKeys(orig.masks, d);
+      if (orig.shapes) c.props.shapes = Motion.shiftKeys(orig.shapes, d);
       if (orig.tracks) { const tr = Tracker.shiftTracks(orig.tracks, d); if (tr.length) c.props.tracks = tr; else delete c.props.tracks; }
       syncLinkedTiming(c);
     } else { // trim-r
@@ -5262,7 +5266,7 @@ function renderInspector(lite) {
   });
   bindMaskControls(c);
   bindTrackControls(c);
-  bindLayerControls(c);
+  bindParentAnchorControls(c);
   bindShapeControls(c);
   syncInspectorOffClip(c);
   renderKfGraphsPanel();
@@ -10557,7 +10561,7 @@ function anchorRowsHtml(c, p, row) {
     ${row("Anchor X", `<input type="number" data-k="anchorX" value="${fmtInspNum(p.anchorX)}">`, "anchorX")}
     ${row("Anchor Y", `<input type="number" data-k="anchorY" value="${fmtInspNum(p.anchorY)}">`, "anchorY")}`;
 }
-function bindLayerControls(c) {
+function bindParentAnchorControls(c) {
   const root = els.inspector;
   root.querySelector("[data-parent]")?.addEventListener("change", (e) => {
     if (isGroupLocked(c)) { toastLocked(); renderInspector(); return; }
@@ -10605,9 +10609,11 @@ function writeShapeSet(c, path, set) {
   for (const [k, v] of Object.entries(set)) (Motion.KEYED.includes(k) && isAnimated(it, k) ? keyed : statics)[k] = v;
   const next = { ...statics };
   if (Object.keys(keyed).length) {
-    const keys = it.keys.map((k) => ({ ...k }));
-    let j = shapeKeyIndex(keys, t);
-    if (j < 0) { keys.push({ t: +clamp(t, 0, c.duration).toFixed(4) }); keys.sort((a, b) => a.t - b.t); j = shapeKeyIndex(keys, t); }
+    // like setAnimProp: off the clip there is no "at the playhead" to key
+    if (!playheadOverClip(c)) { toast("Move the playhead over the clip to edit its keyframes"); return false; }
+    const keys = it.keys.map((k) => ({ ...k })), kt = +clamp(t, 0, c.duration).toFixed(4);
+    let j = shapeKeyIndex(keys, kt);
+    if (j < 0) { keys.push({ t: kt }); keys.sort((a, b) => a.t - b.t); j = shapeKeyIndex(keys, kt); }
     Object.assign(keys[j], keyed);
     next.keys = keys;
   }
