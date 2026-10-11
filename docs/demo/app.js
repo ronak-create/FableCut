@@ -9310,19 +9310,28 @@ function drawMotionBlurred(c, W, H, t, asMatte) {
   const lo = c.start, hi = clipEnd(c) - 1e-4;
   const t0 = clamp(t - span / 2, lo, hi), t1 = clamp(t + span / 2, lo, hi);
   if (t1 - t0 < 1e-6 || !clipMovesBetween(c, t0, t1, W, H)) return false;
-  const acc = maskCtx("mbAcc", W, H), smp = maskCtx("mbSmp", W, H);
-  acc.setTransform(1, 0, 0, 1, 0, 0); acc.globalAlpha = 1; acc.globalCompositeOperation = "source-over"; acc.filter = "none";
-  acc.clearRect(0, 0, W, H);
+  // a blurred clip on a matte track blurs inside this one's samples: each depth has its own buffers
+  const depth = runtime.mbDepth = (runtime.mbDepth || 0) + 1;
+  const acc = maskCtx("mbAcc" + depth, W, H), smp = maskCtx("mbSmp" + depth, W, H);
   const main = ctx2d;
-  for (let i = 0; i < n; i++) {
-    const ts = t0 + (t1 - t0) * i / (n - 1);
-    smp.setTransform(1, 0, 0, 1, 0, 0); smp.globalAlpha = 1; smp.globalCompositeOperation = "source-over"; smp.filter = "none";
-    smp.clearRect(0, 0, W, H);
-    ctx2d = smp;
-    try { drawClipCut(c, W, H, ts, asMatte, true); } finally { ctx2d = main; }
-    acc.globalCompositeOperation = "lighter"; acc.globalAlpha = 1 / n;
-    acc.drawImage(smp.canvas, 0, 0);
-  }
+  try {
+    acc.setTransform(1, 0, 0, 1, 0, 0); acc.globalAlpha = 1; acc.globalCompositeOperation = "source-over"; acc.filter = "none";
+    acc.clearRect(0, 0, W, H);
+    acc.fillStyle = "#000";
+    for (let i = 0; i < n; i++) {
+      const ts = t0 + (t1 - t0) * i / (n - 1);
+      smp.setTransform(1, 0, 0, 1, 0, 0); smp.globalAlpha = 1; smp.globalCompositeOperation = "source-over"; smp.filter = "none";
+      smp.clearRect(0, 0, W, H);
+      ctx2d = smp;
+      try { drawClipCut(c, W, H, ts, asMatte, true); } finally { ctx2d = main; }
+      // running average, exact in transparent areas too: acc = acc·(1−a) + sample·a with a = 1/(i+1).
+      // (Adding every sample at 1/n instead rounds each 8-bit contribution and bands the result.)
+      const a = 1 / (i + 1);
+      if (i > 0) { acc.globalCompositeOperation = "destination-in"; acc.globalAlpha = 1 - a; acc.fillRect(0, 0, W, H); }
+      acc.globalCompositeOperation = "lighter"; acc.globalAlpha = a;
+      acc.drawImage(smp.canvas, 0, 0);
+    }
+  } finally { runtime.mbDepth = depth - 1; ctx2d = main; }
   acc.globalCompositeOperation = "source-over"; acc.globalAlpha = 1;
   if (live) { const per = (performance.now() - began) / n, prev = runtime.mbCost.get(c.id); runtime.mbCost.set(c.id, prev ? prev * 0.7 + per * 0.3 : per); }
   const p = evalProps(c, t);
@@ -9406,8 +9415,8 @@ function drawClipPicture(c, W, H, t, layered) {
     return { p, geom };
   }
   if (c.kind === "text") {
-    const b = layerBox(c, p, W, H, t);
-    geom = noteMaskGeom(c, ctx2d.getTransform(), -b.hw, -b.hh, b.hw * 2, b.hh * 2);
+    const b = layerBox(c, p, W, H, t);   // a path's box is usually off the origin (ox / oy)
+    geom = noteMaskGeom(c, ctx2d.getTransform(), (b.ox || 0) - b.hw, (b.oy || 0) - b.hh, b.hw * 2, b.hh * 2);
     drawText(c, p, t - c.start);
     ctx2d.restore();
     return { p, geom };
@@ -11559,7 +11568,7 @@ function motionSectionHtml(c, p, row) {
     ${row("Auto-orient", `<input type="checkbox" data-k="autoOrient" ${p.autoOrient ? "checked" : ""} title="Turn the clip with its direction of travel (its Rotation adds on top)">`, "autoOrient")}
     ${c.kind !== "null" ? row("Motion blur", `<input type="range" data-k="motionBlur" min="0" max="720" step="15" value="${+p.motionBlur || 0}" title="Shutter angle — 180° is the film look, 0 is off">
       <span class="val" data-val="motionBlur" data-unit="°">${+p.motionBlur || 0}°</span>`, "motionBlur")
-      + row("Blur samples", `<input type="range" data-k="motionBlurSamples" min="2" max="32" step="1" value="${+p.motionBlurSamples || 8}" title="Sub-frame samples per frame — more is smoother and slower (playback uses at most 4)">
+      + row("Blur samples", `<input type="range" data-k="motionBlurSamples" min="2" max="32" step="1" value="${+p.motionBlurSamples || 8}" title="Sub-frame samples per frame — more is smoother and slower (playback uses as many as fit in the frame time; a paused frame and export use them all)">
       <span class="val" data-val="motionBlurSamples" data-unit="">${+p.motionBlurSamples || 8}</span>`, "motionBlurSamples") : ""}
   </div>`;
 }
