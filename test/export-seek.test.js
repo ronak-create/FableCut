@@ -132,10 +132,11 @@ function loadHard() {
     return { hardSeekVideo, sameSourceFrame };`)();
 }
 /** A video whose seeks complete (seeked fires) but whose frame callback never does. */
-function seekingVideo({ currentTime = 0, presented = null, completes = true } = {}) {
+function seekingVideo({ currentTime = 0, presented = null, completes = true, frameDur = 1 / 30 } = {}) {
   const listeners = new Map();
   const el = {
-    _t: currentTime, paused: true, readyState: 2, seeking: false, _fcPresentedTime: presented,
+    _t: currentTime, paused: true, readyState: 2, seeking: false, _fcPresentedTime: presented, rvfcCalls: 0,
+    _fcLastShown: presented, _fcFrameDur: frameDur, _fcFrameSeen: frameDur ? 5 : 0,   // as learned from earlier frames
     pause() { el.paused = true; },
     get currentTime() { return el._t; },
     set currentTime(v) {
@@ -145,7 +146,7 @@ function seekingVideo({ currentTime = 0, presented = null, completes = true } = 
     },
     addEventListener(n, f) { (listeners.get(n) || listeners.set(n, []).get(n)).push(f); },
     removeEventListener(n, f) { const a = listeners.get(n) || []; const i = a.indexOf(f); if (i >= 0) a.splice(i, 1); },
-    requestVideoFrameCallback() {},   // never fires: nothing new was presented
+    requestVideoFrameCallback() { el.rvfcCalls++; },   // never fires: nothing new was presented
   };
   return el;
 }
@@ -153,10 +154,30 @@ function seekingVideo({ currentTime = 0, presented = null, completes = true } = 
 test("hardSeekVideo: slow motion inside the frame on screen resolves without a frame callback", async () => {
   const { hardSeekVideo } = loadHard();
   const el = seekingVideo({ currentTime: 1.0, presented: 1.0 });
-  const t0 = Date.now();
-  await hardSeekVideo(el, 1.02);   // 0.6x: the next output frame is still source frame 1.0
-  assert.ok(Date.now() - t0 < 400, "accepted after the first short wait, not after every retry");
+  await hardSeekVideo(el, 1.02);   // 0.6x on 30 fps footage: still source frame 1.0 (1.0 … 1.033)
+  assert.equal(el.rvfcCalls, 1, "accepted after the first wait, not after every retry");
   assert.equal(el._fcPresentedTime, 1.0, "the presented frame is still the one on screen");
+});
+
+test("hardSeekVideo: a target in the next source frame is not taken for the frame on screen", async () => {
+  const { hardSeekVideo, sameSourceFrame } = loadHard();
+  const el = seekingVideo({ currentTime: 1.0, presented: 1.0 });
+  el._t = 1.04; el.seeking = false;
+  assert.equal(sameSourceFrame(el, 1.04, 1.0), false, "1.04 s is the next frame of 30 fps footage");
+  const unknown = seekingVideo({ currentTime: 1.0, presented: 1.0, frameDur: 0 });
+  unknown._t = 1.02;
+  assert.equal(sameSourceFrame(unknown, 1.02, 1.0), false, "no frame duration learned yet: never assume");
+  await hardSeekVideo(el, 1.04);   // only the finished seek on the last try settles it
+  assert.equal(el.rvfcCalls, 3);
+  assert.equal(el._fcPresentedTime, 1.04);
+});
+
+test("notePresented learns the source frame duration from consecutive frames", () => {
+  const { notePresented } = loadWait();
+  const el = {};
+  for (const t of [0, 1 / 30, 3 / 30, 4 / 30, 5 / 30]) notePresented(el, t);   // one dropped frame in there
+  assert.ok(Math.abs(el._fcFrameDur - 1 / 30) < 1e-9);
+  assert.equal(el._fcFrameSeen, 4);
 });
 
 test("hardSeekVideo: a late frame callback on the last try still uses the finished seek", async () => {

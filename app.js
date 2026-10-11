@@ -12837,7 +12837,16 @@ function videoRangeBuffered(el, from, to) {
   return el.readyState >= 3;
 }
 function notePresented(el, mediaTime) {
-  if (Number.isFinite(mediaTime)) el._fcPresentedTime = mediaTime;
+  if (!Number.isFinite(mediaTime)) return;
+  // learn the source's frame duration from consecutive presented frames (the smallest
+  // step seen: playback can drop frames, never split one)
+  const prev = el._fcLastShown;
+  if (prev != null) {
+    const d = mediaTime - prev;
+    if (d > 1 / 240 && d < 0.1) { el._fcFrameDur = Math.min(el._fcFrameDur || Infinity, d); el._fcFrameSeen = (el._fcFrameSeen || 0) + 1; }
+  }
+  el._fcLastShown = mediaTime;
+  el._fcPresentedTime = mediaTime;
 }
 function presentedClose(el, mt, eps) {
   return el._fcPresentedTime != null && Math.abs(el._fcPresentedTime - mt) <= eps;
@@ -12874,10 +12883,13 @@ function assignVideoTime(el, mt, accurate) {
   }
   el.currentTime = mt;
 }
-/** A finished seek to mt still shows the frame that was presented at `shown`: same source frame. */
+/** A finished seek to mt still shows the frame presented at `shown`: mt lies inside that one
+ *  source frame, by the frame duration learned from presented frames (unknown → no). */
 function sameSourceFrame(el, mt, shown) {
-  return shown != null && el.readyState >= 2 && !el.seeking &&
-    Math.abs(el.currentTime - mt) < 0.002 && mt >= shown - 1e-4 && mt - shown < 0.05;
+  const dur = el._fcFrameDur;
+  if (shown == null || !(el._fcFrameSeen >= 3) || !(dur > 0)) return false;
+  return el.readyState >= 2 && !el.seeking && Math.abs(el.currentTime - mt) < 0.002 &&
+    mt >= shown - 1e-4 && mt < shown + dur - 1e-4;
 }
 function hardSeekVideo(el, mt, attempt = 0, shown = el._fcPresentedTime) {
   const hasRvfc = typeof el.requestVideoFrameCallback === "function";
