@@ -396,7 +396,7 @@ These are quick looks. For real grading use `props.grade` (see "Color" below).
 | `bgColor` `bgOpacity` | "#000", 0 | rounded pill behind each line |
 | `textAnim` | "none" | typewriter · word-pop · word-slide · karaoke · **letter-pop** (per-character entrance; Arabic/Indic auto-fallback to per-word clusters so joined letters shape correctly) · **wave** (looping per-character ride; same shaping fallback) · **bounce** (looping per-word hop) · **shake** (looping jitter) · **clip-reveal** (wipe-mask sweep, per line) · **zoom-in** (scale + opacity settle) · **font-cut** (rhythmically swaps typeface, then settles — see `fontCutSet`) · **rise-mask** (line rises from behind its baseline, lower-third reveal) |
 | `wordRate` | 0.15 | seconds per word (typewriter: /4, letter-pop: /3 per character); also staggers `clip-reveal`/`zoom-in`/`rise-mask` per line |
-| `textPath` | — | set the title along a path: one shape item (`path`, `line`, `ellipse`, `rect`, `polygon`, `star`) whose outline is the baseline; one line of text. See "Motion paths, motion blur and text on a path" |
+| `textPath` | — | set the title along a path: one shape item (`path`, `line`, `ellipse`, `rect`, `polygon`, `star`) whose outline is the baseline; more lines follow on parallel curves below it. See "Motion paths, motion blur and text on a path" |
 | `pathOffset` · `pathAlign` | 0 · "start" | where along the path the text sits (% of its length, keyframable, wraps on closed paths) · which end of the text sits there: start · center · end |
 | `fontCutSet` | (curated) | array of font family names cycled by `font-cut`, e.g. `["Anton","Bebas Neue","Archivo Black","Oswald"]`; each is auto-loaded |
 
@@ -1083,21 +1083,23 @@ parent on a curved path carries its children along it.
 `motionBlurSamples` moments across `motionBlur / 360` of a frame, centred on
 the frame, and the samples are averaged. 180 is the film look; 360 smears a
 whole frame. It blurs whatever changes: position, scale, rotation, a parent's
-motion, keyed shapes and trims. A clip that does not move draws once. Preview
-playback uses at most 4 samples; a paused frame and export use them all. It
-works on video, image, svg, text and shape clips.
+motion, keyed shapes and trims. A clip that does not move draws once. During
+playback the preview uses as many samples as fit in the frame time (all of them
+on a fast machine); a paused frame and export always use them all. It works on
+video, image, svg, text and shape clips.
 
 **Text on a path.** `textPath` on a text clip is one shape item (`path`, `line`,
 `ellipse`, `rect`, `polygon` or `star`, with the same geometry keys and
 `keys` as in "Shapes, nulls and parenting", but no paint or trim) whose
-outline is the baseline, in the title's own px. The text runs along it in one
-line, each letter turned with the path. `pathOffset` (% of the path's length,
-keyframable) is where the text sits, and `pathAlign` says which end of the
-text sits there. On a closed path the text wraps around; keying `pathOffset`
-0 → 100 sends it once around a circle. `typewriter`, `letter-pop` and `wave`
-animate on a path; the other text animations show the text still. Font,
-size, colour, gradient, stroke, glow, shadow and `letterSpacing` all apply;
-text boxes and alignment do not.
+outline is the baseline, in the title's own px. The first line of text runs
+along it, each letter turned with the path; each further line (`\n`) runs on a
+parallel curve one line-height below, so its letters space by that curve's own
+length. `pathOffset` (% of the path's length, keyframable) is where the text
+sits, and `pathAlign` says which end of each line sits there. On a closed path
+the text wraps around; keying `pathOffset` 0 → 100 sends it once around a
+circle. Every text animation plays along the path. Font, size, colour,
+gradient, stroke, glow, shadow, `lineHeight` and `letterSpacing` all apply;
+text boxes and `align` do not (`pathAlign` takes their place).
 
 ```jsonc
 { "kind": "text", "props": { "text": "AROUND AND AROUND • ", "font": "Anton", "fontSize": 40, "letterSpacing": 4,

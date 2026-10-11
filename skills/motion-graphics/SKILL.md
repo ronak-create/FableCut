@@ -128,8 +128,9 @@ them out together.
   Add a trailing " • " so the ends don't touch. Size the path to the text:
   the circle's circumference (π × w) should be a bit longer than the text.
   `pathAlign:"center"` with `pathOffset:50` centres a title on an arc.
-- Text on a path is one line. Only `typewriter`, `letter-pop` and `wave`
-  animate on it.
+- Multi-line text on a path: each line after the first runs on a parallel
+  curve one line-height below. Every `textAnim` works on a path;
+  `letter-pop` and `rise-mask` read especially well on arcs.
 
 ## Things that trip agents up
 

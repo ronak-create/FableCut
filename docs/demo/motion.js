@@ -733,9 +733,21 @@
   }
 
   /* ── Paths as tracks: arc-length sampling of an outline (text on a path) ── */
-  /** A sampler over an outline: { length, at(d) → {x, y, angle°} } with d in px along it (wraps when closed). */
-  function pathSampler(A, closed) {
-    const P = flatten(A, closed, 48), L = [0];
+  /** A sampler over an outline: { length, at(d) → {x, y, angle°} } with d in px along it (wraps when closed).
+   *  offset: a parallel curve that far to the right of the direction of travel (below a left-to-right
+   *  line), so a second line of text gets its own, shorter or longer, track. */
+  function pathSampler(A, closed, offset = 0) {
+    let P = flatten(A, closed, 48);
+    if (offset && P.length > 1) {
+      const n = P.length, seg = (i) => { const a = P[i], b = P[i + 1]; const l = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1; return [(b[0] - a[0]) / l, (b[1] - a[1]) / l]; };
+      P = P.map((q, i) => {
+        const t1 = i < n - 1 ? seg(i) : null, t0 = i > 0 ? seg(i - 1) : (closed && n > 2 ? seg(n - 2) : null);
+        let tx = (t0 ? t0[0] : 0) + (t1 ? t1[0] : 0), ty = (t0 ? t0[1] : 0) + (t1 ? t1[1] : 0);
+        const l = Math.hypot(tx, ty) || 1; tx /= l; ty /= l;
+        return [q[0] - ty * offset, q[1] + tx * offset];
+      });
+    }
+    const L = [0];
     for (let i = 1; i < P.length; i++) L.push(L[i - 1] + Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]));
     const length = L[L.length - 1];
     const at = (d) => {
@@ -751,7 +763,7 @@
       if (outside) { const over = d < 0 ? d : d - length; x += Math.cos(angle) * over; y += Math.sin(angle) * over; }   // runs on straight past the ends
       return { x, y, angle: angle * 180 / Math.PI };
     };
-    return { length, at };
+    return { length, at, points: P };
   }
   const TEXT_PATH_TYPES = ["path", "line", "ellipse", "rect", "polygon", "star"];
   /** Ready-made text paths (the editor's buttons and the agent's setTextPath names). */

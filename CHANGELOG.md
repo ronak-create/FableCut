@@ -14,11 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   frame; drag keys and handles to shape it. **Smooth** / **Straight** in the
   Inspector's Motion section, and **Auto-orient** turns the clip along the path.
 - **Motion blur.** `motionBlur` (shutter angle) and `motionBlurSamples` average
-  sub-frame samples of a moving clip, in preview and export alike.
+  sub-frame samples of a moving clip, in preview and export alike; playback
+  uses as many samples as the frame time allows.
 - **Text on a path.** A title's `textPath` (a line, arc, circle, wave, any
-  shape outline or a pen path) carries the text in one line, each letter
-  turned with it; `pathOffset` (keyframable) slides it along. Typewriter,
-  letter-pop and wave animate on the path.
+  shape outline or a pen path) carries the text, each letter turned with it;
+  further lines run on parallel curves below. `pathOffset` (keyframable)
+  slides it along, and every text animation plays along the path.
 - Agents: `setMotionPath` and `setTextPath` patch ops; the new props are
   validated and shown in the compact view.
 - **Shape layers.** A new clip kind, `shape`, draws vector items in

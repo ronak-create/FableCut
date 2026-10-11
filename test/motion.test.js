@@ -335,3 +335,13 @@ test("agent: setMotionPath, setTextPath, motion blur props and the compact view"
   assert.match(compact.text, /c_s V2 .*"motionBlur":180.*kf:x\(3\),y\(3\) path:curved/);
   assert.match(compact.text, /c_t V3 .*"textPath":"path\(3\)"/);
 });
+
+test("text on a path: further lines run on parallel curves", () => {
+  const line = M.outline(M.normalizeItem({ type: "line", points: [[0, 0], [100, 0]] }));
+  const below = M.pathSampler(line.A, false, 30);
+  near(below.length, 100, 1e-6);
+  assert.deepEqual([below.at(50).x, below.at(50).y], [50, 30], "a straight line's parallel sits below it");
+  const ring = M.outline(M.normalizeItem({ type: "ellipse", w: 200, h: 200 }));
+  const outer = M.pathSampler(ring.A, true, 0), inner = M.pathSampler(ring.A, true, 20);
+  near(inner.length / outer.length, 80 / 100, 0.01);   // clockwise: below = inside, a shorter track
+});

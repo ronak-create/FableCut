@@ -9303,7 +9303,10 @@ function drawClipCut(c, W, H, t, asMatte, raw) {
 function drawMotionBlurred(c, W, H, t, asMatte) {
   const fps = projectFps() || 30, span = clamp(+c.props.motionBlur, 0, 720) / 360 / fps;
   let n = clamp(Math.round(+c.props.motionBlurSamples || 8), 2, 32);
-  if (state.playing && !state.exporting) n = Math.min(n, 4);
+  // playback: as many samples as fit in ~12 ms (all of them on a fast machine); a paused frame and export use them all
+  const live = state.playing && !state.exporting, cost = live && (runtime.mbCost ||= new Map()).get(c.id);
+  if (cost) n = clamp(Math.floor(12 / cost), 2, n);
+  const began = live ? performance.now() : 0;
   const lo = c.start, hi = clipEnd(c) - 1e-4;
   const t0 = clamp(t - span / 2, lo, hi), t1 = clamp(t + span / 2, lo, hi);
   if (t1 - t0 < 1e-6 || !clipMovesBetween(c, t0, t1, W, H)) return false;
@@ -9321,6 +9324,7 @@ function drawMotionBlurred(c, W, H, t, asMatte) {
     acc.drawImage(smp.canvas, 0, 0);
   }
   acc.globalCompositeOperation = "source-over"; acc.globalAlpha = 1;
+  if (live) { const per = (performance.now() - began) / n, prev = runtime.mbCost.get(c.id); runtime.mbCost.set(c.id, prev ? prev * 0.7 + per * 0.3 : per); }
   const p = evalProps(c, t);
   main.save();
   main.setTransform(1, 0, 0, 1, 0, 0);
@@ -11218,29 +11222,41 @@ function textPathAt(c, t) { const n = clipTextPath(c); return n ? Motion.itemAt(
 /** The box of the text on its path, in the title's own px (for the selection box and masks). */
 function textPathBox(c, p, t) {
   const it = textPathAt(c, t);
-  const b = it && Motion.bounds([{ ...it, stroke: "none", on: true }]);
-  if (!b) return null;
-  const pad = (+p.fontSize || 72) * 0.8, s = Motion.contentScale(c, p);
-  return { ox: (b.x0 + b.x1) / 2 * s, oy: (b.y0 + b.y1) / 2 * s, hw: ((b.x1 - b.x0) / 2 + pad) * s, hh: ((b.y1 - b.y0) / 2 + pad) * s };
+  if (!it) return null;
+  const lines = Math.max(1, String(p.text || "").split("\n").length), size = +p.fontSize || 72, lh = size * lineHeightOf(p);
+  const { A, closed } = Motion.outline(it), m = Motion.itemMatrix(it);
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const off of lines > 1 ? [0, (lines - 1) * lh] : [0]) {   // the first and the last line's tracks
+    for (const [x, y] of Motion.pathSampler(A, closed, off).points) {
+      const [px, py] = Motion.apply(m, x, y);
+      x0 = Math.min(x0, px); y0 = Math.min(y0, py); x1 = Math.max(x1, px); y1 = Math.max(y1, py);
+    }
+  }
+  if (!(x1 >= x0)) return null;
+  const pad = size * 0.8, s = Motion.contentScale(c, p);
+  return { ox: (x0 + x1) / 2 * s, oy: (y0 + y1) / 2 * s, hw: ((x1 - x0) / 2 + pad) * s, hh: ((y1 - y0) / 2 + pad) * s };
 }
 function drawTextOnPath(c, p, local) {
   const it = textPathAt(c, c.start + local);
   if (!it) return;
-  const sc = +p.scale || 1, size = +p.fontSize || 72;
+  const sc = +p.scale || 1, size = +p.fontSize || 72, lh = size * lineHeightOf(p);
   ctx2d.scale(sc, sc);
   const m = Motion.itemMatrix(it);
   ctx2d.transform(m[0], m[1], m[2], m[3], m[4], m[5]);
-  setTextFont(ctx2d, p, size);
-  try { ctx2d.letterSpacing = "0px"; } catch { }   // spacing is laid out by hand along the path
-  ctx2d.textBaseline = "alphabetic"; ctx2d.textAlign = "center";
-  const glyphs = graphemeSegments(textSourceString(p).replace(/\s*\n\s*/g, " "));
-  const ls = +p.letterSpacing || 0, widths = glyphs.map((g) => ctx2d.measureText(g).width);
-  const total = widths.reduce((a, b) => a + b, 0) + ls * Math.max(0, glyphs.length - 1);
-  const { A, closed } = Motion.outline(it), path = Motion.pathSampler(A, closed);
-  const base = (+p.pathOffset || 0) / 100 * path.length;
-  let d = p.pathAlign === "center" ? base - total / 2 : p.pathAlign === "end" ? base - total : base;
   const anim = TEXT_ANIMS.includes(p.textAnim) ? p.textAnim : "none";
   const rate = clamp(+p.wordRate || 0.15, 0.03, 2);
+  let fam = p.font || "Segoe UI";
+  if (anim === "font-cut") {   // swap the typeface rhythmically, then settle
+    const setF = (Array.isArray(p.fontCutSet) && p.fontCutSet.length) ? p.fontCutSet : FONT_CUT_DEFAULT;
+    setF.forEach(ensureFont);
+    if (local < 0.6) fam = setF[Math.floor(local / 0.06) % setF.length];
+  }
+  setTextFont(ctx2d, { ...p, font: fam }, size);
+  try { ctx2d.letterSpacing = "0px"; } catch { }   // spacing is laid out by hand along the path
+  ctx2d.textBaseline = "alphabetic"; ctx2d.textAlign = "center";
+  const { A, closed } = Motion.outline(it), ls = +p.letterSpacing || 0;
+  const tracks = [];   // line i runs on a parallel curve i line-heights below the path
+  const track = (i) => tracks[i] || (tracks[i] = Motion.pathSampler(A, closed, i * lh));
   const shadowBlur = (p.textShadow === 0 ? 0 : (+p.textShadow || 12)) * size / 100;
   const fill = () => {
     if (!p.color2) return p.color || "#fff";
@@ -11248,36 +11264,103 @@ function drawTextOnPath(c, p, local) {
     g.addColorStop(0, p.color || "#fff"); g.addColorStop(1, p.color2);
     return g;
   };
+  // Lay out every line along the path (line i sits i line-heights below it), glyph by glyph,
+  // remembering the glyph's word and line so the animations can group them.
+  const lines = textSourceString(p).split("\n");
+  const glyphs = [];   // {g, w, d (centre along the path), line, word, ci (letter index), gi}
+  const lineRuns = [];   // {from, to} along the path, per line
+  let wi = 0, ci = 0, gi = 0;
+  lines.forEach((ln, line) => {
+    const gs = graphemeSegments(ln), ws = gs.map((g) => ctx2d.measureText(g).width);
+    const total = ws.reduce((a, b) => a + b, 0) + ls * Math.max(0, gs.length - 1);
+    const base = (+p.pathOffset || 0) / 100 * track(line).length;
+    let d = p.pathAlign === "center" ? base - total / 2 : p.pathAlign === "end" ? base - total : base;
+    lineRuns.push({ from: d, to: d + total });
+    let inWord = false;
+    gs.forEach((g, j) => {
+      const space = !g.trim();
+      if (!space && !inWord) { inWord = true; } else if (space && inWord) { inWord = false; wi++; }
+      glyphs.push({ g, w: ws[j], d: d + ws[j] / 2, line, word: wi, ci: space ? -1 : ci, gi, space });
+      if (!space) ci++;
+      gi++;
+      d += ws[j] + ls;
+    });
+    if (inWord) wi++;
+  });
+  // group centres (for word-pop / zoom-in, which scale a word or a line about its middle)
+  const centre = (key) => {
+    const out = new Map();
+    for (const q of glyphs) { if (q.space) continue; const k = q[key], o = out.get(k) || { a: Infinity, b: -Infinity }; o.a = Math.min(o.a, q.d - q.w / 2); o.b = Math.max(o.b, q.d + q.w / 2); out.set(k, o); }
+    return out;
+  };
+  const words = anim === "word-pop" ? centre("word") : null, lineBox = anim === "zoom-in" ? centre("line") : null;
   const shown = anim === "typewriter" ? Math.floor(local / (rate / 4)) : Infinity;
-  glyphs.forEach((g, i) => {
-    const w = widths[i], at = path.at(d + w / 2);
-    d += w + ls;
-    if (i >= shown || !g.trim()) return;
-    let scale = 1, alpha = 1, lift = 0;
+  const ease = EASE["ease-out"];
+  for (const q of glyphs) {
+    if (q.space || q.gi >= shown) continue;
+    let d = q.d, scale = 1, alpha = 1, dx = 0, dy = 0, clipL = null, clipR = null, rise = null;
+    const uw = clamp((local - q.word * rate) / 0.25, 0, 1);         // per word
+    const ul = (dur) => clamp((local - q.line * rate) / dur, 0, 1);  // per line
     if (anim === "letter-pop") {
-      const u = clamp((local - i * rate / 3) / 0.18, 0, 1);
-      if (u <= 0) return;
+      const u = clamp((local - q.ci * rate / 3) / 0.18, 0, 1);
+      if (u <= 0) continue;
       scale = Math.max(0.001, backOut(u)); alpha = Math.min(1, u * 2.5);
-    } else if (anim === "wave") lift = Math.sin(local * 4 + i * 0.55) * size * 0.12;
+    } else if (anim === "wave") dy += Math.sin(local * 4 + q.ci * 0.55) * size * 0.12;
+    else if (anim === "word-pop") {
+      if (uw <= 0) continue;
+      scale = Math.max(0.001, backOut(uw)); alpha = Math.min(1, uw * 2.5);
+      const o = words.get(q.word), mid = (o.a + o.b) / 2;
+      d = mid + (d - mid) * scale;
+    } else if (anim === "word-slide") {
+      if (uw <= 0) continue;
+      dy += (1 - ease(uw)) * size * 0.7; alpha = uw;
+    } else if (anim === "bounce") dy -= Math.abs(Math.sin(local * 3.2 + q.word * 0.9)) * size * 0.18;
+    else if (anim === "shake") { dx += Math.sin(local * 31 + q.word * 7.3) * size * 0.035; dy += Math.cos(local * 27 + q.word * 3.1) * size * 0.035; }
+    else if (anim === "karaoke") alpha = uw >= 1 ? 1 : 0.3 + uw * 0.7;
+    else if (anim === "clip-reveal") {   // a wipe runs along each line in reading order
+      const u = ul(0.5);
+      if (u <= 0) continue;
+      const run = lineRuns[q.line], edge = run.from + (run.to - run.from) * ease(u);
+      if (edge <= d - q.w / 2) continue;
+      if (edge < d + q.w / 2) clipR = edge - d;
+    } else if (anim === "zoom-in") {
+      const u = ul(0.45);
+      if (u <= 0) continue;
+      scale = 1.35 - 0.35 * ease(u); alpha = Math.min(1, u * 1.6);
+      const o = lineBox.get(q.line), mid = (o.a + o.b) / 2;
+      d = mid + (d - mid) * scale;
+    } else if (anim === "rise-mask") {   // each line rises from behind its own baseline
+      const u = ul(0.5);
+      if (u <= 0) continue;
+      rise = (1 - ease(u)) * lh;
+    }
+    const at = track(q.line).at(d);
     ctx2d.save();
     ctx2d.translate(at.x, at.y);
     ctx2d.rotate(at.angle * Math.PI / 180);
-    if (lift) ctx2d.translate(0, lift);
+    ctx2d.translate(dx, dy);
+    if (clipL != null || clipR != null || rise != null) {
+      ctx2d.beginPath();
+      const x0 = clipL ?? -q.w / 2 - size, x1 = clipR ?? q.w / 2 + size;
+      ctx2d.rect(x0, -size * 1.1, x1 - x0, size * 1.4);   // the glyph's line box: ascenders to descenders
+      ctx2d.clip();
+      if (rise != null) ctx2d.translate(0, rise);
+    }
     if (scale !== 1) ctx2d.scale(scale, scale);
     const keep = ctx2d.globalAlpha;
-    ctx2d.globalAlpha = keep * alpha;
+    ctx2d.globalAlpha = keep * clamp(alpha, 0, 1);
     if (p.strokeWidth > 0) {
       ctx2d.lineJoin = "round"; ctx2d.miterLimit = 2; ctx2d.lineWidth = p.strokeWidth; ctx2d.strokeStyle = p.strokeColor || "#000";
-      ctx2d.strokeText(g, 0, 0);
+      ctx2d.strokeText(q.g, 0, 0);
     }
     if (p.glow > 0) { ctx2d.shadowColor = p.glowColor || p.color || "#fff"; ctx2d.shadowBlur = (+p.glow) * size / 40; }
     else if (shadowBlur > 0) { ctx2d.shadowColor = "rgba(0,0,0,.7)"; ctx2d.shadowBlur = shadowBlur; ctx2d.shadowOffsetY = shadowBlur / 3; }
     ctx2d.fillStyle = fill();
-    ctx2d.fillText(g, 0, 0);
-    if (p.glow > 0) ctx2d.fillText(g, 0, 0);
+    ctx2d.fillText(q.g, 0, 0);
+    if (p.glow > 0) ctx2d.fillText(q.g, 0, 0);
     ctx2d.globalAlpha = keep;
     ctx2d.restore();
-  });
+  }
 }
 function textPathSectionHtml(c, p, row) {
   const has = !!clipTextPath(c), editing = has && shapeUi.clip === c.id && samePath(shapeUi.sel, [0]);
@@ -11289,7 +11372,7 @@ function textPathSectionHtml(c, p, row) {
       ${row("Offset", `<input type="range" data-k="pathOffset" min="-100" max="200" step="0.5" value="${fmtInspNum(p.pathOffset, 0.5)}" title="Slide the text along the path, % of its length — key it to make the text travel">
         <span class="val" data-val="pathOffset" data-unit="%">${fmtInspNum(p.pathOffset, 0.5)}%</span>`, "pathOffset")}
       ${row("Align", `<select data-k="pathAlign">${["start", "center", "end"].map((v) => `<option value="${v}" ${(p.pathAlign || "start") === v ? "selected" : ""}>${v}</option>`).join("")}</select>`, "pathAlign")}
-      <p class="cl-note">One line along the path. Typewriter, letter-pop and wave animate on it; other text animations show the text still.</p>`
+      <p class="cl-note">Each line runs along the path, the next one a line below it. Every text animation plays along the path.</p>`
     : `<p class="cl-note">Set the title along a line, an arc, a circle, a wave or a path you draw.</p>`}
   </div>`;
 }
