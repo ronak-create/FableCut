@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a stroke (width, caps, joins, dashes) and trim paths (`trimStart`, `trimEnd`,
   `trimOffset`) for draw-ons; the layer's own trim props trim every path at once.
   Every item value keys on its own, colours and path outlines included. In the
-  editor: **+ Shape** (or the Pen) and a Shape layer section, with items moved,
+  editor: a **Shapes** tab in the bin (or the Pen) and a Shape layer section, with items moved,
   turned, resized and point-edited on the monitor.
 - **Null objects and parenting.** `kind: "null"` is an invisible clip that
   carries a transform. Any visual clip can take a `parent` and then moves,

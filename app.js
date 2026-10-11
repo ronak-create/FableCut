@@ -560,7 +560,7 @@ const state = {
   webCodecs: false,      // VideoEncoder + Annex-B H.264 supported
   dirtyTimeline: true, gesture: false,
   workAreaPlay: false,   // when true, play + Home/End stay inside IN/OUT
-  binTab: "project",     // project | elements | sfx | svg
+  binTab: "project",     // project | elements | sfx | svg | shapes
   disabledTracks: new Set(), // mirror of project.disabledTracks for fast lookup
   lockedTracks: new Set(),   // mirror of project.lockedTracks
   untargetedTracks: new Set(), // mirror of project.untargetedTracks
@@ -1564,7 +1564,7 @@ function listenSSE() {
 async function syncFromServer(force) {
   if (state.gesture || state.exporting) { runtime.pendingSync = true; return; }
   runtime.pendingSync = false;
-  if (state.binTab !== "project") fetchLibrary(state.binTab).then(renderLibrary);
+  if (state.binTab !== "project" && state.binTab !== "shapes") fetchLibrary(state.binTab).then(renderLibrary);
   loadLibraryFonts();
   fetchEncodeProfiles();
   try {
@@ -2166,7 +2166,8 @@ function setBinTab(tab) {
   const isProj = tab === "project";
   els.binList.classList.toggle("hidden", !isProj);
   els.libList.classList.toggle("hidden", isProj);
-  if (!isProj) fetchLibrary(tab).then(renderLibrary);
+  if (tab === "shapes") renderShapesTab();
+  else if (!isProj) fetchLibrary(tab).then(renderLibrary);
 }
 
 /* ═══════════════════════════ EDIT OPERATIONS ═══════════════════════════ */
@@ -10477,23 +10478,35 @@ function addNull() {
   project.clips.push(c);
   selectClip(c.id); scheduleSave(); renderInspector();
 }
-function showShapeMenu(anchor) {
-  hideTrackCtxMenu();
-  const menu = document.createElement("div");
-  menu.className = "ctx-menu"; menu.id = "trackCtxMenu";
-  const item = (label, run) => {
-    const b = document.createElement("button");
-    b.type = "button"; b.className = "ctx-item"; b.innerHTML = `<span>${escapeHtml(label)}</span>`;
-    b.addEventListener("click", () => { hideTrackCtxMenu(); run(); });
-    menu.appendChild(b);
-  };
-  for (const [k, pre] of Object.entries(SHAPE_PRESETS)) item(pre.label, () => addShapeLayer(k));
-  item("Pen path", () => addShapeLayer("pen"));
-  document.body.appendChild(menu);
-  trackCtxMenu = menu;
-  const r = anchor.getBoundingClientRect(), pad = 6;
-  menu.style.left = Math.max(pad, Math.min(r.left, innerWidth - menu.offsetWidth - pad)) + "px";
-  menu.style.top = Math.max(pad, Math.min(r.bottom + 4, innerHeight - menu.offsetHeight - pad)) + "px";
+/* The bin's Shapes tab: each row adds a new layer at the playhead (a selected
+   shape layer takes more items from its own Shape layer section). */
+const SHAPE_ICONS = {
+  rect: '<rect x="3" y="6" width="18" height="12" rx="2" fill="#ffd166"/>',
+  ellipse: '<circle cx="12" cy="12" r="8" fill="#7b6cff"/>',
+  polygon: '<polygon points="12,3 20,7.5 20,16.5 12,21 4,16.5 4,7.5" fill="#22d3ee"/>',
+  star: '<polygon points="12,2.5 14.6,9 21.5,9.3 16.1,13.6 18,20.3 12,16.4 6,20.3 7.9,13.6 2.5,9.3 9.4,9" fill="#ff7ac8"/>',
+  line: '<line x1="4" y1="18" x2="20" y2="6" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/>',
+  pen: '<path d="M4 18 C 8 4, 16 4, 20 16" fill="none" stroke="#5ad1ff" stroke-width="2.5" stroke-linecap="round"/><rect x="2.5" y="16.5" width="3" height="3" fill="#fff"/><rect x="18.5" y="14.5" width="3" height="3" fill="#fff"/>',
+  null: '<rect x="5" y="5" width="14" height="14" fill="none" stroke="#ff6b6b" stroke-width="2"/><path d="M12 8v8M8 12h8" stroke="#ff6b6b" stroke-width="2"/>',
+};
+function renderShapesTab() {
+  const rows = [
+    ...Object.entries(SHAPE_PRESETS).map(([k, pre]) => ({ k, name: pre.label, sub: "Shape layer", run: () => addShapeLayer(k) })),
+    { k: "pen", name: "Pen path", sub: "Click points on the monitor", run: () => addShapeLayer("pen") },
+    { k: "null", name: "Null object", sub: "Invisible parent for other clips", run: addNull },
+  ];
+  els.libList.innerHTML = "";
+  for (const r of rows) {
+    const item = document.createElement("div");
+    item.className = "bin-item lib-item";
+    item.title = r.k === "null" ? "Add a null object at the playhead — parent clips to it to move them together" : `Add a ${r.name.toLowerCase()} layer at the playhead`;
+    item.innerHTML = `<div class="bin-thumb shape-thumb"><svg viewBox="0 0 24 24" aria-hidden="true">${SHAPE_ICONS[r.k]}</svg></div>
+      <div class="bin-meta"><div class="bin-name">${escapeHtml(r.name)}</div><div class="bin-sub">${escapeHtml(r.sub)}</div></div>
+      <button class="btn tiny accent lib-add" title="Add at playhead">＋</button>`;
+    item.addEventListener("dblclick", r.run);
+    item.querySelector(".lib-add").addEventListener("click", r.run);
+    els.libList.appendChild(item);
+  }
 }
 /** Parent the selected visual clips to a new null at their centre (a layer group). */
 function parentSelectionToNull() {
@@ -13350,8 +13363,7 @@ els.importUrlOverlay?.addEventListener("click", (e) => {
 });
 $("btnTitle").addEventListener("click", addTitle);
 $("btnAdjust").addEventListener("click", addAdjust);
-$("btnShape").addEventListener("click", (e) => showShapeMenu(e.currentTarget));
-$("btnNull").addEventListener("click", addNull);
+
 $("btnSplit").addEventListener("click", splitAtPlayhead);
 $("btnCloseGap").addEventListener("click", closeGapAtPlayhead);
 $("btnLift").addEventListener("click", () => liftExtract(false));

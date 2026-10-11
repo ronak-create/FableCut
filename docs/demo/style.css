@@ -421,12 +421,12 @@ body.track-size-s .clip.selected {
 /* Media bin: the add buttons share one row, no heading beside them. */
 .panel-head-actions.bin-actions {
   flex: 1;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   min-width: 0;
 }
 
 .panel-head-actions.bin-actions .btn {
-  flex: 1 1 calc(33.3% - 6px);   /* six actions: two rows of three */
+  flex: 1;
   min-width: 0;
   justify-content: center;
   text-align: center;
@@ -2711,6 +2711,17 @@ body.track-size-s .clip .fade-grip {
 
 .clip.c-svg .clip-body {
   background: linear-gradient(180deg, #ffd16633, #ffd16611), #6b5420;
+}
+
+.lib-item .bin-thumb.shape-thumb {
+  display: grid;
+  place-items: center;
+  background: #1d4f63;
+}
+
+.lib-item .bin-thumb.shape-thumb svg {
+  width: 70%;
+  height: 70%;
 }
 
 .clip.c-shape .clip-body {

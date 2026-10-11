@@ -1002,8 +1002,8 @@ turn around: `anchorY: 200` on a 400 px tall shape spins it about its bottom
 edge. Moving the anchor without moving the picture means changing `x`/`y`
 with it (the editor's anchor tool does that).
 
-In the editor: **+ Shape** (rectangle, ellipse, polygon, star, line or a pen
-path) and **+ Null** in the bin header. The **Shape layer** section lists the
+In the editor: the bin's **Shapes** tab adds a rectangle, ellipse, polygon,
+star, line or pen-path layer, or a null object, at the playhead. The **Shape layer** section lists the
 items; pick one to edit it — the sliders, Fill / Stroke (colour or **None**),
 ends and joins, trim, **Group** / **Ungroup** / **Out**, ↑ ↓, **Copy**,
 **Delete** — and on the monitor drag it to move, the knob to turn it (Shift:
