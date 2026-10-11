@@ -68,6 +68,15 @@ these agree. CI's **Release readiness** job checks the starred (★) items for y
 
 **The code**
 - Preview and export go through the same compositor path; check both by hand.
+  For export, render a project that uses the feature (`fablecut_export
+  {where:"headless"}`), pull a frame with ffmpeg and look at it: editing
+  overlays and guides must not be in it.
+- The editor saves only the clip fields it knows (`projectJSON` in `app.js`).
+  A new top-level clip field goes into that list, or the first save from the
+  UI silently drops it. Check a save → reload round trip.
+- A new clip kind also needs: the media-free kinds in `mcp-server.js` (`addClip`
+  and `fablecut_set_project`), a timeline label and colour, its Inspector
+  sections, and the Source monitor's "no source media" message.
 - A new shared module (UMD, like `color.js` or `mask.js`) is loaded in
   `index.html` in dependency order and added to the copy list in
   `docs/demo/sync.js`. Root `*.js` files ship in the npm package automatically. ★
@@ -76,6 +85,10 @@ these agree. CI's **Release readiness** job checks the starred (★) items for y
   dialog (`#helpOverlay` in `index.html`). `test/shortcuts.test.js` checks the
   keys ★; mouse gestures you check yourself.
 - `npm test` passes; add tests for anything an agent or the REST API can reach.
+  Some tests run editor functions in a sandbox (`test/keyframes.test.js`):
+  a new function those call has to be stubbed there.
+- Try every new monitor gesture with real mouse input, and undo / redo
+  through each new action; locked clips and tracks must refuse it.
 
 **Agent parity** (whatever a person can do in the editor, an agent can do too)
 - A new patch op is listed in the `fablecut_patch_project` description and in
@@ -84,6 +97,11 @@ these agree. CI's **Release readiness** job checks the starred (★) items for y
 - A new MCP tool is added to `manifest.json` `tools` ★ and to the tool list at
   the top of `CLAUDE.md`.
 - A new prop shows up in the compact project view when it is set.
+- Try the new ops in a real MCP session, including a refusal: a bad op aborts
+  the whole patch and nothing is saved.
+- When agents need know-how beyond the reference (recipes, gotchas, timing),
+  add or update a skill in `skills/`, point the `edit-video` skill at it, and
+  list it in the README's plugin section and `docs/llms.txt`.
 
 **Docs and site**
 - `CLAUDE.md` describes it (schema, props, ops, a recipe), then run
