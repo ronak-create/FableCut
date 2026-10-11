@@ -74,6 +74,11 @@ const PAGES = [
     parts: [["project.json schema", "Shapes, nulls and parenting"]],
   },
   {
+    slug: "motion-paths", nav: "Motion paths", title: "Motion paths, motion blur and text on a path", group: "The timeline",
+    lede: "Bend a clip's travel into a curve, turn it along the way, blur fast moves with a shutter angle, and set titles along lines, arcs, circles and drawn paths, on the monitor or by an agent with setMotionPath and setTextPath.",
+    parts: [["project.json schema", "Motion paths, motion blur and text on a path"]],
+  },
+  {
     slug: "editing", nav: "Editing rules", title: "Editing rules", group: "The timeline",
     lede: "How tracks, links, locks, targeting and the trim tools behave, for people and agents alike.",
     parts: [["project.json schema", "Semantics"]],

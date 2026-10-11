@@ -199,6 +199,11 @@ same time.
   stroke, dashes and trim paths for draw-ons; null objects, parenting and an
   anchor point on every clip; every value keyframes, edited right on the
   monitor. Agents use the `setShape` and `setParent` patch ops
+- **Motion paths, motion blur and text on a path** — bend a clip's travel into
+  a curve with handles on the monitor, turn it along the way, blur fast moves
+  with a shutter angle (preview and export), and set titles along lines, arcs,
+  circles or drawn paths. Agents use the `setMotionPath` and `setTextPath`
+  patch ops
 - **Motion tracking** — follow a point or a region (with its scale and
   rotation) through a video clip, then make a mask follow it or pin a title,
   sticker or any clip to it; the result is ordinary editable keys. Agents use

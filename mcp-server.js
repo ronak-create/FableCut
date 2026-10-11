@@ -142,7 +142,7 @@ const TOOLS = [
   },
   {
     name: "fablecut_patch_project",
-    description: "Apply targeted edits to the FableCut project WITHOUT round-tripping the whole document — PREFER THIS over get+set for every edit (it is ~10-100x cheaper in tokens and merge-safe by design: it re-reads the latest document from disk, applies your ops in order, bumps revision once, saves atomically). Ops: {op:'addClip', clip:{…}} (id auto-generated if omitted) · {op:'updateClip', id, set:{…}} · {op:'removeClip', id} · {op:'addMedia', media:{…}} · {op:'removeMedia', id} · {op:'setProject', set:{name|width|height|fps|background|markers|disabledTracks|lockedTracks|untargetedTracks|encodeProfile|master}} (markers = the full list [{t, label?, color?}], color: gold|red|orange|green|cyan|blue|purple|pink; master = {gain}, the master fader in dB) · {op:'setTrack', id:'A1', set:{gain?, pan?, out?}} (audio-track fader in dB −60…+12, pan −1…1, out = a submix bus id or 'master'; null or 0 resets) · {op:'setBus', id:'B1', set:{name?, gain?, pan?, mute?}} (submix bus, created if missing; route tracks into it with setTrack out) · {op:'removeBus', id} · {op:'setFx', target:'clip'|'track'|'bus'|'master', id?, preset?:'podcast'|… OR fx:[{type,…params}], append?:true} (audio effects — validated; presets: clean-voice, podcast, radio, deep-voice, telephone, cinematic, wide, muffled; fx:null clears; on a clip it applies to its linked stems too) · {op:'setFxKeys', target, id?, index?|type?, param, keys:[{t, v, ease?}]|null} (automate one effect parameter: t is clip-local for a clip's effects, timeline seconds otherwise; see the 'Audio mix' docs section) · {op:'setGrade', id | ids:[…], grade:{exposure?, temp?, tint?, lift?, gamma?, gain?, offset?, contrast?, pivot?, blacks?, shadows?, midtones?, highlights?, whites?, lowSoft?, highSoft?, saturation?, curves?:{y?, r?, g?, b?}, hueHue?, hueSat?, hueLuma?, satLuma?, layers?:[…], on?}, replace?:true} (color grade on video / image / svg / adjust clips — wheels are [r, g, b, master]; curves are [[x, y], …] point lists on 0…1 and merge per channel; hue curves are [[hue°, value], …] — one point = a ±40° band; layers replaces the whole layer list; merges key by key, null resets a key, replace:true starts from neutral, grade:null clears; see the 'Color' docs section; measure the result with fablecut_scopes) · {op:'setGradeLayer', id | ids, layer: index | 'name', set:{name?, on?, qualifier?:{hue?:[centre°, width°, soft°], sat?:[lo, hi, soft], luma?:[lo, hi, soft], invert?}, mask?:{shape:'ellipse'|'rect'|'poly', x, y, w, h, rotation?, feather?, invert?, points?, keys?:[{t, x?, y?, …}]}, …any grade key}, replace?:true, remove?:true} (a secondary: a grade applied only where the qualifier × mask select; a new name or index = length adds a layer; qualifier and mask merge key by key; check what it selects with fablecut_scopes matte:{clip, layer}) · {op:'setMask', id | ids, mask?: index | 'name', set:{shape?:'rect'|'ellipse'|'bezier'|'freehand', mode?:'add'|'subtract'|'intersect'|'difference', invert?, opacity?, feather? (px), expand? (px, − shrinks), x?, y? (centre, 0…1 of the clip's picture), w?, h?, scale?, rotation?, points?:[[dx, dy, inX?, inY?, outX?, outY?], …] (bezier, around x, y), stroke?:[[u, v], …] (freehand: fitted into a bezier), keys?:[{t, ease?, x?, y?, w?, h?, scale?, rotation?, feather?, expand?, opacity?, points?}], name?, on?}, replace?:true, remove?:true} (clip masks on video / image / svg / text / adjust clips: the clip shows only where its masks combine to, bottom-up; mask left out, an unknown name or index = length adds one — a new mask needs shape; set merges key by key; masks follow the clip's transform; check with fablecut_scopes mask:{clip}) · {op:'removeMask', id, mask} · {op:'setMaskKeys', id, mask, keys:[…]|null} (animate a mask; t = seconds from the clip's start) · {op:'setMatte', id | ids, matte:'alpha'|'alpha-inverted'|'luma'|'luma-inverted'|null, track?:'V3'|null} (track matte: the picture on the video track directly above — or track — cuts the clip by its alpha or its brightness, inverted or not; that track stops drawing while it is a matte; null clears). · {op:'removeTrack', id, track: name | index} (delete a motion track stored by fablecut_track; what follows it keeps its keys). MOTION GRAPHICS: a shape layer is addClip {kind:'shape', track, start, duration, props:{shapes:[…]}} (no mediaId); a null is addClip {kind:'null', …} — invisible, a parent for other clips. {op:'setShape', id | ids, shape?: index | 'name' | '2.0' (path into a group), set:{type?:'rect'|'ellipse'|'polygon'|'star'|'line'|'path'|'group', name?, on?, x?, y? (px from the layer's origin), rotation?, scale?, opacity?, w?, h?, radius? (rect corners), sides?, inner? (star 0.05…1), points?:[[x, y, inX?, inY?, outX?, outY?], …] (line: 2, path: 2…128, px around x, y), closed? (path), fill?, stroke? ('#rrggbb' | '#rrggbbaa' | 'none'), strokeWidth?, lineCap?, lineJoin?, dash?:[on, off…], trimStart?, trimEnd? (0…100 — a draw-on), trimOffset?, items?:[…] (group), keys?:[{t, ease?, …any of x y rotation scale opacity w h radius inner strokeWidth trimStart trimEnd trimOffset fill stroke points}]}, replace?:true, remove?:true} (shape left out, an unknown name or index = length adds one — a new shape needs type; set merges key by key) · {op:'removeShape', id, shape} · {op:'setParent', id | ids, parent: clip id | null, keep?: true, at?} (the clip moves, turns and scales with its parent; keep:true — the default — keeps it where it is at time at, default its start; opacity and effects are not inherited). Every visual clip also has props.anchorX / anchorY (px from its picture's centre: the point x / y place and rotation / scale turn around) and shape clips props.trimStart / trimEnd / trimOffset (trim every path in the layer) — all keyframable. props.blend: normal · multiply · screen · overlay · darken · lighten · color-dodge · color-burn · hard-light · soft-light · difference · exclusion · hue · saturation · color · luminosity · lighter. TIMELINE EDITS — the editor's own split / ripple / trim code, so linked stems, track targeting (untargetedTracks) and locks behave exactly as in the UI; times in seconds: {op:'split', at, ids?} (no ids: every targeted track) · {op:'rippleDelete', ids} (later clips close the hole) · {op:'closeGap', at} · {op:'lift'|'extract', from?, to?} (remove a range; extract closes it; default = project inPoint/outPoint, which then clear) · {op:'insert'|'overwrite', mediaId, at, in?, duration?} (three-point edit: insert pushes later clips right, overwrite replaces what is there; a video brings one audio stem per channel) · {op:'rippleTrim'|'roll', id, side:'in'|'out', delta} · {op:'slip'|'slide', id, delta} (clamped to the media; the note says what was applied) · {op:'crossfade', ids? | at, duration?} (constant-power audio crossfade, borrowing handles from both sides). Any of these takes tracks:[…] to target lanes for that op only. setProject also takes inPoint / outPoint. updateClip merge rules: top-level keys are replaced (keyframes/transitionIn/transitionOut wholesale), `props` merges key-by-key, and setting any key to null deletes it. LOCKS: the user can lock clips (`locked:true`) and tracks (`lockedTracks`); updateClip / removeClip on a locked clip — or on a clip linked to one — and addClip onto a locked track are refused. Leave locked material alone; only if the user asked you to change it, pass force:true on that op (or unlock first: updateClip set:{locked:null}, which is always allowed). All-or-nothing: an invalid op aborts the whole patch unsaved. Optional baseRevision: the revision your ops were planned against (from fablecut_get_project, fablecut_status or the previous patch result) — if the project has moved past it (e.g. the user edited in the UI meanwhile), the patch is refused with CONFLICT and the current revision, nothing saved; re-check the clips you touch, then retry with the new revision. Omit it to apply on top of whatever is latest.",
+    description: "Apply targeted edits to the FableCut project WITHOUT round-tripping the whole document — PREFER THIS over get+set for every edit (it is ~10-100x cheaper in tokens and merge-safe by design: it re-reads the latest document from disk, applies your ops in order, bumps revision once, saves atomically). Ops: {op:'addClip', clip:{…}} (id auto-generated if omitted) · {op:'updateClip', id, set:{…}} · {op:'removeClip', id} · {op:'addMedia', media:{…}} · {op:'removeMedia', id} · {op:'setProject', set:{name|width|height|fps|background|markers|disabledTracks|lockedTracks|untargetedTracks|encodeProfile|master}} (markers = the full list [{t, label?, color?}], color: gold|red|orange|green|cyan|blue|purple|pink; master = {gain}, the master fader in dB) · {op:'setTrack', id:'A1', set:{gain?, pan?, out?}} (audio-track fader in dB −60…+12, pan −1…1, out = a submix bus id or 'master'; null or 0 resets) · {op:'setBus', id:'B1', set:{name?, gain?, pan?, mute?}} (submix bus, created if missing; route tracks into it with setTrack out) · {op:'removeBus', id} · {op:'setFx', target:'clip'|'track'|'bus'|'master', id?, preset?:'podcast'|… OR fx:[{type,…params}], append?:true} (audio effects — validated; presets: clean-voice, podcast, radio, deep-voice, telephone, cinematic, wide, muffled; fx:null clears; on a clip it applies to its linked stems too) · {op:'setFxKeys', target, id?, index?|type?, param, keys:[{t, v, ease?}]|null} (automate one effect parameter: t is clip-local for a clip's effects, timeline seconds otherwise; see the 'Audio mix' docs section) · {op:'setGrade', id | ids:[…], grade:{exposure?, temp?, tint?, lift?, gamma?, gain?, offset?, contrast?, pivot?, blacks?, shadows?, midtones?, highlights?, whites?, lowSoft?, highSoft?, saturation?, curves?:{y?, r?, g?, b?}, hueHue?, hueSat?, hueLuma?, satLuma?, layers?:[…], on?}, replace?:true} (color grade on video / image / svg / adjust clips — wheels are [r, g, b, master]; curves are [[x, y], …] point lists on 0…1 and merge per channel; hue curves are [[hue°, value], …] — one point = a ±40° band; layers replaces the whole layer list; merges key by key, null resets a key, replace:true starts from neutral, grade:null clears; see the 'Color' docs section; measure the result with fablecut_scopes) · {op:'setGradeLayer', id | ids, layer: index | 'name', set:{name?, on?, qualifier?:{hue?:[centre°, width°, soft°], sat?:[lo, hi, soft], luma?:[lo, hi, soft], invert?}, mask?:{shape:'ellipse'|'rect'|'poly', x, y, w, h, rotation?, feather?, invert?, points?, keys?:[{t, x?, y?, …}]}, …any grade key}, replace?:true, remove?:true} (a secondary: a grade applied only where the qualifier × mask select; a new name or index = length adds a layer; qualifier and mask merge key by key; check what it selects with fablecut_scopes matte:{clip, layer}) · {op:'setMask', id | ids, mask?: index | 'name', set:{shape?:'rect'|'ellipse'|'bezier'|'freehand', mode?:'add'|'subtract'|'intersect'|'difference', invert?, opacity?, feather? (px), expand? (px, − shrinks), x?, y? (centre, 0…1 of the clip's picture), w?, h?, scale?, rotation?, points?:[[dx, dy, inX?, inY?, outX?, outY?], …] (bezier, around x, y), stroke?:[[u, v], …] (freehand: fitted into a bezier), keys?:[{t, ease?, x?, y?, w?, h?, scale?, rotation?, feather?, expand?, opacity?, points?}], name?, on?}, replace?:true, remove?:true} (clip masks on video / image / svg / text / adjust clips: the clip shows only where its masks combine to, bottom-up; mask left out, an unknown name or index = length adds one — a new mask needs shape; set merges key by key; masks follow the clip's transform; check with fablecut_scopes mask:{clip}) · {op:'removeMask', id, mask} · {op:'setMaskKeys', id, mask, keys:[…]|null} (animate a mask; t = seconds from the clip's start) · {op:'setMatte', id | ids, matte:'alpha'|'alpha-inverted'|'luma'|'luma-inverted'|null, track?:'V3'|null} (track matte: the picture on the video track directly above — or track — cuts the clip by its alpha or its brightness, inverted or not; that track stops drawing while it is a matte; null clears). · {op:'removeTrack', id, track: name | index} (delete a motion track stored by fablecut_track; what follows it keeps its keys). MOTION GRAPHICS: a shape layer is addClip {kind:'shape', track, start, duration, props:{shapes:[…]}} (no mediaId); a null is addClip {kind:'null', …} — invisible, a parent for other clips. {op:'setShape', id | ids, shape?: index | 'name' | '2.0' (path into a group), set:{type?:'rect'|'ellipse'|'polygon'|'star'|'line'|'path'|'group', name?, on?, x?, y? (px from the layer's origin), rotation?, scale?, opacity?, w?, h?, radius? (rect corners), sides?, inner? (star 0.05…1), points?:[[x, y, inX?, inY?, outX?, outY?], …] (line: 2, path: 2…128, px around x, y), closed? (path), fill?, stroke? ('#rrggbb' | '#rrggbbaa' | 'none'), strokeWidth?, lineCap?, lineJoin?, dash?:[on, off…], trimStart?, trimEnd? (0…100 — a draw-on), trimOffset?, items?:[…] (group), keys?:[{t, ease?, …any of x y rotation scale opacity w h radius inner strokeWidth trimStart trimEnd trimOffset fill stroke points}]}, replace?:true, remove?:true} (shape left out, an unknown name or index = length adds one — a new shape needs type; set merges key by key) · {op:'removeShape', id, shape} · {op:'setParent', id | ids, parent: clip id | null, keep?: true, at?} (the clip moves, turns and scales with its parent; keep:true — the default — keeps it where it is at time at, default its start; opacity and effects are not inherited). MOTION PATHS: x and y keyed at the same time are a position key; curve handles pin / pout (px) on those x and y keys bend the path between keys ({op:'setMotionPath', id | ids, path:'smooth'|'straight', autoOrient?:bool} sets them for you; props.autoOrient turns the clip along its path). props.motionBlur = shutter angle 0…720 (180 = film look), props.motionBlurSamples 2…32. TEXT ON A PATH: {op:'setTextPath', id | ids, path:'line'|'arc'|'circle'|'wave'|{type:'path'|'line'|'ellipse'|'rect'|'polygon'|'star', …shape item geometry, keys?}|null, offset? (% along, keyable as pathOffset), align?:'start'|'center'|'end'} — the title sits on the path in one line. Every visual clip also has props.anchorX / anchorY (px from its picture's centre: the point x / y place and rotation / scale turn around) and shape clips props.trimStart / trimEnd / trimOffset (trim every path in the layer) — all keyframable. props.blend: normal · multiply · screen · overlay · darken · lighten · color-dodge · color-burn · hard-light · soft-light · difference · exclusion · hue · saturation · color · luminosity · lighter. TIMELINE EDITS — the editor's own split / ripple / trim code, so linked stems, track targeting (untargetedTracks) and locks behave exactly as in the UI; times in seconds: {op:'split', at, ids?} (no ids: every targeted track) · {op:'rippleDelete', ids} (later clips close the hole) · {op:'closeGap', at} · {op:'lift'|'extract', from?, to?} (remove a range; extract closes it; default = project inPoint/outPoint, which then clear) · {op:'insert'|'overwrite', mediaId, at, in?, duration?} (three-point edit: insert pushes later clips right, overwrite replaces what is there; a video brings one audio stem per channel) · {op:'rippleTrim'|'roll', id, side:'in'|'out', delta} · {op:'slip'|'slide', id, delta} (clamped to the media; the note says what was applied) · {op:'crossfade', ids? | at, duration?} (constant-power audio crossfade, borrowing handles from both sides). Any of these takes tracks:[…] to target lanes for that op only. setProject also takes inPoint / outPoint. updateClip merge rules: top-level keys are replaced (keyframes/transitionIn/transitionOut wholesale), `props` merges key-by-key, and setting any key to null deletes it. LOCKS: the user can lock clips (`locked:true`) and tracks (`lockedTracks`); updateClip / removeClip on a locked clip — or on a clip linked to one — and addClip onto a locked track are refused. Leave locked material alone; only if the user asked you to change it, pass force:true on that op (or unlock first: updateClip set:{locked:null}, which is always allowed). All-or-nothing: an invalid op aborts the whole patch unsaved. Optional baseRevision: the revision your ops were planned against (from fablecut_get_project, fablecut_status or the previous patch result) — if the project has moved past it (e.g. the user edited in the UI meanwhile), the patch is refused with CONFLICT and the current revision, nothing saved; re-check the clips you touch, then retry with the new revision. Omit it to apply on top of whatever is latest.",
     inputSchema: {
       type: "object",
       properties: {
@@ -807,6 +807,7 @@ async function callTool(name, args, attempt = 0) {
         strokeWidth: 0, strokeColor: "#000", bgColor: "#000", bgOpacity: 0,
         textAnim: "none", wordRate: 0.15, direction: "auto", boxW: 0, boxH: 0, boxFit: false, vAlign: "middle",
         anchorX: 0, anchorY: 0, trimStart: 0, trimEnd: 100, trimOffset: 0,
+        autoOrient: false, motionBlur: 0, motionBlurSamples: 8, pathOffset: 0, pathAlign: "start",
       };
       const hex = (v) => typeof v === "string" && /^#[0-9a-f]{3}$/i.test(v)
         ? "#" + [...v.slice(1)].map((c) => c + c).join("").toLowerCase()
@@ -822,11 +823,13 @@ async function callTool(name, args, attempt = 0) {
             kept[k] = v;
             continue;
           }
-          if (k === "masks" || k === "tracks" || k === "shapes") continue;   // summarized below — point lists and samples are long
+          if (k === "masks" || k === "tracks" || k === "shapes" || k === "textPath") continue;   // summarized below — point lists and samples are long
           if (hex(DEFAULTS[k]) !== hex(v)) kept[k] = v;
         }
         const masks = Mask.describe(Mask.normalizeMasks(o.masks)), tracks = Tracker.describe(Tracker.normalizeTracks(o.tracks));
         const shapes = Motion.describe(Motion.normalizeShapes(o.shapes));
+        const tp = o.textPath && Motion.normalizeTextPath(o.textPath);
+        if (tp) kept.textPath = tp.type + (tp.points ? `(${tp.points.length})` : tp.w ? ` ${tp.w}×${tp.h}` : "");
         return (Object.keys(kept).length ? " " + JSON.stringify(kept) : "") + (shapes ? ` [${shapes}]` : "") + (masks ? ` [${masks}]` : "") + (tracks ? ` [tracks: ${tracks}]` : "");
       };
       // Mixer: only off-default faders / pans, so a fresh project adds no line.
@@ -861,7 +864,8 @@ async function callTool(name, args, attempt = 0) {
           .slice()
           .sort((a, b) => (a.track === b.track ? a.start - b.start : String(a.track).localeCompare(b.track)))
           .map((c) => {
-            const kf = c.keyframes ? " kf:" + Object.entries(c.keyframes).map(([k, v]) => `${k}(${v.length})`).join(",") : "";
+            const kf = c.keyframes ? " kf:" + Object.entries(c.keyframes).map(([k, v]) => `${k}(${v.length})`).join(",") +
+              (Motion.hasPathHandles(c) ? " path:curved" : "") : "";
             const tr = (c.transitionIn ? ` in:${c.transitionIn.type}/${c.transitionIn.duration}` : "") +
                        (c.transitionOut ? ` out:${c.transitionOut.type}/${c.transitionOut.duration}` : "");
             const r3 = (n) => Math.round(n * 1000) / 1000;
@@ -978,6 +982,21 @@ async function callTool(name, args, attempt = 0) {
         if (n) c.props.shapes = n; else delete c.props.shapes;
       };
       const byId = (id) => proj.clips.find((x) => x.id === id) || null;
+      // motion blur, auto-orient, text paths and motion-path handles (pin / pout on x / y keys)
+      const checkMotion = (c, label) => {
+        const p = c.props || {};
+        if (p.motionBlur != null && !(typeof p.motionBlur === "number" && p.motionBlur >= 0 && p.motionBlur <= 720)) throw new Error(`${label}: props.motionBlur is a shutter angle 0…720 (0 = off)`);
+        if (p.motionBlurSamples != null && !(Number.isInteger(p.motionBlurSamples) && p.motionBlurSamples >= 2 && p.motionBlurSamples <= 32)) throw new Error(`${label}: props.motionBlurSamples is a whole number 2…32`);
+        if (p.autoOrient != null && typeof p.autoOrient !== "boolean") throw new Error(`${label}: props.autoOrient is true or false`);
+        if (p.pathAlign != null && !["start", "center", "end"].includes(p.pathAlign)) throw new Error(`${label}: props.pathAlign is start | center | end`);
+        if (p.textPath != null) {
+          if (c.kind !== "text") throw new Error(`${label}: textPath goes on text clips`);
+          try { p.textPath = Motion.normalizeTextPath(p.textPath, true); } catch (err) { throw new Error(`${label}: props.${err.message}`); }
+        }
+        for (const ch of ["x", "y"]) for (const k of (c.keyframes && Array.isArray(c.keyframes[ch]) ? c.keyframes[ch] : []))
+          for (const h of ["pin", "pout"]) if (k && k[h] != null && !(typeof k[h] === "number" && Number.isFinite(k[h])))
+            throw new Error(`${label}: keyframes.${ch} ${h} must be a number (px, the motion path's curve handle)`);
+      };
       const checkParent = (c, label) => {
         if (c.parent == null) { delete c.parent; return; }
         const par = typeof c.parent === "string" && byId(c.parent);
@@ -1013,6 +1032,7 @@ async function callTool(name, args, attempt = 0) {
             checkMasks(c, "addClip");
             checkShapes(c, "addClip");
             checkParent(c, "addClip");
+            checkMotion(c, "addClip");
             checkTracks(c, "addClip");
             checkCompositing(c, "addClip", c.props);
             proj.clips.push(c);
@@ -1034,6 +1054,7 @@ async function callTool(name, args, attempt = 0) {
             if (op.set && op.set.props && "tracks" in op.set.props) checkTracks(c, "updateClip");
             if (op.set && op.set.props && "shapes" in op.set.props) checkShapes(c, "updateClip");
             if (op.set && "parent" in op.set) checkParent(c, "updateClip");
+            checkMotion(c, "updateClip");
             // a track move re-checks the matte too (a clip can't be its own matte)
             checkCompositing(c, "updateClip", op.set && op.set.track ? c.props : op.set && op.set.props);
             if (c.props && c.props.matteTrack && !c.props.matte) delete c.props.matteTrack;   // matte:null clears its track too
@@ -1283,6 +1304,55 @@ async function callTool(name, args, attempt = 0) {
             }
             break;
           }
+          case "setMotionPath": {
+            // {op:"setMotionPath", id | ids, path?: "smooth" | "straight", autoOrient?: bool}
+            const ids = Array.isArray(op.ids) ? op.ids : op.id != null ? [op.id] : [];
+            if (!ids.length) throw new Error("setMotionPath needs id or ids");
+            if (op.path != null && !["smooth", "straight"].includes(op.path)) throw new Error('setMotionPath: path is "smooth" (curve through the position keys) or "straight"');
+            if (op.autoOrient != null && typeof op.autoOrient !== "boolean") throw new Error("setMotionPath: autoOrient is true or false");
+            if (op.path == null && op.autoOrient == null) throw new Error('setMotionPath needs path:"smooth"|"straight" and / or autoOrient');
+            for (const id of ids) {
+              const c = byId(id);
+              if (!c) throw new Error("setMotionPath: no clip " + id);
+              if (c.kind === "audio" || c.kind === "adjust") throw new Error(`setMotionPath: ${id} is a ${c.kind} clip`);
+              refuseLocked("setMotionPath", lockReason(c), op);
+              if (op.path) {
+                if (Motion.posKeys(c).length < 2) throw new Error(`setMotionPath: ${id} needs x and y keyed together at two or more times first (the position keys)`);
+                c.keyframes = op.path === "smooth" ? Motion.smoothPath(c.keyframes) : Motion.straightPath(c.keyframes);
+              }
+              if (op.autoOrient != null) { c.props = c.props || {}; if (op.autoOrient) c.props.autoOrient = true; else delete c.props.autoOrient; }
+              notes.push(`~${id}.motionPath(${Motion.posKeys(c).length} keys${Motion.hasPathHandles(c) ? ", curved" : ""}${c.props && c.props.autoOrient ? ", auto-orient" : ""})`);
+            }
+            break;
+          }
+          case "setTextPath": {
+            // {op:"setTextPath", id | ids, path: "line" | "arc" | "circle" | "wave" | {type, …} | null, offset?, align?}
+            const ids = Array.isArray(op.ids) ? op.ids : op.id != null ? [op.id] : [];
+            if (!ids.length) throw new Error("setTextPath needs id or ids");
+            if (op.path === undefined && op.offset == null && op.align == null) throw new Error("setTextPath needs path (a preset name, a shape item or null), offset and / or align");
+            let item;
+            if (op.path === null) item = null;
+            else if (typeof op.path === "string") {
+              if (!Motion.TEXT_PATH_PRESETS[op.path]) throw new Error(`setTextPath: path is ${Object.keys(Motion.TEXT_PATH_PRESETS).join(" | ")}, a shape item or null`);
+              item = Motion.normalizeTextPath(Motion.TEXT_PATH_PRESETS[op.path], true);
+            } else if (op.path !== undefined) {
+              try { item = Motion.normalizeTextPath(op.path, true); } catch (err) { throw new Error(`setTextPath: ${err.message}`); }
+            }
+            if (op.offset != null && typeof op.offset !== "number") throw new Error("setTextPath: offset is % of the path's length");
+            if (op.align != null && !["start", "center", "end"].includes(op.align)) throw new Error("setTextPath: align is start | center | end");
+            for (const id of ids) {
+              const c = byId(id);
+              if (!c) throw new Error("setTextPath: no clip " + id);
+              if (c.kind !== "text") throw new Error(`setTextPath: ${id} is a ${c.kind} clip — text paths go on text clips`);
+              refuseLocked("setTextPath", lockReason(c), op);
+              c.props = c.props || {};
+              if (op.path !== undefined) { if (item) c.props.textPath = JSON.parse(JSON.stringify(item)); else delete c.props.textPath; }
+              if (op.offset != null) c.props.pathOffset = op.offset;
+              if (op.align != null) c.props.pathAlign = op.align;
+              notes.push(`~${id}.textPath(${c.props.textPath ? c.props.textPath.type : "none"})`);
+            }
+            break;
+          }
           case "removeTrack": {
             // {op:"removeTrack", id, track: "name" | index} — what follows it keeps its keys
             const c = proj.clips.find((x) => x.id === op.id);
@@ -1402,7 +1472,7 @@ async function callTool(name, args, attempt = 0) {
             notes.push(timelineEdit(proj, op, refuseLocked, lockReason));
             break;
           default:
-            throw new Error("Unknown op: " + op.op + " (addClip|updateClip|removeClip|addMedia|removeMedia|setProject|setTrack|setBus|removeBus|setFx|setFxKeys|setGrade|setGradeLayer|setMask|removeMask|setMaskKeys|setMatte|removeTrack|setShape|removeShape|setParent|" +
+            throw new Error("Unknown op: " + op.op + " (addClip|updateClip|removeClip|addMedia|removeMedia|setProject|setTrack|setBus|removeBus|setFx|setFxKeys|setGrade|setGradeLayer|setMask|removeMask|setMaskKeys|setMatte|removeTrack|setShape|removeShape|setParent|setMotionPath|setTextPath|" +
               "split|rippleDelete|closeGap|lift|extract|rippleTrim|roll|slip|slide|insert|overwrite|crossfade)");
         }
       }

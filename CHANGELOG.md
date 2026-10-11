@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Motion paths.** Position keys (x and y keyed together) take bezier
+  handles (`pin` / `pout` on the keys), so a clip travels along a curve, paced
+  along the curve by its eases. The path shows on the monitor with a dot per
+  frame; drag keys and handles to shape it. **Smooth** / **Straight** in the
+  Inspector's Motion section, and **Auto-orient** turns the clip along the path.
+- **Motion blur.** `motionBlur` (shutter angle) and `motionBlurSamples` average
+  sub-frame samples of a moving clip, in preview and export alike.
+- **Text on a path.** A title's `textPath` (a line, arc, circle, wave, any
+  shape outline or a pen path) carries the text in one line, each letter
+  turned with it; `pathOffset` (keyframable) slides it along. Typewriter,
+  letter-pop and wave animate on the path.
+- Agents: `setMotionPath` and `setTextPath` patch ops; the new props are
+  validated and shown in the compact view.
 - **Shape layers.** A new clip kind, `shape`, draws vector items in
   `props.shapes`: rectangles (with rounded corners), ellipses, polygons, stars,
   lines and bezier paths (open or closed), nested in groups. Each has a fill and

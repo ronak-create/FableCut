@@ -542,7 +542,7 @@
   /* ── Layer transforms: anchor point and parenting ── */
   /** The scale a clip's picture is drawn at (a boxed title ignores scale). */
   function contentScale(clip, p) {
-    if (clip && clip.kind === "text" && +p.boxW > 0 && +p.boxH > 0) return 1;
+    if (clip && clip.kind === "text" && +p.boxW > 0 && +p.boxH > 0 && !p.textPath) return 1;
     return +p.scale || 1;
   }
   /** A layer's own matrix: position · rotation · scale about its anchor point. */
@@ -570,6 +570,9 @@
   function transformAt(clip, t) {
     const local = clamp(t - (clip.start || 0), 0, clip.duration || 0), p = clip.props || {}, out = {};
     for (const k of XFORM_KEYS) out[k] = channelAt(clip, k, local, p[k] == null ? XFORM_DEF[k] : +p[k]);
+    const q = pathPositionAt(clip, local);   // a curved motion path moves the children too
+    if (q) { out.x = q.x; out.y = q.y; }
+    if (p.autoOrient) { const a = orientAt(clip, local); if (a != null) out.rotation += a; }
     return out;
   }
   /** The clips a clip is parented through: [parent, grandparent, …]; stops at a missing clip or a loop. */
@@ -616,7 +619,169 @@
     return { x: r3(x), y: r3(y), anchorX: r3(ax), anchorY: r3(ay) };
   }
 
+  /* ── Motion paths: position keys with spatial handles ──
+     A position key is a time where keyframes.x and keyframes.y both have a key.
+     Its curve handles sit on those keys: x key {pin, pout} and y key {pin, pout},
+     px relative to the key's position (in the clip's x / y space). Between two
+     position keys with no other x / y key in between, the clip travels along the
+     cubic bezier key → key+out → next+in → next, at the pace of the arriving key's
+     ease (measured along the curve). Without handles the channels run as usual. */
+  const KEY_EPS = 1e-3;
+  /** The clip's position keys: [{t, x, y, ix, iy, ox, oy, ease, xk, yk}] (xk / yk = the stored keys). */
+  function posKeys(clip) {
+    const kx = clip && clip.keyframes && clip.keyframes.x, ky = clip && clip.keyframes && clip.keyframes.y;
+    if (!Array.isArray(kx) || !Array.isArray(ky) || kx.length < 2 || ky.length < 2) return [];
+    const out = [];
+    for (const a of kx) {
+      const b = ky.find((k) => Math.abs(k.t - a.t) < KEY_EPS);
+      if (!b) continue;
+      out.push({ t: a.t, x: +a.v, y: +b.v, ix: +a.pin || 0, iy: +b.pin || 0, ox: +a.pout || 0, oy: +b.pout || 0,
+        ease: a.ease || "ease-in-out", xk: a, yk: b });
+    }
+    return out.sort((p, q) => p.t - q.t);
+  }
+  function hasPathHandles(clip) {
+    const k = clip && clip.keyframes;
+    return !!k && [k.x, k.y].some((a) => Array.isArray(a) && a.some((x) => x && (+x.pin || +x.pout)));
+  }
+  /** The curved segment that holds clip-local time t, or null (the channels apply there). */
+  function pathSegmentAt(clip, t) {
+    if (!hasPathHandles(clip)) return null;
+    const P = posKeys(clip);
+    for (let i = 0; i < P.length - 1; i++) {
+      const a = P[i], b = P[i + 1];
+      if (t < a.t - 1e-9 || t > b.t + 1e-9) continue;
+      if (!(a.ox || a.oy || b.ix || b.iy)) return null;
+      const between = (arr) => arr.some((k) => k.t > a.t + KEY_EPS && k.t < b.t - KEY_EPS);
+      if (between(clip.keyframes.x) || between(clip.keyframes.y)) return null;
+      return { a, b, A: { x: a.x, y: a.y, ix: a.x, iy: a.y, ox: a.x + a.ox, oy: a.y + a.oy }, B: { x: b.x, y: b.y, ix: b.x + b.ix, iy: b.y + b.iy, ox: b.x, oy: b.y } };
+    }
+    return null;
+  }
+  const segLUT = new Map();   // "x,y,…" → cumulative arc lengths of one cubic (64 steps)
+  function cubicLUT(A, B) {
+    const key = [A.x, A.y, A.ox, A.oy, B.ix, B.iy, B.x, B.y].join(",");
+    let L = segLUT.get(key);
+    if (!L) {
+      L = [0];
+      let prev = [A.x, A.y];
+      for (let j = 1; j <= 64; j++) { const q = cubic(A, B, j / 64); L.push(L[j - 1] + Math.hypot(q[0] - prev[0], q[1] - prev[1])); prev = q; }
+      if (segLUT.size > 512) segLUT.clear();
+      segLUT.set(key, L);
+    }
+    return L;
+  }
+  /** Curve parameter at arc-length fraction s of one cubic. */
+  function paramAtFraction(A, B, s) {
+    const L = cubicLUT(A, B), total = L[64];
+    if (total <= 1e-9) return s;
+    const d = clamp(s, 0, 1) * total;
+    let j = 1;
+    while (j < 64 && L[j] < d) j++;
+    return (j - 1 + (d - L[j - 1]) / Math.max(1e-12, L[j] - L[j - 1])) / 64;
+  }
+  /** {x, y} on the clip's motion path at clip-local t, or null where the channels apply. */
+  function pathPositionAt(clip, t) {
+    const seg = pathSegmentAt(clip, t);
+    if (!seg) return null;
+    const u = (t - seg.a.t) / Math.max(1e-9, seg.b.t - seg.a.t);
+    const s = (EASES[seg.b.ease] || EASES.linear)(clamp(u, 0, 1));
+    const [x, y] = cubic(seg.A, seg.B, paramAtFraction(seg.A, seg.B, s));
+    return { x, y };
+  }
+  /** x / y at clip-local t: the motion path where it curves, the keyframe channels elsewhere. */
+  function positionAt(clip, t, p = clip.props || {}) {
+    const q = pathPositionAt(clip, t);
+    if (q) return q;
+    return { x: channelAt(clip, "x", t, +p.x || 0), y: channelAt(clip, "y", t, +p.y || 0) };
+  }
+  /** Direction of travel at clip-local t in degrees (for auto-orient), or null when the clip never moves. */
+  function orientAt(clip, t) {
+    const kx = clip.keyframes && clip.keyframes.x, ky = clip.keyframes && clip.keyframes.y;
+    const ts = [...(kx || []), ...(ky || [])].map((k) => k.t);
+    if (ts.length < 2) return null;
+    const lo = Math.min(...ts), hi = Math.max(...ts);
+    for (const eps of [1 / 240, 1 / 60, 1 / 10]) {
+      const t0 = clamp(t - eps, lo, hi), t1 = clamp(t + eps, lo, hi);
+      if (t1 - t0 < 1e-9) continue;
+      const a = positionAt(clip, t0), b = positionAt(clip, t1);
+      if (Math.hypot(b.x - a.x, b.y - a.y) > 1e-6) return Math.atan2(b.y - a.y, b.x - a.x) * 180 / Math.PI;
+    }
+    return null;
+  }
+  /** Handles for every position key that make a smooth path through them (Catmull-Rom,
+   *  a third of the way to the neighbours); the ends get one handle each. Returns the keyframes. */
+  function smoothPath(keyframes) {
+    const clip = { keyframes };
+    const P = posKeys(clip);
+    if (P.length < 2) return keyframes;
+    const out = { ...keyframes, x: keyframes.x.map((k) => ({ ...k })), y: keyframes.y.map((k) => ({ ...k })) };
+    const find = (arr, t) => arr.find((k) => Math.abs(k.t - t) < KEY_EPS);
+    P.forEach((k, i) => {
+      const prev = P[i - 1] || k, next = P[i + 1] || k;
+      const tx = (next.x - prev.x) / 6, ty = (next.y - prev.y) / 6;
+      const xk = find(out.x, k.t), yk = find(out.y, k.t);
+      const set = (key, prop, v) => { if (i === 0 && prop === "pin" || i === P.length - 1 && prop === "pout" || Math.abs(v) < 1e-3) delete key[prop]; else key[prop] = r3(v); };
+      set(xk, "pin", -tx); set(xk, "pout", tx); set(yk, "pin", -ty); set(yk, "pout", ty);
+    });
+    return out;
+  }
+  /** The keyframes with every spatial handle removed (a straight path). */
+  function straightPath(keyframes) {
+    const strip = (arr) => Array.isArray(arr) ? arr.map((k) => { const o = { ...k }; delete o.pin; delete o.pout; return o; }) : arr;
+    return { ...keyframes, x: strip(keyframes.x), y: strip(keyframes.y) };
+  }
+
+  /* ── Paths as tracks: arc-length sampling of an outline (text on a path) ── */
+  /** A sampler over an outline: { length, at(d) → {x, y, angle°} } with d in px along it (wraps when closed). */
+  function pathSampler(A, closed) {
+    const P = flatten(A, closed, 48), L = [0];
+    for (let i = 1; i < P.length; i++) L.push(L[i - 1] + Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]));
+    const length = L[L.length - 1];
+    const at = (d) => {
+      if (length <= 0) return { x: P[0] ? P[0][0] : 0, y: P[0] ? P[0][1] : 0, angle: 0 };
+      if (closed) d = ((d % length) + length) % length;
+      const outside = !closed && (d < 0 || d > length);
+      const dd = clamp(d, 0, length);
+      let i = 1;
+      while (i < L.length - 1 && L[i] < dd) i++;
+      const a = P[i - 1], b = P[i], u = (dd - L[i - 1]) / Math.max(1e-12, L[i] - L[i - 1]);
+      const angle = Math.atan2(b[1] - a[1], b[0] - a[0]);
+      let x = a[0] + (b[0] - a[0]) * u, y = a[1] + (b[1] - a[1]) * u;
+      if (outside) { const over = d < 0 ? d : d - length; x += Math.cos(angle) * over; y += Math.sin(angle) * over; }   // runs on straight past the ends
+      return { x, y, angle: angle * 180 / Math.PI };
+    };
+    return { length, at };
+  }
+  const TEXT_PATH_TYPES = ["path", "line", "ellipse", "rect", "polygon", "star"];
+  /** Ready-made text paths (the editor's buttons and the agent's setTextPath names). */
+  const TEXT_PATH_PRESETS = {
+    line: { type: "line", points: [[-420, 0], [420, 0]] },
+    arc: { type: "path", closed: false, points: [[-420, 120], [0, -110, -240, 0, 240, 0], [420, 120]] },
+    circle: { type: "ellipse", w: 520, h: 520 },
+    wave: { type: "path", closed: false, points: [[-450, 0, 0, 0, 150, -160], [0, 0, -150, 160, 150, 160], [450, 0, -150, -160, 0, 0]] },
+  };
+  /** A text clip's props.textPath: one shape item (its outline is the baseline), validated. */
+  function normalizeTextPath(v, strict = false) {
+    if (v == null) return null;
+    const bad = (m) => { if (strict) throw new Error("textPath" + m); return null; };
+    if (!isObj(v)) return bad(" must be an object like {type:'path', points:[[-300, 0], [300, 0]], closed:false}");
+    const type = v.type == null ? "path" : v.type;
+    if (!TEXT_PATH_TYPES.includes(type)) return bad(`.type must be ${TEXT_PATH_TYPES.join(" | ")}`);
+    const src = { ...v, type };
+    for (const k of ["fill", "stroke", "strokeWidth", "lineCap", "lineJoin", "dash", "opacity", "trimStart", "trimEnd", "trimOffset", "name", "on"]) {
+      if (k in src) { if (strict && !["name", "on"].includes(k)) bad(`.${k}: a text path has no paint or trim (the text is what draws)`); delete src[k]; }
+    }
+    if (type === "path" && src.closed == null) src.closed = false;
+    const it = normalizeItem(src, strict, "textPath");
+    if (!it) return null;
+    for (const k of ["fill", "stroke", "strokeWidth", "lineCap", "lineJoin", "trimStart", "trimEnd", "trimOffset", "opacity"]) delete it[k];
+    return it;
+  }
+
   return {
+    posKeys, hasPathHandles, pathSegmentAt, pathPositionAt, positionAt, orientAt, smoothPath, straightPath,
+    pathSampler, TEXT_PATH_TYPES, TEXT_PATH_PRESETS, normalizeTextPath,
     TYPES, MAX_ITEMS, MAX_DEPTH, MAX_POINTS, CAPS, JOINS, KEYED, NUM_KEYED, COLOR_KEYED, RANGE, EASES, OWN,
     normColor, lerpColor, defaultsFor, normalizeShapes, normalizeItem, mergeItem, itemAt, shapesAt, snapshotKey, shiftKeys,
     IDENT, mul, apply, invert, trs, outline, segments, flatten, tracePath, trimRuns, traceTrim, composeTrim, itemMatrix,

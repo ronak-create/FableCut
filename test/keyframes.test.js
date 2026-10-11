@@ -619,12 +619,13 @@ const TRANS = slice("function evalProps(", "/* Rebase clip-local keyframe times 
 
 function makeTransSandbox({ W = 1280, H = 720 } = {}) {
   return new Function(
-    "DEFAULT_PROPS", "EASE", "FILTER_PRESETS", "backOut", "clamp", "els",
+    "DEFAULT_PROPS", "EASE", "FILTER_PRESETS", "backOut", "clamp", "els", "applyMotionPath",
     `${TRANS}\nreturn { evalProps, applyTransition, transOffsetAt };`
   )(
     DEFAULT_PROPS, EASE, { none: {} }, BACKOUT,
     (v, a, b) => Math.min(b, Math.max(a, v)), // clamp, as in app.js
     { preview: { width: W, height: H } },
+    () => {}, // applyMotionPath — motion paths have their own tests (motion.test.js)
   );
 }
 

@@ -294,6 +294,8 @@ Examples in `library/svg/`: `sparkles.svg` (loop), `lower-third.svg`,
       // OPTIONAL — keyframe animation. Times are seconds RELATIVE TO CLIP START.
       // "ease" sits on the DESTINATION keyframe of each segment:
       // linear | ease-in | ease-out | ease-in-out (default ease-in-out).
+      // x and y keys at the same time are a position key; pin / pout on them (px)
+      // are motion-path curve handles (see "Motion paths, motion blur and text on a path").
       "keyframes": {
         "scale":   [ { "t": 0, "v": 1 }, { "t": 5, "v": 1.25, "ease": "linear" } ],
         "opacity": [ { "t": 0, "v": 0 }, { "t": 0.8, "v": 1 } ]
@@ -318,6 +320,8 @@ Examples in `library/svg/`: `sparkles.svg` (loop), `lower-third.svg`,
 | `rotation` | 0 | degrees |
 | `opacity` | 1 | 0–1 |
 | `anchorX`, `anchorY` | 0 | anchor point, px from the picture's centre: the point `x`/`y` place and `rotation`/`scale` turn around |
+| `autoOrient` | false | turn the clip with its direction of travel along its motion path (`rotation` adds on top) |
+| `motionBlur` · `motionBlurSamples` | 0 · 8 | motion blur: shutter angle in degrees (0 = off, 180 = film look, up to 720) · sub-frame samples 2–32 |
 | `blend` | "normal" | how the clip lays over what is under it (see Track mattes and blending) |
 | `matte` · `matteTrack` | — | a track matte (see Track mattes and blending) |
 
@@ -392,6 +396,8 @@ These are quick looks. For real grading use `props.grade` (see "Color" below).
 | `bgColor` `bgOpacity` | "#000", 0 | rounded pill behind each line |
 | `textAnim` | "none" | typewriter · word-pop · word-slide · karaoke · **letter-pop** (per-character entrance; Arabic/Indic auto-fallback to per-word clusters so joined letters shape correctly) · **wave** (looping per-character ride; same shaping fallback) · **bounce** (looping per-word hop) · **shake** (looping jitter) · **clip-reveal** (wipe-mask sweep, per line) · **zoom-in** (scale + opacity settle) · **font-cut** (rhythmically swaps typeface, then settles — see `fontCutSet`) · **rise-mask** (line rises from behind its baseline, lower-third reveal) |
 | `wordRate` | 0.15 | seconds per word (typewriter: /4, letter-pop: /3 per character); also staggers `clip-reveal`/`zoom-in`/`rise-mask` per line |
+| `textPath` | — | set the title along a path: one shape item (`path`, `line`, `ellipse`, `rect`, `polygon`, `star`) whose outline is the baseline; one line of text. See "Motion paths, motion blur and text on a path" |
+| `pathOffset` · `pathAlign` | 0 · "start" | where along the path the text sits (% of its length, keyframable, wraps on closed paths) · which end of the text sits there: start · center · end |
 | `fontCutSet` | (curated) | array of font family names cycled by `font-cut`, e.g. `["Anton","Bebas Neue","Archivo Black","Oswald"]`; each is auto-loaded |
 
 **Title styles (one-tap cohesive looks).** Text clips created in the UI now
@@ -439,7 +445,7 @@ polygons, stars, lines, bezier paths, groups) and `trimStart` / `trimEnd` /
 `trimOffset` (%, a draw-on of every path). **Null objects** (`kind:"null"`)
 never render; other clips are parented to them. See "Shapes, nulls and parenting".
 
-**Animatable props** (usable in `keyframes`): x, y, scale, rotation, opacity, anchorX, anchorY, trimStart, trimEnd, trimOffset,
+**Animatable props** (usable in `keyframes`): x, y, scale, rotation, opacity, anchorX, anchorY, trimStart, trimEnd, trimOffset, pathOffset,
 volume, pan, duck, speed, brightness, contrast, saturation, hue, blur, grayscale, sepia,
 invert, temperature, tint, vignette, cornerRadius, shake, rgbSplit, grain,
 fontSize, letterSpacing, glow.
@@ -1050,6 +1056,86 @@ stroke, `trimEnd: 25`, `trimOffset` keyed 0→100 with `ease:"linear"`;
 to it with `x: 300`; **swing from the top** — `anchorY` at the top edge
 (minus half the height) and `rotation` keyed −10↔10; **burst** — a group of
 lines at different `rotation`s with `scale` keyed 0→1 and `opacity` 1→0.
+
+### Motion paths, motion blur and text on a path
+
+**Motion paths.** When `keyframes.x` and `keyframes.y` both have a key at the
+same time, that is a **position key**. Give position keys curve handles and
+the clip travels along a bezier path between them instead of a straight line.
+The handles are `pin` (arriving) and `pout` (leaving) on the x and y keys,
+in px relative to the key's position, in the clip's `x`/`y` space:
+
+```jsonc
+"keyframes": {
+  "x": [ { "t": 0, "v": -450, "pout": 250 }, { "t": 2, "v": 0, "pin": -250, "pout": 250 }, { "t": 4, "v": 450, "pin": -250 } ],
+  "y": [ { "t": 0, "v": 150, "pout": -300 }, { "t": 2, "v": 0 },                        { "t": 4, "v": 150, "pin": -300 } ]
+}
+```
+
+Between two position keys the clip moves along the curve at the pace of the
+arriving key's `ease`, measured along the curve, so a `linear` key gives an
+even speed around a bend. A segment with an extra x or y key inside it, or
+with no handles, runs the channels as before. `autoOrient: true` turns the
+clip to face its direction of travel, and its `rotation` adds on top. A
+parent on a curved path carries its children along it.
+
+**Motion blur.** `motionBlur` is a shutter angle: the clip is drawn at
+`motionBlurSamples` moments across `motionBlur / 360` of a frame, centred on
+the frame, and the samples are averaged. 180 is the film look; 360 smears a
+whole frame. It blurs whatever changes: position, scale, rotation, a parent's
+motion, keyed shapes and trims. A clip that does not move draws once. Preview
+playback uses at most 4 samples; a paused frame and export use them all. It
+works on video, image, svg, text and shape clips.
+
+**Text on a path.** `textPath` on a text clip is one shape item (`path`, `line`,
+`ellipse`, `rect`, `polygon` or `star`, with the same geometry keys and
+`keys` as in "Shapes, nulls and parenting", but no paint or trim) whose
+outline is the baseline, in the title's own px. The text runs along it in one
+line, each letter turned with the path. `pathOffset` (% of the path's length,
+keyframable) is where the text sits, and `pathAlign` says which end of the
+text sits there. On a closed path the text wraps around; keying `pathOffset`
+0 → 100 sends it once around a circle. `typewriter`, `letter-pop` and `wave`
+animate on a path; the other text animations show the text still. Font,
+size, colour, gradient, stroke, glow, shadow and `letterSpacing` all apply;
+text boxes and alignment do not.
+
+```jsonc
+{ "kind": "text", "props": { "text": "AROUND AND AROUND • ", "font": "Anton", "fontSize": 40, "letterSpacing": 4,
+  "textPath": { "type": "ellipse", "w": 300, "h": 300 }, "pathAlign": "start" },
+  "keyframes": { "pathOffset": [ { "t": 0, "v": 0 }, { "t": 6, "v": 100, "ease": "linear" } ] } }
+```
+
+In the editor: when the selected clip has two or more position keys, its path
+shows on the monitor: the curve, a dot per frame (their spacing is the speed),
+a square per key and the keys' handles. Drag a key to move it, drag a handle to
+bend the path (Alt breaks the pair), Alt-drag a key to pull new handles, and
+double-click a key to make it a corner again. Moving the clip on the monitor
+or typing X / Y keys both channels together. The Inspector's **Motion**
+section has **Smooth** (handles through every position key), **Straight**,
+**Auto-orient**, **Motion blur** and **Blur samples**. A title's **Text path**
+section sets it on a **Line**, **Arc**, **Circle**, **Wave** or a **Pen** path
+(click points, drag to curve, Enter to finish, click the first point to close
+it). **Edit path** shows the path's points on the monitor, and **Offset** and
+**Align** place the text along it.
+
+**Agents:**
+
+- Write `pin` / `pout` on x / y keys directly, or
+  `{op:"setMotionPath", id | ids, path:"smooth" | "straight", autoOrient?: true}`.
+  `"smooth"` needs the position keys first (x and y keyed together at two or more times).
+- Motion blur: `updateClip` with `props:{motionBlur:180, motionBlurSamples:12}`.
+- `{op:"setTextPath", id | ids, path:"line" | "arc" | "circle" | "wave" | {type:"path", points:[…], closed:false, …} | null, offset?, align?}`
+  sets, replaces or removes (`null`) a title's path; animate `pathOffset` with
+  keyframes.
+- These are validated on `addClip` / `updateClip` too. The compact view shows
+  `path:curved` after a clip's keyframes, and a title's `"textPath":"ellipse 300×300"`.
+
+Recipes: **fly-in on a curve** — two position keys, `setMotionPath` smooth,
+`autoOrient:true`, `motionBlur:180`; **orbiting label** — circle `textPath`,
+`pathOffset` keyed 0 → 100 linear; **stamp along a road** — an open `path`
+textPath that follows the shape in the footage, `pathAlign:"center"`,
+`textAnim:"letter-pop"`; **whip without the transition** — a fast `x` move over
+4–6 frames with `motionBlur:360`.
 
 ### Semantics
 

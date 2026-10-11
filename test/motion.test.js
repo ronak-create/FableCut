@@ -234,3 +234,104 @@ test("deleting a parent leaves its children in place, under the nearest ancestor
   assert.equal(c.parent, undefined, "no ancestor left: unparented");
   world(c).forEach((v, i) => near(v, before[i], 1e-3));
 });
+
+test("motion paths: curved position keys, arc-length pacing, auto-orient, smooth and straight", () => {
+  const kf = () => ({
+    x: [{ t: 0, v: -300 }, { t: 2, v: 300, ease: "linear" }],
+    y: [{ t: 0, v: 0, pout: -300 }, { t: 2, v: 0, pin: -300, ease: "linear" }],
+  });
+  const clip = { start: 0, duration: 2, keyframes: kf(), props: {} };
+  assert.equal(M.posKeys(clip).length, 2);
+  assert.equal(M.hasPathHandles(clip), true);
+  const mid = M.positionAt(clip, 1);
+  near(mid.x, 0, 1e-6); near(mid.y, -225, 0.5);   // the top of the arch
+  near(M.orientAt(clip, 1), 0, 0.5);              // travelling right at the top
+  assert.ok(M.orientAt(clip, 0.1) < -45, "climbing at the start");
+  // pacing is along the curve: equal times cover equal lengths on a linear key
+  const travelled = (a, b) => {   // distance along the path between two times
+    let d = 0, prev = M.positionAt(clip, a);
+    for (let i = 1; i <= 200; i++) { const q = M.positionAt(clip, a + (b - a) * i / 200); d += Math.hypot(q.x - prev.x, q.y - prev.y); prev = q; }
+    return d;
+  };
+  const legs = [0, 0.5, 1, 1.5].map((t) => travelled(t, t + 0.5));
+  for (const l of legs) near(l, legs[0], legs[0] * 0.01);
+  // no handles: the channels run exactly as before
+  const plain = { keyframes: { x: [{ t: 0, v: 0 }, { t: 1, v: 100 }], y: [{ t: 0, v: 0 }, { t: 1, v: 0 }] }, props: {} };
+  assert.equal(M.pathPositionAt(plain, 0.5), null);
+  // an extra x key between two position keys breaks that segment back to the channels
+  const broken = { keyframes: { x: [...kf().x, { t: 1, v: 50 }].sort((a, b) => a.t - b.t), y: kf().y }, props: {} };
+  assert.equal(M.pathPositionAt(broken, 0.5), null);
+  const sm = M.smoothPath({ x: [{ t: 0, v: 0 }, { t: 1, v: 100 }, { t: 2, v: 200 }], y: [{ t: 0, v: 0 }, { t: 1, v: 100 }, { t: 2, v: 0 }] });
+  assert.equal(sm.x[0].pin, undefined, "the first key has no in handle");
+  assert.equal(sm.x[1].pout, 33.333);
+  assert.equal(M.hasPathHandles({ keyframes: M.straightPath(sm) }), false);
+  // a parent on a curved path carries its children along it
+  const parent = { id: "p", start: 0, duration: 2, keyframes: kf(), props: { autoOrient: true } };
+  const tr = M.transformAt(parent, 1);
+  near(tr.y, -225, 0.5); near(tr.rotation, 0, 0.5);
+});
+
+test("text paths: validation, presets and the arc-length sampler", () => {
+  const circle = M.normalizeTextPath(M.TEXT_PATH_PRESETS.circle, true);
+  assert.equal(circle.type, "ellipse");
+  assert.equal(circle.fill, undefined, "a text path carries no paint");
+  assert.equal(M.normalizeTextPath({ points: [[0, 0], [10, 0]] }).closed, false, "a path defaults to open");
+  assert.throws(() => M.normalizeTextPath({ type: "group" }, true), /type must be/);
+  assert.throws(() => M.normalizeTextPath({ type: "line", stroke: "#fff" }, true), /no paint/);
+  const s = M.pathSampler(M.outline(M.normalizeItem({ type: "line", points: [[0, 0], [100, 0]] })).A, false);
+  near(s.length, 100, 1e-6);
+  assert.deepEqual([s.at(25).x, s.at(25).y, s.at(25).angle], [25, 0, 0]);
+  near(s.at(120).x, 120, 1e-6, "runs on straight past an open end");
+  const ring = M.pathSampler(M.outline(circle).A, true);
+  near(ring.at(ring.length * 1.25).x, ring.at(ring.length * 0.25).x, 1e-6);   // a closed path wraps
+});
+
+test("a split keeps the motion path's handles on both halves", () => {
+  const doc = { tracks: [{ id: "V1", kind: "video" }], media: [], clips: [{ id: "s", kind: "shape", mediaId: null, track: "V1", start: 0, in: 0, duration: 4,
+    props: {}, keyframes: { x: [{ t: 0, v: 0, pout: 50 }, { t: 3, v: 300, pin: -50 }], y: [{ t: 0, v: 0, pout: -80 }, { t: 3, v: 0, pin: -80 }] } }] };
+  const right = E.forDoc(doc).splitAt(3.5, [doc.clips[0]]).rights[0];
+  assert.equal(doc.clips[0].keyframes.x[0].pout, 50);
+  assert.ok(right, "split happened");
+});
+
+test("agent: setMotionPath, setTextPath, motion blur props and the compact view", async (t) => {
+  const dir = makeDataDir(t, motionProject());
+  const mcp = startMcp(t, dir);
+  await mcp.request("initialize", { protocolVersion: "2025-11-25" });
+  const patch = (...ops) => mcp.callTool("fablecut_patch_project", { ops });
+  const clip = (id) => readProject(dir).clips.find((c) => c.id === id);
+  let r = await patch(
+    { op: "addClip", clip: { id: "c_s", kind: "shape", track: "V2", start: 0, duration: 4, props: { shapes: [{ type: "star" }], motionBlur: 180 },
+      keyframes: { x: [{ t: 0, v: -300 }, { t: 2, v: 0 }, { t: 4, v: 300 }], y: [{ t: 0, v: 100 }, { t: 2, v: -100 }, { t: 4, v: 100 }] } } },
+    { op: "setMotionPath", id: "c_s", path: "smooth", autoOrient: true },
+    { op: "addClip", clip: { id: "c_t", kind: "text", track: "V3", start: 0, duration: 4, props: { text: "Round and round" } } },
+    { op: "setTextPath", id: "c_t", path: "circle", offset: 25, align: "center" });
+  assert.equal(r.isError, false, r.text);
+  assert.match(r.text, /c_s\.motionPath\(3 keys, curved, auto-orient\)/);
+  assert.equal(clip("c_s").keyframes.x[1].pout, 100);
+  assert.equal(clip("c_s").props.autoOrient, true);
+  assert.equal(clip("c_t").props.textPath.type, "ellipse");
+  assert.equal(clip("c_t").props.pathOffset, 25);
+  r = await patch({ op: "setTextPath", id: "c_t", path: { type: "path", points: [[-200, 0], [0, -80, -90, 0, 90, 0], [200, 0]] } });
+  assert.equal(r.isError, false, r.text);
+  assert.equal(clip("c_t").props.textPath.closed, false);
+  r = await patch({ op: "setMotionPath", id: "c_s", path: "straight" });
+  assert.equal(clip("c_s").keyframes.x[1].pout, undefined);
+
+  // refusals
+  r = await patch({ op: "setMotionPath", id: "c_a", path: "smooth" });
+  assert.match(r.text, /needs x and y keyed together/);
+  r = await patch({ op: "setTextPath", id: "c_s", path: "arc" });
+  assert.match(r.text, /text paths go on text clips/);
+  r = await patch({ op: "setTextPath", id: "c_t", path: "spiral" });
+  assert.match(r.text, /path is line \| arc \| circle \| wave/);
+  r = await patch({ op: "updateClip", id: "c_s", set: { props: { motionBlur: 900 } } });
+  assert.match(r.text, /shutter angle 0…720/);
+  r = await patch({ op: "updateClip", id: "c_s", set: { keyframes: { x: [{ t: 0, v: 0, pout: "big" }] } } });
+  assert.match(r.text, /pout must be a number/);
+
+  await patch({ op: "setMotionPath", id: "c_s", path: "smooth" });
+  const compact = await mcp.callTool("fablecut_get_project", { compact: true });
+  assert.match(compact.text, /c_s V2 .*"motionBlur":180.*kf:x\(3\),y\(3\) path:curved/);
+  assert.match(compact.text, /c_t V3 .*"textPath":"path\(3\)"/);
+});

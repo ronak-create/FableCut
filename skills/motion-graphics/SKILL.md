@@ -1,5 +1,5 @@
 ---
-description: Build motion graphics in FableCut — shape layers (rectangles, ellipses, polygons, stars, lines, bezier paths, groups), draw-on trim paths, null objects, parenting and anchor points, all keyframed. Use when the user wants a lower third, an animated logo or icon, a callout, a progress bar or loading ring, shapes that pop or slide in, or anything to "move together", "orbit" or "draw on".
+description: Build motion graphics in FableCut — shape layers (rectangles, ellipses, polygons, stars, lines, bezier paths, groups), draw-on trim paths, null objects, parenting, anchor points, curved motion paths with auto-orient, motion blur and text on a path, all keyframed. Use when the user wants a lower third, an animated logo or icon, a callout, a progress bar or loading ring, shapes that pop or slide in, or anything to "move together", "orbit" or "draw on".
 ---
 
 # Motion graphics with FableCut
@@ -17,8 +17,8 @@ applies. Three pieces do the work:
   `anchorY`) that it turns and scales around.
 
 For the full key table, read `fablecut_docs {section:"schema"}` once and see
-its "Shapes, nulls and parenting" part. The notes below cover how to use it
-well.
+its "Shapes, nulls and parenting" and "Motion paths, motion blur and text on a
+path" parts. The notes below cover how to use it well.
 
 ## Coordinates (get these right first)
 
@@ -106,6 +106,30 @@ them out together.
 - **Burst**: a `group` of six `line` items with `rotation` 0, 60, 120… and
   `points:[[40,0],[90,0]]`. Key the group's `scale` 0.4 → 1.2 and its
   `opacity` 1 → 0 over 0.5 s.
+
+## Curves, blur and text on a path
+
+- **Curved moves**: key `x` and `y` together at two or more times (position
+  keys), then call `{op:"setMotionPath", id, path:"smooth"}`. For a precise
+  arc, write the handles yourself: `pout` on the leaving key and `pin` on the
+  arriving key, on both the x and y keys, in px from the key's position. A fly-in
+  that arches up: x `{t:0, v:-500, pout:200}` → `{t:1, v:0, pin:-200}`,
+  y `{t:0, v:200, pout:-250}` → `{t:1, v:0, pin:0}`.
+- **Auto-orient** (`autoOrient:true` or `setMotionPath … autoOrient:true`) makes
+  arrows, planes and cars point where they go. Draw them pointing right
+  (0°), the direction of travel.
+- **Motion blur**: `motionBlur:180` on anything that moves fast (whips,
+  fly-ins, spinning logos). Use 360 for a heavy smear. Leave it off on slow
+  drifts, where it only costs render time. 8 samples is enough for most
+  shots; use 12–16 for very fast spins.
+- **Text on a path**: `{op:"setTextPath", id, path:"circle"}` (or `"arc"`,
+  `"wave"`, `"line"`, or a shape item such as `{type:"path", points:[…], closed:false}`).
+  Key `pathOffset` 0 → 100 with `ease:"linear"` to send text around a ring.
+  Add a trailing " • " so the ends don't touch. Size the path to the text:
+  the circle's circumference (π × w) should be a bit longer than the text.
+  `pathAlign:"center"` with `pathOffset:50` centres a title on an arc.
+- Text on a path is one line. Only `typewriter`, `letter-pop` and `wave`
+  animate on it.
 
 ## Things that trip agents up
 

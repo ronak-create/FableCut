@@ -70,7 +70,7 @@
 <div class="wrap docs" id="main">
   <nav class="docs-side" aria-label="Docs">
     <button class="docs-menu" type="button" aria-expanded="false" aria-controls="docsNav"><svg class="i" aria-hidden="true"><use href="#i-menu"/></svg><span>project.json</span></button>
-    <div class="docs-nav" id="docsNav"><p class="docs-group">Start</p><a href="../">Overview</a><a href="../mcp/">MCP tools</a><p class="docs-group">The timeline</p><a href="../project-json/" aria-current="page">project.json</a><a href="../props/">Clip props</a><a href="../audio/">Audio mix</a><a href="../color/">Color</a><a href="../masks/">Masks</a><a href="../compositing/">Track mattes and blending</a><a href="../tracking/">Tracking</a><a href="../motion/">Shapes and parenting</a><a href="../editing/">Editing rules</a><a href="../library/">Asset library</a><p class="docs-group">Guides</p><a href="../recipes/">Recipes</a><a href="../remake/">Remake a reference</a><p class="docs-group">Reference</p><a href="../rest-api/">REST API</a><a href="../export/">Export</a></div>
+    <div class="docs-nav" id="docsNav"><p class="docs-group">Start</p><a href="../">Overview</a><a href="../mcp/">MCP tools</a><p class="docs-group">The timeline</p><a href="../project-json/" aria-current="page">project.json</a><a href="../props/">Clip props</a><a href="../audio/">Audio mix</a><a href="../color/">Color</a><a href="../masks/">Masks</a><a href="../compositing/">Track mattes and blending</a><a href="../tracking/">Tracking</a><a href="../motion/">Shapes and parenting</a><a href="../motion-paths/">Motion paths</a><a href="../editing/">Editing rules</a><a href="../library/">Asset library</a><p class="docs-group">Guides</p><a href="../recipes/">Recipes</a><a href="../remake/">Remake a reference</a><p class="docs-group">Reference</p><a href="../rest-api/">REST API</a><a href="../export/">Export</a></div>
   </nav>
   <article class="docs-main prose">
     <h1>project.json</h1>
@@ -144,6 +144,8 @@
       <span class="tk-c">// OPTIONAL — keyframe animation. Times are seconds RELATIVE TO CLIP START.</span>
       <span class="tk-c">// "ease" sits on the DESTINATION keyframe of each segment:</span>
       <span class="tk-c">// linear | ease-in | ease-out | ease-in-out (default ease-in-out).</span>
+      <span class="tk-c">// x and y keys at the same time are a position key; pin / pout on them (px)</span>
+      <span class="tk-c">// are motion-path curve handles (see "Motion paths, motion blur and text on a path").</span>
       <span class="tk-k">"keyframes"</span>: {
         <span class="tk-k">"scale"</span>:   [ { <span class="tk-k">"t"</span>: <span class="tk-n">0</span>, <span class="tk-k">"v"</span>: <span class="tk-n">1</span> }, { <span class="tk-k">"t"</span>: <span class="tk-n">5</span>, <span class="tk-k">"v"</span>: <span class="tk-n">1.25</span>, <span class="tk-k">"ease"</span>: <span class="tk-s">"linear"</span> } ],
         <span class="tk-k">"opacity"</span>: [ { <span class="tk-k">"t"</span>: <span class="tk-n">0</span>, <span class="tk-k">"v"</span>: <span class="tk-n">0</span> }, { <span class="tk-k">"t"</span>: <span class="tk-n">0.8</span>, <span class="tk-k">"v"</span>: <span class="tk-n">1</span> } ]
