@@ -63,7 +63,7 @@ about 150 ms. A human and an agent can work the same timeline at once.
   Agents can start an export themselves (`fablecut_export`), in the open editor
   or a headless browser.
 - Also installable as a Claude Code plugin, which registers the MCP server and
-  adds `edit-video` and `remake-reel` skills.
+  adds `edit-video`, `remake-reel` and `motion-graphics` skills.
 
 ## Links
 

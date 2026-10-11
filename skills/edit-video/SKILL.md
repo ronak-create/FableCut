@@ -64,6 +64,9 @@ re-read after a moment instead of shelling out to ffprobe.
   check every grade with `fablecut_scopes` — median luma near 0.35–0.5, no
   clipped whites, cast strength under ~0.03 on neutral scenes.
   `fablecut_docs {section:"Color"}` has the keys and how to read the numbers.
+- **Motion graphics** (shape layers, draw-ons, lower thirds, nulls,
+  parenting, anchor points) have their own skill, `motion-graphics`, and
+  manual section ("Shapes, nulls and parenting" under `{section:"schema"}`).
 - **Export** with `fablecut_export` — the editor's own Fast export, in the
   user's open tab or a headless Chrome / Edge. It needs ffmpeg on PATH; it
   waits for the file and returns its path.
