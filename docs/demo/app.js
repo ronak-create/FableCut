@@ -12874,15 +12874,29 @@ function assignVideoTime(el, mt, accurate) {
   }
   el.currentTime = mt;
 }
-function hardSeekVideo(el, mt, attempt = 0) {
+/** A finished seek to mt still shows the frame that was presented at `shown`: same source frame. */
+function sameSourceFrame(el, mt, shown) {
+  return shown != null && el.readyState >= 2 && !el.seeking &&
+    Math.abs(el.currentTime - mt) < 0.002 && mt >= shown - 1e-4 && mt - shown < 0.05;
+}
+function hardSeekVideo(el, mt, attempt = 0, shown = el._fcPresentedTime) {
   const hasRvfc = typeof el.requestVideoFrameCallback === "function";
   const maxAttempts = 3;
   return new Promise((res, rej) => {
-    const after = () => waitForPresentedFrame(el)
+    // a busy frame (grades, masks, blur) can present late: each retry waits longer
+    const after = () => waitForPresentedFrame(el, [80, 250, 600][attempt] || 600)
       .then(res)
       .catch((err) => {
-        if (attempt + 1 >= maxAttempts) rej(err);
-        else hardSeekVideo(el, mt, attempt + 1).then(res, rej);
+        // Slow motion lands several output frames on one source frame: seeking within the
+        // frame already on screen presents nothing new, so no frame callback ever comes.
+        // The seek finished on mt and the frame shown just before is within one source frame
+        // of it (≥ 20 fps footage): that frame is the right picture.
+        if (sameSourceFrame(el, mt, shown)) { notePresented(el, shown); res(); return; }
+        if (attempt + 1 < maxAttempts) { hardSeekVideo(el, mt, attempt + 1, shown).then(res, rej); return; }
+        // Last try: the seek finished on mt with the frame's data loaded, so the element holds
+        // that frame even though no callback reported it. Better than failing the whole export.
+        if (el.readyState >= 2 && !el.seeking && Math.abs(el.currentTime - mt) < 0.002) { notePresented(el, mt); res(); return; }
+        rej(err);
       });
     if (presentedClose(el, mt, 0.002) && el.readyState >= 2) {
       res();

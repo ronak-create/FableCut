@@ -121,3 +121,53 @@ test("playAdvanceVideo: hard-seeks when presented picture overshoots target", as
   await play(el, 0.04, 0.01, 1, { keepPlaying: false });
   assert.equal(hardSeeks, 1);
 });
+
+/* hardSeekVideo: a seek that presents no new frame (slow motion inside one source
+   frame) or presents it late must not fail the export. */
+const HARD = slice("function sameSourceFrame(", "/** Play forward until");
+function loadHard() {
+  return new Function(`${WAIT_HELPERS}
+    function assignVideoTime(el, mt) { el.currentTime = mt; }
+    ${HARD}
+    return { hardSeekVideo, sameSourceFrame };`)();
+}
+/** A video whose seeks complete (seeked fires) but whose frame callback never does. */
+function seekingVideo({ currentTime = 0, presented = null, completes = true } = {}) {
+  const listeners = new Map();
+  const el = {
+    _t: currentTime, paused: true, readyState: 2, seeking: false, _fcPresentedTime: presented,
+    pause() { el.paused = true; },
+    get currentTime() { return el._t; },
+    set currentTime(v) {
+      el._t = v; el.seeking = true;
+      if (!completes) return;
+      setTimeout(() => { el.seeking = false; for (const f of [...(listeners.get("seeked") || [])]) f(); }, 5);
+    },
+    addEventListener(n, f) { (listeners.get(n) || listeners.set(n, []).get(n)).push(f); },
+    removeEventListener(n, f) { const a = listeners.get(n) || []; const i = a.indexOf(f); if (i >= 0) a.splice(i, 1); },
+    requestVideoFrameCallback() {},   // never fires: nothing new was presented
+  };
+  return el;
+}
+
+test("hardSeekVideo: slow motion inside the frame on screen resolves without a frame callback", async () => {
+  const { hardSeekVideo } = loadHard();
+  const el = seekingVideo({ currentTime: 1.0, presented: 1.0 });
+  const t0 = Date.now();
+  await hardSeekVideo(el, 1.02);   // 0.6x: the next output frame is still source frame 1.0
+  assert.ok(Date.now() - t0 < 400, "accepted after the first short wait, not after every retry");
+  assert.equal(el._fcPresentedTime, 1.0, "the presented frame is still the one on screen");
+});
+
+test("hardSeekVideo: a late frame callback on the last try still uses the finished seek", async () => {
+  const { hardSeekVideo } = loadHard();
+  const el = seekingVideo({ currentTime: 0, presented: 0 });
+  await hardSeekVideo(el, 2.0);   // a different frame, but the callback never arrives (busy page)
+  assert.equal(el._fcPresentedTime, 2.0);
+});
+
+test("hardSeekVideo: a seek that never lands still fails", async () => {
+  const { hardSeekVideo } = loadHard();
+  const el = seekingVideo({ currentTime: 0, presented: 0, completes: false });
+  await assert.rejects(hardSeekVideo(el, 2.0), /presented frame timeout/);
+});

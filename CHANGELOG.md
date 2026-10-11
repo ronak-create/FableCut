@@ -41,6 +41,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `parent` are validated on `addClip` / `updateClip`; the compact view
   lists shapes and parents. A `motion-graphics` skill covers the recipes.
 
+### Fixed
+- Exports of clips with slow-motion speed ramps (or very busy frames: grades,
+  masks, blur) no longer fail with "presented frame timeout". A seek that lands
+  inside the source frame already on screen is accepted, and later tries wait
+  longer before giving up.
+
 ## [1.13.0] - 2026-10-10
 
 ### Added
