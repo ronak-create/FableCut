@@ -1096,7 +1096,7 @@ function toggleKfAtPlayhead(c, k) {
   return true;
 }
 function hasSpeedRamp(c) {
-  return Array.isArray(c.keyframes?.speed) && c.keyframes.speed.length > 0;
+  return c.kind !== "comp" && Array.isArray(c.keyframes?.speed) && c.keyframes.speed.length > 0;   // comps run at 1×
 }
 function mediaTimeAt(c, t) {
   const base = clipSpeed(c);
@@ -1617,6 +1617,8 @@ async function syncFromServer(force) {
     if (!force && (data.revision || 0) === (project.revision || 0)) return; // our own save
     if (runtime.saveTimer) { // unsaved local edit vs. external write: external wins, tell the user
       clearTimeout(runtime.saveTimer); runtime.saveTimer = null;
+      // the undo steps describe the discarded edit; replaying one would re-save over the external write
+      runtime.undo.length = 0; runtime.redo.length = 0;
       toast("Project was updated externally — your last change may need redoing.");
     }
     applyProject(data);
@@ -9163,7 +9165,7 @@ function precomposeSelection() {
   if (!sel.length) { toast("Select the clips to put in a composition"); return; }
   if (sel.some(isClipLocked)) { toastLocked(); return; }
   pushUndo();
-  const doc = { clips: project.clips, comps: project.comps || [], tracks: project.tracks, width: project.width, height: project.height };
+  const doc = { clips: project.clips, comps: project.comps || [], tracks: project.tracks, width: project.width, height: project.height, disabledTracks: project.disabledTracks || [] };
   const { comp, clip } = CompLib.precompose(doc, sel.map((c) => c.id), { id: newCompId(), name: "Comp " + ((project.comps || []).length + 1) });
   project.clips = doc.clips; project.comps = doc.comps;
   clip.id = "c_" + uid(); clip.props = { ...DEFAULT_PROPS, fit: "none" };

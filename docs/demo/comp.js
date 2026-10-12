@@ -167,6 +167,9 @@
       duration: r4(t1 - t0), tracks,
       clips: moving.map((c) => ({ ...c, start: r4(c.start - t0) })),
     };
+    // a hidden track stays hidden inside the comp
+    const hidden = (host.disabledTracks || []).filter((t) => used.includes(t));
+    if (hidden.length) comp.disabledTracks = hidden;
     // parents outside the moved set can't follow into the comp
     for (const c of comp.clips) if (c.parent && !set.has(c.parent)) delete c.parent;
     const videoTracks = moving.filter((c) => c.kind !== "audio").map((c) => c.track);

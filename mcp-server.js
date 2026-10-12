@@ -1601,28 +1601,29 @@ async function callTool(name, args, attempt = 0) {
       if (!doc || typeof doc !== "object") throw new Error("`project` must be an object");
       if (!Array.isArray(doc.clips) || !Array.isArray(doc.media))
         throw new Error("project must contain `clips` and `media` arrays");
-      for (const c of doc.clips) {
-        if (!c.id || !c.track || typeof c.start !== "number" || typeof c.duration !== "number")
-          throw new Error(`clip ${c.id || "?"} needs id, track, numeric start and duration`);
-        if (!["text", "adjust", "shape", "null", "comp"].includes(c.kind) && !doc.media.some((m) => m.id === c.mediaId))
-          throw new Error(`clip ${c.id} references unknown mediaId ${c.mediaId}`);
-        if (c.kind === "comp" && !CompLib.getComp(doc, c.compId)) throw new Error(`clip ${c.id} references unknown compId ${c.compId}`);
-        if (c.kind === "shape" && c.props && c.props.shapes != null) {
-          let n;
-          try { n = Motion.normalizeShapes(c.props.shapes, true); } catch (err) { throw new Error(`clip ${c.id}: props.${err.message}`); }
-          if (n) c.props.shapes = n; else delete c.props.shapes;
-        }
-      }
       if (doc.comps != null) {
         if (!Array.isArray(doc.comps)) throw new Error("comps must be a list of compositions");
-        for (const comp of doc.comps) {
-          try { CompLib.normalizeComp(comp, true, doc); } catch (err) { throw new Error(err.message); }
-          for (const c of comp.clips || []) {
-            if (c.kind === "comp" && (!CompLib.getComp(doc, c.compId) || CompLib.wouldCycle(doc, comp.id, c.compId)))
-              throw new Error(`comp ${comp.id}: clip ${c.id} uses comp ${c.compId}, which is missing or would contain itself`);
-          }
-        }
+        // saved as normalized (trimmed id, default name and size, rounded duration)
+        try { doc.comps = doc.comps.map((comp) => CompLib.normalizeComp(comp, true, doc)); } catch (err) { throw new Error(err.message); }
       }
+      // the same checks for clips on the timeline and clips inside comps
+      const checkClip = (c, where) => {
+        const at = where ? `comp ${where}: ` : "";
+        if (!c.id || !c.track || typeof c.start !== "number" || typeof c.duration !== "number")
+          throw new Error(`${at}clip ${c.id || "?"} needs id, track, numeric start and duration`);
+        if (!["text", "adjust", "shape", "null", "comp"].includes(c.kind) && !doc.media.some((m) => m.id === c.mediaId))
+          throw new Error(`${at}clip ${c.id} references unknown mediaId ${c.mediaId}`);
+        if (c.kind === "comp" && !CompLib.getComp(doc, c.compId)) throw new Error(`${at}clip ${c.id} references unknown compId ${c.compId}`);
+        if (c.kind === "comp" && where && CompLib.wouldCycle(doc, where, c.compId))
+          throw new Error(`comp ${where}: clip ${c.id} uses comp ${c.compId}, which is missing or would contain itself`);
+        if (c.kind === "shape" && c.props && c.props.shapes != null) {
+          let n;
+          try { n = Motion.normalizeShapes(c.props.shapes, true); } catch (err) { throw new Error(`${at}clip ${c.id}: props.${err.message}`); }
+          if (n) c.props.shapes = n; else delete c.props.shapes;
+        }
+      };
+      for (const c of doc.clips) checkClip(c, null);
+      for (const comp of doc.comps || []) for (const c of comp.clips) checkClip(c, comp.id);
       let cur = { revision: 0 };
       try { cur = readProject(); } catch {}
       const curRev = cur.revision || 0;

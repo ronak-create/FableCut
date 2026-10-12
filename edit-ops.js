@@ -68,7 +68,7 @@
     return fallback;
   }
   function hasSpeedRamp(c) {
-    return Array.isArray(c.keyframes?.speed) && c.keyframes.speed.length > 0;
+    return c.kind !== "comp" && Array.isArray(c.keyframes?.speed) && c.keyframes.speed.length > 0;   // comps run at 1×
   }
   /** Source time at timeline time t: in + ∫speed (trapezoid, 1/120 s steps). */
   function mediaTimeAt(c, t) {

@@ -65,6 +65,10 @@ test("precompose moves clips into a new comp and leaves a comp clip in their pla
   assert.equal(doc.clips.find((x) => x.id === "c").parent, undefined, "a clip parented to a moved one lets go");
   assert.deepEqual([clip.start, clip.duration, clip.track, clip.compId, clip.props.fit], [2, 5, "V1", "pc", "none"]);
   assert.deepEqual(doc.clips.map((x) => x.id).sort(), ["c", clip.id, "z"].sort());
+  assert.equal(comp.disabledTracks, undefined, "no hidden tracks, no list");
+  const hid = { width: 1280, height: 720, comps: [], disabledTracks: ["V2", "V3"], clips: [
+    { id: "a", kind: "video", track: "V1", start: 0, duration: 2 }, { id: "b", kind: "text", track: "V2", start: 0, duration: 2 }] };
+  assert.deepEqual(C.precompose(hid, ["a", "b"], { id: "h" }).comp.disabledTracks, ["V2"], "a hidden track stays hidden inside the comp");
 });
 
 test("trims treat a comp clip's in as a window into its comp", () => {
@@ -85,6 +89,11 @@ test("trims treat a comp clip's in as a window into its comp", () => {
   doc = mk(); ed = E.forDoc(doc); k = doc.clips[0];
   ed.liftRange(2, 2.75, false);                     // lifting the head keeps the comp aligned
   near(k.start, 2.75); near(k.in, 1.75);
+  doc = mk(); ed = E.forDoc(doc); k = doc.clips[0];
+  k.keyframes = { speed: [{ t: 0, v: 4 }, { t: 3, v: 4 }] };   // speed keys on a comp clip are ignored
+  near(E.mediaTimeAt(k, 3), 2);
+  ed.splitClipAt(k, 3);
+  near(doc.clips.find((x) => x.id !== "k").in, 2);                // the right half carries on at comp time 2
 });
 
 test("normalizeComp: defaults and strict refusals", () => {
@@ -164,4 +173,15 @@ test("agent: addComp, inComp, precompose, updateComp, removeComp and the compact
   bad.comps.find((c) => c.id === "badge").clips.push({ id: "x", kind: "comp", compId: "intro", track: "V1", start: 0, duration: 1 });
   r = await mcp.callTool("fablecut_set_project", { project: bad, force: true });
   assert.match(r.text, /missing or would contain itself/);
+  // clips inside comps get the same checks as timeline clips, and comps are saved normalized
+  const ghost = doc();
+  ghost.comps.find((c) => c.id === "badge").clips.push({ id: "g", kind: "video", mediaId: "m_nope", track: "V1", start: 0, duration: 1 });
+  r = await mcp.callTool("fablecut_set_project", { project: ghost, force: true });
+  assert.match(r.text, /comp badge: clip g references unknown mediaId m_nope/);
+  const loose = doc();
+  loose.comps.push({ id: " extra ", duration: 2.123456, clips: [] });
+  r = await mcp.callTool("fablecut_set_project", { project: loose, force: true });
+  assert.equal(r.isError, false, r.text);
+  assert.deepEqual((({ id, name, width, height, duration }) => ({ id, name, width, height, duration }))(comp("extra")),
+    { id: "extra", name: "extra", width: 1280, height: 720, duration: 2.1235 });
 });
