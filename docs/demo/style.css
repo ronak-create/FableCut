@@ -2997,9 +2997,43 @@ body.track-size-s .clip .fade-grip {
 }
 
 .dialog.help {
-  width: min(820px, 94vw);
-  max-height: min(90vh, 640px);
-  overflow: auto;
+  width: min(1080px, 94vw);
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 14px;
+}
+
+.dialog.help .help-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.dialog.help .help-head h2 {
+  margin: 0;
+  flex: 1;
+}
+
+.dialog.help .help-filter {
+  width: min(280px, 50%);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 10px;
+}
+
+.dialog.help .help-filter:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.dialog.help .dialog-actions {
+  margin-top: 10px;
 }
 
 .dialog.settings {
@@ -3070,11 +3104,38 @@ body.track-size-s .clip .fade-grip {
 }
 
 .dialog.help .keys-cols {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0 28px;
-  margin-bottom: 12px;
-  align-items: start;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  columns: 2 380px;
+  column-gap: 16px;
+  padding-right: 4px;
+}
+
+.dialog.help .keys-sec {
+  break-inside: avoid;
+  margin: 0 0 14px;
+  padding: 10px 12px 6px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.dialog.help .keys-sec h3 {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+
+.dialog.help .keys-sec h3 span {
+  margin-left: 6px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--dim);
 }
 
 .dialog.help .keys {
@@ -3084,22 +3145,31 @@ body.track-size-s .clip .fade-grip {
 }
 
 .dialog.help .keys td {
-  padding: 5px 6px;
-  border-bottom: 1px solid #26262c;
+  padding: 5px 0;
+  border-top: 1px solid var(--border);
   font-size: 12px;
+  line-height: 1.45;
   vertical-align: top;
 }
 
+.dialog.help .keys tr:first-child td {
+  border-top: 0;
+}
+
 .dialog.help .keys td:first-child {
-  width: 40%;
+  width: 34%;
+  padding-right: 12px;
   color: var(--dim);
+}
+
+.dialog.help .keys td:first-child kbd {
   white-space: nowrap;
 }
 
-@media (max-width: 700px) {
-  .dialog.help .keys-cols {
-    grid-template-columns: 1fr;
-  }
+.dialog.help .help-empty {
+  color: var(--dim);
+  font-size: 12px;
+  margin: 8px 2px;
 }
 
 kbd {
@@ -3610,13 +3680,4 @@ input[type="range"].cq-hue {
   background: linear-gradient(90deg, #f33, #ff3, #3f3, #3ff, #33f, #f3f, #f33);
   border-radius: 3px;
   height: 6px;
-}
-.dialog.help .keys tr.keys-head td {
-  padding-top: 12px;
-  color: var(--text);
-  font-weight: 600;
-  font-size: 11px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  white-space: normal;
 }

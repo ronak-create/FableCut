@@ -344,81 +344,143 @@
 <!-- ══════════ HELP OVERLAY ══════════ -->
 <div class="overlay hidden" id="helpOverlay">
   <div class="dialog help">
-    <h2>Keyboard shortcuts</h2>
-    <div class="keys-cols">
-      <table class="keys">
-        <tr><td><kbd>Space</kbd></td><td>Play / pause (Source or Program — whichever is active)</td></tr>
-        <tr><td>Dbl-click bin / clip</td><td>Load into Source monitor</td></tr>
-        <tr><td><kbd>,</kbd></td><td>Insert Source In→Out at the timeline playhead (ripples later clips)</td></tr>
-        <tr><td><kbd>.</kbd></td><td>Replace — overwrite at playhead, or apply new Source In/Out to a timeline-loaded clip (ripples if duration changes)</td></tr>
-        <tr><td><kbd>J</kbd> <kbd>K</kbd> <kbd>L</kbd></td><td>Shuttle — <kbd>L</kbd> plays forward, <kbd>J</kbd> in reverse (silent); tap again for 1.5× · 2× · 4×, the other key turns around; <kbd>K</kbd> stops</td></tr>
-        <tr><td><kbd>K</kbd>+<kbd>J</kbd> / <kbd>K</kbd>+<kbd>L</kbd></td><td>Hold <kbd>K</kbd> and tap to step one frame; hold both to crawl at ¼ speed</td></tr>
-        <tr><td><kbd>S</kbd></td><td>Split clip(s) at playhead (selection, else targeted tracks)</td></tr>
-        <tr><td><kbd>G</kbd></td><td>Find next shared gap (wraps; respects IN/OUT)</td></tr>
-        <tr><td><kbd>⇧</kbd>+<kbd>G</kbd></td><td>Close gap at playhead (targeted tracks)</td></tr>
-        <tr><td><kbd>Alt</kbd>+<kbd>T</kbd></td><td>Add transition at playhead (in / out by half)</td></tr>
-        <tr><td><kbd>Del</kbd></td><td>Delete selected clip(s), or clear focused transition</td></tr>
-        <tr><td><kbd>⇧</kbd>+<kbd>Del</kbd></td><td>Ripple delete — remove selection and close the gap on targeted tracks</td></tr>
-        <tr><td>Drag empty area</td><td>Marquee-select clips</td></tr>
-        <tr><td>Right-click track</td><td>Remove empty track (keeps ≥1 video + ≥1 audio)</td></tr>
-        <tr><td>Track <b>S</b></td><td>Solo track (mute all others; click again to restore)</td></tr>
-        <tr><td>Click track name</td><td>Target / untarget the track — edits touch lit (targeted) tracks only</td></tr>
-        <tr><td>Track padlock</td><td>Lock the track — nothing on it can be edited or moved</td></tr>
-        <tr><td>Right-click clip</td><td>Disable / lock / link or unlink the clip</td></tr>
-        <tr><td><kbd>V</kbd> <kbd>B</kbd> <kbd>R</kbd> <kbd>Y</kbd> <kbd>U</kbd></td><td>Tools: Selection · Ripple edit (drag an edge, the rest follows) · Rolling edit (drag a cut) · Slip (change the source under a clip) · Slide (move a clip, neighbours trim)</td></tr>
-        <tr><td><kbd>;</kbd> / <kbd>'</kbd></td><td>Lift / Extract IN→OUT on targeted tracks (Extract closes the gap)</td></tr>
-        <tr><td><kbd>⇧</kbd>+<kbd>E</kbd></td><td>Disable / enable selected clip(s) — hidden from preview and export</td></tr>
-        <tr><td><kbd>⇧</kbd>+<kbd>D</kbd></td><td>Crossfade the audio cut next to the selected clip (or at the playhead)</td></tr>
-        <tr><td><kbd>Ctrl/Cmd</kbd>+<kbd>L</kbd></td><td>Unlink / link video and its audio</td></tr>
-        <tr><td><kbd>Ctrl</kbd>+click bin</td><td>Import media files</td></tr>
-        <tr><td><kbd>Ctrl</kbd>+click clip</td><td>Add / remove from selection</td></tr>
-        <tr><td><kbd>Ctrl</kbd>+<kbd>A</kbd> / <kbd>Esc</kbd></td><td>Select all / deselect</td></tr>
-        <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>Step 1 frame (⇧ = 1 second)</td></tr>
-        <tr><td><kbd>↑</kbd> / <kbd>↓</kbd></td><td>Jump playhead to previous / next cut (selected clip In then Out; no selection → targeted tracks). Source monitor: In / Out marks</td></tr>
-        <tr><td><kbd>Ctrl/Cmd</kbd>+<kbd>←</kbd> / <kbd>Ctrl/Cmd</kbd>+<kbd>→</kbd></td><td>Go to previous / next keyframe (inspector follows)</td></tr>
-        <tr><td><kbd>Ctrl/Cmd</kbd>+click inspector label or slider</td><td>Reset property + clear all its keyframes</td></tr>
-        <tr><td><kbd>⇧</kbd>+click inspector label</td><td>Reset value at playhead, or remove that keyframe</td></tr>
-        <tr><td><kbd>[</kbd> / <kbd>]</kbd></td><td>Trim selected in / out to playhead</td></tr>
-        <tr><td><kbd>Home</kbd> / <kbd>End</kbd></td><td>Jump to start / end</td></tr>
-      </table>
-      <table class="keys">
-        <tr><td><kbd>M</kbd></td><td>Add / remove marker at playhead</td></tr>
-        <tr><td><kbd>⇧</kbd>+<kbd>M</kbd> / <kbd>Alt</kbd>+<kbd>⇧</kbd>+<kbd>M</kbd></td><td>Go to next / previous marker</td></tr>
-        <tr><td>Marker on ruler</td><td>Drag to move · click to jump · double-click or right-click to name / colour / delete · <b>Markers</b> button lists them all</td></tr>
-        <tr><td><kbd>0</kbd>–<kbd>9</kbd> / click timecode</td><td>Type a time: <code>01:15:00</code>, packed <code>1500</code> (= 15 s), <code>+30</code> / <code>-1:00</code> to offset, <code>12.5</code> seconds. Click IN / OUT readouts to type those too</td></tr>
-        <tr><td><kbd>I</kbd> / <kbd>O</kbd></td><td>Set Source In/Out (Source mode) or timeline work-area (Program; also bounds Export)</td></tr>
-        <tr><td><kbd>⇧</kbd>+<kbd>I</kbd> / <kbd>⇧</kbd>+<kbd>O</kbd></td><td>Clear Source or timeline IN / OUT</td></tr>
-        <tr><td><kbd>T</kbd></td><td>Split clips at IN/OUT markers</td></tr>
-        <tr><td><kbd>⇧</kbd>+<kbd>T</kbd></td><td>Trim clips to IN/OUT (remove heads/tails)</td></tr>
-        <tr><td>Limit (toolbar)</td><td>Play stops at OUT; Home/End use IN/OUT</td></tr>
-        <tr><td><kbd>N</kbd></td><td>Toggle snapping — <b>▾</b> picks targets (clip edges, playhead, markers, IN/OUT, keyframes, frame grid)</td></tr>
-        <tr><td><kbd>+</kbd> / <kbd>-</kbd></td><td>Zoom timeline</td></tr>
-        <tr><td><kbd>Z</kbd></td><td>Zoom to selected clip(s)</td></tr>
-        <tr><td><kbd>Alt</kbd>+<kbd>Z</kbd></td><td>Zoom to IN–OUT work area</td></tr>
-        <tr><td><kbd>⇧</kbd>+<kbd>Z</kbd></td><td>Zoom timeline to fit</td></tr>
-        <tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>⇧</kbd>+<kbd>Z</kbd></td><td>Undo / redo (also <kbd>Ctrl</kbd>+<kbd>Y</kbd>)</td></tr>
-        <tr><td><kbd>Ctrl</kbd>+wheel</td><td>Zoom timeline at cursor</td></tr>
-        <tr><td>Audio volume line</td><td>Drag to change the level · <kbd>Ctrl/Cmd</kbd>+click adds a keyframe · <kbd>Alt</kbd>+click or double-click removes one · corner grips drag fades</td></tr>
-        <tr class="keys-head"><td colspan="2">Color workspace</td></tr>
-        <tr><td>Colour wheel</td><td>Drag to tint (<kbd>⇧</kbd> = fine) · double-click resets the colour · double-click a label or slider name to reset it</td></tr>
-        <tr><td>WB pick / Pick</td><td>Click the monitor to balance, to mark a colour on the curves, or to select it in a layer's qualifier · <kbd>Esc</kbd> cancels</td></tr>
-        <tr><td>Curves</td><td>Click adds a point on the curve · drag moves it · double-click removes it</td></tr>
-        <tr><td>Layer mask on the monitor</td><td>Drag inside to move · handles resize · the knob rotates (<kbd>⇧</kbd> snaps to 15°) · poly / bezier: <kbd>Ctrl/Cmd</kbd>+click adds a point, double-click removes one · <b>Draw</b>: drag a free-hand outline</td></tr>
-        <tr class="keys-head"><td colspan="2">Masks (Inspector → Masks)</td></tr>
-        <tr><td>Pen</td><td>Click to place points, drag while placing to pull curve handles · click the first point or <kbd>Enter</kbd> closes · <kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Backspace</kbd> removes the last point, <kbd>Ctrl</kbd>+<kbd>⇧</kbd>+<kbd>Z</kbd> puts it back · <kbd>Esc</kbd> cancels</td></tr>
-        <tr><td>Draw</td><td>Drag a free-hand outline — it becomes an editable bezier</td></tr>
-        <tr><td>Mask on the monitor</td><td>Drag inside to move · edge handles resize · the knob rotates (<kbd>⇧</kbd> snaps to 15°) · drag a point or its handles (<kbd>Alt</kbd> breaks the pair) · <kbd>Alt</kbd>+drag a point pulls new handles · <kbd>Ctrl/Cmd</kbd>+click the outline adds a point · double-click a point removes it · <kbd>Esc</kbd> deselects</td></tr>
-        <tr class="keys-head"><td colspan="2">Shapes and transforms (bin → Shapes, Inspector → Shape layer / Transform)</td></tr>
-        <tr><td>Motion path on the monitor</td><td>Drag a key square to move it · drag a handle to bend the path (<kbd>Alt</kbd> breaks the pair) · <kbd>Alt</kbd>+drag a key pulls new handles · double-click a key makes it a corner again</td></tr>
-        <tr><td>Shape / text-path pen</td><td>Click to place points, drag while placing to pull curve handles · click the first point closes the path · <kbd>Enter</kbd> keeps it open · <kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Backspace</kbd> removes the last point, <kbd>Ctrl</kbd>+<kbd>⇧</kbd>+<kbd>Z</kbd> puts it back · <kbd>Esc</kbd> cancels</td></tr>
-        <tr><td>Shape item on the monitor</td><td>Drag inside to move · corners resize (<kbd>⇧</kbd> keeps the proportions) · the knob rotates (<kbd>⇧</kbd> snaps to 15°) · line / path: drag a point or its handles (<kbd>Alt</kbd> breaks the pair), <kbd>Alt</kbd>+drag a point pulls new handles · path: <kbd>Ctrl/Cmd</kbd>+click the outline adds a point, double-click a point removes it · <kbd>Esc</kbd> deselects</td></tr>
-        <tr><td>Anchor ✥ Move</td><td>Drag on the monitor to move the anchor point; the picture stays put (<kbd>⇧</kbd> snaps to its centre) · <kbd>Esc</kbd> turns it off</td></tr>
-        <tr class="keys-head"><td colspan="2">Compositions (bin → Project, clip menu → Precompose)</td></tr>
-        <tr><td>Comp clip / bin comp</td><td>Double-click to open it on the timeline · drag a bin comp onto the timeline to place it · the breadcrumb above the timeline steps back out</td></tr>
-        <tr><td><kbd>Esc</kbd> inside a comp</td><td>Back out one level (once nothing is selected)</td></tr>
-        <tr class="keys-head"><td colspan="2">Tracking (Inspector → Tracking, or a mask's Track buttons)</td></tr>
-        <tr><td>Track point</td><td>Click the spot to follow on the monitor — it tracks from the playhead to the clip's end · <kbd>Esc</kbd> cancels the pick, or stops a track that is running (what was tracked so far is kept)</td></tr>
-      </table>
+    <div class="help-head">
+      <h2>Keyboard shortcuts</h2>
+      <input type="search" id="helpFilter" class="help-filter" placeholder="Filter — e.g. marker, trim, mask" aria-label="Filter shortcuts" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="keys-cols" id="helpKeys">
+      <section class="keys-sec">
+        <h3>Playback</h3>
+        <table class="keys">
+          <tr><td><kbd>Space</kbd></td><td>Play / pause (Source or Program — whichever is active)</td></tr>
+          <tr><td><kbd>J</kbd> <kbd>K</kbd> <kbd>L</kbd></td><td>Shuttle — <kbd>L</kbd> plays forward, <kbd>J</kbd> in reverse (silent); tap again for 1.5× · 2× · 4×, the other key turns around; <kbd>K</kbd> stops</td></tr>
+          <tr><td><kbd>K</kbd>+<kbd>J</kbd> / <kbd>K</kbd>+<kbd>L</kbd></td><td>Hold <kbd>K</kbd> and tap to step one frame; hold both to crawl at ¼ speed</td></tr>
+          <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>Step 1 frame (<kbd>⇧</kbd> = 1 second)</td></tr>
+          <tr><td><kbd>↑</kbd> / <kbd>↓</kbd></td><td>Jump to previous / next cut (selected clip In then Out; no selection → targeted tracks). Source monitor: In / Out marks</td></tr>
+          <tr><td><kbd>Home</kbd> / <kbd>End</kbd></td><td>Jump to start / end</td></tr>
+          <tr><td><kbd>0</kbd>–<kbd>9</kbd> / click timecode</td><td>Type a time: <code>01:15:00</code>, packed <code>1500</code> (= 15 s), <code>+30</code> / <code>-1:00</code> to offset, <code>12.5</code> seconds. Click IN / OUT readouts to type those too</td></tr>
+          <tr><td>Limit (toolbar)</td><td>Play stops at OUT; Home / End use IN / OUT</td></tr>
+        </table>
+      </section>
+      <section class="keys-sec">
+        <h3>Source monitor</h3>
+        <table class="keys">
+          <tr><td>Dbl-click bin / clip</td><td>Load into the Source monitor</td></tr>
+          <tr><td><kbd>,</kbd></td><td>Insert Source In→Out at the timeline playhead (ripples later clips)</td></tr>
+          <tr><td><kbd>.</kbd></td><td>Replace — overwrite at the playhead, or apply new Source In / Out to a timeline-loaded clip (ripples if the duration changes)</td></tr>
+        </table>
+      </section>
+      <section class="keys-sec">
+        <h3>Editing</h3>
+        <table class="keys">
+          <tr><td><kbd>V</kbd> <kbd>B</kbd> <kbd>R</kbd> <kbd>Y</kbd> <kbd>U</kbd></td><td>Tools: Selection · Ripple edit (drag an edge, the rest follows) · Rolling edit (drag a cut) · Slip (change the source under a clip) · Slide (move a clip, neighbours trim)</td></tr>
+          <tr><td><kbd>S</kbd></td><td>Split clip(s) at the playhead (selection, else targeted tracks)</td></tr>
+          <tr><td><kbd>[</kbd> / <kbd>]</kbd></td><td>Trim selected in / out to the playhead</td></tr>
+          <tr><td><kbd>Del</kbd></td><td>Delete selected clip(s), or clear the focused transition</td></tr>
+          <tr><td><kbd>⇧</kbd>+<kbd>Del</kbd></td><td>Ripple delete — remove the selection and close the gap on targeted tracks</td></tr>
+          <tr><td><kbd>G</kbd></td><td>Find the next shared gap (wraps; respects IN / OUT)</td></tr>
+          <tr><td><kbd>⇧</kbd>+<kbd>G</kbd></td><td>Close the gap at the playhead (targeted tracks)</td></tr>
+          <tr><td><kbd>Alt</kbd>+<kbd>T</kbd></td><td>Add a transition at the playhead (in / out by half)</td></tr>
+          <tr><td><kbd>⇧</kbd>+<kbd>E</kbd></td><td>Disable / enable selected clip(s) — hidden from preview and export</td></tr>
+          <tr><td><kbd>Ctrl/Cmd</kbd>+<kbd>L</kbd></td><td>Unlink / link video and its audio</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>⇧</kbd>+<kbd>Z</kbd></td><td>Undo / redo (also <kbd>Ctrl</kbd>+<kbd>Y</kbd>)</td></tr>
+        </table>
+      </section>
+      <section class="keys-sec">
+        <h3>Selection</h3>
+        <table class="keys">
+          <tr><td>Drag empty area</td><td>Marquee-select clips</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+click clip</td><td>Add to / remove from the selection</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>A</kbd> / <kbd>Esc</kbd></td><td>Select all / deselect</td></tr>
+          <tr><td>Right-click clip</td><td>Disable / lock / link or unlink / precompose</td></tr>
+        </table>
+      </section>
+      <section class="keys-sec">
+        <h3>IN / OUT and markers</h3>
+        <table class="keys">
+          <tr><td><kbd>I</kbd> / <kbd>O</kbd></td><td>Set Source In / Out (Source mode) or the timeline work area (Program; also bounds Export)</td></tr>
+          <tr><td><kbd>⇧</kbd>+<kbd>I</kbd> / <kbd>⇧</kbd>+<kbd>O</kbd></td><td>Clear Source or timeline IN / OUT</td></tr>
+          <tr><td><kbd>T</kbd></td><td>Split clips at the IN / OUT marks</td></tr>
+          <tr><td><kbd>⇧</kbd>+<kbd>T</kbd></td><td>Trim clips to IN / OUT (remove heads and tails)</td></tr>
+          <tr><td><kbd>;</kbd> / <kbd>'</kbd></td><td>Lift / Extract IN→OUT on targeted tracks (Extract closes the gap)</td></tr>
+          <tr><td><kbd>M</kbd></td><td>Add / remove a marker at the playhead</td></tr>
+          <tr><td><kbd>⇧</kbd>+<kbd>M</kbd> / <kbd>Alt</kbd>+<kbd>⇧</kbd>+<kbd>M</kbd></td><td>Go to the next / previous marker</td></tr>
+          <tr><td>Marker on ruler</td><td>Drag to move · click to jump · double-click or right-click to name / colour / delete · <b>Markers</b> lists them all</td></tr>
+        </table>
+      </section>
+      <section class="keys-sec">
+        <h3>Timeline view and tracks</h3>
+        <table class="keys">
+          <tr><td><kbd>+</kbd> / <kbd>-</kbd></td><td>Zoom the timeline</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+wheel</td><td>Zoom at the cursor</td></tr>
+          <tr><td><kbd>Z</kbd></td><td>Zoom to the selected clip(s)</td></tr>
+          <tr><td><kbd>Alt</kbd>+<kbd>Z</kbd></td><td>Zoom to the IN–OUT work area</td></tr>
+          <tr><td><kbd>⇧</kbd>+<kbd>Z</kbd></td><td>Zoom to fit</td></tr>
+          <tr><td><kbd>N</kbd></td><td>Snapping on / off — <b>▾</b> picks targets (clip edges, playhead, markers, IN / OUT, keyframes, frame grid)</td></tr>
+          <tr><td>Click track name</td><td>Target / untarget the track — edits touch lit (targeted) tracks only</td></tr>
+          <tr><td>Track <b>S</b></td><td>Solo the track (mutes all others; click again to restore)</td></tr>
+          <tr><td>Track padlock</td><td>Lock the track — nothing on it can be edited or moved</td></tr>
+          <tr><td>Right-click track</td><td>Remove an empty track (keeps ≥1 video + ≥1 audio)</td></tr>
+        </table>
+      </section>
+      <section class="keys-sec">
+        <h3>Keyframes and Inspector</h3>
+        <table class="keys">
+          <tr><td><kbd>Ctrl/Cmd</kbd>+<kbd>←</kbd> / <kbd>→</kbd></td><td>Go to the previous / next keyframe (the Inspector follows)</td></tr>
+          <tr><td><kbd>Ctrl/Cmd</kbd>+click label</td><td>Reset a property and clear all its keyframes (works on sliders too)</td></tr>
+          <tr><td><kbd>⇧</kbd>+click label</td><td>Reset the value at the playhead, or remove that keyframe</td></tr>
+        </table>
+      </section>
+      <section class="keys-sec">
+        <h3>Audio</h3>
+        <table class="keys">
+          <tr><td>Volume line</td><td>Drag to change the level · <kbd>Ctrl/Cmd</kbd>+click adds a keyframe · <kbd>Alt</kbd>+click or double-click removes one · corner grips drag fades</td></tr>
+          <tr><td><kbd>⇧</kbd>+<kbd>D</kbd></td><td>Crossfade the audio cut next to the selected clip (or at the playhead)</td></tr>
+        </table>
+      </section>
+      <section class="keys-sec">
+        <h3>Bin and compositions</h3>
+        <table class="keys">
+          <tr><td><kbd>Ctrl</kbd>+click bin</td><td>Import media files</td></tr>
+          <tr><td>Right-click <b>Project</b> tab</td><td>New folder · New composition</td></tr>
+          <tr><td>Comp clip / bin comp</td><td>Double-click to open it on the timeline · drag a bin comp onto the timeline to place it · the breadcrumb above the timeline steps back out</td></tr>
+          <tr><td>Right-click clips</td><td><b>Precompose</b> — move the selection into a new comp</td></tr>
+          <tr><td><kbd>Esc</kbd> inside a comp</td><td>Back out one level (once nothing is selected)</td></tr>
+        </table>
+      </section>
+      <section class="keys-sec">
+        <h3>Color workspace</h3>
+        <table class="keys">
+          <tr><td>Colour wheel</td><td>Drag to tint (<kbd>⇧</kbd> = fine) · double-click resets the colour · double-click a label or slider name to reset it</td></tr>
+          <tr><td>WB pick / Pick</td><td>Click the monitor to balance, to mark a colour on the curves, or to select it in a layer's qualifier · <kbd>Esc</kbd> cancels</td></tr>
+          <tr><td>Curves</td><td>Click adds a point on the curve · drag moves it · double-click removes it</td></tr>
+          <tr><td>Layer mask on monitor</td><td>Drag inside to move · handles resize · the knob rotates (<kbd>⇧</kbd> snaps to 15°) · poly / bezier: <kbd>Ctrl/Cmd</kbd>+click adds a point, double-click removes one · <b>Draw</b>: drag a free-hand outline</td></tr>
+        </table>
+      </section>
+      <section class="keys-sec">
+        <h3>Masks <span>Inspector → Masks</span></h3>
+        <table class="keys">
+          <tr><td>Pen</td><td>Click to place points, drag while placing to pull curve handles · click the first point or <kbd>Enter</kbd> closes · <kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Backspace</kbd> removes the last point, <kbd>Ctrl</kbd>+<kbd>⇧</kbd>+<kbd>Z</kbd> puts it back · <kbd>Esc</kbd> cancels</td></tr>
+          <tr><td>Draw</td><td>Drag a free-hand outline — it becomes an editable bezier</td></tr>
+          <tr><td>Mask on monitor</td><td>Drag inside to move · edge handles resize · the knob rotates (<kbd>⇧</kbd> snaps to 15°) · drag a point or its handles (<kbd>Alt</kbd> breaks the pair) · <kbd>Alt</kbd>+drag a point pulls new handles · <kbd>Ctrl/Cmd</kbd>+click the outline adds a point · double-click a point removes it · <kbd>Esc</kbd> deselects</td></tr>
+        </table>
+      </section>
+      <section class="keys-sec">
+        <h3>Shapes and transforms <span>bin → Shapes · Inspector</span></h3>
+        <table class="keys">
+          <tr><td>Shape item on monitor</td><td>Drag inside to move · corners resize (<kbd>⇧</kbd> keeps the proportions) · the knob rotates (<kbd>⇧</kbd> snaps to 15°) · line / path: drag a point or its handles (<kbd>Alt</kbd> breaks the pair), <kbd>Alt</kbd>+drag a point pulls new handles · path: <kbd>Ctrl/Cmd</kbd>+click the outline adds a point, double-click a point removes it · <kbd>Esc</kbd> deselects</td></tr>
+          <tr><td>Shape / text-path pen</td><td>Click to place points, drag while placing to pull curve handles · click the first point closes the path · <kbd>Enter</kbd> keeps it open · <kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Backspace</kbd> removes the last point, <kbd>Ctrl</kbd>+<kbd>⇧</kbd>+<kbd>Z</kbd> puts it back · <kbd>Esc</kbd> cancels</td></tr>
+          <tr><td>Motion path</td><td>Drag a key square to move it · drag a handle to bend the path (<kbd>Alt</kbd> breaks the pair) · <kbd>Alt</kbd>+drag a key pulls new handles · double-click a key makes it a corner again</td></tr>
+          <tr><td>Anchor ✥ Move</td><td>Drag on the monitor to move the anchor point; the picture stays put (<kbd>⇧</kbd> snaps to its centre) · <kbd>Esc</kbd> turns it off</td></tr>
+        </table>
+      </section>
+      <section class="keys-sec">
+        <h3>Tracking <span>Inspector → Tracking · a mask’s Track buttons</span></h3>
+        <table class="keys">
+          <tr><td>Track point</td><td>Click the spot to follow on the monitor — it tracks from the playhead to the clip's end · <kbd>Esc</kbd> cancels the pick, or stops a running track (what was tracked so far is kept)</td></tr>
+        </table>
+      </section>
+      <p class="help-empty hidden" id="helpEmpty">No shortcut matches that.</p>
     </div>
     <div class="dialog-actions"><button class="btn primary" id="btnCloseHelp">Close</button></div>
   </div>

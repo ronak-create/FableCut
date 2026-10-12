@@ -52,6 +52,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `parent` are validated on `addClip` / `updateClip`; the compact view
   lists shapes and parents. A `motion-graphics` skill covers the recipes.
 
+### Changed
+- The Keyboard shortcuts dialog is grouped into sections (Playback, Editing,
+  IN / OUT and markers, Bin and compositions, Masks, …) and has a filter box.
+
 ### Fixed
 - Exports of clips with slow-motion speed ramps (or very busy frames: grades,
   masks, blur) no longer fail with "presented frame timeout". A seek that lands

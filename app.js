@@ -14247,8 +14247,37 @@ function startSourceScrub(e) {
   window.addEventListener("pointerup", onUp);
 }
 els.sourceScrubTrack?.addEventListener("pointerdown", startSourceScrub);
-$("btnHelp").addEventListener("click", () => $("helpOverlay").classList.remove("hidden"));
+$("btnHelp").addEventListener("click", () => {
+  $("helpOverlay").classList.remove("hidden");
+  $("helpFilter").focus();
+});
 $("btnCloseHelp").addEventListener("click", () => $("helpOverlay").classList.add("hidden"));
+/** Keyboard shortcuts filter: keeps the rows (and whole sections, by heading) that match every typed word. */
+function filterHelp() {
+  const words = $("helpFilter").value.toLowerCase().split(/\s+/).filter(Boolean);
+  let any = false;
+  for (const sec of $("helpKeys").querySelectorAll(".keys-sec")) {
+    const head = sec.querySelector("h3").textContent.toLowerCase();
+    let shown = 0;
+    for (const tr of sec.querySelectorAll("tr")) {
+      const text = head + " " + tr.textContent.toLowerCase();
+      const hit = words.every((w) => text.includes(w));
+      tr.classList.toggle("hidden", !hit);
+      if (hit) shown++;
+    }
+    sec.classList.toggle("hidden", !shown);
+    if (shown) any = true;
+  }
+  $("helpEmpty").classList.toggle("hidden", any);
+}
+$("helpFilter").addEventListener("input", filterHelp);
+$("helpFilter").addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  e.preventDefault();
+  e.stopPropagation();
+  if ($("helpFilter").value) { $("helpFilter").value = ""; filterHelp(); }
+  else $("helpOverlay").classList.add("hidden");
+});
 function settingsFocusables() {
   const root = $("settingsDialog");
   if (!root) return [];
