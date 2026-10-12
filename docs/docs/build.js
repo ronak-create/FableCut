@@ -84,6 +84,11 @@ const PAGES = [
     parts: [["project.json schema", "Compositions (nested sequences)"]],
   },
   {
+    slug: "presets-templates", nav: "Presets & templates", title: "Animation presets and templates", group: "The timeline",
+    lede: "Put a ready-made entrance, exit, emphasis or loop on any clip, and place lower thirds, logo animations and social layouts whose text, colours and logo you fill in, from the bin and the Inspector or by an agent with applyPreset and addTemplate.",
+    parts: [["project.json schema", "Presets and templates"]],
+  },
+  {
     slug: "editing", nav: "Editing rules", title: "Editing rules", group: "The timeline",
     lede: "How tracks, links, locks, targeting and the trim tools behave, for people and agents alike.",
     parts: [["project.json schema", "Semantics"]],

@@ -64,6 +64,13 @@ about 150 ms. A human and an agent can work the same timeline at once.
   plays and exports; nests 4 deep, opens on the timeline, precompose a
   selection. Agents use the `addComp`, `updateComp`, `inComp` and `precompose`
   patch ops.
+- Animation presets and templates: 33 named entrances, exits, emphases and
+  loops keyed relative to the clip, and templates (lower thirds, logo
+  animations, social layouts at 9:16, 1:1 and 16:9) with text, colour and logo
+  fields, each placed as its own comp and retimed by its hold point. Saved
+  ones live in library/presets and library/templates. Agents use the
+  `applyPreset`, `addTemplate`, `setTemplate`, `savePreset` and
+  `saveTemplate` patch ops.
 - Track mattes and blending: a clip can be cut by the picture on the track
   above (alpha, alpha inverted, luma, luma inverted; the matte track stops
   drawing), and laid over the clips below with 17 blend modes. Agents use the

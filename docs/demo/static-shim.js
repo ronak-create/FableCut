@@ -121,6 +121,8 @@
     var url = typeof input === "string" ? input : (input && input.url) || "";
     var path;
     try { path = new URL(url, location.href).pathname; } catch (e) { path = url; }
+    // the templates' library files sit next to the playground (sync.js copies them)
+    if (path.indexOf("/library/") === 0) return nativeFetch(path.slice(1), init);
     if (path.indexOf("/api/") === -1) return nativeFetch(input, init);
     var method = ((init && init.method) || (input && input.method) || "GET").toUpperCase();
 
@@ -136,6 +138,7 @@
     }
     if (path === "/api/export/ffmpeg") return reply({ available: false });
     if (path === "/api/library") return reply([]);
+    if ((path === "/api/presets" || path === "/api/templates") && method === "GET") return reply([]);
     if (path === "/api/export/profiles") return reply({}, 404);
     if (path === "/api/upload" || path === "/api/library/install") {
       return reply({ error: "The playground runs in the browser with no server, so it can't take new files. Clone the repo to import your own footage." }, 501);

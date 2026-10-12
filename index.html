@@ -58,6 +58,7 @@
         <button type="button" data-tab="sfx" title="Sound effects from library/sfx">SFX</button>
         <button type="button" data-tab="svg" title="Vector animations from library/svg">SVG</button>
         <button type="button" data-tab="shapes" title="Shape layers and null objects">Shapes</button>
+        <button type="button" data-tab="templates" title="Lower thirds, logo animations and social layouts — with fields you edit in the Inspector">Templates</button>
       </div>
       <input type="file" id="fileInput" class="sr-only" multiple accept="video/*,audio/*,image/*,.mp4,.mov,.webm,.mkv,.mp3,.wav,.m4a,.png,.jpg,.jpeg,.gif,.webp,.svg">
       <div class="bin-list" id="binList">
@@ -424,11 +425,12 @@
         </table>
       </section>
       <section class="keys-sec">
-        <h3>Keyframes and Inspector</h3>
+        <h3>Keyframes, presets and Inspector</h3>
         <table class="keys">
           <tr><td><kbd>Ctrl/Cmd</kbd>+<kbd>←</kbd> / <kbd>→</kbd></td><td>Go to the previous / next keyframe (the Inspector follows)</td></tr>
           <tr><td><kbd>Ctrl/Cmd</kbd>+click inspector label or slider</td><td>Reset a property and clear all its keyframes</td></tr>
           <tr><td><kbd>⇧</kbd>+click label</td><td>Reset the value at the playhead, or remove that keyframe</td></tr>
+          <tr><td>Motion → Presets</td><td>In · Out · At playhead · Loop menus key a ready-made animation onto the selected clips · <b>Save as preset</b> keeps this clip's keyframes for every project</td></tr>
         </table>
       </section>
       <section class="keys-sec">
@@ -439,13 +441,14 @@
         </table>
       </section>
       <section class="keys-sec">
-        <h3>Bin and compositions</h3>
+        <h3>Bin, compositions and templates</h3>
         <table class="keys">
           <tr><td><kbd>Ctrl</kbd>+click bin</td><td>Import media files</td></tr>
           <tr><td>Right-click <b>Project</b> tab</td><td>New folder · New composition</td></tr>
           <tr><td>Comp clip / bin comp</td><td>Double-click to open it on the timeline · drag a bin comp onto the timeline to place it · the breadcrumb above the timeline steps back out</td></tr>
           <tr><td>Right-click clips</td><td><b>Precompose</b> — move the selection into a new comp</td></tr>
           <tr><td><kbd>Esc</kbd> inside a comp</td><td>Back out one level (once nothing is selected)</td></tr>
+          <tr><td><b>Templates</b> tab</td><td>Drag a lower third, logo animation or social layout onto the timeline (or click ＋) · fill in its fields in the Inspector's <b>Template</b> section · right-click a comp → <b>Save as template</b></td></tr>
         </table>
       </section>
       <section class="keys-sec">
@@ -497,6 +500,7 @@
 <script src="color.js"></script>
 <script src="edit-ops.js"></script>
 <script src="comp.js"></script>
+<script src="templates.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

@@ -21,7 +21,7 @@ const { spawn, spawnSync } = require("child_process");
 const { loadEncodeProfiles, listProfilesPublic, resolveProfile, profileSummary } = require("./encode-profiles");
 
 const {
-  APP_DIR, DATA_DIR, MEDIA_DIR, EXPORTS_DIR, ANALYSIS_DIR, LIBRARY_DIR, PROJECT_FILE, ensureDirs,
+  APP_DIR, DATA_DIR, MEDIA_DIR, EXPORTS_DIR, ANALYSIS_DIR, LIBRARY_DIR, PROJECT_FILE, ensureDirs, readSaved, writeSaved,
 } = require("./paths");
 const { downloadImportUrl, kindFromName, maybeFaststart } = require("./import-url");
 const FX = require("./audio-fx");
@@ -32,6 +32,9 @@ const Mask = require("./mask");
 const Tracker = require("./tracker");
 const Motion = require("./motion");
 const CompLib = require("./comp");
+const Templates = require("./templates");
+/** The user's saved presets / templates (library/presets, library/templates), validated; bad files skipped. */
+const savedItems = (kind) => readSaved(kind).map((x) => (kind === "presets" ? Templates.normalizePreset(x.data) : Templates.normalizeTemplate(x.data))).filter(Boolean);
 
 /* ROOT is where the code lives (server.js, CLAUDE.md); the user's timeline and
    media live under DATA_DIR. Identical unless FABLECUT_DATA_DIR is set. */
@@ -143,7 +146,7 @@ const TOOLS = [
   },
   {
     name: "fablecut_patch_project",
-    description: "Apply targeted edits to the FableCut project WITHOUT round-tripping the whole document — PREFER THIS over get+set for every edit (it is ~10-100x cheaper in tokens and merge-safe by design: it re-reads the latest document from disk, applies your ops in order, bumps revision once, saves atomically). Ops: {op:'addClip', clip:{…}} (id auto-generated if omitted) · {op:'updateClip', id, set:{…}} · {op:'removeClip', id} · {op:'addMedia', media:{…}} · {op:'removeMedia', id} · {op:'setProject', set:{name|width|height|fps|background|markers|disabledTracks|lockedTracks|untargetedTracks|encodeProfile|master}} (markers = the full list [{t, label?, color?}], color: gold|red|orange|green|cyan|blue|purple|pink; master = {gain}, the master fader in dB) · {op:'setTrack', id:'A1', set:{gain?, pan?, out?}} (audio-track fader in dB −60…+12, pan −1…1, out = a submix bus id or 'master'; null or 0 resets) · {op:'setBus', id:'B1', set:{name?, gain?, pan?, mute?}} (submix bus, created if missing; route tracks into it with setTrack out) · {op:'removeBus', id} · {op:'setFx', target:'clip'|'track'|'bus'|'master', id?, preset?:'podcast'|… OR fx:[{type,…params}], append?:true} (audio effects — validated; presets: clean-voice, podcast, radio, deep-voice, telephone, cinematic, wide, muffled; fx:null clears; on a clip it applies to its linked stems too) · {op:'setFxKeys', target, id?, index?|type?, param, keys:[{t, v, ease?}]|null} (automate one effect parameter: t is clip-local for a clip's effects, timeline seconds otherwise; see the 'Audio mix' docs section) · {op:'setGrade', id | ids:[…], grade:{exposure?, temp?, tint?, lift?, gamma?, gain?, offset?, contrast?, pivot?, blacks?, shadows?, midtones?, highlights?, whites?, lowSoft?, highSoft?, saturation?, curves?:{y?, r?, g?, b?}, hueHue?, hueSat?, hueLuma?, satLuma?, layers?:[…], on?}, replace?:true} (color grade on video / image / svg / adjust clips — wheels are [r, g, b, master]; curves are [[x, y], …] point lists on 0…1 and merge per channel; hue curves are [[hue°, value], …] — one point = a ±40° band; layers replaces the whole layer list; merges key by key, null resets a key, replace:true starts from neutral, grade:null clears; see the 'Color' docs section; measure the result with fablecut_scopes) · {op:'setGradeLayer', id | ids, layer: index | 'name', set:{name?, on?, qualifier?:{hue?:[centre°, width°, soft°], sat?:[lo, hi, soft], luma?:[lo, hi, soft], invert?}, mask?:{shape:'ellipse'|'rect'|'poly', x, y, w, h, rotation?, feather?, invert?, points?, keys?:[{t, x?, y?, …}]}, …any grade key}, replace?:true, remove?:true} (a secondary: a grade applied only where the qualifier × mask select; a new name or index = length adds a layer; qualifier and mask merge key by key; check what it selects with fablecut_scopes matte:{clip, layer}) · {op:'setMask', id | ids, mask?: index | 'name', set:{shape?:'rect'|'ellipse'|'bezier'|'freehand', mode?:'add'|'subtract'|'intersect'|'difference', invert?, opacity?, feather? (px), expand? (px, − shrinks), x?, y? (centre, 0…1 of the clip's picture), w?, h?, scale?, rotation?, points?:[[dx, dy, inX?, inY?, outX?, outY?], …] (bezier, around x, y), stroke?:[[u, v], …] (freehand: fitted into a bezier), keys?:[{t, ease?, x?, y?, w?, h?, scale?, rotation?, feather?, expand?, opacity?, points?}], name?, on?}, replace?:true, remove?:true} (clip masks on video / image / svg / text / adjust clips: the clip shows only where its masks combine to, bottom-up; mask left out, an unknown name or index = length adds one — a new mask needs shape; set merges key by key; masks follow the clip's transform; check with fablecut_scopes mask:{clip}) · {op:'removeMask', id, mask} · {op:'setMaskKeys', id, mask, keys:[…]|null} (animate a mask; t = seconds from the clip's start) · {op:'setMatte', id | ids, matte:'alpha'|'alpha-inverted'|'luma'|'luma-inverted'|null, track?:'V3'|null} (track matte: the picture on the video track directly above — or track — cuts the clip by its alpha or its brightness, inverted or not; that track stops drawing while it is a matte; null clears). · {op:'removeTrack', id, track: name | index} (delete a motion track stored by fablecut_track; what follows it keeps its keys). MOTION GRAPHICS: a shape layer is addClip {kind:'shape', track, start, duration, props:{shapes:[…]}} (no mediaId); a null is addClip {kind:'null', …} — invisible, a parent for other clips. {op:'setShape', id | ids, shape?: index | 'name' | '2.0' (path into a group), set:{type?:'rect'|'ellipse'|'polygon'|'star'|'line'|'path'|'group', name?, on?, x?, y? (px from the layer's origin), rotation?, scale?, opacity?, w?, h?, radius? (rect corners), sides?, inner? (star 0.05…1), points?:[[x, y, inX?, inY?, outX?, outY?], …] (line: 2, path: 2…128, px around x, y), closed? (path), fill?, stroke? ('#rrggbb' | '#rrggbbaa' | 'none'), strokeWidth?, lineCap?, lineJoin?, dash?:[on, off…], trimStart?, trimEnd? (0…100 — a draw-on), trimOffset?, items?:[…] (group), keys?:[{t, ease?, …any of x y rotation scale opacity w h radius inner strokeWidth trimStart trimEnd trimOffset fill stroke points}]}, replace?:true, remove?:true} (shape left out, an unknown name or index = length adds one — a new shape needs type; set merges key by key) · {op:'removeShape', id, shape} · {op:'setParent', id | ids, parent: clip id | null, keep?: true, at?} (the clip moves, turns and scales with its parent; keep:true — the default — keeps it where it is at time at, default its start; opacity and effects are not inherited). COMPOSITIONS (nested sequences): project.comps = [{id, name, width, height, duration, background?, tracks?, clips:[…]}]; a clip {kind:'comp', compId, start, in, duration} places one (draws like a picture of the comp's size — transform, masks, grade, blend, blur all apply — and its media plays and exports). {op:'addComp', comp:{id?, name, duration, width?, height?, background?, clips?:[…]}} · {op:'updateComp', id, set:{name?, width?, height?, duration?, background?, tracks?}} · {op:'removeComp', id} (refused while used) · {op:'precompose', ids:[…], name?, id?} (the clips move into a new comp; a comp clip takes their place) · {op:'inComp', comp, ops:[…]} (run clip and timeline ops on the comp's own clips — addClip, updateClip, setShape, split, …; nests). MOTION PATHS: x and y keyed at the same time are a position key; curve handles pin / pout (px) on those x and y keys bend the path between keys ({op:'setMotionPath', id | ids, path:'smooth'|'straight', autoOrient?:bool} sets them for you; props.autoOrient turns the clip along its path). props.motionBlur = shutter angle 0…720 (180 = film look), props.motionBlurSamples 2…32. TEXT ON A PATH: {op:'setTextPath', id | ids, path:'line'|'arc'|'circle'|'wave'|{type:'path'|'line'|'ellipse'|'rect'|'polygon'|'star', …shape item geometry, keys?}|null, offset? (% along, keyable as pathOffset), align?:'start'|'center'|'end'} — the title runs along the path (more lines on parallel curves below it), every textAnim plays along it. Every visual clip also has props.anchorX / anchorY (px from its picture's centre: the point x / y place and rotation / scale turn around) and shape clips props.trimStart / trimEnd / trimOffset (trim every path in the layer) — all keyframable. props.blend: normal · multiply · screen · overlay · darken · lighten · color-dodge · color-burn · hard-light · soft-light · difference · exclusion · hue · saturation · color · luminosity · lighter. TIMELINE EDITS — the editor's own split / ripple / trim code, so linked stems, track targeting (untargetedTracks) and locks behave exactly as in the UI; times in seconds: {op:'split', at, ids?} (no ids: every targeted track) · {op:'rippleDelete', ids} (later clips close the hole) · {op:'closeGap', at} · {op:'lift'|'extract', from?, to?} (remove a range; extract closes it; default = project inPoint/outPoint, which then clear) · {op:'insert'|'overwrite', mediaId, at, in?, duration?} (three-point edit: insert pushes later clips right, overwrite replaces what is there; a video brings one audio stem per channel) · {op:'rippleTrim'|'roll', id, side:'in'|'out', delta} · {op:'slip'|'slide', id, delta} (clamped to the media; the note says what was applied) · {op:'crossfade', ids? | at, duration?} (constant-power audio crossfade, borrowing handles from both sides). Any of these takes tracks:[…] to target lanes for that op only. setProject also takes inPoint / outPoint. updateClip merge rules: top-level keys are replaced (keyframes/transitionIn/transitionOut wholesale), `props` merges key-by-key, and setting any key to null deletes it. LOCKS: the user can lock clips (`locked:true`) and tracks (`lockedTracks`); updateClip / removeClip on a locked clip — or on a clip linked to one — and addClip onto a locked track are refused. Leave locked material alone; only if the user asked you to change it, pass force:true on that op (or unlock first: updateClip set:{locked:null}, which is always allowed). All-or-nothing: an invalid op aborts the whole patch unsaved. Optional baseRevision: the revision your ops were planned against (from fablecut_get_project, fablecut_status or the previous patch result) — if the project has moved past it (e.g. the user edited in the UI meanwhile), the patch is refused with CONFLICT and the current revision, nothing saved; re-check the clips you touch, then retry with the new revision. Omit it to apply on top of whatever is latest.",
+    description: "Apply targeted edits to the FableCut project WITHOUT round-tripping the whole document — PREFER THIS over get+set for every edit (it is ~10-100x cheaper in tokens and merge-safe by design: it re-reads the latest document from disk, applies your ops in order, bumps revision once, saves atomically). Ops: {op:'addClip', clip:{…}} (id auto-generated if omitted) · {op:'updateClip', id, set:{…}} · {op:'removeClip', id} · {op:'addMedia', media:{…}} · {op:'removeMedia', id} · {op:'setProject', set:{name|width|height|fps|background|markers|disabledTracks|lockedTracks|untargetedTracks|encodeProfile|master}} (markers = the full list [{t, label?, color?}], color: gold|red|orange|green|cyan|blue|purple|pink; master = {gain}, the master fader in dB) · {op:'setTrack', id:'A1', set:{gain?, pan?, out?}} (audio-track fader in dB −60…+12, pan −1…1, out = a submix bus id or 'master'; null or 0 resets) · {op:'setBus', id:'B1', set:{name?, gain?, pan?, mute?}} (submix bus, created if missing; route tracks into it with setTrack out) · {op:'removeBus', id} · {op:'setFx', target:'clip'|'track'|'bus'|'master', id?, preset?:'podcast'|… OR fx:[{type,…params}], append?:true} (audio effects — validated; presets: clean-voice, podcast, radio, deep-voice, telephone, cinematic, wide, muffled; fx:null clears; on a clip it applies to its linked stems too) · {op:'setFxKeys', target, id?, index?|type?, param, keys:[{t, v, ease?}]|null} (automate one effect parameter: t is clip-local for a clip's effects, timeline seconds otherwise; see the 'Audio mix' docs section) · {op:'setGrade', id | ids:[…], grade:{exposure?, temp?, tint?, lift?, gamma?, gain?, offset?, contrast?, pivot?, blacks?, shadows?, midtones?, highlights?, whites?, lowSoft?, highSoft?, saturation?, curves?:{y?, r?, g?, b?}, hueHue?, hueSat?, hueLuma?, satLuma?, layers?:[…], on?}, replace?:true} (color grade on video / image / svg / adjust clips — wheels are [r, g, b, master]; curves are [[x, y], …] point lists on 0…1 and merge per channel; hue curves are [[hue°, value], …] — one point = a ±40° band; layers replaces the whole layer list; merges key by key, null resets a key, replace:true starts from neutral, grade:null clears; see the 'Color' docs section; measure the result with fablecut_scopes) · {op:'setGradeLayer', id | ids, layer: index | 'name', set:{name?, on?, qualifier?:{hue?:[centre°, width°, soft°], sat?:[lo, hi, soft], luma?:[lo, hi, soft], invert?}, mask?:{shape:'ellipse'|'rect'|'poly', x, y, w, h, rotation?, feather?, invert?, points?, keys?:[{t, x?, y?, …}]}, …any grade key}, replace?:true, remove?:true} (a secondary: a grade applied only where the qualifier × mask select; a new name or index = length adds a layer; qualifier and mask merge key by key; check what it selects with fablecut_scopes matte:{clip, layer}) · {op:'setMask', id | ids, mask?: index | 'name', set:{shape?:'rect'|'ellipse'|'bezier'|'freehand', mode?:'add'|'subtract'|'intersect'|'difference', invert?, opacity?, feather? (px), expand? (px, − shrinks), x?, y? (centre, 0…1 of the clip's picture), w?, h?, scale?, rotation?, points?:[[dx, dy, inX?, inY?, outX?, outY?], …] (bezier, around x, y), stroke?:[[u, v], …] (freehand: fitted into a bezier), keys?:[{t, ease?, x?, y?, w?, h?, scale?, rotation?, feather?, expand?, opacity?, points?}], name?, on?}, replace?:true, remove?:true} (clip masks on video / image / svg / text / adjust clips: the clip shows only where its masks combine to, bottom-up; mask left out, an unknown name or index = length adds one — a new mask needs shape; set merges key by key; masks follow the clip's transform; check with fablecut_scopes mask:{clip}) · {op:'removeMask', id, mask} · {op:'setMaskKeys', id, mask, keys:[…]|null} (animate a mask; t = seconds from the clip's start) · {op:'setMatte', id | ids, matte:'alpha'|'alpha-inverted'|'luma'|'luma-inverted'|null, track?:'V3'|null} (track matte: the picture on the video track directly above — or track — cuts the clip by its alpha or its brightness, inverted or not; that track stops drawing while it is a matte; null clears). · {op:'removeTrack', id, track: name | index} (delete a motion track stored by fablecut_track; what follows it keeps its keys). MOTION GRAPHICS: a shape layer is addClip {kind:'shape', track, start, duration, props:{shapes:[…]}} (no mediaId); a null is addClip {kind:'null', …} — invisible, a parent for other clips. {op:'setShape', id | ids, shape?: index | 'name' | '2.0' (path into a group), set:{type?:'rect'|'ellipse'|'polygon'|'star'|'line'|'path'|'group', name?, on?, x?, y? (px from the layer's origin), rotation?, scale?, opacity?, w?, h?, radius? (rect corners), sides?, inner? (star 0.05…1), points?:[[x, y, inX?, inY?, outX?, outY?], …] (line: 2, path: 2…128, px around x, y), closed? (path), fill?, stroke? ('#rrggbb' | '#rrggbbaa' | 'none'), strokeWidth?, lineCap?, lineJoin?, dash?:[on, off…], trimStart?, trimEnd? (0…100 — a draw-on), trimOffset?, items?:[…] (group), keys?:[{t, ease?, …any of x y rotation scale opacity w h radius inner strokeWidth trimStart trimEnd trimOffset fill stroke points}]}, replace?:true, remove?:true} (shape left out, an unknown name or index = length adds one — a new shape needs type; set merges key by key) · {op:'removeShape', id, shape} · {op:'setParent', id | ids, parent: clip id | null, keep?: true, at?} (the clip moves, turns and scales with its parent; keep:true — the default — keeps it where it is at time at, default its start; opacity and effects are not inherited). COMPOSITIONS (nested sequences): project.comps = [{id, name, width, height, duration, background?, tracks?, clips:[…]}]; a clip {kind:'comp', compId, start, in, duration} places one (draws like a picture of the comp's size — transform, masks, grade, blend, blur all apply — and its media plays and exports). {op:'addComp', comp:{id?, name, duration, width?, height?, background?, clips?:[…]}} · {op:'updateComp', id, set:{name?, width?, height?, duration?, background?, tracks?}} · {op:'removeComp', id} (refused while used) · {op:'precompose', ids:[…], name?, id?} (the clips move into a new comp; a comp clip takes their place) · {op:'inComp', comp, ops:[…]} (run clip and timeline ops on the comp's own clips — addClip, updateClip, setShape, split, …; nests). PRESETS AND TEMPLATES: {op:'applyPreset', id | ids, preset, length?, at?} keys a named animation onto visual clips, relative to where they sit (in: fade-in, pop-in, slide-up-in, slide-down-in, slide-left-in, slide-right-in, drop-in, zoom-in, spin-in, whip-in, rise-blur, draw-on · out: fade-out, pop-out, slide-up-out, slide-down-out, slide-left-out, slide-right-out, zoom-out, spin-out, whip-out, sink-blur, draw-off · at (an emphasis at timeline time at): pulse, shake, wobble, bounce, flash · loop (the whole clip): float, breathe, sway, spin, wiggle — or a saved one, or an inline {anchor:'in'|'out'|'at'|'whole', length, keys:{channel:[{t, v, ease?}]}} where scale / opacity multiply and the rest add). {op:'addTemplate', template, start?, track?, duration?, fields?:{key: value}, id?, compId?, name?} places a template as its own comp + a comp clip (lower-third-bar, lower-third-underline, lower-third-boxes [name, title, accent…] · logo-ring, logo-slam, logo-lines [logo = a media id, brand / tagline, accent] · social-story 1080x1920, social-quote 1080x1080, social-end-card [text fields, accent, background]); {op:'setTemplate', id: its clip or comp, fields?, duration?} changes the fields or the length (the exit keeps its timing). {op:'savePreset', id, name, anchor?} / {op:'saveTemplate', comp, name?, fields?} save to library/presets and library/templates for every project.MOTION PATHS: x and y keyed at the same time are a position key; curve handles pin / pout (px) on those x and y keys bend the path between keys ({op:'setMotionPath', id | ids, path:'smooth'|'straight', autoOrient?:bool} sets them for you; props.autoOrient turns the clip along its path). props.motionBlur = shutter angle 0…720 (180 = film look), props.motionBlurSamples 2…32. TEXT ON A PATH: {op:'setTextPath', id | ids, path:'line'|'arc'|'circle'|'wave'|{type:'path'|'line'|'ellipse'|'rect'|'polygon'|'star', …shape item geometry, keys?}|null, offset? (% along, keyable as pathOffset), align?:'start'|'center'|'end'} — the title runs along the path (more lines on parallel curves below it), every textAnim plays along it. Every visual clip also has props.anchorX / anchorY (px from its picture's centre: the point x / y place and rotation / scale turn around) and shape clips props.trimStart / trimEnd / trimOffset (trim every path in the layer) — all keyframable. props.blend: normal · multiply · screen · overlay · darken · lighten · color-dodge · color-burn · hard-light · soft-light · difference · exclusion · hue · saturation · color · luminosity · lighter. TIMELINE EDITS — the editor's own split / ripple / trim code, so linked stems, track targeting (untargetedTracks) and locks behave exactly as in the UI; times in seconds: {op:'split', at, ids?} (no ids: every targeted track) · {op:'rippleDelete', ids} (later clips close the hole) · {op:'closeGap', at} · {op:'lift'|'extract', from?, to?} (remove a range; extract closes it; default = project inPoint/outPoint, which then clear) · {op:'insert'|'overwrite', mediaId, at, in?, duration?} (three-point edit: insert pushes later clips right, overwrite replaces what is there; a video brings one audio stem per channel) · {op:'rippleTrim'|'roll', id, side:'in'|'out', delta} · {op:'slip'|'slide', id, delta} (clamped to the media; the note says what was applied) · {op:'crossfade', ids? | at, duration?} (constant-power audio crossfade, borrowing handles from both sides). Any of these takes tracks:[…] to target lanes for that op only. setProject also takes inPoint / outPoint. updateClip merge rules: top-level keys are replaced (keyframes/transitionIn/transitionOut wholesale), `props` merges key-by-key, and setting any key to null deletes it. LOCKS: the user can lock clips (`locked:true`) and tracks (`lockedTracks`); updateClip / removeClip on a locked clip — or on a clip linked to one — and addClip onto a locked track are refused. Leave locked material alone; only if the user asked you to change it, pass force:true on that op (or unlock first: updateClip set:{locked:null}, which is always allowed). All-or-nothing: an invalid op aborts the whole patch unsaved. Optional baseRevision: the revision your ops were planned against (from fablecut_get_project, fablecut_status or the previous patch result) — if the project has moved past it (e.g. the user edited in the UI meanwhile), the patch is refused with CONFLICT and the current revision, nothing saved; re-check the clips you touch, then retry with the new revision. Omit it to apply on top of whatever is latest.",
     inputSchema: {
       type: "object",
       properties: {
@@ -878,7 +881,12 @@ async function callTool(name, args, attempt = 0) {
               (c.unlinked === true ? " [unlinked]" : "") + fxTag(c.fx);
           }),
         ...(Array.isArray(doc.comps) && doc.comps.length ? [`COMPS (${doc.comps.length}) — edit their clips with {op:"inComp", comp, ops:[…]}:`,
-          ...doc.comps.flatMap((comp) => [`  ${CompLib.describe(comp)}`, ...(comp.clips || []).slice().sort((a, b) => a.start - b.start).map((c) => {
+          ...doc.comps.flatMap((comp) => [`  ${CompLib.describe(comp)}`,
+            ...(comp.template ? [`    template ${comp.template.id} — fields (setTemplate): ` + (comp.template.fields || []).map((f) => {
+              const v = Templates.fieldValue(comp, f);
+              return `${f.key}=${typeof v === "string" ? JSON.stringify(v.length > 40 ? v.slice(0, 40) + "…" : v) : v}`;
+            }).join(" ")] : []),
+            ...(comp.clips || []).slice().sort((a, b) => a.start - b.start).map((c) => {
             const r3 = (n) => Math.round(n * 1000) / 1000;
             return `    ${c.id} ${c.track} ${r3(c.start)}s+${r3(c.duration)}s ${c.kind}` + (c.mediaId ? `(${c.mediaId})` : "") + (c.kind === "comp" ? `(${c.compId})` : "") +
               (c.name ? ` "${c.name}"` : "") + (c.parent ? ` parent:${c.parent}` : "") + fmtProps(c.props, c.kind);
@@ -903,6 +911,8 @@ async function callTool(name, args, attempt = 0) {
         `or omit baseRevision to apply on top of the latest anyway.`);
       if (base != null && readRev !== base) throw conflict(readRev);
       const notes = [];
+      const toSave = [];   // [kind, item] — presets / templates written to the library once the project is saved
+      const savedList = (kind) => [...savedItems(kind), ...toSave.filter((x) => x[0] === kind).map((x) => x[1])];
       // Locks mirror the editor: a clip is locked by its own flag or its track,
       // and a linked A/V group with any locked member is locked as a whole.
       const lockedTracks = () => new Set(Array.isArray(proj.lockedTracks) ? proj.lockedTracks : []);
@@ -1434,6 +1444,95 @@ async function callTool(name, args, attempt = 0) {
             notes.push(`+comp ${r.comp.id} (${ids.length} clips) +${r.clip.id}`);
             break;
           }
+          case "applyPreset": {
+            // {op:"applyPreset", id | ids, preset: name | {anchor, length, keys…}, length?, at?} — at: timeline seconds, for an "at" (emphasis) preset
+            const ids = Array.isArray(op.ids) ? op.ids : op.id ? [op.id] : [];
+            if (!ids.length) throw new Error("applyPreset needs id or ids:[…]");
+            let p;
+            try { p = Templates.findPreset(op.preset, savedList("presets")); } catch (err) { throw new Error(`applyPreset: ${err.message}`); }
+            if (!p) throw new Error(`applyPreset: no preset ${JSON.stringify(op.preset)} — built in: ${Templates.PRESETS.map((x) => x.id).join(", ")}` +
+              (savedList("presets").length ? `; saved: ${savedList("presets").map((x) => x.id).join(", ")}` : ""));
+            if (op.length != null && !(typeof op.length === "number" && op.length > 0)) throw new Error("applyPreset: length is seconds, more than 0");
+            for (const id of ids) {
+              const c = proj.clips.find((x) => x.id === id);
+              if (!c) throw new Error("applyPreset: no clip " + id + (inCompId ? ` in comp ${inCompId}` : ""));
+              if (c.kind === "audio" || c.kind === "adjust") throw new Error(`applyPreset: clip ${id} is ${c.kind} — presets animate visual clips`);
+              refuseLocked("applyPreset", lockReason(c), op);
+              Templates.applyPreset(c, p, { length: op.length, at: typeof op.at === "number" ? op.at - c.start : undefined });
+            }
+            notes.push(`~${ids.join(",")}.${p.id}`);
+            break;
+          }
+          case "addTemplate": {
+            // {op:"addTemplate", template: name | {…}, start?, track?, duration?, fields?:{key: value}, id?, compId?, name?}
+            let t;
+            try { t = Templates.findTemplate(op.template, savedList("templates")); } catch (err) { throw new Error(`addTemplate: ${err.message}`); }
+            if (!t) throw new Error(`addTemplate: no template ${JSON.stringify(op.template)} — built in: ${Templates.TEMPLATES.map((x) => x.id).join(", ")}` +
+              (savedList("templates").length ? `; saved: ${savedList("templates").map((x) => x.id).join(", ")}` : ""));
+            let r;
+            try {
+              r = Templates.instantiate(proj, t, { compId: op.compId || "comp_" + uid(), clipId: op.id || "c_" + uid(), name: op.name,
+                start: typeof op.start === "number" ? op.start : 0, track: op.track || "V2", duration: op.duration, fields: op.fields });
+            } catch (err) { throw new Error(`addTemplate: ${err.message}`); }
+            notes.push(`+comp ${r.comp.id} (${t.id})`);
+            applyOps([{ op: "addClip", clip: r.clip }]);   // the same checks as any clip: track, locks
+            break;
+          }
+          case "setTemplate": {
+            // {op:"setTemplate", id: comp clip id | comp id, fields?:{key: value}, duration?}
+            let comp = CompLib.getComp(proj, op.id);
+            if (!comp) { const c = proj.clips.find((x) => x.id === op.id && x.kind === "comp"); comp = c && CompLib.getComp(proj, c.compId); }
+            if (!comp) throw new Error("setTemplate: no template clip or comp " + op.id);
+            if (!comp.template) throw new Error(`setTemplate: comp ${comp.id} isn't a placed template — edit its clips with inComp`);
+            try {
+              for (const [k, v] of Object.entries(op.fields || {})) Templates.setField(comp, Templates.slug(k), v, proj);
+              if (op.duration != null) {
+                const old = comp.duration;
+                Templates.retime(comp, op.duration);
+                // clips that showed the comp to its end keep doing so
+                for (const u of CompLib.usages(proj, comp.id)) if (Math.abs((+u.clip.in || 0) + u.clip.duration - old) < 1e-3) u.clip.duration = +(comp.duration - (+u.clip.in || 0)).toFixed(4);
+              }
+            } catch (err) { throw new Error(`setTemplate: ${err.message}`); }
+            notes.push(`~template ${comp.id}`);
+            break;
+          }
+          case "savePreset": {
+            // {op:"savePreset", id: clip id, name, anchor?:"in"|"out"|"whole", from?, to?} (clip seconds) or {op:"savePreset", preset:{…}}
+            let p;
+            try {
+              if (op.preset) p = Templates.normalizePreset(op.preset, true);
+              else {
+                const c = proj.clips.find((x) => x.id === op.id);
+                if (!c) throw new Error("no clip " + op.id);
+                const times = Object.values(c.keyframes || {}).flat().map((x) => x.t);
+                if (!times.length) throw new Error(`clip ${c.id} has no keyframes to save`);
+                const anchor = op.anchor || "in";
+                p = Templates.presetFromClip(c, { name: op.name, anchor,
+                  from: typeof op.from === "number" ? op.from : anchor === "out" ? Math.min(...times) : 0,
+                  to: typeof op.to === "number" ? op.to : anchor === "in" ? Math.max(...times) : c.duration });
+              }
+            } catch (err) { throw new Error(`savePreset: ${err.message}`); }
+            p = Templates.asSaved(p, "presets");
+            toSave.push(["presets", p]);
+            notes.push(`saved preset ${p.id} → library/presets/${p.id}.json`);
+            break;
+          }
+          case "saveTemplate": {
+            // {op:"saveTemplate", comp, name?, fields?, hold?} or {op:"saveTemplate", template:{…}}
+            let t;
+            try {
+              if (op.template) t = Templates.normalizeTemplate(op.template, true);
+              else {
+                const comp = CompLib.getComp(proj, op.comp);
+                if (!comp) throw new Error("no comp " + op.comp);
+                t = Templates.templateFromComp(comp, { name: op.name, fields: op.fields, hold: op.hold, media: proj.media });
+              }
+            } catch (err) { throw new Error(`saveTemplate: ${err.message}`); }
+            t = Templates.asSaved(t, "templates");
+            toSave.push(["templates", t]);
+            notes.push(`saved template ${t.id} → library/templates/${t.id}.json`);
+            break;
+          }
           case "inComp": {
             // {op:"inComp", comp, ops:[…clip / timeline ops…]} — run ops on the comp's own clips and tracks
             const comp = CompLib.getComp(proj, op.comp);
@@ -1441,6 +1540,7 @@ async function callTool(name, args, attempt = 0) {
             if (!Array.isArray(op.ops)) throw new Error("inComp needs ops:[…]");
             const allowed = ["addClip", "updateClip", "removeClip", "setGrade", "setGradeLayer", "setMask", "removeMask", "setMaskKeys", "setMatte",
               "setShape", "removeShape", "setParent", "setMotionPath", "setTextPath", "setFx", "setFxKeys", "precompose", "inComp",
+              "applyPreset", "addTemplate", "setTemplate",
               "split", "rippleDelete", "closeGap", "lift", "extract", "rippleTrim", "roll", "slip", "slide", "crossfade"];
             for (const o of op.ops) {
               if (!o || !allowed.includes(o.op)) throw new Error(`inComp: ${o && o.op} can't run inside a comp (clip and timeline ops only: ${allowed.join(", ")})`);
@@ -1588,7 +1688,7 @@ async function callTool(name, args, attempt = 0) {
           default:
             throw new Error("Unknown op: " + op.op + " (addClip|updateClip|removeClip|addMedia|removeMedia|setProject|setTrack|setBus|removeBus|setFx|setFxKeys|setGrade|setGradeLayer|setMask|removeMask|setMaskKeys|setMatte|removeTrack|setShape|removeShape|setParent|setMotionPath|setTextPath|" +
               "split|rippleDelete|closeGap|lift|extract|rippleTrim|roll|slip|slide|insert|overwrite|crossfade|" +
-              "addComp|updateComp|removeComp|precompose|inComp)");
+              "addComp|updateComp|removeComp|precompose|inComp|applyPreset|addTemplate|setTemplate|savePreset|saveTemplate)");
         }
       } };
       applyOps(ops);
@@ -1603,6 +1703,7 @@ async function callTool(name, args, attempt = 0) {
       proj.revision = readRev + 1;
       writeProject(proj);
       lastReadRevision = proj.revision;
+      for (const [kind, item] of toSave) writeSaved(kind, item.id, item);
       return `Patched (revision ${proj.revision}): ${notes.join(" ")}. Now ${proj.clips.length} clip(s), ${proj.media.length} media. UI hot-reloaded.`;
     }
     case "fablecut_set_project": {

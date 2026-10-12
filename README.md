@@ -209,6 +209,12 @@ same time.
   blends like a picture, while its video and audio play and export as usual.
   Open one to edit it on the timeline, or precompose a selection. Agents use
   the `addComp`, `inComp` and `precompose` patch ops
+- **Animation presets and templates** — 33 ready-made entrances, exits,
+  emphases and loops that fit any clip where it sits, and templates (lower
+  thirds, logo animations, 9:16 / 1:1 / 16:9 social layouts) whose text,
+  colours and logo you fill in, each placed as its own comp. Save your own
+  animations and comps to the library for every project. Agents use the
+  `applyPreset`, `addTemplate` and `setTemplate` patch ops
 - **Motion tracking** — follow a point or a region (with its scale and
   rotation) through a video clip, then make a mask follow it or pin a title,
   sticker or any clip to it; the result is ordinary editable keys. Agents use

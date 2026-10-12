@@ -2724,6 +2724,26 @@ body.track-size-s .clip .fade-grip {
   height: 70%;
 }
 
+.lib-group {
+  margin: 10px 4px 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.lib-group:first-child {
+  margin-top: 2px;
+}
+
+.lib-hint {
+  margin: 10px 4px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--dim);
+}
+
 .clip.c-comp .clip-body {
   background: linear-gradient(180deg, #c084fc33, #c084fc11), #4c2a73;
 }

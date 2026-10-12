@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="400" height="400">
+  <!-- A stand-in logo for the logo templates: pick your own in the template's Logo field. -->
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7b6cff"/>
+      <stop offset="1" stop-color="#ff7ac8"/>
+    </linearGradient>
+  </defs>
+  <rect x="40" y="40" width="320" height="320" rx="84" fill="url(#g)"/>
+  <path d="M138 118 L138 282 L262 282" fill="none" stroke="#ffffff" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="258" cy="142" r="26" fill="#ffffff"/>
+</svg>

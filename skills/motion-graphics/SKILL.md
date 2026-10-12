@@ -1,5 +1,5 @@
 ---
-description: Build motion graphics in FableCut — shape layers (rectangles, ellipses, polygons, stars, lines, bezier paths, groups), draw-on trim paths, null objects, parenting, anchor points, curved motion paths with auto-orient, motion blur, text on a path and reusable compositions (nested sequences), all keyframed. Use when the user wants a lower third, an animated logo or icon, a callout, a progress bar or loading ring, shapes that pop or slide in, a graphic reused across the edit, or anything to "move together", "orbit", "draw on" or "precompose".
+description: Build motion graphics in FableCut — shape layers (rectangles, ellipses, polygons, stars, lines, bezier paths, groups), draw-on trim paths, null objects, parenting, anchor points, curved motion paths with auto-orient, motion blur, text on a path, reusable compositions (nested sequences), animation presets and templates (lower thirds, logo animations, social layouts), all keyframed. Use when the user wants a lower third, an animated logo or icon, a callout, a progress bar or loading ring, shapes that pop or slide in, a title that "comes in" or "goes out", a vertical story or a quote card, a graphic reused across the edit, or anything to "move together", "orbit", "draw on" or "precompose".
 ---
 
 # Motion graphics with FableCut
@@ -18,7 +18,7 @@ applies. Three pieces do the work:
 
 For the full key table, read `fablecut_docs {section:"schema"}` once and see
 its "Shapes, nulls and parenting", "Motion paths, motion blur and text on a
-path" and "Compositions (nested sequences)" parts. The notes below cover how to use it well.
+path", "Compositions (nested sequences)" and "Presets and templates" parts. The notes below cover how to use it well.
 
 ## Coordinates (get these right first)
 
@@ -164,6 +164,42 @@ fablecut_patch_project {ops:[
   read the same as on the timeline.
 - Sound inside a comp plays through the main timeline's track of the same
   name, so a whoosh in a sting follows the A-track fader it is on.
+
+## Presets and templates: start from something designed
+
+Reach for these before keying by hand.
+
+```
+fablecut_patch_project {ops:[
+  {op:"addTemplate", template:"lower-third-bar", id:"c_lt_ava", track:"V3", start:4,
+    fields:{name:"Ava Moreno", title:"Director of Photography", accent:"#22d3ee"}},
+  {op:"addTemplate", template:"logo-ring", track:"V3", start:0, fields:{logo:"m_logo", brand:"NORTHWIND"}},
+  {op:"applyPreset", ids:["c_title1", "c_title2"], preset:"rise-blur"},
+  {op:"applyPreset", ids:["c_title1", "c_title2"], preset:"fade-out"},
+  {op:"applyPreset", id:"c_badge", preset:"pulse", at:12.5}
+]}
+```
+
+- **Templates** (`addTemplate`): lower thirds `lower-third-bar`,
+  `lower-third-underline`, `lower-third-boxes` (fields `name`, `title`,
+  `accent`…); logos `logo-ring`, `logo-slam`, `logo-lines` (`logo` takes a
+  media id: import the user's logo first); social `social-story` (1080×1920),
+  `social-quote` (1080×1080), `social-end-card`. Each placement is its own comp,
+  so one per speaker is right. Change it later with
+  `{op:"setTemplate", id:"c_lt_ava", fields:{…}, duration:7}`; a longer
+  template holds longer and keeps its exit. For a vertical template, set the
+  canvas to its size first (`setProject {width:1080, height:1920}`) or it sits
+  letterboxed in a 16:9 frame.
+- **Presets** (`applyPreset`) key relative to the clip, so put the clip where
+  it should rest first, then apply. One In and one Out per clip; an At preset
+  (`pulse`, `shake`, `wobble`, `bounce`, `flash`) on a beat; a loop
+  (`float`, `breathe`, `sway`, `spin`, `wiggle`) for something that lives on
+  screen. `length` stretches one (`length:1.2` for a slow, grand entrance).
+- Use one family of entrances across an edit (say `rise-blur` for titles and
+  `pop-in` for stickers) rather than a different preset on every clip.
+- Save what the user likes: `savePreset {id, name}` from a clip they animated,
+  `saveTemplate {comp, name}` from a comp they built. Both go to the library
+  and work in every project.
 
 ## Things that trip agents up
 

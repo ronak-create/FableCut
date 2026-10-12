@@ -23,10 +23,18 @@ fs.writeFileSync(path.join(OUT, "index.html"), html);
 
 /* app.js and style.css are copied verbatim. Some of these only exist on
    branches that add them, so a missing one is skipped rather than fatal. */
-for (const f of ["app.js", "loudness.js", "ducking.js", "audio-fx.js", "mask.js", "tracker.js", "motion.js", "color.js", "edit-ops.js", "comp.js", "fx-worklet.js", "style.css", "favicon.svg", "ruler-worker.js", "meter-worklet.js", "svg-sanitize.js", "credits.js"]) {
+for (const f of ["app.js", "loudness.js", "ducking.js", "audio-fx.js", "mask.js", "tracker.js", "motion.js", "color.js", "edit-ops.js", "comp.js", "templates.js", "fx-worklet.js", "style.css", "favicon.svg", "ruler-worker.js", "meter-worklet.js", "svg-sanitize.js", "credits.js"]) {
   const from = path.join(ROOT, f);
   if (!fs.existsSync(from)) continue;
   fs.copyFileSync(from, path.join(OUT, f));
+}
+
+/* The library files the built-in templates use (the placeholder logo). The
+   shim serves /library/… from this folder. */
+for (const rel of ["elements/logo-placeholder.svg"]) {
+  const to = path.join(OUT, "library", rel);
+  fs.mkdirSync(path.dirname(to), { recursive: true });
+  fs.copyFileSync(path.join(ROOT, "library", rel), to);
 }
 
 /* Footage is generated, not borrowed: see make-media.js. It is left alone

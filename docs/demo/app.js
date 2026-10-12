@@ -1616,7 +1616,9 @@ function listenSSE() {
 async function syncFromServer(force) {
   if (state.gesture || state.exporting) { runtime.pendingSync = true; return; }
   runtime.pendingSync = false;
-  if (state.binTab !== "project" && state.binTab !== "shapes") fetchLibrary(state.binTab).then(renderLibrary);
+  if (state.binTab === "templates") fetchSaved("templates").then(() => { if (state.binTab === "templates") renderTemplatesTab(); });
+  else if (state.binTab !== "project" && state.binTab !== "shapes") fetchLibrary(state.binTab).then(renderLibrary);
+  fetchSaved("presets");
   loadLibraryFonts();
   fetchEncodeProfiles();
   try {
@@ -2227,6 +2229,7 @@ function setBinTab(tab) {
   els.binList.classList.toggle("hidden", !isProj);
   els.libList.classList.toggle("hidden", isProj);
   if (tab === "shapes") renderShapesTab();
+  else if (tab === "templates") { renderTemplatesTab(); fetchSaved("templates").then(() => { if (state.binTab === "templates") renderTemplatesTab(); }); }
   else if (!isProj) fetchLibrary(tab).then(renderLibrary);
 }
 
@@ -4699,7 +4702,7 @@ function updateWorkArea() {
 
 /* ── Drag & drop: bin → timeline, files → window ── */
 els.timelineScroll.addEventListener("dragover", (e) => {
-  if (e.dataTransfer.types.includes("text/fablecut-media") || e.dataTransfer.types.includes("text/fablecut-comp")) {
+  if (["text/fablecut-media", "text/fablecut-comp", "text/fablecut-template"].some((t) => e.dataTransfer.types.includes(t))) {
     e.preventDefault();
     e.dataTransfer.dropEffect = "copy";
     for (const row of els.tracks.children)
@@ -4713,6 +4716,8 @@ els.timelineScroll.addEventListener("drop", (e) => {
   for (const row of els.tracks.children) row.classList.remove("drop-hint");
   const cid = e.dataTransfer.getData("text/fablecut-comp");
   if (cid) { e.preventDefault(); const comp = getComp(cid); if (comp) addCompClip(comp, trackAtEvent(e), snapTime(timeAtEvent(e), null)); return; }
+  const tid = e.dataTransfer.getData("text/fablecut-template");
+  if (tid) { e.preventDefault(); const t = findTemplate(tid); if (t) addTemplateClip(t, trackAtEvent(e), snapTime(timeAtEvent(e), null)); return; }
   const mid = e.dataTransfer.getData("text/fablecut-media");
   if (!mid) return;
   e.preventDefault();
@@ -4984,7 +4989,7 @@ function renderInspector(lite) {
     </div>`;
   }
   if (c.kind === "shape") html += shapeSectionHtml(c, p, row) + `<div class="insp-section"><h3>Look</h3>${slider("blur", 0, 40, 0.5, p.blur, "px")}${slider("shake", 0, 40, 0.5, p.shake, "px")}${slider("shakeSpeed", 1, 30, 0.5, p.shakeSpeed)}</div>`;
-  if (c.kind === "comp") html += compSectionHtml(c, row);
+  if (c.kind === "comp") html += templateSectionHtml(c, row) + compSectionHtml(c, row);
   if (c.kind === "video" || c.kind === "image" || c.kind === "svg" || c.kind === "comp") {
     html += `<div class="insp-section"><h3>Layout</h3>
       ${sel("Fit", "fit", ["contain", "cover", "stretch", "none"], p.fit)}
@@ -5340,6 +5345,8 @@ function renderInspector(lite) {
   bindMotionControls(c);
   bindTextPathControls(c);
   bindCompControls(c);
+  bindTemplateControls(c);
+  bindPresetControls(c);
   syncInspectorOffClip(c);
   renderKfGraphsPanel();
 }
@@ -9243,6 +9250,8 @@ function showCompMenu(x, y, comp) {
     const copy = JSON.parse(JSON.stringify(comp)); copy.id = newCompId(); copy.name = `${comp.name} copy`.slice(0, 80);
     project.comps.push(copy); runtime.compGen = (runtime.compGen || 0) + 1; scheduleSave(); renderBin();
   });
+  // an open comp's live clips are on the timeline, not yet in its entry
+  item("Save as template", () => saveCompAsTemplate(comp.id === compCtxId() ? { ...comp, clips: project.clips, tracks: project.tracks } : comp));
   const used = CompLib.usages(state.compCtx ? state.compCtx.root : project, comp.id).length;
   item("Delete", () => {
     pushUndo();
@@ -9277,6 +9286,200 @@ function bindCompControls(c) {
   root.querySelector("[data-comp-dur]")?.addEventListener("change", (e) => { const v = +e.target.value; if (v > 0.05) edit(() => { comp.duration = +v.toFixed(3); }); });
   root.querySelector("[data-comp-bg]")?.addEventListener("change", (e) => edit(() => { comp.background = e.target.value; }));
   root.querySelector("[data-comp-bgoff]")?.addEventListener("click", () => edit(() => { delete comp.background; }));
+}
+
+/* ── Animation presets and templates (the data and the maths live in templates.js) ── */
+const Tpl = self.FableCutTemplates;
+const savedLib = { presets: [], templates: [] };   // the user's own, from library/presets and library/templates
+async function fetchSaved(kind) {
+  try { const r = await fetch("/api/" + kind, { cache: "no-store" }); savedLib[kind] = r.ok ? await r.json() : []; }
+  catch { savedLib[kind] = []; }
+  return savedLib[kind];
+}
+const findTemplate = (id) => Tpl.findTemplate(id, savedLib.templates);
+const TEMPLATE_ICONS = {
+  "Lower thirds": '<rect x="2" y="13" width="14" height="5" rx="1" fill="#ffd166"/><rect x="2" y="13" width="2" height="5" fill="#fff"/><rect x="6" y="15" width="7" height="1.4" rx=".7" fill="#111"/>',
+  "Logo animations": '<circle cx="12" cy="11" r="7" fill="none" stroke="#7b6cff" stroke-width="2.2"/><rect x="9" y="8" width="6" height="6" rx="1.5" fill="#ff7ac8"/>',
+  Social: '<rect x="7" y="2.5" width="10" height="19" rx="2" fill="none" stroke="#22d3ee" stroke-width="2"/><rect x="9" y="8" width="6" height="2" rx="1" fill="#fff"/><rect x="9" y="12" width="4" height="1.5" rx=".7" fill="#fff"/>',
+  Saved: '<path d="M6 3h12v18l-6-4-6 4z" fill="#ffd166"/>',
+};
+/* The bin's Templates tab: lower thirds, logo animations and social layouts, then the user's own. */
+function renderTemplatesTab() {
+  els.libList.innerHTML = "";
+  let group = null;
+  for (const t of [...Tpl.TEMPLATES, ...savedLib.templates]) {
+    if (t.group !== group) {
+      group = t.group;
+      const h = document.createElement("div");
+      h.className = "lib-group";
+      h.textContent = group;
+      els.libList.appendChild(h);
+    }
+    const item = document.createElement("div");
+    item.className = "bin-item lib-item";
+    item.draggable = true;
+    item.title = "Drag onto the timeline or click ＋ — then edit its fields in the Inspector";
+    item.innerHTML = `<div class="bin-thumb shape-thumb"><svg viewBox="0 0 24 24" aria-hidden="true">${TEMPLATE_ICONS[t.group] || TEMPLATE_ICONS.Saved}</svg></div>
+      <div class="bin-meta"><div class="bin-name"></div><div class="bin-sub"></div></div>
+      <button class="btn tiny accent lib-add" title="Add at the playhead">＋</button>`;
+    item.querySelector(".bin-name").textContent = t.name;
+    item.querySelector(".bin-sub").textContent = `${t.width}×${t.height} · ${t.duration}s · ${t.fields.map((f) => f.label).join(", ") || "no fields"}`;
+    item.addEventListener("dragstart", (e) => { e.dataTransfer.setData("text/fablecut-template", t.id); e.dataTransfer.effectAllowed = "copy"; });
+    item.addEventListener("dblclick", () => addTemplateClip(t, null, state.time));
+    item.querySelector(".lib-add").addEventListener("click", (e) => { e.stopPropagation(); addTemplateClip(t, null, state.time); });
+    els.libList.appendChild(item);
+  }
+  if (!savedLib.templates.length) {
+    const p = document.createElement("p");
+    p.className = "lib-hint";
+    p.textContent = "Right-click a composition in the Project tab → Save as template to keep your own here.";
+    els.libList.appendChild(p);
+  }
+}
+/** Place a template: its own comp (so its fields are this copy's alone) and a comp clip at `at`. */
+function addTemplateClip(t, trackId, at) {
+  const track = trackId && TRACKS.some((x) => x.id === trackId && x.kind === "video") ? trackId : shapeTrack();
+  if (!track || isTrackLocked(track)) { toast(track ? `${track} is locked` : "V1–V3 are locked — unlock a video track to add a template"); return; }
+  pushUndo(JSON.stringify({ clips: project.clips, markers: project.markers || [], comps: project.comps || [], media: project.media }));
+  const had = new Set(project.media.map((m) => m.id));
+  project.comps = project.comps || [];
+  let r;
+  try { r = Tpl.instantiate(project, t, { compId: newCompId(), start: Math.max(0, at), track }); }
+  catch (err) { runtime.undo.pop(); toast(err.message); return; }
+  const { comp, clip } = r;
+  for (const x of comp.clips) {
+    x.props = { ...DEFAULT_PROPS, ...(x.kind === "comp" ? { fit: "none" } : {}), ...(x.props || {}) };
+    if (x.kind === "text") ensureFont(x.props.font);
+  }
+  clip.id = "c_" + uid();
+  clip.props = { ...DEFAULT_PROPS, ...clip.props };
+  project.clips.push(clip);
+  for (const m of project.media) if (!had.has(m.id)) loadMediaMetadata(m).then(() => { state.dirtyTimeline = true; }).catch(() => { });
+  runtime.compGen = (runtime.compGen || 0) + 1;
+  selectClip(clip.id); scheduleSave(); renderBin(); renderInspector();
+  toast(`${comp.name} placed — edit its fields in the Inspector`);
+}
+/** Set the canvas size (the aspect menu and a template's "Use … canvas" button). */
+function setCanvasSize(w, h) {
+  project.width = w; project.height = h;
+  els.preview.width = w; els.preview.height = h;
+  if (project.exportFrame) project.exportFrame = normalizeExportFrame(project.exportFrame, w, h);
+  updateMonitorRes();
+  syncAspectSel();
+  syncExportFrameSel();
+  updateExportFrameOverlay();
+  seekMediaWhilePaused();
+  scheduleSave();
+}
+/** The Inspector's Template section on a placed template: its fields, its length, and the canvas it was made for. */
+function templateSectionHtml(c, row) {
+  const comp = getComp(c.compId), tpl = comp && comp.template;
+  if (!tpl) return "";
+  const pics = project.media.filter((m) => m.kind === "image" || m.kind === "svg" || m.kind === "video");
+  const fields = (tpl.fields || []).map((f) => {
+    const v = Tpl.fieldValue(comp, f), label = escapeHtml(f.label);
+    if (f.type === "text") return row(label, `<textarea data-tf="${escapeHtml(f.key)}" rows="${String(v || "").length > 28 ? 2 : 1}" maxlength="2000">${escapeHtml(v || "")}</textarea>`);
+    if (f.type === "color") return row(label, `<input type="color" data-tf="${escapeHtml(f.key)}" value="${/^#[0-9a-f]{6}/i.test(v || "") ? v.slice(0, 7) : "#ffffff"}">`);
+    return row(label, `<select data-tf="${escapeHtml(f.key)}" title="Import your picture (or drop it in the bin), then pick it here">${pics.map((m) => `<option value="${m.id}" ${m.id === v ? "selected" : ""}>${escapeHtml(m.name)}</option>`).join("")}</select>`);
+  }).join("");
+  const sameShape = Math.abs(comp.width / comp.height - project.width / project.height) < 0.01;
+  return `<div class="insp-section" data-tpl-section><h3>Template</h3>
+    ${fields}
+    ${row("Length (s)", `<input type="number" data-tf-dur min="0.5" step="0.1" value="${comp.duration}" title="Longer holds longer — the exit keeps its timing at the end">`)}
+    ${sameShape || state.compCtx ? "" : row("Canvas", `<button type="button" class="btn tiny" data-tf-canvas title="Make the project canvas ${comp.width}×${comp.height}, the size this template was made for">Use ${comp.width}×${comp.height}</button>`)}
+    <p class="cl-note">These fields belong to this copy (its comp "${escapeHtml(comp.name)}"). Open it to change anything else.</p>
+  </div>`;
+}
+function bindTemplateControls(c) {
+  const root = els.inspector.querySelector("[data-tpl-section]");
+  const comp = root && getComp(c.compId);
+  if (!comp || !comp.template) return;
+  let undoTaken = false;
+  const refresh = () => { runtime.compGen = (runtime.compGen || 0) + 1; state.dirtyTimeline = true; scheduleSave(); };
+  const set = (key, value) => {
+    if (!undoTaken) { pushUndo(); undoTaken = true; }
+    try { Tpl.setField(comp, key, value, project); } catch (err) { toast(err.message); return; }
+    refresh();
+  };
+  for (const el of root.querySelectorAll("[data-tf]")) {
+    const key = el.dataset.tf;
+    if (el.tagName === "SELECT") el.addEventListener("change", () => {
+      const m = getMedia(el.value);
+      set(key, el.value);
+      if (m && !runtime.mediaAux.get(m.id)?.svgText && !runtime.mediaAux.get(m.id)?.img) loadMediaMetadata(m).then(refresh).catch(() => { });
+    });
+    else el.addEventListener("input", () => set(key, el.value));
+    el.addEventListener("change", () => { undoTaken = false; renderBin(); });
+  }
+  root.querySelector("[data-tf-dur]")?.addEventListener("change", (e) => {
+    const v = +e.target.value, old = comp.duration;
+    pushUndo();
+    try { Tpl.retime(comp, +v.toFixed(3)); } catch (err) { runtime.undo.pop(); toast(err.message); renderInspector(); return; }
+    // clips that showed the comp to its end keep doing so
+    for (const x of project.clips) if (x.kind === "comp" && x.compId === comp.id && Math.abs((+x.in || 0) + x.duration - old) < 1e-3) x.duration = +(comp.duration - (+x.in || 0)).toFixed(4);
+    refresh(); renderBin(); renderInspector();
+  });
+  root.querySelector("[data-tf-canvas]")?.addEventListener("click", () => { setCanvasSize(comp.width, comp.height); renderInspector(); toast(`Canvas is now ${comp.width}×${comp.height}`); });
+}
+/** Save comp `comp` to library/templates as a template (its titles' text and its pictures become fields). */
+async function saveCompAsTemplate(comp) {
+  let template;
+  try { template = Tpl.templateFromComp(comp, { media: project.media }); } catch (err) { toast(err.message); return; }
+  try {
+    const r = await fetch("/api/templates", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ template }) });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || r.statusText);
+    toast(`Saved "${j.name}" to ${j.file}`);
+  } catch (err) { toast("Couldn't save the template: " + err.message); return; }
+  await fetchSaved("templates");
+  if (state.binTab === "templates") renderTemplatesTab();
+}
+
+/** Inspector rows (in Motion): put a preset on the selected clips, or save this clip's animation as one. */
+function presetRowsHtml(c, row) {
+  const opts = (anchor, first) => {
+    const own = savedLib.presets.filter((p) => p.anchor === anchor);
+    const list = (l) => l.map((p) => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`).join("");
+    return `<select data-preset="${anchor}"><option value="">${first}</option>${list(Tpl.PRESETS.filter((p) => p.anchor === anchor))}${own.length ? `<optgroup label="Saved">${list(own)}</optgroup>` : ""}</select>`;
+  };
+  return row("Presets", `<span class="insp-ctrls">${opts("in", "In…")}${opts("out", "Out…")}</span>`)
+    + row("", `<span class="insp-ctrls">${opts("at", "At playhead…")}${opts("whole", "Loop…")}</span>`)
+    + row("Save as preset", `<span class="insp-ctrls"><input type="text" data-preset-name maxlength="60" placeholder="Name" style="max-width:110px">
+      <select data-preset-anchor title="In: from the clip's start · Out: up to its end · Loop: the whole clip"><option value="in">In</option><option value="out">Out</option><option value="whole">Loop</option></select>
+      <button type="button" class="btn tiny" data-preset-save title="Save this clip's keyframes to library/presets — every project can use it">Save</button></span>`);
+}
+function bindPresetControls(c) {
+  for (const s of els.inspector.querySelectorAll("[data-preset]")) s.addEventListener("change", () => {
+    const p = Tpl.findPreset(s.value, savedLib.presets);
+    s.value = "";
+    if (!p) return;
+    const clips = selectedClips().filter(isVisualClip);
+    const targets = clips.length ? clips : [c];
+    if (targets.some(isGroupLocked)) { toastLocked(); return; }
+    pushUndo();
+    for (const x of targets) Tpl.applyPreset(x, p, { at: state.time - x.start });
+    inspPropGen++; state.dirtyTimeline = true;
+    scheduleSave(); renderInspector();
+    toast(`${p.name} on ${targets.length} clip${targets.length > 1 ? "s" : ""}`);
+  });
+  els.inspector.querySelector("[data-preset-save]")?.addEventListener("click", async () => {
+    const name = els.inspector.querySelector("[data-preset-name]").value.trim();
+    const anchor = els.inspector.querySelector("[data-preset-anchor]").value;
+    if (!name) { toast("Name the preset first"); return; }
+    const times = Object.values(c.keyframes || {}).flat().map((x) => x.t);
+    if (!times.length) { toast("This clip has no keyframes to save"); return; }
+    const from = anchor === "out" ? Math.min(...times) : 0, to = anchor === "in" ? Math.max(...times) : c.duration;
+    let preset;
+    try { preset = Tpl.presetFromClip(c, { name, anchor, from, to }); } catch (err) { toast(err.message); return; }
+    try {
+      const r = await fetch("/api/presets", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ preset }) });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || r.statusText);
+      toast(`Saved "${j.name}" to ${j.file}`);
+    } catch (err) { toast("Couldn't save the preset: " + err.message); return; }
+    await fetchSaved("presets");
+    renderInspector();
+  });
 }
 window.addEventListener("keydown", (e) => {
   if (e.key !== "Escape" || !state.compCtx) return;
@@ -11869,6 +12072,7 @@ function motionSectionHtml(c, p, row) {
       <span class="val" data-val="motionBlur" data-unit="°">${+p.motionBlur || 0}°</span>`, "motionBlur")
       + row("Blur samples", `<input type="range" data-k="motionBlurSamples" min="2" max="32" step="1" value="${+p.motionBlurSamples || 8}" title="Sub-frame samples per frame — more is smoother and slower (playback uses as many as fit in the frame time; a paused frame and export use them all)">
       <span class="val" data-val="motionBlurSamples" data-unit="">${+p.motionBlurSamples || 8}</span>`, "motionBlurSamples") : ""}
+    ${presetRowsHtml(c, row)}
   </div>`;
 }
 function bindMotionControls(c) {
@@ -14428,17 +14632,7 @@ function syncFpsSel() {
 }
 els.aspectSel.addEventListener("change", () => {
   const a = ASPECT_PRESETS[+els.aspectSel.value];
-  if (!a) return;
-  project.width = a.w; project.height = a.h;
-  els.preview.width = a.w; els.preview.height = a.h;
-  if (project.exportFrame)
-    project.exportFrame = normalizeExportFrame(project.exportFrame, a.w, a.h);
-  updateMonitorRes();
-  syncAspectSel();
-  syncExportFrameSel();
-  updateExportFrameOverlay();
-  seekMediaWhilePaused();
-  scheduleSave();
+  if (a) setCanvasSize(a.w, a.h);
 });
 els.fpsSel?.addEventListener("change", () => {
   const v = FPS_PRESETS[+els.fpsSel.value];

@@ -37,8 +37,9 @@ const { denoiseFile, AMOUNT_IDS: DENOISE_AMOUNTS } = require("./denoise");
 
 const {
   APP_DIR, DATA_DIR, MEDIA_DIR, EXPORTS_DIR, ANALYSIS_DIR, LIBRARY_DIR,
-  PROJECT_FILE, LIBRARY_SUBDIRS, ensureDirs,
+  PROJECT_FILE, LIBRARY_SUBDIRS, ensureDirs, readSaved, writeSaved,
 } = require("./paths");
+const Templates = require("./templates");
 
 /* Static app files are served from the install dir; everything the user creates
    lives under DATA_DIR. The two are the same unless FABLECUT_DATA_DIR is set. */
@@ -463,6 +464,24 @@ const server = http.createServer(async (req, res) => {
       walk(base, "");
       sendJSON(res, 200, out);
     } catch (e) { sendJSON(res, 500, { error: String(e) }); }
+    return;
+  }
+
+  /* API: saved animation presets and templates (library/presets, library/templates).
+       GET  /api/presets | /api/templates  → [ …validated items… ] (bad files skipped)
+       POST /api/presets {preset} | /api/templates {template} → saved as library/<kind>/<id>.json */
+  if ((p === "/api/presets" || p === "/api/templates") && (req.method === "GET" || req.method === "POST")) {
+    const kind = p.slice(5), norm = kind === "presets" ? Templates.normalizePreset : Templates.normalizeTemplate;
+    try {
+      if (req.method === "GET") {
+        sendJSON(res, 200, readSaved(kind).map((x) => norm(x.data)).filter(Boolean));
+        return;
+      }
+      const body = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+      const item = Templates.asSaved(norm(kind === "presets" ? body.preset : body.template, true), kind);
+      const file = writeSaved(kind, item.id, item);
+      sendJSON(res, 200, { id: item.id, name: item.name, file: path.relative(DATA_DIR, file).split(path.sep).join("/") });
+    } catch (e) { sendJSON(res, 400, { error: String(e.message || e) }); }
     return;
   }
 

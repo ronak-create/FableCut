@@ -10,6 +10,8 @@ place (`/library/...`), never copied into the project.
 | `elements/` | Elements   | overlay art: PNGs with alpha, light leaks, textures, short loops |
 | `svg/`      | SVG        | vector animations authored by Claude (see CLAUDE.md conventions) |
 | `fonts/`    | (Font editor) | `.ttf .otf .woff .woff2` — auto-registered, family = file name |
+| `presets/`  | (Inspector → Motion) | saved animation presets, one `.json` each |
+| `templates/`| Templates  | saved templates, one `.json` each, after the built-in ones    |
 
 Drop free assets you find online into the matching folder — the open editor
 refreshes the list automatically. Subfolders are allowed and listed too.

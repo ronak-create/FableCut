@@ -65,9 +65,11 @@ re-read after a moment instead of shelling out to ffprobe.
   clipped whites, cast strength under ~0.03 on neutral scenes.
   `fablecut_docs {section:"Color"}` has the keys and how to read the numbers.
 - **Motion graphics** (shape layers, draw-ons, lower thirds, nulls,
-  parenting, anchor points, motion paths, compositions) have their own skill,
-  `motion-graphics`, and manual sections ("Shapes, nulls and parenting" and
-  "Compositions (nested sequences)" under `{section:"schema"}`).
+  parenting, anchor points, motion paths, compositions, animation presets and
+  templates) have their own skill, `motion-graphics`, and manual sections
+  ("Shapes, nulls and parenting", "Compositions (nested sequences)" and
+  "Presets and templates" under `{section:"schema"}`). For a quick lower third
+  or a title that slides in, `addTemplate` and `applyPreset` are one op each.
 - **Export** with `fablecut_export` — the editor's own Fast export, in the
   user's open tab or a headless Chrome / Edge. It needs ffmpeg on PATH; it
   waits for the file and returns its path.

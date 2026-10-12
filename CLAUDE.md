@@ -177,6 +177,8 @@ Reusable assets, visible in the editor's left-panel tabs and never copied:
 | `library/elements/` | **Elements** | overlay art: alpha PNGs, light leaks, textures, stickers |
 | `library/svg/`      | **SVG**      | animated vector graphics **you author** (convention below) |
 | `library/fonts/`    | font editor  | `.ttf/.otf/.woff/.woff2`, auto-registered, family name = file name; a variable font draws every `weight` |
+| `library/presets/`  | Inspector → Motion → Presets | saved animation presets, one `.json` each (see "Presets and templates") |
+| `library/templates/`| **Templates** | saved templates, one `.json` each, listed after the built-in ones |
 
 - List via `GET /api/library?dir=sfx|elements|svg|fonts` (recursive; subfolders OK).
 - To use one in the timeline, add a media entry whose `src` is its library path,
@@ -1179,6 +1181,7 @@ comp is edited. Comps live in `project.comps`:
 | `background` | none | a colour behind the comp's clips; leave it out for transparent |
 | `tracks` | V3…V1, A1, A2 | the comp's own lanes, like the project's `tracks` |
 | `clips` | [] | ordinary clips of any kind (comp clips too), with times inside the comp |
+| `template` | — | set on a placed template: `{id, hold, fields}` (see "Presets and templates") |
 
 **A comp clip** (`kind:"comp"`, `compId`, no `mediaId`) shows the comp from its
 `in` (comp seconds) for its `duration`, at speed 1. It draws like a picture of
@@ -1220,13 +1223,128 @@ length and background.
 - The compact view shows a comp clip as `comp(lt in:1.5)` and lists every comp
   under `COMPS` with its clips.
 
-Recipes: **reusable lower third** — a comp with the bar, the title and a
-whoosh, placed under each speaker (change the name per use by making one comp
-per name with `addComp`, or keep the text outside the comp on the track above);
-**logo sting** — a draw-on logo comp at the head and tail of the edit;
+Recipes: **reusable lower third** — a template (next section) gives every
+speaker their own copy with their own name; a plain comp suits a graphic that
+is the same every time; **logo sting** — a draw-on logo comp at the head and tail of the edit;
 **picture in picture of a whole scene** — precompose the scene's clips, then
 scale the comp clip down and move it into a corner;
 **one grade for a sequence** — precompose it and grade the comp clip once.
+
+### Presets and templates
+
+Two ways to reuse motion: an **animation preset** keys a named animation onto a
+clip, and a **template** is a ready-made comp (lower third, logo animation,
+social layout) whose text, colours and pictures are **fields** you fill in.
+
+**Presets.** A preset keys the clip's own channels, relative to where the clip
+already is: `scale` and `opacity` multiply the clip's value and everything else
+adds to it, so "Slide up" works wherever the clip sits and however big it is.
+Each has an anchor: **in** plays from the clip's start and settles on its
+values, **out** starts from them and ends at the clip's end, **at** is an
+emphasis at a time you pick (the playhead, or `at`), and **loop** spans the
+whole clip. Keys already in the window a preset covers are replaced; the rest
+stay, so an In, an Out and a loop on another channel live side by side.
+
+| group | presets |
+|---|---|
+| In | `fade-in` · `pop-in` · `slide-up-in` · `slide-down-in` · `slide-left-in` (from the right) · `slide-right-in` (from the left) · `drop-in` · `zoom-in` · `spin-in` · `whip-in` (with motion blur) · `rise-blur` · `draw-on` (shape layers) |
+| Out | `fade-out` · `pop-out` · `slide-up-out` · `slide-down-out` · `slide-left-out` · `slide-right-out` · `zoom-out` · `spin-out` · `whip-out` · `sink-blur` · `draw-off` |
+| At (emphasis) | `pulse` · `shake` · `wobble` · `bounce` · `flash` |
+| Loop | `float` · `breathe` · `sway` · `spin` · `wiggle` |
+
+Every In / Out / At preset is 0.35–1 s long; `length` stretches it (a clip
+shorter than the preset squeezes it in). A saved preset is a JSON file in
+`library/presets/`, shared by every project:
+
+```jsonc
+{ "id": "fly-in", "name": "Fly in", "group": "Saved", "anchor": "in", "length": 0.6,
+  "keys": { "x": [ { "t": 0, "v": -500 }, { "t": 0.6, "v": 0, "ease": "ease-out" } ],
+            "opacity": [ { "t": 0, "v": 0 }, { "t": 0.3, "v": 1 } ] },
+  "props": { "motionBlur": 180 } }   // optional: motionBlur, motionBlurSamples
+```
+
+`t` is seconds into the preset (for a loop, 0…1 of the clip). Channels: `x y
+scale rotation opacity blur anchorX anchorY trimStart trimEnd trimOffset
+brightness saturation hue grayscale shake rgbSplit glow fontSize letterSpacing
+pathOffset`.
+
+**Templates.** Placing one adds its own comp (so two lower thirds can show two
+names) and a comp clip showing it with `fit:"contain"`; a template made for
+another shape than the canvas sits inside it, letterboxed. The comp carries
+what makes it a template:
+
+```jsonc
+{ "id": "comp_x1", "name": "Lower third — Bar", "width": 1920, "height": 1080, "duration": 5, "clips": [ … ],
+  "template": { "id": "lower-third-bar", "hold": 4.5, "fields": [
+    { "key": "name", "label": "Name", "type": "text", "targets": [ "name:props.text" ], "value": "Ava Moreno" },
+    { "key": "accent", "label": "Accent", "type": "color", "targets": [ "bar:props.shapes.1.fill" ], "value": "#ffd166" } ] } }
+```
+
+| template | name | size | length | fields |
+|---|---|---|---|---|
+| `lower-third-bar` | Lower third — Bar | 1920×1080 | 5 s | `name` `title` `accent` `panel` |
+| `lower-third-underline` | Lower third — Underline | 1920×1080 | 5 s | `name` `title` `accent` |
+| `lower-third-boxes` | Lower third — Boxes | 1920×1080 | 5 s | `name` `title` `accent` `box` |
+| `logo-ring` | Logo — Ring reveal | 1920×1080 | 4 s | `logo` `brand` `accent` |
+| `logo-slam` | Logo — Slam | 1920×1080 | 3.5 s | `logo` `accent` |
+| `logo-lines` | Logo — Lines | 1920×1080 | 4 s | `logo` `tagline` `lines` |
+| `social-story` | Story — Headline (9:16) | 1080×1920 | 6 s | `headline` `subline` `button` `accent` `background` |
+| `social-quote` | Post — Quote (1:1) | 1080×1080 | 6 s | `quote` `author` `accent` `background` |
+| `social-end-card` | End card — Follow (16:9) | 1920×1080 | 6 s | `heading` `button` `accent` `background` |
+
+Field types: `text` (a string), `color` (`#rgb`, `#rrggbb` or `#rrggbbaa`) and
+`media` (a media id of a picture: image, svg or video; the clip's kind follows
+it). A target is `"<clip id>:<path>"` inside the comp (`props.text`,
+`props.shapes.1.fill`, `mediaId`, …) or `"comp:background"`; one field can set
+several. The logo templates start with a placeholder,
+`/library/elements/logo-placeholder.svg`, until the `logo` field gets a
+picture. **`hold`** is when the exit starts: changing a template's length
+keeps everything after it at the same distance from the end, so a longer lower
+third just holds longer (it can't get shorter than its entrance needs).
+
+A saved template (`library/templates/<id>.json`) is a template object:
+`{id, name, group, width, height, duration, hold, background?, tracks?, clips,
+media?, fields}`; `media` lists the `{id, name, kind, src}` entries its clips
+use (`/library/…` or `/media/…`), matched by `src` when it is placed. A saved
+preset or template whose name a built-in already has is saved as
+"<name> (saved)".
+
+In the editor: the bin's **Templates** tab lists them by group (Lower thirds,
+Logo animations, Social, then Saved); drag one onto the timeline or click ＋.
+The Inspector's **Template** section on its clip edits the fields, its
+**Length**, and offers **Use W×H canvas** when the template was made for
+another shape. Right-click a comp in the Project tab → **Save as template**
+keeps it (every title's text and every picture become fields). The
+**Motion** section's **Presets** menus (In, Out, At playhead, Loop) put a
+preset on the selected clips, and **Save as preset** keeps this clip's
+keyframes (In: from its start to its last key; Out: from its first key to its
+end; Loop: the whole clip).
+
+**Agents:**
+
+- `{op:"applyPreset", id | ids, preset, length?, at?}` — `preset` is a name,
+  a saved one's id, or an inline preset object; `at` is timeline seconds (for
+  an At preset; default the clip's start). Visual clips only.
+- `{op:"addTemplate", template, start?, track?, duration?, fields?:{key: value}, id?, compId?, name?}`
+  places one (default track V2, at 0, its own length).
+- `{op:"setTemplate", id, fields?:{key: value}, duration?}` — `id` is its comp
+  clip or its comp; a new `duration` retimes it, and clips that showed it to
+  its end keep doing so.
+- `{op:"savePreset", id, name, anchor?, from?, to?}` (`from`/`to` in clip
+  seconds) or `{op:"savePreset", preset:{…}}`; `{op:"saveTemplate", comp,
+  name?, fields?, hold?}` or `{op:"saveTemplate", template:{…}}`. Files are
+  written once the patch is saved, and later ops in the same patch can use them.
+- `applyPreset`, `addTemplate` and `setTemplate` also run inside `inComp`.
+- The compact view prints a placed template's fields under its comp:
+  `template lower-third-bar — fields (setTemplate): name="Ava Moreno" …`.
+
+Recipes: **name every speaker** — `addTemplate lower-third-bar` once per
+speaker with `fields:{name, title}`; **branded intro** — `addTemplate logo-ring`
+with `fields:{logo:"<your logo's media id>", brand, accent}` at 0;
+**vertical teaser** — set the canvas to 1080×1920, `addTemplate social-story`;
+**house style** — build a comp the way you like it, `saveTemplate`, then place
+it in every project; **titles that arrive and leave the same way** —
+`applyPreset` an In and an Out on every title in one patch.
 
 ### Semantics
 
@@ -1377,7 +1495,10 @@ obvious cuts were missed, raise it if motion is being misread as cuts.
   Append `?force=1` to overwrite unconditionally. Writes are atomic (tmp file +
   rename), so a crashed write never corrupts the file.
 - `GET  /api/media`   — list files in ./media (name, src, size)
-- `GET  /api/library?dir=sfx|elements|svg|fonts` — list library assets
+- `GET  /api/library?dir=sfx|elements|svg|fonts|presets|templates` — list library assets
+- `GET  /api/presets` · `GET /api/templates` — the saved presets / templates, validated (bad files skipped);
+  `POST /api/presets {preset}` · `POST /api/templates {template}` — validate one and save it as
+  `library/presets/<id>.json` / `library/templates/<id>.json`, returning `{id, name, file}`
 - `POST /api/upload?name=foo.mp4` — raw body saved into ./media, returns `{src}`.
   MP4/MOV/M4V uploads are auto-remuxed with `+faststart` (needs ffmpeg on PATH).
   Files copied straight into ./media by external tools skip this — remux big ones

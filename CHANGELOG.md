@@ -19,6 +19,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in the Inspector.
 - Agents: `addComp`, `updateComp`, `removeComp`, `precompose` and `inComp`
   patch ops; comps are validated and listed in the compact view.
+- **Animation presets.** 33 named animations (In, Out, At playhead, Loop) that
+  key a clip relative to where it sits and how big it is: scale and opacity
+  multiply, the rest add. Apply them from the Inspector's Motion section, and
+  save a clip's own keyframes as a preset in `library/presets/`.
+- **Templates.** Lower thirds (Bar, Underline, Boxes), logo animations (Ring
+  reveal, Slam, Lines) and social layouts (9:16 story, 1:1 quote, 16:9 end
+  card) in the bin's new Templates tab. Each placement is its own comp whose
+  text, colour and logo fields are edited in the Inspector; changing its length
+  keeps the exit at the end. Right-click a comp → Save as template keeps your
+  own in `library/templates/`. A placeholder logo ships in
+  `library/elements/`.
+- Agents: `applyPreset`, `addTemplate`, `setTemplate`, `savePreset` and
+  `saveTemplate` patch ops; `GET`/`POST /api/presets` and `/api/templates`;
+  the compact view shows a placed template's fields.
 - **Motion paths.** Position keys (x and y keyed together) take bezier
   handles (`pin` / `pout` on the keys), so a clip travels along a curve, paced
   along the curve by its eases. The path shows on the monitor with a dot per

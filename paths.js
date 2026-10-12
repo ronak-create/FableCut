@@ -33,7 +33,7 @@ const EXPORTS_DIR = path.join(DATA_DIR, "exports");
 const ANALYSIS_DIR = path.join(DATA_DIR, "analysis");
 const LIBRARY_DIR = path.join(DATA_DIR, "library");
 const PROJECT_FILE = path.join(DATA_DIR, "project.json");
-const LIBRARY_SUBDIRS = ["sfx", "elements", "svg", "fonts"];
+const LIBRARY_SUBDIRS = ["sfx", "elements", "svg", "fonts", "presets", "templates"];
 
 /* The asset library ships with the repo but users also drop their own files in
    (library/sfx is gitignored precisely for that). When the data dir is split
@@ -99,8 +99,28 @@ function ensureDirs() {
   seedLibrary();
 }
 
+/* Saved animation presets and templates: one JSON file each in library/presets/
+   and library/templates/ (templates.js validates them). Unreadable files are skipped. */
+function readSaved(kind) {
+  const dir = path.join(LIBRARY_DIR, kind);
+  let names = [];
+  try { names = fs.readdirSync(dir).filter((f) => f.toLowerCase().endsWith(".json")).sort(); } catch { return []; }
+  const out = [];
+  for (const f of names) {
+    try { out.push({ file: f, data: JSON.parse(fs.readFileSync(path.join(dir, f), "utf8").replace(new RegExp("^\\uFEFF"), "")) }); } catch { }
+  }
+  return out;
+}
+function writeSaved(kind, id, data) {
+  const dir = path.join(LIBRARY_DIR, kind);
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, String(id).replace(/[^a-z0-9-]+/gi, "-").slice(0, 60) + ".json");
+  fs.writeFileSync(file, JSON.stringify(data, null, 2) + "\n");
+  return file;
+}
+
 module.exports = {
   APP_DIR, DATA_DIR, SPLIT,
   MEDIA_DIR, EXPORTS_DIR, ANALYSIS_DIR, LIBRARY_DIR, PROJECT_FILE,
-  LIBRARY_SUBDIRS, ensureDirs,
+  LIBRARY_SUBDIRS, ensureDirs, readSaved, writeSaved,
 };
