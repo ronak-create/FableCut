@@ -1108,6 +1108,10 @@ async function callTool(name, args, attempt = 0) {
           case "removeMedia": {
             const used = proj.clips.find((c) => c.mediaId === op.id);
             if (used) throw new Error(`removeMedia: media ${op.id} is used by clip ${used.id}`);
+            for (const comp of proj.comps || []) {
+              const inner = (comp.clips || []).find((c) => c.mediaId === op.id);
+              if (inner) throw new Error(`removeMedia: media ${op.id} is used by clip ${inner.id} in comp ${comp.id}`);
+            }
             const n = proj.media.length;
             proj.media = proj.media.filter((x) => x.id !== op.id);
             if (proj.media.length === n) throw new Error("removeMedia: no media " + op.id);
@@ -1605,6 +1609,11 @@ async function callTool(name, args, attempt = 0) {
         if (!Array.isArray(doc.comps)) throw new Error("comps must be a list of compositions");
         // saved as normalized (trimmed id, default name and size, rounded duration)
         try { doc.comps = doc.comps.map((comp) => CompLib.normalizeComp(comp, true, doc)); } catch (err) { throw new Error(err.message); }
+        const seen = new Set();
+        for (const comp of doc.comps) {
+          if (seen.has(comp.id)) throw new Error(`two comps have the id ${comp.id} — comp ids must be unique`);
+          seen.add(comp.id);
+        }
       }
       // the same checks for clips on the timeline and clips inside comps
       const checkClip = (c, where) => {

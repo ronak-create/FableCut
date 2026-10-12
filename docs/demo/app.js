@@ -618,7 +618,11 @@ const {
   listAlignedGaps, adjacentClip, rippleTrim, rollEdit, slipClip, slideClip, crossfadeCuts, crossfadeCut,
 } = EDIT;
 /** Does this clip reach the picture / the mix? Track output and clip enable. */
-function clipRenders(c) { return c._comp ? c._on !== false : isTrackEnabled(c.track) && c.disabled !== true; }
+function clipRenders(c) {
+  // comp audio plays through the main timeline's track of the same id, so that track's switch applies too
+  if (c._comp) return c._on !== false && (c.kind !== "audio" || isTrackEnabled(c.track));
+  return isTrackEnabled(c.track) && c.disabled !== true;
+}
 function toastLocked(partial = false) {
   toast(partial ? "Locked clips were left untouched — unlock them to edit"
     : "Locked — unlock the clip or its track to edit");
@@ -1417,6 +1421,9 @@ function applyProject(data, opts = {}) {
   if (state.compCtx && !opts.ctx) {   // the root changed on disk (an agent, another tab): keep the open comp open
     const x = state.compCtx;
     x.root = data;
+    // every undo step here and in the levels above predates this document; replaying one would save over it
+    for (const f of x.frames) { f.undo = []; f.redo = []; }
+    runtime.undo.length = 0; runtime.redo.length = 0;
     const path = x.path.filter((id) => CompLib.getComp(data, id));
     if (path.length !== x.path.length) { state.compCtx = null; applyProject(data, { ctx: true }); syncCompCrumb(); toast("The open composition was removed"); return; }
     applyProject(compSyntheticDoc(data, path), { ctx: true });
@@ -1441,7 +1448,10 @@ function applyProject(data, opts = {}) {
     master: normalizeMaster(data.master),
     buses: normalizeBuses(data.buses),
     comps: (Array.isArray(data.comps) ? data.comps : []).filter((cp) => cp && cp.id).map((cp) => ({
-      ...cp, clips: (cp.clips || []).map((x) => ({ ...x, props: { ...DEFAULT_PROPS, ...(x.kind === "comp" ? { fit: "none" } : {}), ...(x.props || {}) } })) })),
+      ...cp, clips: (cp.clips || []).map((x) => {
+        if (x.keyframes) for (const arr of Object.values(x.keyframes)) if (Array.isArray(arr)) arr.sort((a, b) => a.t - b.t);
+        return { ...x, props: { ...DEFAULT_PROPS, ...(x.kind === "comp" ? { fit: "none" } : {}), ...(x.props || {}) } };
+      }) })),
   });
   runtime.compGen = (runtime.compGen || 0) + 1;
   applyTracksFromProject(data.tracks);
@@ -1998,6 +2008,10 @@ function renderBin() {
       pushUndo();
       project.media = project.media.filter((x) => x.id !== m.id);
       project.clips = project.clips.filter((c) => c.mediaId !== m.id);
+      // and its clips inside comps (and on the main timeline while a comp is open)
+      project.comps = (project.comps || []).map((cp) => ({ ...cp, clips: (cp.clips || []).filter((c) => c.mediaId !== m.id) }));
+      if (state.compCtx) state.compCtx.root = { ...state.compCtx.root, clips: (state.compCtx.root.clips || []).filter((c) => c.mediaId !== m.id) };
+      runtime.compGen = (runtime.compGen || 0) + 1;
       if (state.source.mediaId === m.id) clearSource();
       renderBin(); scheduleSave(); renderInspector();
     });

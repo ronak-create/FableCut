@@ -184,4 +184,13 @@ test("agent: addComp, inComp, precompose, updateComp, removeComp and the compact
   assert.equal(r.isError, false, r.text);
   assert.deepEqual((({ id, name, width, height, duration }) => ({ id, name, width, height, duration }))(comp("extra")),
     { id: "extra", name: "extra", width: 1280, height: 720, duration: 2.1235 });
+  const twin = doc();
+  twin.comps.push({ id: " extra", duration: 1, clips: [] });
+  r = await mcp.callTool("fablecut_set_project", { project: twin, force: true });
+  assert.match(r.text, /two comps have the id extra/);
+  // media still used inside a comp can't be removed
+  r = await patch({ op: "inComp", comp: "badge", ops: [{ op: "addClip", clip: { id: "bv", kind: "video", mediaId: "m_a", track: "V1", start: 0, in: 0, duration: 1 } }] });
+  assert.equal(r.isError, false, r.text);
+  r = await patch({ op: "removeMedia", id: "m_a" });
+  assert.match(r.text, /used by clip .* in comp/);
 });
