@@ -116,7 +116,7 @@ function writeSaved(kind, id, data) {
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, String(id).replace(/[^a-z0-9-]+/gi, "-").slice(0, 60) + ".json");
   // tmp + rename, like the project file: a crash mid-write never leaves half a preset
-  const tmp = file + ".tmp";
+  const tmp = `${file}.${crypto.randomUUID()}.tmp`;   // unique: the editor and the MCP server may save at once
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + "\n");
   fs.renameSync(tmp, file);
   return file;
