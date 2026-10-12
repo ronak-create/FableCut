@@ -3379,6 +3379,12 @@ function rebuildClips() {
       : (c.name || "");
     body += `<div class="fade"></div>
       <div class="clip-label">${badge}${escapeHtml(label)}</div>`;
+    if (c.kind === "comp") {
+      // say on hover how to get inside (wide enough clips show it in the clip, every one in its tooltip)
+      const comp = getComp(c.compId);
+      div.title = comp ? `${comp.template ? "Template" : "Composition"} "${comp.name}" — double-click to open and edit${comp.template ? " · its fields are in the Inspector" : ""}` : "Its composition is missing";
+      if (comp && c.duration * state.pps >= label.length * 7 + 190) body += `<div class="comp-open-hint">Double-click to open</div>`;
+    }
     body += clipKeyframesHtml(c);
     let inner = `<div class="clip-body">${body}</div>`;
     inner += transitionMarksHtml(c, tr.h);

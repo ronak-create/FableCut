@@ -2744,6 +2744,30 @@ body.track-size-s .clip .fade-grip {
   color: var(--dim);
 }
 
+.clip.c-comp .comp-open-hint {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #00000073;
+  color: #f3e8ff;
+  font-size: 10.5px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.clip.c-comp:hover .comp-open-hint {
+  opacity: 1;
+}
+
+body.track-size-s .clip.c-comp .comp-open-hint {
+  display: none;
+}
+
 .clip.c-comp .clip-body {
   background: linear-gradient(180deg, #c084fc33, #c084fc11), #4c2a73;
 }

@@ -33,6 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Agents: `applyPreset`, `addTemplate`, `setTemplate`, `savePreset` and
   `saveTemplate` patch ops; `GET`/`POST /api/presets` and `/api/templates`;
   the compact view shows a placed template's fields.
+- Hovering a comp clip on the timeline shows "Double-click to open" (and a
+  tooltip naming the comp or template).
 - **Motion paths.** Position keys (x and y keyed together) take bezier
   handles (`pin` / `pout` on the keys), so a clip travels along a curve, paced
   along the curve by its eases. The path shows on the monitor with a dot per
