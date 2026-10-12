@@ -115,7 +115,10 @@ function writeSaved(kind, id, data) {
   const dir = path.join(LIBRARY_DIR, kind);
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, String(id).replace(/[^a-z0-9-]+/gi, "-").slice(0, 60) + ".json");
-  fs.writeFileSync(file, JSON.stringify(data, null, 2) + "\n");
+  // tmp + rename, like the project file: a crash mid-write never leaves half a preset
+  const tmp = file + ".tmp";
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + "\n");
+  fs.renameSync(tmp, file);
   return file;
 }
 

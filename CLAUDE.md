@@ -180,7 +180,7 @@ Reusable assets, visible in the editor's left-panel tabs and never copied:
 | `library/presets/`  | Inspector → Motion → Presets | saved animation presets, one `.json` each (see "Presets and templates") |
 | `library/templates/`| **Templates** | saved templates, one `.json` each, listed after the built-in ones |
 
-- List via `GET /api/library?dir=sfx|elements|svg|fonts` (recursive; subfolders OK).
+- List via `GET /api/library?dir=sfx|elements|svg|fonts|presets|templates` (recursive; subfolders OK).
 - To use one in the timeline, add a media entry whose `src` is its library path,
   e.g. `{ "id":"m_x", "name":"whoosh.mp3", "kind":"audio", "src":"/library/sfx/whoosh.mp3" }`
   — then reference it from clips like any other media.

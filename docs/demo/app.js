@@ -9346,12 +9346,13 @@ function renderTemplatesTab() {
 function addTemplateClip(t, trackId, at) {
   const track = trackId && TRACKS.some((x) => x.id === trackId && x.kind === "video") ? trackId : shapeTrack();
   if (!track || isTrackLocked(track)) { toast(track ? `${track} is locked` : "V1–V3 are locked — unlock a video track to add a template"); return; }
-  pushUndo(JSON.stringify({ clips: project.clips, markers: project.markers || [], comps: project.comps || [], media: project.media }));
+  const snap = JSON.stringify({ clips: project.clips, markers: project.markers || [], comps: project.comps || [], media: project.media });
   const had = new Set(project.media.map((m) => m.id));
   project.comps = project.comps || [];
   let r;
   try { r = Tpl.instantiate(project, t, { compId: newCompId(), start: Math.max(0, at), track }); }
-  catch (err) { runtime.undo.pop(); toast(err.message); return; }
+  catch (err) { restoreSnapshot(snap); toast(err.message); return; }   // put back any media it added; history untouched
+  pushUndo(snap);
   const { comp, clip } = r;
   for (const x of comp.clips) {
     x.props = { ...DEFAULT_PROPS, ...(x.kind === "comp" ? { fit: "none" } : {}), ...(x.props || {}) };
@@ -9419,8 +9420,9 @@ function bindTemplateControls(c) {
   }
   root.querySelector("[data-tf-dur]")?.addEventListener("change", (e) => {
     const v = +e.target.value, old = comp.duration;
-    pushUndo();
-    try { Tpl.retime(comp, +v.toFixed(3)); } catch (err) { runtime.undo.pop(); toast(err.message); renderInspector(); return; }
+    const snap = undoSnapshot();   // recorded only once the new length is accepted
+    try { Tpl.retime(comp, +v.toFixed(3)); } catch (err) { toast(err.message); renderInspector(); return; }
+    pushUndo(snap);
     // clips that showed the comp to its end keep doing so
     for (const x of project.clips) if (x.kind === "comp" && x.compId === comp.id && Math.abs((+x.in || 0) + x.duration - old) < 1e-3) x.duration = +(comp.duration - (+x.in || 0)).toFixed(4);
     refresh(); renderBin(); renderInspector();
