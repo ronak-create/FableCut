@@ -70,7 +70,7 @@
 <div class="wrap docs" id="main">
   <nav class="docs-side" aria-label="Docs">
     <button class="docs-menu" type="button" aria-expanded="false" aria-controls="docsNav"><svg class="i" aria-hidden="true"><use href="#i-menu"/></svg><span>project.json</span></button>
-    <div class="docs-nav" id="docsNav"><p class="docs-group">Start</p><a href="../">Overview</a><a href="../mcp/">MCP tools</a><p class="docs-group">The timeline</p><a href="../project-json/" aria-current="page">project.json</a><a href="../props/">Clip props</a><a href="../audio/">Audio mix</a><a href="../color/">Color</a><a href="../masks/">Masks</a><a href="../compositing/">Track mattes and blending</a><a href="../tracking/">Tracking</a><a href="../motion/">Shapes and parenting</a><a href="../motion-paths/">Motion paths</a><a href="../editing/">Editing rules</a><a href="../library/">Asset library</a><p class="docs-group">Guides</p><a href="../recipes/">Recipes</a><a href="../remake/">Remake a reference</a><p class="docs-group">Reference</p><a href="../rest-api/">REST API</a><a href="../export/">Export</a></div>
+    <div class="docs-nav" id="docsNav"><p class="docs-group">Start</p><a href="../">Overview</a><a href="../mcp/">MCP tools</a><p class="docs-group">The timeline</p><a href="../project-json/" aria-current="page">project.json</a><a href="../props/">Clip props</a><a href="../audio/">Audio mix</a><a href="../color/">Color</a><a href="../masks/">Masks</a><a href="../compositing/">Track mattes and blending</a><a href="../tracking/">Tracking</a><a href="../motion/">Shapes and parenting</a><a href="../motion-paths/">Motion paths</a><a href="../compositions/">Compositions</a><a href="../editing/">Editing rules</a><a href="../library/">Asset library</a><p class="docs-group">Guides</p><a href="../recipes/">Recipes</a><a href="../remake/">Remake a reference</a><p class="docs-group">Reference</p><a href="../rest-api/">REST API</a><a href="../export/">Export</a></div>
   </nav>
   <article class="docs-main prose">
     <h1>project.json</h1>
@@ -116,6 +116,8 @@
     { <span class="tk-k">"id"</span>: <span class="tk-s">"A4"</span>, <span class="tk-k">"kind"</span>: <span class="tk-s">"audio"</span> }
   ],
   <span class="tk-k">"buses"</span>: [ { <span class="tk-k">"id"</span>: <span class="tk-s">"B1"</span>, <span class="tk-k">"name"</span>: <span class="tk-s">"Dialogue"</span>, <span class="tk-k">"gain"</span>: <span class="tk-n">-2</span>, <span class="tk-k">"fx"</span>: [ { <span class="tk-k">"type"</span>: <span class="tk-s">"compressor"</span> } ] } ],
+  <span class="tk-k">"comps"</span>: [ { <span class="tk-k">"id"</span>: <span class="tk-s">"lt"</span>, <span class="tk-k">"name"</span>: <span class="tk-s">"Lower third"</span>, <span class="tk-k">"width"</span>: <span class="tk-n">1280</span>, <span class="tk-k">"height"</span>: <span class="tk-n">720</span>, <span class="tk-k">"duration"</span>: <span class="tk-n">5</span>, <span class="tk-k">"clips"</span>: [ <span class="tk-c">/* … */</span> ] } ],
+  <span class="tk-c">// ^ optional — compositions (nested sequences), placed with kind:"comp" clips; see "Compositions (nested sequences)"</span>
   <span class="tk-c">// ^ optional — submix buses B1…B8: name, gain (dB), pan, mute, fx; tracks route in with `out`</span>
   <span class="tk-k">"media"</span>: [
     { <span class="tk-k">"id"</span>: <span class="tk-s">"m_abc"</span>, <span class="tk-k">"name"</span>: <span class="tk-s">"intro.mp4"</span>, <span class="tk-k">"kind"</span>: <span class="tk-s">"video"</span>,  <span class="tk-c">// video|audio|image|svg</span>
@@ -128,8 +130,9 @@
   <span class="tk-k">"clips"</span>: [
     {
       <span class="tk-k">"id"</span>: <span class="tk-s">"c_xyz"</span>,             <span class="tk-c">// unique string</span>
-      <span class="tk-k">"mediaId"</span>: <span class="tk-s">"m_abc"</span>,        <span class="tk-c">// null for kind:"text", "adjust", "shape" and "null"</span>
-      <span class="tk-k">"kind"</span>: <span class="tk-s">"video"</span>,           <span class="tk-c">// video | audio | image | svg | text | adjust | shape | null</span>
+      <span class="tk-k">"mediaId"</span>: <span class="tk-s">"m_abc"</span>,        <span class="tk-c">// null for kind:"text", "adjust", "shape", "null" and "comp"</span>
+      <span class="tk-k">"kind"</span>: <span class="tk-s">"video"</span>,           <span class="tk-c">// video | audio | image | svg | text | adjust | shape | null | comp</span>
+      <span class="tk-c">// kind:"comp" also has "compId" (a comps[] entry) — see "Compositions (nested sequences)"</span>
       <span class="tk-k">"track"</span>: <span class="tk-s">"V1"</span>,             <span class="tk-c">// Vn…V1 (video) | A1…An (audio); extras via UI +V/+A or tracks[]</span>
       <span class="tk-k">"start"</span>: <span class="tk-n">0</span>,                <span class="tk-c">// timeline position, seconds</span>
       <span class="tk-k">"in"</span>: <span class="tk-n">2.5</span>,                 <span class="tk-c">// offset into source media, seconds (0 for image/svg/text)</span>

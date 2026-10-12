@@ -79,6 +79,11 @@ const PAGES = [
     parts: [["project.json schema", "Motion paths, motion blur and text on a path"]],
   },
   {
+    slug: "compositions", nav: "Compositions", title: "Compositions (nested sequences)", group: "The timeline",
+    lede: "Build a lower third, a logo sting or a whole scene once as a composition, then place it anywhere as one clip that moves, masks and grades like a picture, from the bin or by an agent with addComp, inComp and precompose.",
+    parts: [["project.json schema", "Compositions (nested sequences)"]],
+  },
+  {
     slug: "editing", nav: "Editing rules", title: "Editing rules", group: "The timeline",
     lede: "How tracks, links, locks, targeting and the trim tools behave, for people and agents alike.",
     parts: [["project.json schema", "Semantics"]],

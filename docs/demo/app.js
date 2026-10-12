@@ -882,7 +882,7 @@ function projDur() {
   }
   return mx;
 }
-const clipSpeed = (c) => clamp(+(c.props?.speed) || 1, 0.1, 8);
+const clipSpeed = FableCutEdit.clipSpeed;   // comp clips run at 1×
 
 /* ── Speed ramps (time remapping) ──
    `speed` is keyframable: media time = in + ∫ speed(t) dt over the clip.
@@ -4208,11 +4208,11 @@ function startClipGesture(e, c, mode, collapseOnClick) {
     } else if (mode === "trim-l") {
       let ns = snapTime(orig.start + dt, groupIds);
       const sp = clipSpeed(c);
-      const maxShiftLeft = (c.kind === "video" || c.kind === "audio") ? orig.in / sp : 1e6;
+      const maxShiftLeft = FableCutEdit.hasSourceTime(c) ? orig.in / sp : 1e6;
       ns = clamp(ns, Math.max(0, orig.start - maxShiftLeft), orig.start + orig.duration - MIN_DUR);
       const d = ns - orig.start;
       c.start = ns;
-      c.in = (c.kind === "video" || c.kind === "audio") ? orig.in + d * sp : 0;
+      c.in = FableCutEdit.hasSourceTime(c) ? orig.in + d * sp : 0;
       c.duration = orig.duration - d;
       c.keyframes = shiftKF(orig.keyframes, d, c.duration);
       if (orig.masks) c.props.masks = Mask.shiftKeys(orig.masks, d);
@@ -4222,8 +4222,9 @@ function startClipGesture(e, c, mode, collapseOnClick) {
     } else { // trim-r
       let ne = snapTime(orig.start + orig.duration + dt, groupIds);
       let maxDur = 1e6;
-      if ((c.kind === "video" || c.kind === "audio") && media?.duration)
-        maxDur = (media.duration - orig.in) / clipSpeed(c);
+      const srcLen = c.kind === "comp" ? (getComp(c.compId) || {}).duration : media?.duration;
+      if (FableCutEdit.hasSourceTime(c) && srcLen)
+        maxDur = (srcLen - orig.in) / clipSpeed(c);
       c.duration = clamp(ne - orig.start, MIN_DUR, maxDur);
       c.keyframes = shiftKF(orig.keyframes, 0, c.duration);
       syncLinkedTiming(c);
@@ -4922,7 +4923,7 @@ function renderInspector(lite) {
   let html = (state.selIds.size > 1
     ? `<div class="insp-multi">${state.selIds.size} clips selected — drag moves them together, Del deletes all. Fields below edit the primary (white-outlined) clip.</div>`
     : "") + clipStatusBar(c) + `<div class="insp-section"><h3>Clip — ${c.kind}</h3>
-    ${row("Name", `<input type="text" data-k="name" value="${c.name.replace(/"/g, "&quot;")}">`)}
+    ${row("Name", `<input type="text" data-k="name" value="${escapeHtml(c.name || "")}">`)}
     ${c.mediaId ? row("Source", `<button type="button" class="btn tiny style-picker-btn" data-media-open title="Replace this clip's media — keeps position, trim, keyframes and effects">${escapeHtml((getMedia(c.mediaId) || {}).name || "Missing media")} ▾</button>`) : ""}
     ${row("Start (s)", `<input type="number" data-k="start" step="0.01" value="${c.start.toFixed(2)}">`)}
     ${row("Length (s)", `<input type="number" data-k="duration" step="0.01" value="${c.duration.toFixed(2)}">`)}

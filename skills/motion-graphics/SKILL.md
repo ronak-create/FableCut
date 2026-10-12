@@ -1,5 +1,5 @@
 ---
-description: Build motion graphics in FableCut — shape layers (rectangles, ellipses, polygons, stars, lines, bezier paths, groups), draw-on trim paths, null objects, parenting, anchor points, curved motion paths with auto-orient, motion blur and text on a path, all keyframed. Use when the user wants a lower third, an animated logo or icon, a callout, a progress bar or loading ring, shapes that pop or slide in, or anything to "move together", "orbit" or "draw on".
+description: Build motion graphics in FableCut — shape layers (rectangles, ellipses, polygons, stars, lines, bezier paths, groups), draw-on trim paths, null objects, parenting, anchor points, curved motion paths with auto-orient, motion blur, text on a path and reusable compositions (nested sequences), all keyframed. Use when the user wants a lower third, an animated logo or icon, a callout, a progress bar or loading ring, shapes that pop or slide in, a graphic reused across the edit, or anything to "move together", "orbit", "draw on" or "precompose".
 ---
 
 # Motion graphics with FableCut
@@ -17,8 +17,8 @@ applies. Three pieces do the work:
   `anchorY`) that it turns and scales around.
 
 For the full key table, read `fablecut_docs {section:"schema"}` once and see
-its "Shapes, nulls and parenting" and "Motion paths, motion blur and text on a
-path" parts. The notes below cover how to use it well.
+its "Shapes, nulls and parenting", "Motion paths, motion blur and text on a
+path" and "Compositions (nested sequences)" parts. The notes below cover how to use it well.
 
 ## Coordinates (get these right first)
 
@@ -132,6 +132,39 @@ them out together.
   curve one line-height below. Every `textAnim` works on a path;
   `letter-pop` and `rise-mask` read especially well on arcs.
 
+## Compositions: build once, use anywhere
+
+A **comp** (`project.comps`) is a timeline of its own; a `kind:"comp"` clip
+places it, drawn like one picture of the comp's size. Use one when the same
+graphic appears more than once, or when several clips should move, fade, mask
+or grade as a unit.
+
+```
+fablecut_patch_project {ops:[
+  {op:"addComp", comp:{id:"sting", name:"Logo sting", duration:2.5, clips:[
+    {id:"ring", kind:"shape", track:"V1", start:0, duration:2.5, props:{shapes:[
+      {type:"ellipse", w:220, h:220, fill:"none", stroke:"#ffd166", strokeWidth:10,
+       keys:[{t:0, trimEnd:0}, {t:0.8, trimEnd:100, ease:"ease-out"}]}]}},
+    {id:"word", kind:"text", track:"V2", start:0.5, duration:2, props:{text:"FC", font:"Anton", fontSize:96, textAnim:"zoom-in"}}]}},
+  {op:"addClip", clip:{kind:"comp", compId:"sting", track:"V3", start:0, duration:2.5}},
+  {op:"addClip", clip:{kind:"comp", compId:"sting", track:"V3", start:58, duration:2.5, props:{scale:0.6, x:480, y:260}}}
+]}
+```
+
+- Edit what is inside with `{op:"inComp", comp:"sting", ops:[…]}` (the same
+  clip ops, with comp times). Every placement updates.
+- `{op:"precompose", ids:[…]}` turns clips you already built into a comp and
+  leaves one comp clip in their place; then animate, mask or fade that clip
+  as a whole (this is the fix for "parenting doesn't pass opacity").
+- A comp clip's `in` is where in the comp it starts. A comp clip shows nothing
+  past the comp's `duration`, so lengthen the comp (`updateComp`) before
+  stretching the clip.
+- The comp's frame is its `width` × `height`, transparent unless it has a
+  `background`. Make a graphic's comp the canvas size so `x`/`y` inside it
+  read the same as on the timeline.
+- Sound inside a comp plays through the main timeline's track of the same
+  name, so a whoosh in a sting follows the A-track fader it is on.
+
 ## Things that trip agents up
 
 - Shape and null clips have `mediaId:null`. Don't register media for them.
@@ -153,3 +186,5 @@ them out together.
   `x`/`y` keys in every frame.
 - Parent loops (for example, a null to its own child) are refused, and so are
   parents that are audio or adjustment clips.
+- A comp can't contain itself (directly or through another comp), and
+  `removeComp` is refused while a clip still uses it. Comps nest 4 deep.

@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Compositions (nested sequences).** `project.comps` holds timelines of their
+  own (size, length, tracks, clips); a `comp` clip places one, drawn like a
+  picture of the comp's size so transform, masks, mattes, blend and grade apply
+  to it as a whole, while the video and audio inside play and export as if on
+  the timeline. Comps nest 4 deep. In the editor: comps in the bin's Project
+  tab (drag to place, double-click to open), an open comp takes over the
+  timeline with a breadcrumb and Esc to go back, **Precompose** in the clip
+  menu, **New composition** in the Project tab menu, and a Composition section
+  in the Inspector.
+- Agents: `addComp`, `updateComp`, `removeComp`, `precompose` and `inComp`
+  patch ops; comps are validated and listed in the compact view.
 - **Motion paths.** Position keys (x and y keyed together) take bezier
   handles (`pin` / `pout` on the keys), so a clip travels along a curve, paced
   along the curve by its eases. The path shows on the monitor with a dot per

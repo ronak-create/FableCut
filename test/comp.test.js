@@ -67,6 +67,26 @@ test("precompose moves clips into a new comp and leaves a comp clip in their pla
   assert.deepEqual(doc.clips.map((x) => x.id).sort(), ["c", clip.id, "z"].sort());
 });
 
+test("trims treat a comp clip's in as a window into its comp", () => {
+  const E = require("../edit-ops.js");
+  const mk = () => ({ media: [], tracks: [{ id: "V1", kind: "video" }], comps: [{ id: "q", name: "Q", width: 640, height: 360, duration: 6, clips: [] }],
+    clips: [{ id: "k", kind: "comp", compId: "q", track: "V1", start: 2, in: 1, duration: 3, props: { speed: 3 } }] });
+  let doc = mk(), ed = E.forDoc(doc), k = doc.clips[0];
+  assert.equal(E.clipSpeed(k), 1, "comps run at 1×");
+  ed.rippleTrim(k, "in", 0.5);
+  near(k.in, 1.5); near(k.duration, 2.5);
+  ed.rippleTrim(k, "in", -5);                       // the head can go back only to comp time 0
+  near(k.in, 0); near(k.duration, 4);
+  ed.rippleTrim(k, "out", 10);                      // the tail stops at the comp's end
+  near(k.in + k.duration, 6);
+  doc = mk(); ed = E.forDoc(doc); k = doc.clips[0];
+  ed.slipClip(k, -9);                               // later comp time, clamped to the comp's length
+  near(k.in, 3); near(k.duration, 3); near(k.start, 2);
+  doc = mk(); ed = E.forDoc(doc); k = doc.clips[0];
+  ed.liftRange(2, 2.75, false);                     // lifting the head keeps the comp aligned
+  near(k.start, 2.75); near(k.in, 1.75);
+});
+
 test("normalizeComp: defaults and strict refusals", () => {
   const n = C.normalizeComp({ id: "x", duration: 3 }, true, { width: 1920, height: 1080 });
   assert.deepEqual([n.name, n.width, n.height, n.clips.length], ["x", 1920, 1080, 0]);

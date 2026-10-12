@@ -266,6 +266,8 @@ Examples in `library/svg/`: `sparkles.svg` (loop), `lower-third.svg`,
     { "id": "A4", "kind": "audio" }
   ],
   "buses": [ { "id": "B1", "name": "Dialogue", "gain": -2, "fx": [ { "type": "compressor" } ] } ],
+  "comps": [ { "id": "lt", "name": "Lower third", "width": 1280, "height": 720, "duration": 5, "clips": [ /* … */ ] } ],
+  // ^ optional — compositions (nested sequences), placed with kind:"comp" clips; see "Compositions (nested sequences)"
   // ^ optional — submix buses B1…B8: name, gain (dB), pan, mute, fx; tracks route in with `out`
   "media": [
     { "id": "m_abc", "name": "intro.mp4", "kind": "video",  // video|audio|image|svg
@@ -278,8 +280,9 @@ Examples in `library/svg/`: `sparkles.svg` (loop), `lower-third.svg`,
   "clips": [
     {
       "id": "c_xyz",             // unique string
-      "mediaId": "m_abc",        // null for kind:"text", "adjust", "shape" and "null"
-      "kind": "video",           // video | audio | image | svg | text | adjust | shape | null
+      "mediaId": "m_abc",        // null for kind:"text", "adjust", "shape", "null" and "comp"
+      "kind": "video",           // video | audio | image | svg | text | adjust | shape | null | comp
+      // kind:"comp" also has "compId" (a comps[] entry) — see "Compositions (nested sequences)"
       "track": "V1",             // Vn…V1 (video) | A1…An (audio); extras via UI +V/+A or tracks[]
       "start": 0,                // timeline position, seconds
       "in": 2.5,                 // offset into source media, seconds (0 for image/svg/text)
@@ -444,6 +447,10 @@ subtract / intersect, keyframes. See "Masks" below.
 polygons, stars, lines, bezier paths, groups) and `trimStart` / `trimEnd` /
 `trimOffset` (%, a draw-on of every path). **Null objects** (`kind:"null"`)
 never render; other clips are parented to them. See "Shapes, nulls and parenting".
+
+**Comp clips** (`kind:"comp"`, `compId`): a composition placed as one clip — it
+draws like a picture of the comp's size (`fit` defaults to `none`) and its media
+plays and exports. See "Compositions (nested sequences)".
 
 **Animatable props** (usable in `keyframes`): x, y, scale, rotation, opacity, anchorX, anchorY, trimStart, trimEnd, trimOffset, pathOffset,
 volume, pan, duck, speed, brightness, contrast, saturation, hue, blur, grayscale, sepia,
@@ -1138,6 +1145,88 @@ Recipes: **fly-in on a curve** — two position keys, `setMotionPath` smooth,
 textPath that follows the shape in the footage, `pathAlign:"center"`,
 `textAnim:"letter-pop"`; **whip without the transition** — a fast `x` move over
 4–6 frames with `motionBlur:360`.
+
+### Compositions (nested sequences)
+
+A **composition** (comp) is a timeline of its own, with its own size, length,
+tracks and clips, that is placed on the main timeline (or inside another comp)
+as one clip. Build a lower third, a logo sting or a whole scene once, then use
+it as many times as you like: every clip that shows the comp changes when the
+comp is edited. Comps live in `project.comps`:
+
+```jsonc
+"comps": [
+  { "id": "lt", "name": "Lower third", "width": 1280, "height": 720, "duration": 5,
+    "background": "#00000000",   // optional; leave it out for transparent
+    "tracks": [ { "id": "V2", "kind": "video" }, { "id": "V1", "kind": "video" }, { "id": "A1", "kind": "audio" } ],
+    "clips": [
+      { "id": "bar", "kind": "shape", "track": "V1", "start": 0, "duration": 5, "props": { "shapes": [ … ] } },
+      { "id": "name", "kind": "text", "track": "V2", "start": 0.3, "duration": 4.7, "props": { "text": "Ada Lovelace" } },
+      { "id": "whoosh", "kind": "audio", "mediaId": "m_whoosh", "track": "A1", "start": 0, "in": 0, "duration": 0.6 }
+    ] }
+],
+"clips": [
+  { "id": "c_lt1", "kind": "comp", "compId": "lt", "mediaId": null, "track": "V3", "start": 4, "in": 0, "duration": 5,
+    "props": { "fit": "none", "y": 220 } }
+]
+```
+
+| key | default | does |
+|---|---|---|
+| `id` · `name` | — · the id | how clips and agents refer to it · the label shown on its clips and in the bin |
+| `width` · `height` | the project's | the comp's frame, px (16…8192) |
+| `duration` | — | seconds; what the comp shows past its clips is transparent (or its `background`) |
+| `background` | none | a colour behind the comp's clips; leave it out for transparent |
+| `tracks` | V3…V1, A1, A2 | the comp's own lanes, like the project's `tracks` |
+| `clips` | [] | ordinary clips of any kind (comp clips too), with times inside the comp |
+
+**A comp clip** (`kind:"comp"`, `compId`, no `mediaId`) shows the comp from its
+`in` (comp seconds) for its `duration`, at speed 1. It draws like a picture of
+the comp's size: `fit` defaults to `none` (the comp's own pixels), and its
+transform, keyframes, opacity, transitions, masks, track matte, blend, grade and
+filters all apply to the comp's frame as a whole. Trims and splits move its
+`in` like a video clip's; the window can't run past the comp's length.
+
+The media inside a comp **plays and exports as if it were on the timeline**:
+its video frames, and its audio, which goes through the main timeline's audio
+track of the same name (its fader, effects and bus). A comp clip that is
+disabled, or sits on a disabled track, silences the comp's audio too. Comps
+nest up to 4 deep, and a comp can never contain itself.
+
+In the editor: the bin's **Project** tab lists the comps; drag one onto the
+timeline to place it, and double-click it (or a comp clip, or **Open** in the
+Inspector's **Composition** section) to open it. An open comp takes over the
+timeline: every tool, shortcut and inspector works on its clips, and the
+breadcrumb above the timeline (or **Esc**, once nothing is selected) goes back
+out. Right-click clips → **Precompose** moves them into a new comp and puts a
+comp clip in their place; right-click the Project tab → **New composition**
+starts an empty one. The Composition section also sets the comp's name, size,
+length and background.
+
+**Agents:**
+
+- `{op:"addComp", comp:{id?, name, duration, width?, height?, background?, tracks?, clips?:[…]}}`
+  adds one (its clips go through the same checks as `addClip`).
+  `{op:"updateComp", id, set:{name?, width?, height?, duration?, background?, tracks?}}`
+  changes it; `{op:"removeComp", id}` is refused while a clip still uses it.
+- Place it with `addClip {kind:"comp", compId, track, start, duration, in?}`.
+- `{op:"inComp", comp, ops:[…]}` runs clip and timeline ops on the comp's own
+  clips: `addClip`, `updateClip`, `removeClip`, `split`, `rippleDelete`, the
+  trims, `setShape`, `setMask`, `setGrade`, `setParent`, `setMotionPath`,
+  `setTextPath`, clip `setFx`, `precompose`, and `inComp` for a comp inside it.
+- `{op:"precompose", ids:[…], name?, id?}` moves those clips (here, or in the
+  comp an `inComp` is running in) into a new comp that starts at the earliest
+  of them; a comp clip of the same length takes their place.
+- The compact view shows a comp clip as `comp(lt in:1.5)` and lists every comp
+  under `COMPS` with its clips.
+
+Recipes: **reusable lower third** — a comp with the bar, the title and a
+whoosh, placed under each speaker (change the name per use by making one comp
+per name with `addComp`, or keep the text outside the comp on the track above);
+**logo sting** — a draw-on logo comp at the head and tail of the edit;
+**picture in picture of a whole scene** — precompose the scene's clips, then
+scale the comp clip down and move it into a corner;
+**one grade for a sequence** — precompose it and grade the comp clip once.
 
 ### Semantics
 

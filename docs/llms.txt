@@ -59,6 +59,11 @@ about 150 ms. A human and an agent can work the same timeline at once.
   shutter-angle motion blur samples sub-frames in preview and export; titles
   run along lines, arcs, circles and drawn paths with a keyframable offset.
   Agents use the `setMotionPath` and `setTextPath` patch ops.
+- Compositions (nested sequences): a timeline of its own, placed as one clip
+  that transforms, masks, grades and blends like a picture while its media
+  plays and exports; nests 4 deep, opens on the timeline, precompose a
+  selection. Agents use the `addComp`, `updateComp`, `inComp` and `precompose`
+  patch ops.
 - Track mattes and blending: a clip can be cut by the picture on the track
   above (alpha, alpha inverted, luma, luma inverted; the matte track stops
   drawing), and laid over the clips below with 17 blend modes. Agents use the

@@ -204,6 +204,11 @@ same time.
   with a shutter angle (preview and export), and set titles along lines, arcs,
   circles or drawn paths. Agents use the `setMotionPath` and `setTextPath`
   patch ops
+- **Compositions** — nested sequences: build a lower third, a logo sting or a
+  scene once and place it anywhere as one clip that moves, masks, grades and
+  blends like a picture, while its video and audio play and export as usual.
+  Open one to edit it on the timeline, or precompose a selection. Agents use
+  the `addComp`, `inComp` and `precompose` patch ops
 - **Motion tracking** — follow a point or a region (with its scale and
   rotation) through a video clip, then make a mask follow it or pin a title,
   sticker or any clip to it; the result is ordinary editable keys. Agents use

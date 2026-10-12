@@ -42,8 +42,10 @@
   /* ── Pure clip helpers ── */
   const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
   const clipEnd = (c) => c.start + c.duration;
-  const clipSpeed = (c) => clamp(+(c.props?.speed) || 1, 0.1, 8);
+  const clipSpeed = (c) => (c.kind === "comp" ? 1 : clamp(+(c.props?.speed) || 1, 0.1, 8));
   const isMediaClip = (c) => c.kind === "video" || c.kind === "audio";
+  /** Clips with a source window (`in` into something with a length): media, and comp clips (into their comp). */
+  const hasSourceTime = (c) => isMediaClip(c) || c.kind === "comp";
   const EASE = {
     linear: (u) => u,
     "ease-in": (u) => u * u,
@@ -143,6 +145,12 @@
     const timeAt = env.mediaTimeAt || mediaTimeAt;
     const removed = (c) => { if (env.onRemove) env.onRemove(c); };
     const getMedia = (id) => P().media.find((m) => m.id === id);
+    /** Length of what c's `in` points into (media or comp), 0 when unknown. */
+    const sourceLen = (c) => {
+      if (c.kind === "comp") { const k = (P().comps || []).find((x) => x.id === c.compId); return k ? +k.duration || 0 : 0; }
+      const m = getMedia(c.mediaId);
+      return m ? +m.duration || 0 : 0;
+    };
     const getClip = (id) => P().clips.find((c) => c.id === id) || null;
     const dropClips = (pred) => {
       const project = P();
@@ -310,7 +318,7 @@
         const dIn = t0 - start;
         if (dIn > 1e-6) {
           c.start = t0;
-          if (isMediaClip(c)) c.in += dIn * clipSpeed(c);
+          if (hasSourceTime(c)) c.in += dIn * clipSpeed(c);
           else c.in = 0;
           c.duration -= dIn;
           c.keyframes = shiftKF(c.keyframes, dIn, c.duration);
@@ -700,10 +708,10 @@
 
     /** Longest this clip may run before it runs out of source media. */
     function maxClipDur(c) {
-      if (!isMediaClip(c)) return Infinity;
-      const m = getMedia(c.mediaId);
-      if (!m || !(m.duration > 0)) return Infinity;
-      return Math.max(MIN_DUR, (m.duration - c.in) / clipSpeed(c));
+      if (!hasSourceTime(c)) return Infinity;
+      const len = sourceLen(c);
+      if (!(len > 0)) return Infinity;
+      return Math.max(MIN_DUR, (len - c.in) / clipSpeed(c));
     }
     /* A linked group shares its timing, but a partner may run at a different
        speed (links are inferred from timing alone), so every source limit is the
@@ -714,7 +722,7 @@
     }
     /** How far c's group can pull its head back before any member reaches source 0. */
     function groupHeadRoom(c) {
-      return Math.min(...withLinked([c]).map((x) => (isMediaClip(x) ? x.in / clipSpeed(x) : Infinity)));
+      return Math.min(...withLinked([c]).map((x) => (hasSourceTime(x) ? x.in / clipSpeed(x) : Infinity)));
     }
     /** The clip butting against c's head ("in") or tail ("out") on its track. */
     function adjacentClip(c, side) {
@@ -750,7 +758,7 @@
     function trimGroupHead(c, d, moveStart) {
       for (const x of withLinked([c])) {
         if (moveStart) x.start = +(x.start + d).toFixed(4);
-        if (isMediaClip(x)) x.in = +(x.in + d * clipSpeed(x)).toFixed(4);
+        if (hasSourceTime(x)) x.in = +(x.in + d * clipSpeed(x)).toFixed(4);
         x.duration = +(x.duration - d).toFixed(4);
         x.keyframes = shiftKF(x.keyframes, d, x.duration);
         shiftMasks(x, d);
@@ -820,7 +828,7 @@
      *  delta > 0 drags the picture right, i.e. earlier source. Position and
      *  length stay; clip-local keyframes stay put on the timeline. */
     function slipClip(c, delta) {
-      if (!isMediaClip(c)) return "Slip needs a video or audio clip — stills and titles have no source time";
+      if (!hasSourceTime(c)) return "Slip needs a video or audio clip, or a comp clip — stills and titles have no source time";
       if (isGroupLocked(c)) return TRIM_LOCKED;
       const sp = clipSpeed(c);
       const group = withLinked([c]);
@@ -828,9 +836,9 @@
       // consumes its own span of source (speed can differ across the group).
       let maxIn = Infinity;
       for (const x of group) {
-        if (!isMediaClip(x)) continue;
-        const m = getMedia(x.mediaId);
-        if (m && m.duration > 0) maxIn = Math.min(maxIn, Math.max(0, m.duration - (timeAt(x, clipEnd(x)) - x.in)));
+        if (!hasSourceTime(x)) continue;
+        const len = sourceLen(x);
+        if (len > 0) maxIn = Math.min(maxIn, Math.max(0, len - (timeAt(x, clipEnd(x)) - x.in)));
       }
       const newIn = clampD(c.in - delta * sp, 0, maxIn);
       const d = (c.in - newIn) / sp;
@@ -1001,7 +1009,7 @@
 
   return {
     MIN_DUR, MIN_TRANS_DUR, CROSSFADE_DUR, GAP_EPS, TRIM_LOCKED, DEFAULT_TRACKS,
-    clipEnd, clipSpeed, kfChannel, hasSpeedRamp, mediaTimeAt, shiftKF, shiftMasks, detachChildren, defaultPanForChannel,
+    clipEnd, clipSpeed, isMediaClip, hasSourceTime, kfChannel, hasSpeedRamp, mediaTimeAt, shiftKF, shiftMasks, detachChildren, defaultPanForChannel,
     create, forDoc,
   };
 });
