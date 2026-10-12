@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.14.0] - 2026-10-12
+
 ### Added
 - **Compositions (nested sequences).** `project.comps` holds timelines of their
   own (size, length, tracks, clips); a `comp` clip places one, drawn like a
@@ -754,7 +756,8 @@ the report in [#1](https://github.com/ronak-create/FableCut/issues/1) — thanks
 - Three control surfaces for AI agents: **MCP server**, direct `project.json`
   editing, and a **REST API** with live-reload over server-sent events.
 
-[Unreleased]: https://github.com/ronak-create/FableCut/compare/v1.13.0...HEAD
+[Unreleased]: https://github.com/ronak-create/FableCut/compare/v1.14.0...HEAD
+[1.14.0]: https://github.com/ronak-create/FableCut/compare/v1.13.0...v1.14.0
 [1.13.0]: https://github.com/ronak-create/FableCut/compare/v1.12.1...v1.13.0
 [1.12.1]: https://github.com/ronak-create/FableCut/compare/v1.12.0...v1.12.1
 [1.12.0]: https://github.com/ronak-create/FableCut/compare/v1.11.0...v1.12.0
