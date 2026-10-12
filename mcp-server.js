@@ -1442,8 +1442,13 @@ async function callTool(name, args, attempt = 0) {
             const allowed = ["addClip", "updateClip", "removeClip", "setGrade", "setGradeLayer", "setMask", "removeMask", "setMaskKeys", "setMatte",
               "setShape", "removeShape", "setParent", "setMotionPath", "setTextPath", "setFx", "setFxKeys", "precompose", "inComp",
               "split", "rippleDelete", "closeGap", "lift", "extract", "rippleTrim", "roll", "slip", "slide", "crossfade"];
-            for (const o of op.ops) if (!o || !allowed.includes(o.op) || (o.op === "setFx" || o.op === "setFxKeys") && o.target && o.target !== "clip")
-              throw new Error(`inComp: ${o && o.op} can't run inside a comp (clip and timeline ops only: ${allowed.join(", ")})`);
+            for (const o of op.ops) {
+              if (!o || !allowed.includes(o.op)) throw new Error(`inComp: ${o && o.op} can't run inside a comp (clip and timeline ops only: ${allowed.join(", ")})`);
+              // the same target rule as fxTarget: no id means master, A… a track, B… a bus — none of them live in a comp
+              const fxAt = o.target || (o.id && /^A\d+$/.test(o.id) ? "track" : o.id && /^B\d+$/.test(o.id) ? "bus" : o.id ? "clip" : "master");
+              if ((o.op === "setFx" || o.op === "setFxKeys") && fxAt !== "clip")
+                throw new Error(`inComp: ${o.op} inside a comp works on its clips only (target:"clip", id) — the ${fxAt} effects are the main timeline's`);
+            }
             const keep = { clips: proj.clips, tracks: proj.tracks, width: proj.width, height: proj.height, lockedTracks: proj.lockedTracks,
               untargetedTracks: proj.untargetedTracks, disabledTracks: proj.disabledTracks, inPoint: proj.inPoint, outPoint: proj.outPoint };
             const prevIn = inCompId;

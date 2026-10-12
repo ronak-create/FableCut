@@ -161,6 +161,11 @@ test("agent: addComp, inComp, precompose, updateComp, removeComp and the compact
   assert.match(r.text, /locked/);
   r = await patch({ op: "updateComp", id: "badge", set: { clips: [] } });
   assert.match(r.text, /edit its clips with inComp/);
+  for (const fx of [{ op: "setFx", preset: "podcast" }, { op: "setFx", id: "A1", preset: "podcast" }, { op: "setFxKeys", id: "B1", param: "gain", keys: null }]) {
+    r = await patch({ op: "inComp", comp: "badge", ops: [fx] });
+    assert.match(r.text, /works on its clips only/, "master, track and bus effects aren't reachable from inside a comp");
+  }
+  assert.equal(doc().master, undefined, "the master chain was left alone");
 
   const compact = await mcp.callTool("fablecut_get_project", { compact: true });
   assert.match(compact.text, /c_b V3 2s\+3s comp\(badge\)/);

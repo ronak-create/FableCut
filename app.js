@@ -2005,12 +2005,12 @@ function renderBin() {
     });
     item.querySelector(".bin-del").addEventListener("click", (e) => {
       e.stopPropagation();
-      pushUndo();
+      if (state.compCtx && (state.compCtx.root.clips || []).some((c) => c.mediaId === m.id)) { toast("It's used on the main timeline — go back to Main to delete it"); return; }
+      pushUndo(JSON.stringify({ clips: project.clips, markers: project.markers || [], comps: project.comps || [], media: project.media }));   // undo brings the media back too
       project.media = project.media.filter((x) => x.id !== m.id);
       project.clips = project.clips.filter((c) => c.mediaId !== m.id);
       // and its clips inside comps (and on the main timeline while a comp is open)
       project.comps = (project.comps || []).map((cp) => ({ ...cp, clips: (cp.clips || []).filter((c) => c.mediaId !== m.id) }));
-      if (state.compCtx) state.compCtx.root = { ...state.compCtx.root, clips: (state.compCtx.root.clips || []).filter((c) => c.mediaId !== m.id) };
       runtime.compGen = (runtime.compGen || 0) + 1;
       if (state.source.mediaId === m.id) clearSource();
       renderBin(); scheduleSave(); renderInspector();
@@ -2246,7 +2246,7 @@ function pushUndo(snap = undoSnapshot()) {
 function restoreSnapshot(json) {
   const snap = JSON.parse(json);
   if (Array.isArray(snap)) project.clips = snap;
-  else { project.clips = snap.clips; project.markers = snap.markers; if (snap.comps) project.comps = snap.comps; }
+  else { project.clips = snap.clips; project.markers = snap.markers; if (snap.comps) project.comps = snap.comps; if (snap.media) { project.media = snap.media; renderBin(); } }
   runtime.compGen = (runtime.compGen || 0) + 1;
 }
 function undo() {
@@ -4240,7 +4240,7 @@ function startClipGesture(e, c, mode, collapseOnClick) {
       let maxDur = 1e6;
       const srcLen = c.kind === "comp" ? (getComp(c.compId) || {}).duration : media?.duration;
       if (FableCutEdit.hasSourceTime(c) && srcLen)
-        maxDur = (srcLen - orig.in) / clipSpeed(c);
+        maxDur = Math.max(MIN_DUR, (srcLen - orig.in) / clipSpeed(c));
       c.duration = clamp(ne - orig.start, MIN_DUR, maxDur);
       c.keyframes = shiftKF(orig.keyframes, 0, c.duration);
       syncLinkedTiming(c);
@@ -8624,7 +8624,7 @@ function drawAdjust(c, W, H, t) {
   if (adjScratch.height !== H) adjScratch.height = H;
   const a = adjScratch.getContext("2d");
   a.clearRect(0, 0, W, H);
-  a.drawImage(els.preview, 0, 0);
+  a.drawImage(runtime.adjSource || els.preview, 0, 0);   // inside a comp: the comp's own layers below
   ctx2d.save();
   ctx2d.setTransform(1, 0, 0, 1, 0, 0);
   if (p.shake > 0) { // whole-frame impact shake
@@ -9080,7 +9080,7 @@ function renderComp(c, t) {
   const depth = (runtime.compDepth || 0) + 1;
   if (!comp || depth > CompLib.MAX_DEPTH) return null;
   const W2 = comp.width, H2 = comp.height;
-  const prev = { ctx: ctx2d, scope: runtime.scope, depth: runtime.compDepth };
+  const prev = { ctx: ctx2d, scope: runtime.scope, depth: runtime.compDepth, adj: runtime.adjSource };
   runtime.compDepth = depth;   // every scratch buffer below gets this depth's own copy
   const cv = maskCtx("comp", W2, H2);
   cv.setTransform(1, 0, 0, 1, 0, 0); cv.globalAlpha = 1; cv.globalCompositeOperation = "source-over"; cv.filter = "none";
@@ -9090,11 +9090,11 @@ function renderComp(c, t) {
   const on = kids.filter((v) => v._on && v.kind !== "audio" && activeAt(v, t))
     .sort((a, b) => (order.indexOf(a.track) - order.indexOf(b.track)) || (a.start - b.start));
   runtime.scope = { clips: kids, videoTracks: order };
-  ctx2d = cv;
+  ctx2d = cv; runtime.adjSource = cv.canvas;
   try {
     const mattes = matteTracksAt(on);
     for (const v of on) if (!mattes.has(v.track)) drawClip(v, W2, H2, t);
-  } finally { ctx2d = prev.ctx; runtime.scope = prev.scope; runtime.compDepth = prev.depth; }
+  } finally { ctx2d = prev.ctx; runtime.scope = prev.scope; runtime.compDepth = prev.depth; runtime.adjSource = prev.adj; }
   return cv.canvas;
 }
 const anyClip = (id) => getClip(id) || virtualClip(id);
@@ -9248,7 +9248,7 @@ function showCompMenu(x, y, comp) {
     pushUndo();
     project.comps = project.comps.filter((c) => c.id !== comp.id);
     runtime.compGen = (runtime.compGen || 0) + 1; scheduleSave(); renderBin();
-  }, used ? `Used ${used}× — remove its clips first` : comp.id === compCtxId() ? "It is open" : null);
+  }, used ? `Used ${used}× — remove its clips first` : state.compCtx && state.compCtx.path.includes(comp.id) ? "It is open" : null);
   document.body.appendChild(menu);
   trackCtxMenu = menu;
   menu.style.left = Math.max(6, Math.min(x, innerWidth - menu.offsetWidth - 6)) + "px";
