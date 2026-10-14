@@ -30,7 +30,7 @@ const PAGES = [
   },
   {
     slug: "studio", nav: "Studio (no install)", title: "FableCut Studio", group: "Start",
-    lede: "The same editor at [studio.fablecut.space](https://studio.fablecut.space), with nothing to install. It edits a folder on your own disk, and Claude Code, claude.ai, ChatGPT or any MCP client can drive it by link.",
+    lede: "The same editor at studio.fablecut.space, with nothing to install. It edits a folder on your own disk, and Claude Code, claude.ai, ChatGPT or any MCP client can drive it by link.",
     file: "docs/docs/studio.md",
   },
   {

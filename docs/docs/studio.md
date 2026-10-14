@@ -4,7 +4,7 @@
 2. Click **New project** and pick where to save it, or **Open a folder** that already has your footage.
 3. When the browser asks to let Studio read and save in that folder, choose **Allow on every visit**.
 
-Studio opens the folder in the editor. Clips are read from the folder as they are and nothing is uploaded. Your edits are saved to `project.json` in the same folder. Projects you have opened before are listed on the home page; opening one again only asks for the browser's permission.
+Studio opens the folder in the editor. Clips are read from the folder where they are, and the files are never uploaded. Your edits are saved to `project.json` in the same folder. Projects you have opened before are listed on the home page; opening one again only asks for the browser's permission.
 
 Firefox and Safari can't open folders on your disk, so Studio needs a Chromium browser. On those browsers, run FableCut locally instead with `npx -y fablecut`.
 
@@ -28,13 +28,13 @@ Open **Agent** in Studio's sidebar, or the **Agent** button in the editor. It sh
 - **claude.ai:** Settings, Connectors, **Add custom connector**, then paste the link.
 - **ChatGPT and other MCP clients:** add a custom connector (a remote MCP server) with the same link.
 
-The agent's tools run in your Studio tab, so keep it open while the agent works. If the agent calls while no project is open, Studio asks you to open one and the call carries on once you do. Every edit shows up live in the editor, and the Agent panel lists each call.
+The agent's tools run in your Studio tab, so keep it open while the agent works. Its edit commands, and any frames it asks to see, pass through Studio's relay (see below). If the agent calls while no project is open, Studio asks you to open one and the call carries on once you do. Every edit shows up live in the editor, and the Agent panel lists each call.
 
 The link stays the same for every project in that browser. Anyone who has it can edit the project you have open, so keep it private. **New link** replaces it and cuts off every agent holding the old one; **Pause agent** stops calls until you resume.
 
 ### What passes through the server
 
-The connection link points at a small relay on studio.fablecut.space. It forwards the agent's tool calls to your tab and the results back to the agent, and keeps nothing. Your clips never go through it. What does: the edit commands, the project text the agent reads, and the frames or scope readings the agent asks for with `fablecut_frame` and `fablecut_scopes`.
+The connection link points at a small relay on studio.fablecut.space. It forwards the agent's tool calls to your tab and the results back to the agent, and keeps nothing. Your clip files never go through it. What does: the edit commands, the project text the agent reads, and the frames or scope readings the agent asks for with `fablecut_frame` and `fablecut_scopes`.
 
 ### Exports
 

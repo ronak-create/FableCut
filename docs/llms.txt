@@ -22,7 +22,7 @@ about 150 ms. A human and an agent can work the same timeline at once.
   command `npx`, args `-y fablecut mcp`).
 - No install: FableCut Studio (https://studio.fablecut.space) runs the same
   editor in a Chromium browser on a folder on the user's disk; clips are never
-  uploaded. Agents connect by link (Claude Code, claude.ai, ChatGPT or any MCP
+  uploaded; an agent's edit commands and the frames it asks to see pass through a relay. Agents connect by link (Claude Code, claude.ai, ChatGPT or any MCP
   client). Docs: https://fablecut.space/docs/studio/
 - The server binds 127.0.0.1 only. Media stays in a local folder; nothing is
   uploaded to a cloud service.
