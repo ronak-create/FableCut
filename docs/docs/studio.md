@@ -56,3 +56,7 @@ Studio renders in the browser and encodes H.264 video with AAC audio into an `.m
 ### When Chrome pauses access
 
 Chrome can pause a site's access to a folder when its tab sits in the background. Studio then shows **Resume access** at the top of the tab; click it and carry on. An agent's call waits for that click for about a minute and a half. Choosing **Allow on every visit** when Chrome first asks stops it happening.
+
+### If something isn't working
+
+If Studio won't load, or the agent panel says **Relay offline** for more than a minute, check [status.fablecut.space](https://status.fablecut.space). It checks the editor and the agent connection every few minutes and lists any recent outages.
