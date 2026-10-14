@@ -20,6 +20,10 @@ about 150 ms. A human and an agent can work the same timeline at once.
   media go to ~/FableCut). Or clone the repo and run `node server.js`.
 - MCP: `claude mcp add -s user fablecut -- npx -y fablecut mcp` (any client:
   command `npx`, args `-y fablecut mcp`).
+- No install: FableCut Studio (https://studio.fablecut.space) runs the same
+  editor in a Chromium browser on a folder on the user's disk; clips are never
+  uploaded. Agents connect by link (Claude Code, claude.ai, ChatGPT or any MCP
+  client). Docs: https://fablecut.space/docs/studio/
 - The server binds 127.0.0.1 only. Media stays in a local folder; nothing is
   uploaded to a cloud service.
 - Control surfaces: an MCP server (stdio, client-neutral), a REST API, and

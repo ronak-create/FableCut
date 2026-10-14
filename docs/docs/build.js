@@ -29,6 +29,11 @@ const PAGES = [
     parts: [["Run"], ["How Claude Code edits a video"]],
   },
   {
+    slug: "studio", nav: "Studio (no install)", title: "FableCut Studio", group: "Start",
+    lede: "The same editor at [studio.fablecut.space](https://studio.fablecut.space), with nothing to install. It edits a folder on your own disk, and Claude Code, claude.ai, ChatGPT or any MCP client can drive it by link.",
+    file: "docs/docs/studio.md",
+  },
+  {
     slug: "mcp", nav: "MCP tools", title: "MCP tools", group: "Start",
     lede: "Connect an agent, and the calls it uses to read and change your timeline without burning tokens.",
     parts: [["MCP connection", "*"]],
@@ -44,37 +49,37 @@ const PAGES = [
     parts: [["project.json schema", "props reference"]], promote: true,
   },
   {
-    slug: "audio", nav: "Audio mix", title: "Audio mix", group: "The timeline",
+    slug: "audio", nav: "Audio mix", title: "Audio mix", group: "Picture and sound",
     lede: "How clips reach the speakers and the export: clip gain, channels, track faders, the master, and loudness normalize.",
     parts: [["project.json schema", "Audio mix"]],
   },
   {
-    slug: "color", nav: "Color", title: "Color", group: "The timeline",
+    slug: "color", nav: "Color", title: "Color", group: "Picture and sound",
     lede: "Grade a clip with wheels, exposure, white balance and tone, and check it with scopes: in the Color workspace, or from an agent with setGrade and fablecut_scopes.",
     parts: [["project.json schema", "Color"]],
   },
   {
-    slug: "masks", nav: "Masks", title: "Masks", group: "The timeline",
+    slug: "masks", nav: "Masks", title: "Masks", group: "Picture and sound",
     lede: "Cut what a clip shows with rectangles, ellipses, bezier and free-hand shapes: feathered, expanded, inverted, combined and keyframed, from the monitor or from an agent with setMask.",
     parts: [["project.json schema", "Masks"]],
   },
   {
-    slug: "compositing", nav: "Track mattes and blending", title: "Track mattes and blending", group: "The timeline",
+    slug: "compositing", nav: "Track mattes and blending", title: "Track mattes and blending", group: "Picture and sound",
     lede: "Cut a clip with the picture on another track by its alpha or its brightness, and lay clips over each other with blend modes, from the Inspector or from an agent with setMatte.",
     parts: [["project.json schema", "Track mattes and blending"]],
   },
   {
-    slug: "tracking", nav: "Tracking", title: "Motion tracking", group: "The timeline",
+    slug: "tracking", nav: "Tracking", title: "Motion tracking", group: "Motion",
     lede: "Follow a point or a region through a video clip, then make a mask follow it or pin a title, sticker or another clip to it, from the Inspector or from an agent with fablecut_track.",
     parts: [["project.json schema", "Tracking"]],
   },
   {
-    slug: "motion", nav: "Shapes and parenting", title: "Shapes, nulls and parenting", group: "The timeline",
+    slug: "motion", nav: "Shapes and parenting", title: "Shapes, nulls and parenting", group: "Motion",
     lede: "Motion graphics: vector shape layers with fills, strokes, groups and trim paths, null objects, parenting and the anchor point, keyframed on the monitor or by an agent with setShape and setParent.",
     parts: [["project.json schema", "Shapes, nulls and parenting"]],
   },
   {
-    slug: "motion-paths", nav: "Motion paths", title: "Motion paths, motion blur and text on a path", group: "The timeline",
+    slug: "motion-paths", nav: "Motion paths", title: "Motion paths, motion blur and text on a path", group: "Motion",
     lede: "Bend a clip's travel into a curve, turn it along the way, blur fast moves with a shutter angle, and set titles along lines, arcs, circles and drawn paths, on the monitor or by an agent with setMotionPath and setTextPath.",
     parts: [["project.json schema", "Motion paths, motion blur and text on a path"]],
   },
@@ -84,7 +89,7 @@ const PAGES = [
     parts: [["project.json schema", "Compositions (nested sequences)"]],
   },
   {
-    slug: "presets-templates", nav: "Presets & templates", title: "Animation presets and templates", group: "The timeline",
+    slug: "presets-templates", nav: "Presets & templates", title: "Animation presets and templates", group: "Motion",
     lede: "Put a ready-made entrance, exit, emphasis or loop on any clip, and place lower thirds, logo animations and social layouts whose text, colours and logo you fill in, from the bin and the Inspector or by an agent with applyPreset and addTemplate.",
     parts: [["project.json schema", "Presets and templates"]],
   },
@@ -124,6 +129,10 @@ const PAGES = [
     parts: [["Export", "*"]],
   },
 ];
+
+/* the sidebar's groups, top to bottom; pages keep their order within a group */
+const GROUPS = ["Start", "The timeline", "Picture and sound", "Motion", "Guides", "Reference", "More"];
+PAGES.sort((a, b) => GROUPS.indexOf(a.group) - GROUPS.indexOf(b.group));
 
 /* ── Split the manual into `## ` sections and their `### ` subsections ── */
 function parseManual(src) {
@@ -339,7 +348,7 @@ const shortTitle = (t) => undash(plain(t)).replace(/\s+-\s.*$/, "").replace(/\s*
 // every part of the manual has to land on some page
 const used = new Set();
 for (const pg of PAGES) {
-  for (const [name, which] of pg.parts) {
+  for (const [name, which] of pg.parts || []) {
     const s = find(name);
     if (!which) used.add(s.title);
     else if (which === "*") { used.add(s.title); s.subs.forEach((x) => used.add(s.title + " > " + x.title)); }
@@ -350,10 +359,11 @@ for (const s of sections) {
   if (!used.has(s.title)) {
     console.warn(`! "## ${s.title}" is not on any page yet; it gets a page of its own`);
     PAGES.push({ slug: slugify(shortTitle(s.title)), nav: shortTitle(s.title), title: shortTitle(s.title), group: "More", lede: "", parts: [[s.title, "*"]] });
+    PAGES.sort((a, b) => GROUPS.indexOf(a.group) - GROUPS.indexOf(b.group));
   }
   for (const x of s.subs) {
     if (!used.has(s.title) && !used.has(s.title + " > " + x.title)) continue;
-    if (!used.has(s.title + " > " + x.title) && !PAGES.some((p) => p.parts.some(([n, w]) => s.title.startsWith(n) && w === "*"))) {
+    if (!used.has(s.title + " > " + x.title) && !PAGES.some((p) => (p.parts || []).some(([n, w]) => s.title.startsWith(n) && w === "*"))) {
       console.warn(`! "### ${x.title}" (in "## ${s.title}") is not on any page`);
     }
   }
@@ -367,7 +377,7 @@ const href = (from, to) => {
 function linksFor(pg) {
   const out = [];
   for (const other of PAGES) {
-    for (const [name, which] of other.parts) {
+    for (const [name, which] of other.parts || []) {
       const s = find(name);
       const titles = which && which !== "*" ? [findSub(s, which).title] : [s.title].concat(which === "*" ? s.subs.map((x) => x.title) : []);
       for (const t of titles) {
@@ -380,6 +390,8 @@ function linksFor(pg) {
 }
 
 function pageBody(pg, ctx) {
+  // a page of its own (not from the manual): Markdown beside this script, ### for its sections
+  if (pg.file) return render(fs.readFileSync(path.join(ROOT, pg.file), "utf8").replace(/\r\n/g, "\n").split("\n"), ctx);
   // a one-part page lets its title stand in for the section heading
   const multi = pg.parts.length > 1;
   let html = "";
@@ -443,7 +455,7 @@ function shell(pg, main, desc) {
 <script type="application/ld+json">${JSON.stringify(ld)}</script>
 <script>document.documentElement.classList.add("js");try{var t=localStorage.getItem("fc-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
 <link rel="preload" href="${base}fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="${base}styles.css?v=32">
+<link rel="stylesheet" href="${base}styles.css?v=33">
 </head>
 <body class="docs-page">
 <!-- Generated by docs/docs/build.js from CLAUDE.md. Edit CLAUDE.md, then rebuild. -->
@@ -457,6 +469,7 @@ ${ICONS}
     <nav class="nav-links" id="navLinks" aria-label="Primary">
       <a href="${base}#playground">Playground</a>
       <a href="${base}start/">Get started</a>
+      <a href="https://studio.fablecut.space">Studio</a>
       <a href="${base}community/">Community</a>
       <a href="${docsHome}" aria-current="page">Docs</a>
     </nav>
@@ -491,7 +504,7 @@ ${main}
   </div>
 </footer>
 
-<script src="${base}main.js?v=22"></script>
+<script src="${base}main.js?v=23"></script>
 </body>
 </html>
 `;
@@ -509,8 +522,9 @@ function build() {
         `<a class="docs-card" href="${href(pg, p)}"><b>${esc(p.nav)}</b><span>${inline(p.lede)}</span></a>`).join("")}</div>` + body;
     }
 
-    const side = groups.map((g) => `<p class="docs-group">${esc(g)}</p>` + PAGES.filter((p) => p.group === g).map((p) =>
-      `<a href="${href(pg, p)}"${p === pg ? ' aria-current="page"' : ""}>${esc(p.nav)}</a>`).join("")).join("");
+    const side = groups.map((g) => `<details class="docs-sec" data-group="${attr(g)}"${g === pg.group ? " open" : ""}>` +
+      `<summary class="docs-group">${esc(g)}</summary><div class="docs-sec-links">` + PAGES.filter((p) => p.group === g).map((p) =>
+      `<a href="${href(pg, p)}"${p === pg ? ' aria-current="page"' : ""}>${esc(p.nav)}</a>`).join("") + "</div></details>").join("");
     const toc = ctx.toc.filter((t) => t.level <= 3);
     const top = Math.min(...toc.map((t) => t.level));
     const prev = PAGES[idx - 1], next = PAGES[idx + 1];
@@ -526,8 +540,9 @@ function build() {
     ${pg.lede ? `<p class="docs-lede">${inline(pg.lede)}</p>` : ""}
     ${body}
     <div class="docs-end">
-      <a class="more" href="${MANUAL}#L${ctx.lines[0]}" rel="noopener" target="_blank">Edit this in CLAUDE.md <svg class="i i-ne" aria-hidden="true"><use href="#i-ne"/></svg></a>
-      <a class="more" href="${RAW}" rel="noopener" target="_blank">The whole manual as Markdown <svg class="i i-ne" aria-hidden="true"><use href="#i-ne"/></svg></a>
+      ${pg.file ? `<a class="more" href="${REPO}/blob/main/${pg.file}" rel="noopener" target="_blank">Edit this page <svg class="i i-ne" aria-hidden="true"><use href="#i-ne"/></svg></a>` :
+      `<a class="more" href="${MANUAL}#L${ctx.lines[0]}" rel="noopener" target="_blank">Edit this in CLAUDE.md <svg class="i i-ne" aria-hidden="true"><use href="#i-ne"/></svg></a>
+      <a class="more" href="${RAW}" rel="noopener" target="_blank">The whole manual as Markdown <svg class="i i-ne" aria-hidden="true"><use href="#i-ne"/></svg></a>`}
     </div>
     <nav class="docs-pn" aria-label="Previous and next page">${pn(prev, "prev")}${pn(next, "next")}</nav>
   </article>

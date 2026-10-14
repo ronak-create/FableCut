@@ -325,6 +325,17 @@
       btn.setAttribute("aria-expanded", String(open));
     });
 
+    // sidebar groups: the current page's opens itself; others stay as the reader left them
+    var KEY = "fc-docs-open", saved = [];
+    try { saved = JSON.parse(sessionStorage.getItem(KEY) || "[]"); } catch (e) { }
+    [].slice.call(document.querySelectorAll(".docs-sec")).forEach(function (d) {
+      if (saved.indexOf(d.getAttribute("data-group")) !== -1) d.open = true;
+      d.addEventListener("toggle", function () {
+        var open = [].slice.call(document.querySelectorAll(".docs-sec[open]")).map(function (x) { return x.getAttribute("data-group"); });
+        try { sessionStorage.setItem(KEY, JSON.stringify(open)); } catch (e) { }
+      });
+    });
+
     var links = [].slice.call(document.querySelectorAll(".docs-toc a[href^='#']"));
     if (!links.length || !("IntersectionObserver" in window)) return;
     var byId = {};

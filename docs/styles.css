@@ -664,6 +664,8 @@ h1, h2, h3 { font-weight: 600; margin: 0; }
 .step-copy p { margin: 12px 0 0; color: var(--text-2); font-size: 16px; text-wrap: pretty; }
 .step-note { margin: 14px 2px 0; font-size: 14px; color: var(--text-3); }
 .step-note + .step-note { margin-top: 6px; }
+.step-copy a, .step-note a, .cta .lead a { color: var(--text); text-decoration: underline; text-decoration-color: var(--line-2); text-underline-offset: 3px; transition: text-decoration-color .2s; }
+.step-copy a:hover, .step-note a:hover, .cta .lead a:hover { text-decoration-color: currentColor; }
 @media (max-width: 860px) { .step { grid-template-columns: minmax(0, 1fr); gap: 20px; } }
 
 .asks { margin: 0; padding: 0; list-style: none; }
@@ -731,8 +733,22 @@ h1, h2, h3 { font-weight: 600; margin: 0; }
 }
 .docs-side, .docs-toc { position: sticky; top: 88px; max-height: calc(100vh - 108px); overflow-y: auto; scrollbar-width: thin; }
 .docs-menu { display: none; }
-.docs-group { margin: 26px 0 8px; font-size: 12.5px; font-weight: 500; color: var(--text-3); }
-.docs-group:first-child { margin-top: 4px; }
+.docs-sec + .docs-sec { margin-top: 6px; }
+.docs-group {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin-left: -12px; padding: 7px 12px; border-radius: 8px; list-style: none; cursor: pointer; user-select: none;
+  font-size: 12.5px; font-weight: 500; color: var(--text-3); transition: color .2s, background-color .2s;
+}
+.docs-group::-webkit-details-marker { display: none; }
+.docs-group::after {
+  content: ""; flex: none; width: 6px; height: 6px; margin-right: 2px;
+  border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg); transition: transform .2s;
+}
+.docs-sec[open] > .docs-group::after { transform: rotate(45deg); }
+.docs-group:hover { color: var(--text); background: var(--bg-3); }
+.docs-group:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+.docs-sec-links { padding: 2px 0 6px; }
 .docs-nav a {
   display: block; margin-left: -12px; padding: 6px 12px; border-radius: 8px;
   font-size: 14px; color: var(--text-2); transition: color .2s, background-color .2s;
