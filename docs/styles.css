@@ -748,7 +748,8 @@ h1, h2, h3 { font-weight: 600; margin: 0; }
 .docs-sec[open] > .docs-group::after { transform: rotate(45deg); }
 .docs-group:hover { color: var(--text); background: var(--bg-3); }
 .docs-group:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
-.docs-sec-links { padding: 2px 0 6px; }
+.docs-sec-links { margin: 2px 0 8px 2px; padding-left: 10px; border-left: 1px solid var(--line); }
+.docs-sec-links a { margin-left: 0; }
 .docs-nav a {
   display: block; margin-left: -12px; padding: 6px 12px; border-radius: 8px;
   font-size: 14px; color: var(--text-2); transition: color .2s, background-color .2s;
