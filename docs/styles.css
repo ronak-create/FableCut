@@ -733,6 +733,8 @@ h1, h2, h3 { font-weight: 600; margin: 0; }
 }
 .docs-side, .docs-toc { position: sticky; top: 88px; max-height: calc(100vh - 108px); overflow-y: auto; scrollbar-width: thin; }
 .docs-menu { display: none; }
+/* room for the highlight that hangs 12px left of the links; the scroll box would clip it */
+.docs-side { margin-left: -12px; padding-left: 12px; }
 .docs-sec + .docs-sec { margin-top: 6px; }
 .docs-group {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
