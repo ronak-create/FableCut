@@ -34,7 +34,9 @@ The link stays the same for every project in that browser. Anyone who has it can
 
 ### What passes through the server
 
-The connection link points at a small relay on studio.fablecut.space. It forwards the agent's tool calls to your tab and the results back to the agent, and keeps nothing. Your clip files never go through it. What does: the edit commands, the project text the agent reads, and the frames or scope readings the agent asks for with `fablecut_frame` and `fablecut_scopes`.
+The connection link points at a small relay on studio.fablecut.space. It forwards the agent's tool calls to your tab and the results back to the agent and doesn't store either. Your clip files never go through it. What does: the edit commands, the project text the agent reads, and the frames or scope readings the agent asks for with `fablecut_frame` and `fablecut_scopes`.
+
+For usage numbers, the relay logs each call: which tool, whether it worked and how long it took, plus your country and a one-way hash of your IP address. It never logs the arguments, results, file names or frames.
 
 ### Exports
 
