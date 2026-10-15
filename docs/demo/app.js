@@ -11012,8 +11012,10 @@ function drawClipPicture(c, W, H, t, layered) {
     src = getSvgImage(c, t);
     if (src) { sw = src.naturalWidth || src.width; sh = src.naturalHeight || src.height; }
   } else if (c.kind === "video") {
-    src = getClipEl(c);
-    if (src) { sw = src.videoWidth; sh = src.videoHeight; }
+    const frame = runtime.exportFrames && runtime.exportFrames.get(c.id);
+    src = frame || getClipEl(c);
+    if (frame) { sw = frame.displayWidth; sh = frame.displayHeight; }
+    else if (src) { sw = src.videoWidth; sh = src.videoHeight; }
   } else if (c.kind === "comp") {
     src = renderComp(c, t);
     if (src) { sw = src.width; sh = src.height; }
@@ -15000,6 +15002,139 @@ function prefetchExportVideos(t) {
     } catch { }
   }
 }
+/* ── Export decode: frames straight from WebCodecs ──
+   Seeking <video> per frame is slow and not frame-exact, so export decodes
+   MP4 / MOV clips itself (mp4-demux.js + VideoDecoder). Clips it can't take
+   stay on the <video> path. */
+const Mp4 = self.FableCutMp4;
+class ExportFrameSource {
+  static async open(src) {
+    if (typeof VideoDecoder !== "function" || !Mp4) return null;
+    try {
+      const probe = await fetch(src, { headers: { Range: "bytes=0-0" } });
+      const size = Number((probe.headers.get("content-range") || "").split("/")[1]);
+      await probe.arrayBuffer();
+      if (probe.status !== 206 || !(size > 0)) return null;
+      const read = async (a, b) => {
+        const r = await fetch(src, { headers: { Range: `bytes=${a}-${b - 1}` } });
+        if (r.status !== 206) throw new Error("range request refused");
+        return new Uint8Array(await r.arrayBuffer());
+      };
+      const moov = await Mp4.findMoov(read, size);
+      const mv = moov && Mp4.parseMovie(moov);
+      if (!mv || !mv.samples.length) return null;
+      const cfg = { codec: mv.codec, codedWidth: mv.width, codedHeight: mv.height };
+      if (mv.description) cfg.description = mv.description;
+      const ok = await VideoDecoder.isConfigSupported(cfg).catch(() => null);
+      return ok && ok.supported ? new ExportFrameSource(read, size, mv, cfg) : null;
+    } catch { return null; }
+  }
+  constructor(read, size, mv, cfg) {
+    Object.assign(this, { read, size, cfg, samples: mv.samples, order: Mp4.presentationOrder(mv.samples) });
+    this.dec = null; this.pos = 0; this.out = []; this.cur = null; this.win = null; this.err = null; this.wake = null;
+  }
+  restart(from) {
+    this.dropQueue();
+    if (this.dec && this.dec.state !== "closed") this.dec.close();
+    this.err = null;
+    this.dec = new VideoDecoder({
+      output: (f) => { this.out.push(f); this.poke(); },
+      error: (e) => { this.err = e; this.poke(); },
+    });
+    this.dec.ondequeue = () => this.poke();
+    this.dec.configure(this.cfg);
+    this.pos = from;
+  }
+  poke() { const w = this.wake; this.wake = null; if (w) w(); }
+  dropQueue() { for (const f of this.out) f.close(); this.out = []; }
+  /** The bytes of one sample, read through a 4 MB window (samples are mostly
+   *  contiguous, so one range request covers many frames). */
+  async bytes(s) {
+    const w = this.win;
+    if (!w || s.offset < w.at || s.offset + s.size > w.at + w.data.length) {
+      const end = Math.min(this.size, s.offset + Math.max(s.size, 4 << 20));
+      this.win = { at: s.offset, data: await this.read(s.offset, end) };
+    }
+    const o = s.offset - this.win.at;
+    return this.win.data.subarray(o, o + s.size);
+  }
+  /** The frame a player shows at media time t (a VideoFrame owned by this
+   *  source: valid until the next call or close()). */
+  async frameAt(t) {
+    const k = Mp4.frameAt(this.samples, this.order, t), ts = Math.round(this.samples[k].pts * 1e6);
+    if (this.cur && this.cur.timestamp === ts) return this.cur;
+    const sync = Mp4.syncBefore(this.samples, k);
+    const ahead = this.out.length && this.out[0].timestamp <= ts;
+    if (!this.dec || this.dec.state === "closed" || (this.cur && this.cur.timestamp > ts)
+      || (k < this.pos && !ahead) || sync > this.pos) this.restart(sync);
+    const n = this.samples.length;
+    for (;;) {
+      while (this.out.length && this.out[0].timestamp < ts) this.out.shift().close();
+      if (this.out.length) {   // the target, or (a frame the decoder dropped) the next one
+        if (this.cur) this.cur.close();
+        this.cur = this.out.shift();
+        return this.cur;
+      }
+      if (this.err) throw this.err;
+      let fed = false;
+      while (this.pos < n && this.dec.decodeQueueSize < 8 && this.out.length < 3) {
+        const s = this.samples[this.pos++];
+        this.dec.decode(new EncodedVideoChunk({
+          type: s.key ? "key" : "delta", timestamp: Math.round(s.pts * 1e6),
+          duration: Math.round(s.dur * 1e6), data: await this.bytes(s),
+        }));
+        fed = true;
+      }
+      if (!fed && this.pos >= n && this.dec.decodeQueueSize === 0) {
+        await this.dec.flush().catch((e) => { this.err = this.err || e; });
+        this.pos = n + 1;   // after a flush the decoder needs a sync sample again
+        if (!this.out.length) { if (this.err) throw this.err; return this.cur; }
+        continue;
+      }
+      await new Promise((res) => { this.wake = res; setTimeout(res, 50); });
+    }
+  }
+  close() {
+    this.dropQueue();
+    if (this.cur) { this.cur.close(); this.cur = null; }
+    if (this.dec && this.dec.state !== "closed") this.dec.close();
+    this.dec = null; this.win = null;
+  }
+}
+/** Export-time decode state: clip id → source (or null: use the element). */
+function exportDecodeBegin() {
+  runtime.exportDecode = runtime.noExportDecode ? null : { sources: new Map(), opening: new Map() };
+  runtime.exportFrames = new Map();
+}
+function exportDecodeEnd() {
+  const d = runtime.exportDecode;
+  if (d) for (const s of d.sources.values()) s?.close();
+  runtime.exportDecode = null;
+  runtime.exportFrames = null;
+}
+/** Decode the frame of video clip c for timeline time t; false when the clip
+ *  stays on the <video> path. Frames go to runtime.exportFrames for drawing. */
+async function exportDecodeFrame(c, t) {
+  const d = runtime.exportDecode;
+  if (!d || c.kind !== "video" || evalProps(c, t).bgRemove) return false;
+  let src = d.sources.get(c.id);
+  if (src === undefined) {
+    const m = getMedia(c.mediaId);
+    if (!m || !m.src) { d.sources.set(c.id, null); return false; }
+    if (!d.opening.has(c.id)) d.opening.set(c.id, ExportFrameSource.open(m.src));
+    src = await d.opening.get(c.id);
+    d.sources.set(c.id, src);
+  }
+  if (!src) return false;
+  try {
+    runtime.exportFrames.set(c.id, await src.frameAt(mediaTimeAt(c, t)));
+    return true;
+  } catch (e) {   // a decode error: this clip falls back to its element for the rest of the export
+    console.warn("[FableCut] export decode failed, using the video element:", e && e.message);
+    src.close(); d.sources.set(c.id, null); runtime.exportFrames.delete(c.id);
+    return false;
+  }
+}
 async function seekVideosTo(t, { queueBusy } = {}) {
   const fps = projectFps();
   const frameMs = 1000 / fps;
@@ -15011,9 +15146,26 @@ async function seekVideosTo(t, { queueBusy } = {}) {
   const keepPlaying = fast && !behind && !queueBusy;
   const waits = [];
   const restoreGain = [];
+  const decoded = new Set();
+  const dec = runtime.exportDecode;
+  if (dec) {
+    const jobs = [];
+    for (const c of mediaClips()) {
+      if (c.kind !== "video" || !clipRenders(c)) continue;
+      if (!activeAt(c, t)) {   // export runs forward: past its end, free the clip's decoder
+        const s = dec.sources.get(c.id);
+        if (s && t > c.start + c.duration) { s.close(); dec.sources.delete(c.id); dec.opening.delete(c.id); }
+        runtime.exportFrames.delete(c.id);
+        continue;
+      }
+      jobs.push(exportDecodeFrame(c, t).then((ok) => { if (ok) decoded.add(c.id); }));
+    }
+    await Promise.all(jobs);
+  }
   for (const c of mediaClips()) {
     if (c.kind !== "video") continue;
     if (!clipRenders(c)) continue;
+    if (decoded.has(c.id)) continue;
     const el = getClipEl(c); if (!el) continue;
     if (!activeAt(c, t)) {
       if (!el.paused) el.pause();
@@ -15242,6 +15394,7 @@ async function fastExport(opts = {}) {
     resetExportCanvases();
     await armExportCors();
     await useOriginalPlayers();   // proxies are for editing — export reads the originals
+    exportDecodeBegin();
     // JPEG off the compositor thread: snapshot is sync, encode/upload run ahead
     // under backpressure. Awaiting toBlob every frame was slower than ffmpeg.
     const up = createExportUploader(sessId, {
@@ -15349,6 +15502,7 @@ async function fastExport(opts = {}) {
   } finally {
     exportAbort = null;
     exportFullCanvas = false;
+    exportDecodeEnd();
     restoreExportVideoState();
     endExportWindow();
     state.exporting = false; state.rendering = false;
@@ -15956,6 +16110,7 @@ async function webCodecsExport() {
     resetExportCanvases();
     await armExportCors();
     await useOriginalPlayers();   // proxies are for editing — export reads the originals
+    exportDecodeBegin();
 
     for (let f = 0; f < frames; f++) {
       if (renderCancelled || signal.aborted) throw new Error("cancelled");
@@ -16011,6 +16166,7 @@ async function webCodecsExport() {
     if (msg !== "cancelled") alert("Export failed: " + msg);
   } finally {
     exportAbort = null;
+    exportDecodeEnd();
     restoreExportVideoState();
     endExportWindow();
     state.exporting = false; state.rendering = false;
