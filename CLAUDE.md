@@ -1982,6 +1982,10 @@ Export is the Export button → dialog, or `fablecut_export` from an agent (belo
    ffmpeg, or WebCodecs is unavailable. Plays the timeline once and records it;
    keep the tab focused.
 
+Fast and WebCodecs export decode MP4 / MOV clips with WebCodecs
+(`mp4-demux.js` + `VideoDecoder`), frame-exact. Fragmented, rotated or
+undecodable files and `bgRemove` clips fall back to the `<video>` element.
+
 The exported span is chosen in the Export dialog (**Range**: Entire
 timeline / IN–OUT). IN–OUT is the default when `inPoint` / `outPoint` are
 set; pick Entire timeline to keep those markers for split/trim. Effective
@@ -2169,7 +2173,8 @@ ffmpeg -y -f image2pipe -framerate <fps> -i - [-i audio.wav] <jpeg-color> <args�
 
 - **There is no allow-list.** Any codec, filter, container or flag your local ffmpeg
   supports works — ProRes, DNxHD, NVENC/QSV/VideoToolbox, VP9/AV1, 10-bit, HDR tags.
-  See the shipped `prores422` and `broadcast1080i50` profiles.
+  See the shipped `prores422`, `broadcast1080i50`, `nvenc-h264` and `nvenc-hevc`
+  profiles (the NVENC ones need an NVIDIA GPU and an ffmpeg built with NVENC).
 - **Args are validated by ffmpeg itself**, not by a schema: when an export starts the
   server dry-runs the profile against a 0.1 s synthetic input (`lavfi`). A typo or an
   encoder your build lacks is rejected up front with ffmpeg's own message, instead of
