@@ -214,3 +214,60 @@ test("media-probe answers asynchronously (ffprobe never blocks the server)", asy
   assert.equal(await probeFile(f + ".missing"), null);
   fs.rmSync(path.dirname(f), { recursive: true, force: true });
 });
+
+test("relinkScore: same name beats another extension beats a similar name; size adds; other kinds never match", () => {
+  const m = { name: "Shot 1.mp4", src: "/media/Shot%201.mp4", size: 10, kind: "video" };
+  assert.deepEqual(M.relinkScore(m, { name: "shot 1.MP4", size: 10 }), { score: 150, why: "same name and size" });
+  assert.deepEqual(M.relinkScore(m, { name: "Shot 1.mov", size: 3 }), { score: 60, why: "same name, other type" });
+  assert.deepEqual(M.relinkScore(m, { name: "Shot 1 final.mp4" }), { score: 30, why: "similar name" });
+  assert.deepEqual(M.relinkScore(m, { name: "zzz.mp4", size: 10 }), { score: 40, why: "same size" });
+  assert.equal(M.relinkScore(m, { name: "Shot 1.wav", size: 10 }).score, 0, "a wav can't stand in for a video");
+  assert.equal(M.relinkScore({ name: "vo.m4a", kind: "audio" }, { name: "vo.mp4" }).score, 60, "audio may sit in a video container");
+  assert.equal(M.srcName("/media/a%20b.mp4?x=1"), "a b.mp4");
+  assert.equal(M.kindFromName("/media/x.MOV"), "video");
+});
+
+test("relinkMedia points the entry at the found file, keeps clips, re-reads the details; refuses a missing file or another kind", () => {
+  const doc = DOC();
+  const before = JSON.stringify(doc.clips);
+  const info = { "/media/archive/broll%202.mov": { size: 400e6, fps: 59.94, codec: "prores", duration: 8, width: 1920, height: 1080 } };
+  const ctx = { mediaInfo: (src) => (src in info ? info[src] : null) };
+  const r = ProjectOps.applyPatch(doc, [{ op: "relinkMedia", id: "m2", src: "/media/archive/broll%202.mov" }], ctx);
+  const m2 = doc.media.find((m) => m.id === "m2");
+  assert.equal(m2.src, "/media/archive/broll%202.mov");
+  assert.equal(m2.name, "broll 2.mov", "relink keeps the name");
+  assert.equal(m2.codec, "prores");
+  assert.equal(JSON.stringify(doc.clips), before, "clips untouched");
+  assert.deepEqual(r.notes, ["~m2→broll 2.mov"]);
+  info["/media/short.mov"] = { duration: 2 };
+  const w = ProjectOps.applyPatch(doc, [{ op: "relinkMedia", id: "m2", src: "/media/short.mov" }], ctx);
+  assert.match(w.notes[0], /warning: 2s, the media was 8s/);
+  assert.throws(() => ProjectOps.applyPatch(doc, [{ op: "relinkMedia", id: "m2", src: "/media/nope.mov" }], ctx), /no file at/);
+  assert.throws(() => ProjectOps.applyPatch(doc, [{ op: "relinkMedia", id: "m2", src: "/media/x.wav" }], {}), /is an audio file, but m2 is video/);
+  assert.throws(() => ProjectOps.applyPatch(doc, [{ op: "relinkMedia", id: "m2", src: "C:/x.mov" }], {}), /must be a \/media\//);
+});
+
+test("replaceMedia puts a new file behind the entry and trims clips to fit it", () => {
+  const doc = DOC();
+  doc.clips.push({ id: "v9", mediaId: "m1", kind: "video", track: "V2", start: 20, in: 50, duration: 8 });
+  const ctx = { mediaInfo: () => ({ duration: 30, width: 1280, height: 720, fps: 24, codec: "h264", size: 1e6 }) };
+  const r = ProjectOps.applyPatch(doc, [{ op: "replaceMedia", id: "m1", src: "/media/Interview%20A%20v2.mp4" }], ctx);
+  const m1 = doc.media.find((m) => m.id === "m1");
+  assert.equal(m1.name, "Interview A v2.mp4");
+  assert.equal(m1.duration, 30);
+  assert.equal(m1.width, 1280);
+  assert.equal(m1.favorite, true, "organization stays");
+  const v9 = doc.clips.find((c) => c.id === "v9");
+  assert.equal(v9.in, 29.999);
+  assert.equal(v9.duration, 0.05);
+  const v1 = doc.clips.find((c) => c.id === "v1");
+  assert.equal(v1.duration, 5, "clips that fit stay as they are");
+  assert.match(r.notes[0], /trimmed to the new file's 30s/);
+});
+
+test("the compact view flags offline media", () => {
+  const doc = { name: "P", width: 1280, height: 720, fps: 30, revision: 3, ...DOC() };
+  const text = ProjectOps.compactView(doc, { offline: (m) => m.id === "m3" });
+  assert.match(text, /m3 audio "music\.wav" 180s .*OFFLINE \(file missing — relinkMedia\)/);
+  assert.doesNotMatch(text.split("\n").find((l) => l.includes("m1 ")), /OFFLINE/);
+});

@@ -1419,6 +1419,31 @@ In the editor, the Project tab has:
 - Right-click a clip on the timeline → **Reveal in project** scrolls the bin to
   its file (or its comp), opening folders and clearing a search that hides it.
 
+**Offline media.** A file is *offline* when its `src` names nothing under
+`media/` or `library/` — it was moved, renamed or deleted. The editor checks
+on load and whenever those folders change. An offline file's clips stay where
+they are: the timeline hatches them red (**⚠ Offline**), the monitor and the
+export draw a **Media offline** slate in the picture's place, and its audio is
+silent. The bin marks the file **OFFLINE**, says how many are missing, and the
+Show filter gains **⚠ Offline**. The Export dialog warns before rendering one.
+Files under `media/` may sit in subfolders (`/media/archive/a.mp4`).
+
+- **Relink** points a media entry at the same footage where it is now; clips
+  keep their In points, edits and everything else. Right-click the file →
+  **Relink…** (or **Relink…** on the offline banner for all of them). The
+  dialog looks through `media/` and `library/` for each file — same name, the
+  same name with another extension, a similar name, the same size — and
+  picks a same-name match for you. **Browse…** picks one file and **Choose
+  folder…** matches a whole folder by name; either copies the chosen files
+  into `media/`. A relinked file whose length differs from the original gets
+  a warning (is it really the same footage?).
+- **Replace file…** (right-click a file) puts a *different* file behind the
+  media entry — a new render, a better take. Every clip using it switches;
+  each keeps its In point and timing, trimmed to fit a shorter file. The name
+  and details follow the new file; favorites, tags and collections stay. To
+  swap the file of one clip only, use the Inspector's **Source** menu instead.
+- Relink and replace are one undo step each.
+
 **Agents:**
 
 - `{op:"updateMedia", id | ids, set:{name?, favorite?, tags?, folderId?}, addTags?, removeTags?}`
@@ -1433,6 +1458,16 @@ In the editor, the Project tab has:
   `m_abc video "intro.mp4" 12.4s 1920×1080 29.97 fps h264 stereo 48 kHz 45 MB ★ #interview uses:2`.
 - `fablecut_import_media` probes the file as it imports it, so the entry it
   returns already has these fields.
+- `fablecut_status` lists offline media, and the compact view marks each
+  `OFFLINE (file missing — relinkMedia)`.
+- `{op:"relinkMedia", id, src:"/media/…", name?}` — the same footage found
+  elsewhere: put the file in `media/` (copy it, or `fablecut_import_media` and
+  `removeMedia` the extra entry it registers), then relink. The note warns when
+  the new file's length differs.
+- `{op:"replaceMedia", id, src, name?}` — a different file behind the entry;
+  clips keep their timing, trimmed to fit (the note says how many). `src` must
+  be an existing file under `/media/` or `/library/` of the same kind (an
+  audio entry may use a video container).
 
 ### Semantics
 
@@ -1623,11 +1658,16 @@ obvious cuts were missed, raise it if motion is being misread as cuts.
   Append `?force=1` to overwrite unconditionally. Writes are atomic (tmp file +
   rename), so a crashed write never corrupts the file.
 - `GET  /api/media`   — list files in ./media (name, src, size)
-- `GET  /api/media-info?src=/media/x.mp4` → `{src, info}` · `POST /api/media-info {srcs:[…]}` →
-  `{info:{src: info}}` (up to 500) — a file's metadata from ffprobe: `size`, `fps`, `codec`,
+- `GET  /api/media-info?src=/media/x.mp4` → `{src, info}` · `POST /api/media-info {srcs:[…], stat?}` →
+  `{info:{src: info}}` (up to 2000; `stat:true` answers only `{size, mtimeMs}`, no ffprobe —
+  how the editor checks for offline files) — a file's metadata from ffprobe: `size`, `fps`, `codec`,
   `audioCodec`, `audioChannels`, `sampleRate`, `bitrate`, `duration`, `width`, `height` and
   `probe` (`"ffprobe"`, or `"stat"` when only the size could be read). `info` is `null` when
   the src names no file under `/media/` or `/library/`. Cached per file version.
+- `POST /api/relink/candidates {media:[{id, name, src?, size?, kind?}]}` →
+  `{candidates:{id:[{src, name, size, score, why}]}}` — where a missing file might be now:
+  files under `media/` and `library/` (subfolders included) of the same kind, ranked by
+  name (same name, same name with another extension, similar name) and size, best 5 each.
 - `GET  /api/library?dir=sfx|elements|svg|fonts|presets|templates` — list library assets
 - `GET  /api/presets` · `GET /api/templates` — the saved presets / templates, validated (bad files skipped);
   `POST /api/presets {preset}` · `POST /api/templates {template}` — validate one and save it as

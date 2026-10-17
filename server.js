@@ -43,6 +43,7 @@ const {
 } = require("./paths");
 const Templates = require("./templates");
 const { probeFile } = require("./media-probe");
+const MediaLib = require("./media-lib");
 
 /* Static app files are served from the install dir; everything the user creates
    lives under DATA_DIR. The two are the same unless FABLECUT_DATA_DIR is set. */
@@ -474,7 +475,8 @@ const server = http.createServer(async (req, res) => {
 
   /* API: media metadata (ffprobe; size only without it).
        GET  /api/media-info?src=/media/x.mp4 → {src, info} (info null = file missing)
-       POST /api/media-info {srcs:[…]} → {info:{src: info | null}} — up to 500 per call */
+       POST /api/media-info {srcs:[…], stat?} → {info:{src: info | null}} — up to 2000 per call;
+       stat:true answers {size, mtimeMs} without ffprobe (the editor's offline check) */
   if (p === "/api/media-info" && (req.method === "GET" || req.method === "POST")) {
     try {
       if (req.method === "GET") {
@@ -484,11 +486,51 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const body = JSON.parse((await readBody(req)).toString("utf8") || "{}");
-      const srcs = Array.isArray(body.srcs) ? body.srcs.slice(0, 500).map(String) : [];
+      const srcs = Array.isArray(body.srcs) ? body.srcs.slice(0, 2000).map(String) : [];
       const info = Object.create(null);   // any src is a plain key, "__proto__" too
       // probed side by side (media-probe.js caps how many ffprobes run at once)
-      await Promise.all(srcs.map(async (src) => { const file = resolveSrc(src); info[src] = file ? await probeFile(file) : null; }));
+      await Promise.all(srcs.map(async (src) => {
+        const file = resolveSrc(src);
+        if (!file) { info[src] = null; return; }
+        // stat:true only asks "is it there?" (offline checks) — no ffprobe
+        if (body.stat) { const st = await fs.promises.stat(file); info[src] = { size: st.size, mtimeMs: Math.round(st.mtimeMs) }; }
+        else info[src] = await probeFile(file);
+      }));
       sendJSON(res, 200, { info });
+    } catch (e) { sendJSON(res, 400, { error: String(e.message || e) }); }
+    return;
+  }
+
+  /* API: where might a missing file be now? Body {media:[{id, name, size?}]} →
+     {candidates:{id:[{src, name, size, score, why}]}} — files under media/ and
+     library/ ranked by name and size (MediaLib.relinkScore), best first, at most 5 each. */
+  if (p === "/api/relink/candidates" && req.method === "POST") {
+    try {
+      const body = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+      const want = Array.isArray(body.media) ? body.media.slice(0, 2000) : [];
+      const files = [];
+      const walk = (root, prefix, d, depth) => {
+        let list = [];
+        try { list = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+        for (const e of list) {
+          if (e.name.startsWith(".")) continue;
+          const full = path.join(d, e.name);
+          if (e.isDirectory()) { if (depth < 6 && !(root === LIBRARY_DIR && /^(presets|templates|fonts)$/.test(e.name) && depth === 0)) walk(root, prefix, full, depth + 1); continue; }
+          let size = 0;
+          try { size = fs.statSync(full).size; } catch { continue; }
+          const rel = path.relative(root, full).split(path.sep).map(encodeURIComponent).join("/");
+          files.push({ src: prefix + rel, name: e.name, size });
+        }
+      };
+      walk(MEDIA_DIR, "/media/", MEDIA_DIR, 0);
+      walk(LIBRARY_DIR, "/library/", LIBRARY_DIR, 0);
+      const candidates = Object.create(null);
+      for (const m of want) {
+        if (!m || !m.id) continue;
+        candidates[m.id] = files.map((f) => ({ ...f, ...MediaLib.relinkScore(m, f) }))
+          .filter((f) => f.score > 0).sort((a, b) => b.score - a.score || a.name.localeCompare(b.name)).slice(0, 5);
+      }
+      sendJSON(res, 200, { candidates });
     } catch (e) { sendJSON(res, 400, { error: String(e.message || e) }); }
     return;
   }
@@ -925,9 +967,10 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  /* Media files */
+  /* Media files (subfolders too — relinked footage can sit in one) */
   if (p.startsWith("/media/")) {
-    const file = path.join(MEDIA_DIR, path.basename(p));
+    const file = path.normalize(path.join(MEDIA_DIR, p.slice("/media/".length)));
+    if (!file.startsWith(MEDIA_DIR + path.sep)) { res.writeHead(403); res.end(); return; }
     serveFile(req, res, file);
     return;
   }

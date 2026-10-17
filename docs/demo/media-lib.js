@@ -239,8 +239,46 @@
     return sortMedia(hit, o.sort || "name", o.dir || "asc", ctx);
   }
 
+  const KIND_BY_EXT = {
+    mp4: "video", webm: "video", mov: "video", mkv: "video", m4v: "video", avi: "video",
+    mp3: "audio", wav: "audio", ogg: "audio", m4a: "audio", aac: "audio", flac: "audio", opus: "audio",
+    png: "image", jpg: "image", jpeg: "image", gif: "image", webp: "image", svg: "svg",
+  };
+  /** video | audio | image | svg from a file name or src, or null. */
+  function kindFromName(n) {
+    const ext = (/\.([a-z0-9]+)$/i.exec(String(n || "").split("?")[0]) || [])[1];
+    return (ext && KIND_BY_EXT[ext.toLowerCase()]) || null;
+  }
+
+  /* ── relink ── */
+  const stem = (n) => String(n || "").replace(/\.[a-z0-9]{1,5}$/i, "").toLowerCase();
+  /** Name of a /media/… or /library/… src, decoded. */
+  function srcName(src) {
+    const s = String(src || "").split("?")[0].split("/").pop() || "";
+    try { return decodeURIComponent(s); } catch { return s; }
+  }
+  /** How likely `file` ({name, size}) is the missing media `m` ({name, src, size}).
+   *  → {score, why}; 0 = not a candidate. Same file name beats same name with
+   *  another extension beats a name containing the other; a matching size adds.
+   *  With m.kind, files of another kind never qualify. */
+  function relinkScore(m, file) {
+    // only files that can stand in for this kind (an audio entry may sit in a video container)
+    const fk = kindFromName(file.name);
+    if (m.kind && fk && fk !== m.kind && !(m.kind === "audio" && fk === "video")) return { score: 0, why: "" };
+    const names = [m.name, srcName(m.src)].filter(Boolean).map((n) => n.toLowerCase());
+    const fn = String(file.name || "").toLowerCase(), fs = stem(fn);
+    let score = 0, why = "";
+    if (names.includes(fn)) { score = 100; why = "same name"; }
+    else if (names.some((n) => stem(n) === fs && fs)) { score = 60; why = "same name, other type"; }
+    else if (names.some((n) => { const a = stem(n); return a.length >= 3 && fs.length >= 3 && (fs.includes(a) || a.includes(fs)); })) { score = 30; why = "similar name"; }
+    const sameSize = m.size > 0 && file.size > 0 && m.size === file.size;
+    if (sameSize) { score += score ? 50 : 40; why = why ? why + " and size" : "same size"; }
+    return { score, why };
+  }
+
   return {
     KINDS, INFO_KEYS, SORT_KEYS, MAX_TAGS,
+    srcName, relinkScore, kindFromName,
     parseProbe, fmtSize, fmtFps, fmtRes, fmtAudio, fmtDur, describe,
     normalizeTags, allTags, normalizeCollections,
     placements, usageCounts,

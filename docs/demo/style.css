@@ -3908,3 +3908,45 @@ input[type="range"].cq-hue {
 .bin-info td { color: var(--text); padding: 2px 0; word-break: break-all; user-select: text; }
 .bin-instances { max-height: 60vh; overflow-y: auto; }
 .bin-instances .ctx-item kbd { font-variant-numeric: tabular-nums; }
+
+/* offline media: bin badge, banner, timeline clips, relink dialog */
+.bin-offline {
+  display: inline-block;
+  font: 700 9px/1.5 "Segoe UI", sans-serif;
+  letter-spacing: .4px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: #e5484d;
+  color: #fff;
+  vertical-align: 1px;
+  flex: none;
+}
+.bin-item.offline { border-color: #e5484d66; }
+.bin-item.offline .bin-thumb { filter: grayscale(1) brightness(.5); }
+.bin-offline-bar { background: #e5484d1f; border: 1px solid #e5484d55; border-radius: 6px; padding: 4px 6px; color: #ffb3b5; }
+.bin-offline-bar .btn:first-of-type { margin-left: auto; }
+.clip.offline {
+  background-image: repeating-linear-gradient(135deg, #e5484d55 0 6px, transparent 6px 12px) !important;
+  outline: 1px solid #e5484d;
+  outline-offset: -1px;
+}
+.clip.offline .clip-label { color: #ffd0d1; }
+.dialog.relink { width: min(720px, 94vw); max-height: 84vh; display: flex; flex-direction: column; }
+.relink-tools { display: flex; align-items: center; gap: 10px; margin: 6px 0 8px; }
+.relink-status { font-size: 12px; }
+.relink-rows { overflow-y: auto; display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+.relink-row { border: 1px solid var(--border); border-radius: 6px; padding: 8px; background: var(--panel-2); }
+.relink-name { display: flex; flex-direction: column; gap: 2px; font-size: 12px; margin-bottom: 6px; min-width: 0; }
+.relink-name b { color: #e8e8ee; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.relink-was { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.relink-pick { display: flex; gap: 6px; align-items: center; }
+.relink-pick select {
+  flex: 1;
+  min-width: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text);
+  font: 12px "Segoe UI", sans-serif;
+  padding: 4px 6px;
+}

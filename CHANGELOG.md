@@ -25,8 +25,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (comps included) and jumps there; **Reveal in project** goes from a clip to
   its file. Agents: patch ops `updateMedia`, `setCollection`,
   `removeCollection`; the compact view shows metadata, tags and usage.
+- **Offline media, relink and replace.** A missing file is marked offline in
+  the bin and on the timeline, and its clips show a "Media offline" slate in
+  the monitor and the export. **Relink…** finds moved files in the project
+  folders by name and size (or matches a chosen folder by name) and keeps
+  every clip's In point; **Replace file…** puts a new file behind a media
+  entry, trimming clips to fit. Agents: `relinkMedia` and `replaceMedia`
+  patch ops, `POST /api/relink/candidates`; offline files show in
+  `fablecut_status` and the compact view.
 
 ### Changed
+- `/media/` serves files in subfolders of `media/` too.
 - **Chroma key, temperature, tint and RGB split run on the GPU** (WebGL2), in
   preview and export: a 720p keyed frame went from 113 ms to 3.6 ms (RTX 4090)
   and 123 ms to 12.5 ms (Intel UHD). Output matches the CPU loop within 1–2

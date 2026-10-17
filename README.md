@@ -120,7 +120,7 @@ same time.
   ffmpeg; the clip's audio switches to it and **Off** switches back. Agents
   use `fablecut_denoise`.
 - **Project bin folders** — tree view with expand/collapse; drag media or folders to nest; right-click the **Project** tab → New folder; drop files onto a folder to import into it
-- **Media management** — each file's frame rate, codecs, audio channels and size (ffprobe); search by name, codec, resolution or `#tag`; filter by favorites, used / unused, kind, tag or collection; sort by any detail or by times used; a list view with metadata columns; favorites, tags and collections; **Find timeline instances** and **Reveal in project**
+- **Media management** — each file's frame rate, codecs, audio channels and size (ffprobe); search by name, codec, resolution or `#tag`; filter by favorites, used / unused, kind, tag or collection; sort by any detail or by times used; a list view with metadata columns; favorites, tags and collections; **Find timeline instances** and **Reveal in project**; offline files flagged with a "Media offline" slate, **Relink…** (finds moved files by name and size) and **Replace file…**
 - **Import from URL** — **+ URL** downloads an HTTPS video/audio/image into
   `./media/` (same-origin after import). Remote SVG is refused. Agents use
   `fablecut_import_media` with an `https://` path. The URL is not kept as

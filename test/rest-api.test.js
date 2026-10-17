@@ -440,3 +440,36 @@ test("/api/media-info answers a file's metadata, null for a missing one, and nev
   assert.equal(many.info["/media/../project.json"], null, "no way out of media/");
   assert.equal(many.info["C:/Windows/win.ini"], null, "only /media/ and /library/ srcs");
 });
+
+test("/media/ serves files in subfolders and never leaves media/", async (t) => {
+  const dir = makeDataDir(t);
+  const { base, port } = await startServer(t, dir, NO_WATCH);
+  fs.mkdirSync(path.join(dir, "media", "archive"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "media", "archive", "a b.txt"), "moved");
+  const ok = await fetch(base + "/media/archive/a%20b.txt");
+  assert.equal(ok.status, 200);
+  assert.equal(await ok.text(), "moved");
+  for (const evil of ["/media/..%2fproject.json", "/media/archive/..%5c..%5cproject.json", "/media/%2e%2e/project.json"]) {
+    const r = await rawGet(port, evil);
+    assert.notEqual(r.status, 200, evil + " must not be served");
+  }
+});
+
+test("/api/relink/candidates ranks files under media/ by name and size, same kind only", async (t) => {
+  const { dir, base } = await boot(t);
+  fs.mkdirSync(path.join(dir, "media", "archive"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "media", "archive", "Shot 1.mp4"), "12345");
+  fs.writeFileSync(path.join(dir, "media", "shot 1.mov"), "123");
+  fs.writeFileSync(path.join(dir, "media", "shot 1.wav"), "123");
+  fs.writeFileSync(path.join(dir, "media", "unrelated.mp4"), "12345");
+  const res = await fetch(base + "/api/relink/candidates", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ media: [{ id: "m1", name: "shot 1.mp4", src: "/media/shot%201.mp4", size: 5, kind: "video" }] }),
+  });
+  const { candidates } = await res.json();
+  assert.deepEqual(candidates.m1.map((c) => [c.src, c.why]), [
+    ["/media/archive/Shot%201.mp4", "same name and size"],
+    ["/media/shot%201.mov", "same name, other type"],
+    ["/media/unrelated.mp4", "same size"],
+  ], "the .wav is another kind and is left out");
+});

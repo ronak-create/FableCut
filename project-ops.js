@@ -12,6 +12,8 @@
        ctx.audioChannels(media) → audio channels of a video file, 0 = none,
                                  null = unknown (insert / overwrite assume 2)
        ctx.checkProfile(id) → throws if id is not an encoding profile
+       ctx.mediaInfo(src) → the file's probed details (media-probe.js), null = no
+                           such file, undefined = can't tell (relinkMedia / replaceMedia)
      compactView(doc) → the one-line-per-clip summary of fablecut_get_project
      checkProject(doc) → validates and normalizes a whole document in place
                          (fablecut_set_project); throws on the first problem
@@ -429,6 +431,55 @@
           if (proj.collections.length === n) throw new Error("removeCollection: no collection " + op.id);
           if (!proj.collections.length) delete proj.collections;
           notes.push("-" + op.id);
+          break;
+        }
+        case "relinkMedia": case "replaceMedia": {
+          // relink: the same footage found somewhere else — clips keep their In points.
+          // replace: a different file behind the same media entry (a new render, a
+          // better take) — clips keep their timing, trimmed to fit a shorter file.
+          const name = op.op;
+          const m = proj.media.find((x) => x.id === op.id);
+          if (!m) throw new Error(`${name}: no media ${op.id}`);
+          const src = String(op.src || "");
+          if (!/^\/(media|library)\//.test(src)) throw new Error(`${name}: src must be a /media/… or /library/… path (import the file first with fablecut_import_media)`);
+          const info = ctx.mediaInfo ? ctx.mediaInfo(src) : undefined;
+          if (info === null) throw new Error(`${name}: no file at ${src}`);
+          const kindOf = MediaLib.kindFromName(src);
+          if (kindOf && kindOf !== m.kind && !(m.kind === "audio" && kindOf === "video"))   // an audio entry may sit in a video container
+            throw new Error(`${name}: ${src} is ${kindOf === "audio" || kindOf === "image" ? "an" : "a"} ${kindOf} file, but ${m.id} is ${m.kind}`);
+          const was = { duration: m.duration };
+          m.src = src;
+          for (const k of MediaLib.INFO_KEYS) delete m[k];
+          if (name === "replaceMedia") {
+            m.name = op.name ? String(op.name).trim().slice(0, 200) : MediaLib.srcName(src);
+            delete m.duration; delete m.width; delete m.height;
+          } else if (op.name) m.name = String(op.name).trim().slice(0, 200);
+          if (info) {
+            for (const k of MediaLib.INFO_KEYS) if (info[k] != null) m[k] = info[k];
+            if (info.duration > 0 && m.kind !== "image" && m.kind !== "svg") m.duration = info.duration;
+            if (info.width > 0) { m.width = info.width; m.height = info.height; }
+          }
+          let note = `~${m.id}→${MediaLib.srcName(src)}`;
+          if (name === "relinkMedia" && was.duration > 0 && m.duration > 0 && Math.abs(was.duration - m.duration) > 0.1)
+            note += ` (warning: ${m.duration}s, the media was ${was.duration}s — is it the same footage?)`;
+          if (name === "replaceMedia" && m.duration > 0) {
+            // keep every clip's In and timing, trimmed to fit the new file
+            let trimmed = 0;
+            const fit = (clips) => {
+              for (const c of clips || []) {
+                if (c.mediaId !== m.id || c.kind === "image" || c.kind === "svg") continue;
+                const speed = (c.props && +c.props.speed) || 1;
+                const maxIn = Math.max(0, m.duration - 0.001);
+                if ((+c.in || 0) > maxIn) { c.in = +maxIn.toFixed(3); trimmed++; }
+                const maxDur = Math.max(0.05, (m.duration - (+c.in || 0)) / speed);
+                if (c.duration > maxDur + 1e-6) { c.duration = +maxDur.toFixed(3); trimmed++; }
+              }
+            };
+            fit(proj.clips);
+            for (const comp of proj.comps || []) fit(comp.clips);
+            if (trimmed) note += ` (${trimmed} clip edge${trimmed === 1 ? "" : "s"} trimmed to the new file's ${m.duration}s)`;
+          }
+          notes.push(note);
           break;
         }
         case "removeMedia": {
@@ -1003,7 +1054,7 @@
           notes.push(timelineEdit(proj, op, refuseLocked, lockReason, ctx));
           break;
         default:
-          throw new Error("Unknown op: " + op.op + " (addClip|updateClip|removeClip|addMedia|updateMedia|removeMedia|setCollection|removeCollection|setProject|setTrack|setBus|removeBus|setFx|setFxKeys|setGrade|setGradeLayer|setMask|removeMask|setMaskKeys|setMatte|removeTrack|setShape|removeShape|setParent|setMotionPath|setTextPath|" +
+          throw new Error("Unknown op: " + op.op + " (addClip|updateClip|removeClip|addMedia|updateMedia|removeMedia|relinkMedia|replaceMedia|setCollection|removeCollection|setProject|setTrack|setBus|removeBus|setFx|setFxKeys|setGrade|setGradeLayer|setMask|removeMask|setMaskKeys|setMatte|removeTrack|setShape|removeShape|setParent|setMotionPath|setTextPath|" +
             "split|rippleDelete|closeGap|lift|extract|rippleTrim|roll|slip|slide|insert|overwrite|crossfade|" +
             "addComp|updateComp|removeComp|precompose|inComp|applyPreset|addTemplate|setTemplate|savePreset|saveTemplate)");
       }
@@ -1012,7 +1063,8 @@
     return { notes, toSave };
   }
 
-  function compactView(doc) {
+  /** opts.offline(media) → true when the media's file is missing. */
+  function compactView(doc, opts = {}) {
     const hex = (v) => typeof v === "string" && /^#[0-9a-f]{3}$/i.test(v)
       ? "#" + [...v.slice(1)].map((c) => c + c).join("").toLowerCase()
       : (typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v) ? v.toLowerCase() : v);
@@ -1067,6 +1119,7 @@
           const info = MediaLib.describe(m);
           return `  ${m.id} ${m.kind} "${m.name}"${m.duration ? " " + m.duration + "s" : ""}` +
             (info ? ` ${info.replace(/ · /g, " ")}` : "") +
+            (opts.offline && opts.offline(m) ? " OFFLINE (file missing — relinkMedia)" : "") +
             (m.favorite ? " ★" : "") + (m.tags && m.tags.length ? " " + m.tags.map((t) => "#" + t.replace(/\s+/g, "_")).join(" ") : "") +
             (m.folderId ? ` folder:${m.folderId}` : "") + ` uses:${uses.get(m.id) || 0}` +
             (m.derivedFrom ? ` (${m.denoise ? "denoised " + m.denoise : "derived"} from ${m.derivedFrom})` : "");

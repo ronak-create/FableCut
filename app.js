@@ -1626,7 +1626,7 @@ function projectJSONHere() {
 function listenSSE() {
   const es = new EventSource("/api/events");
   // Named events: "change" = project/media/library; "profiles" = encoding-profiles.json only
-  es.addEventListener("change", () => { noteActivity(); syncFromServer(); });
+  es.addEventListener("change", () => { noteActivity(); syncFromServer(); scheduleOfflineCheck(); });
   es.addEventListener("export", (e) => {
     noteActivity();
     try { runExportJob(JSON.parse(e.data)); } catch { }
@@ -1677,7 +1677,7 @@ async function loadMediaMetadata(m) {
   if (m.kind === "svg") { await loadSvgMedia(m); return; }
   if (m.kind === "image") {
     const img = await loadImage(m.src);
-    runtime.mediaAux.set(m.id, { ...(runtime.mediaAux.get(m.id) || {}), img });
+    runtime.mediaAux.set(m.id, { ...(runtime.mediaAux.get(m.id) || {}), img, imgSrc: m.src });
     m.width = img.naturalWidth; m.height = img.naturalHeight;
     return;
   }
@@ -1705,6 +1705,7 @@ async function probeMissingMeta() {
   if (changed) { renderBin(); scheduleSave(); }
   state.dirtyTimeline = true;
   refreshMediaInfo();
+  scheduleOfflineCheck(0);
 }
 function probeAV(src, kind) {
   return new Promise((resolve, reject) => {
@@ -1936,6 +1937,15 @@ function renderBin() {
   if (empty) return;
   const ctx = binCtx();
   const flat = !!(binView.q.trim() || binView.filter);   // searching / filtering → one flat list of hits
+  if (mediaOffline.size && binView.filter !== "offline") {
+    const warn = document.createElement("div");
+    warn.className = "bin-filterbar bin-offline-bar";
+    warn.innerHTML = `<span>⚠ ${mediaOffline.size} file${mediaOffline.size === 1 ? " is" : "s are"} offline</span>
+      <button type="button" class="btn tiny" data-show>Show</button><button type="button" class="btn tiny accent" data-relink>Relink…</button>`;
+    warn.querySelector("[data-show]").addEventListener("click", () => setBinFilter("offline"));
+    warn.querySelector("[data-relink]").addEventListener("click", () => openRelinkDialog());
+    els.binList.appendChild(warn);
+  }
 
   const clearBinDropHints = () => {
     els.binList.querySelectorAll(".bin-drop-over").forEach((n) => n.classList.remove("bin-drop-over"));
@@ -1992,7 +2002,8 @@ function renderBin() {
 
   const makeMediaItem = (m, depth) => {
     const item = document.createElement("div");
-    item.className = "bin-item" + (binView.list ? " bin-row" : "");
+    const offline = isMediaOffline(m.id);
+    item.className = "bin-item" + (binView.list ? " bin-row" : "") + (offline ? " offline" : "");
     item.draggable = true;
     item.dataset.mediaId = m.id;
     item.style.setProperty("--bin-depth", flat ? 0 : depth);
@@ -2006,7 +2017,7 @@ function renderBin() {
     if (binView.list) {
       const cell = (v, cls = "") => `<span class="bin-cell${cls}">${escapeHtml(v || "—")}</span>`;
       item.innerHTML = `
-        <span class="bin-cell bin-cell-name">${favHtml}<span class="bin-thumb sm"></span><span class="bin-name"></span></span>
+        <span class="bin-cell bin-cell-name">${favHtml}<span class="bin-thumb sm"></span>${offline ? `<span class="bin-offline" title="The file is missing — right-click → Relink…">OFFLINE</span>` : ""}<span class="bin-name"></span></span>
         ${cell(MediaLib.fmtDur(m.duration), " num c-duration")}${cell(MediaLib.fmtRes(m), " num c-resolution")}${cell(MediaLib.fmtFps(m.fps), " num c-fps")}
         ${cell(m.codec, " c-codec")}${cell(MediaLib.fmtAudio(m), " c-audio")}${cell(MediaLib.fmtSize(m.size), " num c-size")}
         <span class="bin-cell num c-usage">${usesHtml}</span>
@@ -2018,7 +2029,7 @@ function renderBin() {
         <div class="bin-thumb"></div>
         <div class="bin-meta">
           <div class="bin-name"></div>
-          <div class="bin-sub">${escapeHtml(sub)}</div>
+          <div class="bin-sub">${offline ? `<span class="bin-offline" title="The file is missing — right-click → Relink…">OFFLINE</span> ` : ""}${escapeHtml(sub)}</div>
           ${m.tags && m.tags.length ? `<div class="bin-tags">${m.tags.map((t) => `<span class="bin-tag">#${escapeHtml(t)}</span>`).join("")}</div>` : ""}
         </div>
         <div class="bin-side">${favHtml}${usesHtml}</div>
@@ -2029,7 +2040,7 @@ function renderBin() {
     else thumbEl.textContent = icon;
     const nameEl = item.querySelector(".bin-name");
     nameEl.textContent = m.name;
-    item.title = [m.name, MediaLib.describe(m), m.tags && m.tags.length ? m.tags.map((t) => "#" + t).join(" ") : ""].filter(Boolean).join("\n");
+    item.title = [m.name, offline ? "⚠ Offline: " + decodeURIComponent(String(m.src).split("?")[0]) + " is missing — right-click → Relink…" : "", MediaLib.describe(m), m.tags && m.tags.length ? m.tags.map((t) => "#" + t).join(" ") : ""].filter(Boolean).join("\n");
     item.addEventListener("dragstart", (e) => {
       runtime.binDragFolderId = null;
       e.dataTransfer.setData("text/fablecut-media", m.id);
@@ -2172,7 +2183,10 @@ function usageDoc() {
   };
 }
 function binCtx() {
-  return { usage: MediaLib.usageCounts(usageDoc()), collections: project.collections || [] };
+  return {
+    usage: MediaLib.usageCounts(usageDoc()), collections: project.collections || [],
+    extraFilter: (m, f) => (f === "offline" ? isMediaOffline(m.id) : true),
+  };
 }
 function getCollection(id) { return (project.collections || []).find((c) => c.id === id) || null; }
 
@@ -2188,6 +2202,7 @@ function syncBinTools() {
     (f.startsWith("col:") && !getCollection(f.slice(4)))) binView.filter = "";
   const opt = (v, label) => `<option value="${escapeHtml(v)}"${v === binView.filter ? " selected" : ""}>${escapeHtml(label)}</option>`;
   const html = opt("", "All media") + opt("fav", "★ Favorites") + opt("used", "Used in the edit") + opt("unused", "Unused") +
+    (mediaOffline.size || binView.filter === "offline" ? opt("offline", `⚠ Offline (${mediaOffline.size})`) : "") +
     `<optgroup label="Kind">${MediaLib.KINDS.map((k) => opt("kind:" + k, k[0].toUpperCase() + k.slice(1))).join("")}</optgroup>` +
     (cols.length ? `<optgroup label="Collections">${cols.map((c) => opt("col:" + c.id, c.name + ` (${c.media.length})`)).join("")}</optgroup>` : "") +
     (tags.length ? `<optgroup label="Tags">${tags.map((t) => opt("tag:" + t, "#" + t)).join("")}</optgroup>` : "");
@@ -2214,7 +2229,9 @@ function makeFilterBar(n) {
     (col ? `<span class="bin-filter-name" title="Collection">▣ ${escapeHtml(col.name)}</span>
       <button type="button" class="btn tiny" data-col-rename>Rename</button>
       <button type="button" class="btn tiny" data-col-delete title="Delete the collection (keeps the media)">Delete</button>` : "") +
+    (binView.filter === "offline" && mediaOffline.size ? `<button type="button" class="btn tiny accent" data-relink-all>Relink…</button>` : "") +
     `<button type="button" class="btn tiny" data-clear title="Show everything (Esc in the search box)">Clear</button>`;
+  bar.querySelector("[data-relink-all]")?.addEventListener("click", () => openRelinkDialog());
   bar.querySelector("[data-clear]").addEventListener("click", () => { binView.q = ""; els.binSearch.value = ""; setBinFilter(""); });
   if (col) {
     bar.querySelector("[data-col-rename]").addEventListener("click", (e) => {
@@ -2383,6 +2400,8 @@ function showMediaMenu(x, y, m) {
   item("Open in Source", () => loadSourceFromMedia(m));
   item(`Find timeline instances (${uses})`, () => showMediaInstances(m, x, y), uses ? null : "Not used on the timeline");
   item("Media info…", () => showMediaInfo(m, x, y));
+  item(isMediaOffline(m.id) ? "Relink…" : "Relink to another copy…", () => openRelinkDialog([m]), isLocalSrc(m.src) || m.transient ? null : "Not a project file");
+  item("Replace file…", () => replaceMediaFile(m), state.connected ? null : "Needs the FableCut server");
   sep();
   item(m.favorite ? "Remove from favorites" : "Add to favorites", () => setMediaFavorite([m.id], !m.favorite));
   item("Tags…", () => promptBinText(x, y, `Tags for ${m.name}`, (m.tags || []).join(", "), (v) => setMediaTags(m, v),
@@ -2414,7 +2433,7 @@ function showMediaInfo(m, x, y) {
   const audio = m.audioChannels == null ? "" : m.audioChannels === 0 ? "none" :
     [m.audioCodec, MediaLib.fmtAudio(m)].filter(Boolean).join(" · ");
   const rows = [
-    ["Kind", m.kind], ["File", decodeURIComponent(String(m.src || "").split("?")[0])],
+    ["Kind", m.kind], ["File", decodeURIComponent(String(m.src || "").split("?")[0]) + (isMediaOffline(m.id) ? " — MISSING (offline)" : "")],
     ["Duration", m.duration > 0 ? MediaLib.fmtDur(m.duration) + ` (${(+m.duration).toFixed(3)} s)` : ""],
     ["Resolution", MediaLib.fmtRes(m)], ["Frame rate", m.fps ? MediaLib.fmtFps(m.fps) + " fps" : ""],
     ["Video codec", m.kind === "video" ? m.codec : ""], ["Format", m.kind !== "video" && m.codec ? m.codec : ""],
@@ -2490,6 +2509,264 @@ function revealInProject(c) {
   el.classList.remove("bin-flash");
   void el.offsetWidth;
   el.classList.add("bin-flash");
+}
+
+/* ── Offline media, relink and replace ──
+   A file is offline when its src names nothing under media/ or library/ (it was
+   moved, renamed or deleted). Its clips stay on the timeline and draw a "Media
+   offline" slate until it is relinked: pointed at the same footage somewhere
+   else (clips keep their In points). Replace puts a different file behind the
+   media entry (a new render): clips keep their timing, trimmed to fit. */
+const mediaOffline = new Set();   // media ids whose file is missing (runtime only, re-checked on every change)
+function isMediaOffline(id) { return !!id && mediaOffline.has(id); }
+const isLocalSrc = (src) => /^\/(media|library)\//.test(String(src || ""));
+let offlineCheckTimer = null, offlineChecking = false;
+function scheduleOfflineCheck(delay = 300) {
+  clearTimeout(offlineCheckTimer);
+  offlineCheckTimer = setTimeout(checkOffline, delay);
+}
+async function checkOffline() {
+  if (!state.connected || offlineChecking) return;
+  const list = project.media.filter((m) => !m.transient && isLocalSrc(m.src));
+  offlineChecking = true;
+  try {
+    const res = await fetch("/api/media-info", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ srcs: [...new Set(list.map((m) => m.src))], stat: true }),
+    });
+    if (!res.ok) return;
+    const { info } = await res.json();
+    const was = new Set(mediaOffline);
+    mediaOffline.clear();
+    for (const m of list) if (info && info[m.src] === null) mediaOffline.add(m.id);
+    // a file that came back (put back, or relinked by an agent): reload what was cached from it
+    for (const id of was) if (!mediaOffline.has(id)) { const m = getMedia(id); if (m) reloadMediaSource(m); }
+    const changed = was.size !== mediaOffline.size || [...was].some((id) => !mediaOffline.has(id));
+    if (changed) {
+      renderBin(); state.dirtyTimeline = true;
+      const fresh = [...mediaOffline].filter((id) => !was.has(id));
+      if (fresh.length) toast(`${fresh.length === 1 ? `“${getMedia(fresh[0])?.name}” is` : fresh.length + " files are"} offline — right-click it in the bin → Relink…`);
+    }
+  } catch { } finally { offlineChecking = false; }
+}
+/* Everything cached from a media file (players, picture, waveform, thumbnail) is dropped and read again. */
+function reloadMediaSource(m, oldSrc) {
+  for (const [id, el] of runtime.clipEls) if (el._fcSrc === m.src || (oldSrc && el._fcSrc === oldSrc)) releaseClipEl(id);
+  runtime.mediaAux.delete(m.id);
+  runtime.wavePeaks.delete(m.id);
+  if (state.source.mediaId === m.id) { const sm = m; clearSource(); loadSourceFromMedia(sm); }
+  seekMediaWhilePaused();   // fresh players start at 0 — park them on the playhead
+  loadMediaMetadata(m).then(() => {
+    if (m.kind === "video") grabThumb(m).catch(() => { });
+    ensureWave(m);
+    seekMediaWhilePaused();
+    renderBin(); state.dirtyTimeline = true;
+  }).catch(() => { });
+}
+
+/** Point a media entry at another file. mode "relink" (same footage) or "replace" (a new file). */
+async function setMediaSource(m, src, mode, name) {
+  const oldSrc = m.src, oldDur = m.duration;
+  pushUndo(JSON.stringify({ clips: project.clips, markers: project.markers || [], comps: project.comps || [], media: project.media }));
+  m.src = src;
+  for (const k of MediaLib.INFO_KEYS) delete m[k];
+  if (mode === "replace") {
+    m.name = name || MediaLib.srcName(src);
+    delete m.duration; delete m.width; delete m.height;
+  }
+  mediaOffline.delete(m.id);
+  reloadMediaSource(m, oldSrc);
+  try { await loadMediaMetadata(m); } catch { }
+  let msg = mode === "replace" ? `Replaced ${m.name}` : `Relinked ${m.name}`;
+  if (mode === "relink" && oldDur > 0 && m.duration > 0 && Math.abs(oldDur - m.duration) > 0.1)
+    msg += ` — but it is ${fmt(m.duration)} long, the original was ${fmt(oldDur)}: is it the same footage?`;
+  if (mode === "replace" && m.duration > 0) {
+    let trimmed = 0;
+    const fit = (clips) => {
+      for (const c of clips || []) {
+        if (c.mediaId !== m.id || c.kind === "image" || c.kind === "svg") continue;
+        const speed = c.props?.speed || 1;
+        const maxIn = Math.max(0, m.duration - 0.001);
+        if (c.in > maxIn) { c.in = maxIn; trimmed++; }
+        const maxDur = Math.max(0.05, (m.duration - c.in) / speed);
+        if (c.duration > maxDur + 1e-6) { c.duration = maxDur; trimmed++; }
+      }
+    };
+    fit(project.clips);
+    for (const comp of project.comps || []) fit(comp.clips);
+    if (state.compCtx) fit(state.compCtx.root.clips);
+    runtime.compGen = (runtime.compGen || 0) + 1;
+    if (trimmed) msg += ` — ${trimmed} clip edge${trimmed === 1 ? "" : "s"} trimmed to fit`;
+    if (m.kind === "video") for (const c of project.clips) if (c.mediaId === m.id && c.kind === "video") reconcileAudioChannels(c);
+  }
+  state.dirtyTimeline = true;
+  renderBin(); scheduleSave(); renderInspector();
+  refreshMediaInfo([m]);
+  toast(msg);
+}
+
+/* Upload local files into media/ (like import, without adding bin entries) → [{file, src}]. */
+async function uploadForRelink(files, onProgress) {
+  const out = [];
+  for (const file of files) {
+    onProgress?.(file);
+    try {
+      const res = await fetch("/api/upload?name=" + encodeURIComponent(file.name), { method: "POST", body: file });
+      if (!res.ok) throw new Error("upload " + res.status);
+      out.push({ file, src: (await res.json()).src });
+    } catch { out.push({ file, src: null }); }
+  }
+  return out;
+}
+let relinkPicker = null;
+/** A file input of our own for relink / replace (never the shared #fileInput). */
+function pickFilesForRelink({ folder = false, accept = els.fileInput.accept } = {}) {
+  return new Promise((resolve) => {
+    relinkPicker?.remove();
+    const input = relinkPicker = document.createElement("input");
+    input.type = "file"; input.className = "sr-only";
+    if (folder) { input.webkitdirectory = true; input.multiple = true; } else input.accept = accept;
+    document.body.appendChild(input);
+    input.addEventListener("change", () => { resolve([...input.files]); input.remove(); }, { once: true });
+    input.addEventListener("cancel", () => { resolve([]); input.remove(); }, { once: true });
+    input.click();
+  });
+}
+
+/* Replace file…: a different file behind this media entry, for every clip that uses it. */
+async function replaceMediaFile(m) {
+  const files = await pickFilesForRelink({ accept: m.kind === "audio" ? "audio/*,.mp3,.wav,.m4a,.flac,.ogg" : els.fileInput.accept });
+  const file = files[0];
+  if (!file) return;
+  const kind = mediaKindFromFile(file);
+  if (kind !== m.kind && !(m.kind === "audio" && kind === "video")) { toast(`That is ${kind ? (kind === "audio" || kind === "image" ? "an " : "a ") + kind : "an unsupported"} file — ${m.name} is ${m.kind}`); return; }
+  toast(`Copying ${file.name} into the project…`);
+  const [up] = await uploadForRelink([file]);
+  if (!up || !up.src) { toast("Couldn't copy the file into media/"); return; }
+  await setMediaSource(m, up.src, "replace", file.name);
+}
+
+/* The Relink dialog: one row per file, each with candidates found on disk
+   (same name, same name with another extension, similar name, same size),
+   Browse… for one file and Choose folder… to match a whole folder by name. */
+async function openRelinkDialog(list) {
+  list = (list || project.media.filter((m) => isMediaOffline(m.id))).filter(Boolean);
+  if (!list.length) { toast("Nothing is offline"); return; }
+  document.getElementById("relinkOverlay")?.remove();
+  const overlay = document.createElement("div");
+  overlay.className = "overlay";
+  overlay.id = "relinkOverlay";
+  overlay.innerHTML = `<div class="dialog relink" role="dialog" aria-modal="true" aria-labelledby="relinkTitle" tabindex="-1">
+    <h2 id="relinkTitle">Relink media</h2>
+    <p class="dim">Point ${list.length === 1 ? "this file" : `these ${list.length} files`} at the footage where it is now. Clips keep their In points and edits.</p>
+    <div class="relink-tools">
+      <button type="button" class="btn tiny" data-folder title="Pick the folder the files are in now — they are matched by name and copied into the project">Choose folder…</button>
+      <span class="relink-status dim"></span>
+    </div>
+    <div class="relink-rows"></div>
+    <div class="dialog-actions"><button type="button" class="btn" data-cancel>Cancel</button><button type="button" class="btn primary" data-apply>Relink</button></div>
+  </div>`;
+  document.body.appendChild(overlay);
+  const dialog = overlay.querySelector(".dialog");
+  const rowsEl = overlay.querySelector(".relink-rows"), status = overlay.querySelector(".relink-status");
+  const pick = new Map();   // media id → {src, label} | null
+  const cands = new Map();  // media id → [{src, name, size, why}]
+  const close = () => { overlay.remove(); };
+  const render = () => {
+    rowsEl.innerHTML = "";
+    for (const m of list) {
+      const row = document.createElement("div");
+      row.className = "relink-row";
+      const cur = pick.get(m.id);
+      const options = (cands.get(m.id) || []);
+      row.innerHTML = `<div class="relink-name"><b></b><span class="dim relink-was"></span></div>
+        <div class="relink-pick">
+          <select aria-label="New location"></select>
+          <button type="button" class="btn tiny" data-browse title="Pick the file (it is copied into the project)">Browse…</button>
+        </div>`;
+      row.querySelector("b").textContent = (isMediaOffline(m.id) ? "⚠ " : "") + m.name;
+      row.querySelector(".relink-was").textContent = "was " + decodeURIComponent(String(m.src).split("?")[0]) + (m.duration ? " · " + fmt(m.duration) : "") + (m.size ? " · " + MediaLib.fmtSize(m.size) : "");
+      const sel = row.querySelector("select");
+      const opt = (v, label) => { const o = document.createElement("option"); o.value = v; o.textContent = label; sel.appendChild(o); };
+      opt("", options.length || cur ? "— leave it —" : "— not found: Browse… or Choose folder… —");
+      if (cur && !options.some((o) => o.src === cur.src)) opt(cur.src, cur.label);
+      for (const o of options) opt(o.src, `${decodeURIComponent(o.src)} · ${MediaLib.fmtSize(o.size)} (${o.why})`);
+      sel.value = cur ? cur.src : "";
+      sel.addEventListener("change", () => {
+        const o = options.find((x) => x.src === sel.value);
+        pick.set(m.id, sel.value ? { src: sel.value, label: o ? o.name : sel.value } : null);
+        syncApply();
+      });
+      row.querySelector("[data-browse]").addEventListener("click", async () => {
+        const [file] = await pickFilesForRelink({});
+        if (!file) return;
+        status.textContent = `Copying ${file.name}…`;
+        const [up] = await uploadForRelink([file]);
+        status.textContent = up?.src ? "" : "Couldn't copy " + file.name;
+        if (up?.src) { pick.set(m.id, { src: up.src, label: `${file.name} (chosen)` }); render(); }
+      });
+      rowsEl.appendChild(row);
+    }
+    syncApply();
+  };
+  const syncApply = () => {
+    const n = list.filter((m) => pick.get(m.id)).length;
+    const b = overlay.querySelector("[data-apply]");
+    b.disabled = !n;
+    b.textContent = n ? `Relink ${n}` : "Relink";
+  };
+  overlay.querySelector("[data-cancel]").addEventListener("click", close);
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+  overlay.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); } });
+  overlay.querySelector("[data-folder]").addEventListener("click", async () => {
+    const files = await pickFilesForRelink({ folder: true });
+    if (!files.length) return;
+    // match each row by file name (then by size), copy only the matches
+    const want = [];
+    for (const m of list) {
+      let best = null, bestScore = 0;
+      for (const f of files) {
+        const { score } = MediaLib.relinkScore(m, { name: f.name, size: f.size });
+        if (score > bestScore && score >= 60) { best = f; bestScore = score; }
+      }
+      if (best) want.push([m, best]);
+    }
+    if (!want.length) { status.textContent = `None of the ${files.length} files in that folder match by name.`; return; }
+    let i = 0;
+    const ups = await uploadForRelink(want.map(([, f]) => f), (f) => { status.textContent = `Copying ${++i}/${want.length}: ${f.name}…`; });
+    want.forEach(([m, f], k) => { if (ups[k].src) pick.set(m.id, { src: ups[k].src, label: `${f.name} (from the folder)` }); });
+    status.textContent = `Matched ${ups.filter((u) => u.src).length} of ${list.length} by name.`;
+    render();
+  });
+  overlay.querySelector("[data-apply]").addEventListener("click", async () => {
+    const todo = list.filter((m) => pick.get(m.id));
+    close();
+    for (const m of todo) await setMediaSource(m, pick.get(m.id).src, "relink");
+    scheduleOfflineCheck(0);
+  });
+  render();
+  dialog.focus();
+  // candidates found on disk (same name, other extension, similar name, same size)
+  if (state.connected) {
+    status.textContent = "Looking for the files…";
+    try {
+      const res = await fetch("/api/relink/candidates", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ media: list.map((m) => ({ id: m.id, name: m.name, src: m.src, size: m.size, kind: m.kind })) }),
+      });
+      const { candidates } = await res.json();
+      const used = new Set(project.media.map((x) => x.src));
+      let found = 0;
+      for (const m of list) {
+        const opts = (candidates[m.id] || []).filter((o) => o.src !== m.src && (!used.has(o.src) || !isMediaOffline(m.id)));
+        cands.set(m.id, opts);
+        // a confident match is picked for you (same name, or same name with a matching size)
+        if (opts[0] && opts[0].score >= 100 && !pick.get(m.id)) { pick.set(m.id, { src: opts[0].src, label: opts[0].name }); found++; }
+      }
+      status.textContent = found ? `Found ${found} of ${list.length} in the project folders.` : "";
+      if (overlay.isConnected) render();
+    } catch { status.textContent = ""; }
+  }
 }
 
 /* Open the native file dialog. Windows anchors it to the <input>'s screen
@@ -2665,20 +2942,37 @@ function pushUndo(snap = undoSnapshot()) {
 function restoreSnapshot(json) {
   const snap = JSON.parse(json);
   if (Array.isArray(snap)) project.clips = snap;
-  else { project.clips = snap.clips; project.markers = snap.markers; if (snap.comps) project.comps = snap.comps; if (snap.media) { project.media = snap.media; renderBin(); } }
+  else {
+    project.clips = snap.clips; project.markers = snap.markers; if (snap.comps) project.comps = snap.comps;
+    if (snap.media) {
+      const before = new Map(project.media.map((m) => [m.id, m.src]));
+      project.media = snap.media;
+      // a relink / replace undone or redone: the players and pictures follow the src
+      for (const m of project.media) if (before.has(m.id) && before.get(m.id) !== m.src) reloadMediaSource(m, before.get(m.id));
+      renderBin(); scheduleOfflineCheck(0);
+    }
+  }
   runtime.compGen = (runtime.compGen || 0) + 1;
+}
+/** The current state to step back to, carrying the media list when `snap` does
+ *  (removing, relinking or replacing media), so redo puts it back too. */
+function counterSnapshot(snap) {
+  if (!snap.includes('"media":')) return undoSnapshot();
+  return JSON.stringify({ clips: project.clips, markers: project.markers || [], comps: project.comps || [], media: project.media });
 }
 function undo() {
   if (!runtime.undo.length) return;
-  runtime.redo.push(undoSnapshot());
-  restoreSnapshot(runtime.undo.pop());
+  const snap = runtime.undo.pop();
+  runtime.redo.push(counterSnapshot(snap));
+  restoreSnapshot(snap);
   pruneSelection();
   scheduleSave(); renderInspector();
 }
 function redo() {
   if (!runtime.redo.length) return;
-  runtime.undo.push(undoSnapshot());
-  restoreSnapshot(runtime.redo.pop());
+  const snap = runtime.redo.pop();
+  runtime.undo.push(counterSnapshot(snap));
+  restoreSnapshot(snap);
   pruneSelection();
   scheduleSave(); renderInspector();
 }
@@ -3768,7 +4062,8 @@ function rebuildClips() {
     div.className = `clip c-${c.kind}` +
       (state.selIds.has(c.id) ? " selected" : "") + (c.id === state.selId ? " primary" : "") +
       (isClipLocked(c) ? " locked" : "") + (c.disabled === true ? " disabled" : "") +
-      (c.unlinked === true ? " unlinked" : "") + (c.kind !== "audio" && isMatte(c) ? " matte-src" : "");
+      (c.unlinked === true ? " unlinked" : "") + (c.kind !== "audio" && isMatte(c) ? " matte-src" : "") +
+      (isMediaOffline(c.mediaId) ? " offline" : "");
     div.dataset.id = c.id;
     div.style.left = c.start * state.pps + "px";
     div.style.width = Math.max(8, c.duration * state.pps) + "px";
@@ -3779,7 +4074,7 @@ function rebuildClips() {
     }
     const hasWave = c.kind === "audio" && !!wavePeaksFor(c);
     if (hasWave) body += `<canvas class="wave"></canvas>`;
-    const badge = (c.keyframes && Object.keys(c.keyframes).length ? "◆ " : "") +
+    const badge = (isMediaOffline(c.mediaId) ? "⚠ Offline · " : "") + (c.keyframes && Object.keys(c.keyframes).length ? "◆ " : "") +
                   (c.transitionIn || c.transitionOut ? "⇄ " : "") +
                   (clipMatte(c) ? "◐ " : "");
     const chTag = (() => {
@@ -10436,6 +10731,28 @@ function shapeKeyed(c) {
   const any = (list) => (list || []).some((it) => (it.keys && it.keys.length) || (it.type === "group" && any(it.items)));
   return any(c.props.shapes);
 }
+/** A missing file's picture: the box it would fill, marked "Media offline" (preview and export). */
+function drawOfflineSlate(c, p, W, H) {
+  const m = getMedia(c.mediaId);
+  const mw = m && m.width > 0 ? m.width : W, mh = m && m.height > 0 ? m.height : H, sc = p.scale || 1;
+  let dw, dh;
+  if (p.fit === "cover") { const f = Math.max(W / mw, H / mh) * sc; dw = mw * f; dh = mh * f; }
+  else if (p.fit === "stretch") { dw = W * sc; dh = H * sc; }
+  else if (p.fit === "none") { dw = mw * sc; dh = mh * sc; }
+  else { const f = Math.min(W / mw, H / mh) * sc; dw = mw * f; dh = mh * f; }
+  ctx2d.fillStyle = "#3a0d10";
+  ctx2d.fillRect(-dw / 2, -dh / 2, dw, dh);
+  ctx2d.strokeStyle = "#e5484d"; ctx2d.lineWidth = Math.max(2, dh / 120);
+  ctx2d.strokeRect(-dw / 2, -dh / 2, dw, dh);
+  const fs = Math.max(9, Math.min(dw / 20, dh / 9));
+  ctx2d.fillStyle = "#ff8a8d";
+  ctx2d.textAlign = "center"; ctx2d.textBaseline = "middle";
+  ctx2d.font = `700 ${fs}px "Segoe UI", system-ui, sans-serif`;
+  ctx2d.fillText("Media offline", 0, -fs * 0.35, dw * 0.9);
+  ctx2d.font = `400 ${fs * 0.42}px "Segoe UI", system-ui, sans-serif`;
+  ctx2d.fillStyle = "#f2c4c5";
+  ctx2d.fillText(m ? m.name : "", 0, fs * 0.55, dw * 0.9);
+}
 /** Draw one clip. `layered`: into a mask layer — opacity and blend wait for
  *  the composite. Returns { p, geom } — geom = where the clip's picture landed
  *  (canvas transform + its box), the space its masks live in. */
@@ -10500,7 +10817,9 @@ function drawClipPicture(c, W, H, t, layered) {
   }
   let src = null, sw = 0, sh = 0;
   if (c.kind === "image") {
-    src = runtime.mediaAux.get(c.mediaId)?.img;
+    const aux = runtime.mediaAux.get(c.mediaId), im = aux?.imgSrc && getMedia(c.mediaId);
+    if (im && aux.imgSrc !== im.src && !aux.reloading) { aux.reloading = true; reloadMediaSource(im); }   // relinked / undone
+    src = aux?.img;
     if (src) { sw = src.naturalWidth; sh = src.naturalHeight; }
   } else if (c.kind === "svg") {
     src = getSvgImage(c, t);
@@ -10512,6 +10831,7 @@ function drawClipPicture(c, W, H, t, layered) {
     src = renderComp(c, t);
     if (src) { sw = src.width; sh = src.height; }
   }
+  if ((!src || !sw || !sh) && isMediaOffline(c.mediaId)) drawOfflineSlate(c, p, W, H);
   if (src && sw && sh) {
     // source crop (percent per edge)
     const sx = sw * clamp(+p.cropL || 0, 0, 95) / 100;
@@ -13597,6 +13917,13 @@ async function openExportSetup() {
   } else if (warn) {
     warn.textContent = "";
     warn.classList.add("hidden");
+  }
+  // missing files export as their "Media offline" slate — say so before the render
+  const offUsed = project.media.filter((m) => isMediaOffline(m.id) && MediaLib.placements(usageDoc(), m.id).length);
+  if (offUsed.length && warn) {
+    warn.textContent = (warn.textContent ? warn.textContent + " " : "") +
+      `${offUsed.length === 1 ? `“${offUsed[0].name}” is` : offUsed.length + " files are"} offline and will export as “Media offline” — relink first (right-click in the bin → Relink…).`;
+    warn.classList.remove("hidden");
   }
   fillExportRangeSelect();
   syncExportRangeUi();
