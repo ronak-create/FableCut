@@ -42,6 +42,7 @@ const {
   PROJECT_FILE, LIBRARY_SUBDIRS, FRAMES_DIR, ensureDirs, readSaved, writeSaved,
 } = require("./paths");
 const Templates = require("./templates");
+const { probeFile } = require("./media-probe");
 
 /* Static app files are served from the install dir; everything the user creates
    lives under DATA_DIR. The two are the same unless FABLECUT_DATA_DIR is set. */
@@ -468,6 +469,26 @@ const server = http.createServer(async (req, res) => {
         .map((f) => ({ name: f, src: "/media/" + encodeURIComponent(f), size: fs.statSync(path.join(MEDIA_DIR, f)).size }));
       sendJSON(res, 200, files);
     } catch (e) { sendJSON(res, 500, { error: String(e) }); }
+    return;
+  }
+
+  /* API: media metadata (ffprobe; size only without it).
+       GET  /api/media-info?src=/media/x.mp4 → {src, info} (info null = file missing)
+       POST /api/media-info {srcs:[…]} → {info:{src: info | null}} — up to 500 per call */
+  if (p === "/api/media-info" && (req.method === "GET" || req.method === "POST")) {
+    try {
+      if (req.method === "GET") {
+        const src = url.searchParams.get("src") || "";
+        const file = resolveSrc(src);
+        sendJSON(res, 200, { src, info: file ? probeFile(file) : null });
+        return;
+      }
+      const body = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+      const srcs = Array.isArray(body.srcs) ? body.srcs.slice(0, 500).map(String) : [];
+      const info = {};
+      for (const src of srcs) { const file = resolveSrc(src); info[src] = file ? probeFile(file) : null; }
+      sendJSON(res, 200, { info });
+    } catch (e) { sendJSON(res, 400, { error: String(e.message || e) }); }
     return;
   }
 

@@ -15,6 +15,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead (luma levels on 0–1, dominant colours, texture, saturation and
   per-cell motion) for agents without vision. Reading a local file by `path=`
   requires the `X-FableCut-Client` header.
+- **Media management in the Project bin.** Each file's frame rate, codecs,
+  audio channels, sample rate, bitrate and size are read with ffprobe and
+  shown in the bin (`GET /api/media-info`). Search by name, codec, resolution
+  or `#tag`; show favorites, used / unused files, a kind, a tag or a
+  collection; sort by any of them or by how often a file is used; a list view
+  with metadata columns. Files can be starred, tagged and grouped into
+  collections. **Find timeline instances** lists every place a file is used
+  (comps included) and jumps there; **Reveal in project** goes from a clip to
+  its file. Agents: patch ops `updateMedia`, `setCollection`,
+  `removeCollection`; the compact view shows metadata, tags and usage.
 
 ### Changed
 - **Chroma key, temperature, tint and RGB split run on the GPU** (WebGL2), in

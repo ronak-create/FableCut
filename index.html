@@ -60,6 +60,17 @@
         <button type="button" data-tab="shapes" title="Shape layers and null objects">Shapes</button>
         <button type="button" data-tab="templates" title="Lower thirds, logo animations and social layouts — with fields you edit in the Inspector">Templates</button>
       </div>
+      <div class="bin-tools" id="binTools">
+        <input type="search" id="binSearch" class="bin-search" placeholder="Search name, #tag, codec, 4k…" aria-label="Search the Project bin" spellcheck="false" autocomplete="off">
+        <select id="binFilter" class="bin-filter" title="Show only…" aria-label="Show"></select>
+        <select id="binSort" class="bin-sort" title="Sort by" aria-label="Sort by">
+          <option value="name">Name</option><option value="kind">Kind</option><option value="duration">Duration</option>
+          <option value="resolution">Resolution</option><option value="fps">Frame rate</option><option value="codec">Codec</option>
+          <option value="audio">Audio channels</option><option value="size">File size</option><option value="usage">Times used</option>
+        </select>
+        <button type="button" class="btn tiny" id="binSortDir" title="Ascending — click for descending">↑</button>
+        <button type="button" class="btn tiny" id="binViewBtn" title="List view: metadata columns">☰</button>
+      </div>
       <input type="file" id="fileInput" class="sr-only" multiple accept="video/*,audio/*,image/*,.mp4,.mov,.webm,.mkv,.mp3,.wav,.m4a,.png,.jpg,.jpeg,.gif,.webp,.svg">
       <div class="bin-list" id="binList">
         <div class="bin-empty" id="binEmpty">
@@ -445,6 +456,11 @@
         <table class="keys">
           <tr><td><kbd>Ctrl</kbd>+click bin</td><td>Import media files</td></tr>
           <tr><td>Right-click <b>Project</b> tab</td><td>New folder · New composition</td></tr>
+          <tr><td>Bin search</td><td>Name, kind, codec, <code>2160p</code> or a tag; <code>#tag</code> matches tags only · <kbd>Esc</kbd> clears</td></tr>
+          <tr><td>Right-click a bin file</td><td>Find timeline instances · Media info · favorites · Tags · collections</td></tr>
+          <tr><td>☆ / uses badge on a bin file</td><td>Star it · list where it is used (click one to jump there)</td></tr>
+          <tr><td>☰ in the bin</td><td>List view with metadata columns · click a heading to sort</td></tr>
+          <tr><td>Right-click a clip</td><td><b>Reveal in project</b> — show its file in the bin</td></tr>
           <tr><td>Comp clip / bin comp</td><td>Double-click to open it on the timeline · drag a bin comp onto the timeline to place it · the breadcrumb above the timeline steps back out</td></tr>
           <tr><td>Right-click clips</td><td><b>Precompose</b> — move the selection into a new comp</td></tr>
           <tr><td><kbd>Esc</kbd> inside a comp</td><td>Back out one level (once nothing is selected)</td></tr>
@@ -501,6 +517,7 @@
 <script src="edit-ops.js"></script>
 <script src="comp.js"></script>
 <script src="templates.js"></script>
+<script src="media-lib.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

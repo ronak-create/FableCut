@@ -26,10 +26,10 @@
   const dep = (file, name) => (node ? require(file) : root[name]);
   const api = factory(dep("./audio-fx", "FableCutFx"), dep("./edit-ops", "FableCutEdit"), dep("./color", "FableCutColor"),
     dep("./mask", "FableCutMask"), dep("./tracker", "FableCutTracker"), dep("./motion", "FableCutMotion"),
-    dep("./comp", "FableCutComp"), dep("./templates", "FableCutTemplates"));
+    dep("./comp", "FableCutComp"), dep("./templates", "FableCutTemplates"), dep("./media-lib", "FableCutMedia"));
   if (node) module.exports = api;
   else root.FableCutProjectOps = api;
-})(typeof self !== "undefined" ? self : this, function (FX, EditOps, Color, Mask, Tracker, Motion, CompLib, Templates) {
+})(typeof self !== "undefined" ? self : this, function (FX, EditOps, Color, Mask, Tracker, Motion, CompLib, Templates, MediaLib) {
   "use strict";
 
   const DEFAULT_TRACKS = EditOps.DEFAULT_TRACKS;
@@ -372,6 +372,65 @@
           notes.push("+" + m.id);
           break;
         }
+        case "updateMedia": {
+          // {op:"updateMedia", id | ids, set:{name?, favorite?, tags?, folderId?}, addTags?, removeTags?}
+          const ids = op.ids || [op.id];
+          if (!ids.length || ids.some((id) => !id)) throw new Error("updateMedia needs id or ids");
+          const set = op.set || {};
+          const SETTABLE = ["name", "favorite", "tags", "folderId"];
+          for (const k of Object.keys(set))
+            if (!SETTABLE.includes(k)) throw new Error(`updateMedia: '${k}' not settable (allowed: ${SETTABLE.join(", ")}; metadata such as fps or codec is probed from the file)`);
+          if ("folderId" in set && set.folderId != null && !(proj.folders || []).some((f) => f.id === set.folderId))
+            throw new Error(`updateMedia: no folder ${set.folderId}`);
+          if ("name" in set && !String(set.name || "").trim()) throw new Error("updateMedia: name can't be empty");
+          for (const id of ids) {
+            const m = proj.media.find((x) => x.id === id);
+            if (!m) throw new Error("updateMedia: no media " + id);
+            if ("name" in set) m.name = String(set.name).trim().slice(0, 200);
+            if ("favorite" in set) { if (set.favorite) m.favorite = true; else delete m.favorite; }
+            if ("folderId" in set) m.folderId = set.folderId || null;
+            let tags = "tags" in set ? MediaLib.normalizeTags(set.tags) : MediaLib.normalizeTags(m.tags);
+            if (op.addTags) tags = MediaLib.normalizeTags([...tags, ...MediaLib.normalizeTags(op.addTags)]);
+            if (op.removeTags) { const rm = new Set(MediaLib.normalizeTags(op.removeTags).map((t) => t.toLowerCase())); tags = tags.filter((t) => !rm.has(t.toLowerCase())); }
+            if (tags.length) m.tags = tags; else delete m.tags;
+            notes.push("~" + id);
+          }
+          break;
+        }
+        case "setCollection": {
+          // {op:"setCollection", id?, name?, media?:[…], add?:[…], remove?:[…]} — creates it when the id is new
+          const list = proj.collections = MediaLib.normalizeCollections(proj.collections, proj.media);
+          const known = (ids, what) => {
+            if (ids == null) return [];
+            if (!Array.isArray(ids)) throw new Error(`setCollection: ${what} must be a list of media ids`);
+            for (const id of ids) if (!proj.media.some((m) => m.id === id)) throw new Error(`setCollection: no media ${id}`);
+            return ids.map(String);
+          };
+          let col = op.id ? list.find((c) => c.id === op.id) : null;
+          if (!col && !op.id && op.name) col = list.find((c) => c.name.toLowerCase() === String(op.name).trim().toLowerCase()) || null;
+          const fresh = !col;
+          if (fresh) {
+            if (!op.name) throw new Error("setCollection: a new collection needs a name");
+            col = { id: op.id ? String(op.id) : "col_" + uid(), name: "", media: [] };
+            list.push(col);
+          }
+          if (op.name != null) col.name = String(op.name).trim().slice(0, 80) || col.name || "Collection";
+          if (op.media != null) col.media = [...new Set(known(op.media, "media"))];
+          for (const id of known(op.add, "add")) if (!col.media.includes(id)) col.media.push(id);
+          const rm = new Set(known(op.remove, "remove"));
+          col.media = col.media.filter((id) => !rm.has(id));
+          notes.push((fresh ? "+" : "~") + col.id + `(${col.media.length})`);
+          break;
+        }
+        case "removeCollection": {
+          const list = MediaLib.normalizeCollections(proj.collections, proj.media);
+          const n = list.length;
+          proj.collections = list.filter((c) => c.id !== op.id);
+          if (proj.collections.length === n) throw new Error("removeCollection: no collection " + op.id);
+          if (!proj.collections.length) delete proj.collections;
+          notes.push("-" + op.id);
+          break;
+        }
         case "removeMedia": {
           const used = proj.clips.find((c) => c.mediaId === op.id);
           if (used) throw new Error(`removeMedia: media ${op.id} is used by clip ${used.id}`);
@@ -382,6 +441,7 @@
           const n = proj.media.length;
           proj.media = proj.media.filter((x) => x.id !== op.id);
           if (proj.media.length === n) throw new Error("removeMedia: no media " + op.id);
+          if (proj.collections) proj.collections = MediaLib.normalizeCollections(proj.collections, proj.media);
           notes.push("-" + op.id);
           break;
         }
@@ -943,7 +1003,7 @@
           notes.push(timelineEdit(proj, op, refuseLocked, lockReason, ctx));
           break;
         default:
-          throw new Error("Unknown op: " + op.op + " (addClip|updateClip|removeClip|addMedia|removeMedia|setProject|setTrack|setBus|removeBus|setFx|setFxKeys|setGrade|setGradeLayer|setMask|removeMask|setMaskKeys|setMatte|removeTrack|setShape|removeShape|setParent|setMotionPath|setTextPath|" +
+          throw new Error("Unknown op: " + op.op + " (addClip|updateClip|removeClip|addMedia|updateMedia|removeMedia|setCollection|removeCollection|setProject|setTrack|setBus|removeBus|setFx|setFxKeys|setGrade|setGradeLayer|setMask|removeMask|setMaskKeys|setMatte|removeTrack|setShape|removeShape|setParent|setMotionPath|setTextPath|" +
             "split|rippleDelete|closeGap|lift|extract|rippleTrim|roll|slip|slide|insert|overwrite|crossfade|" +
             "addComp|updateComp|removeComp|precompose|inComp|applyPreset|addTemplate|setTemplate|savePreset|saveTemplate)");
       }
@@ -1001,8 +1061,20 @@
       (doc.disabledTracks?.length ? ` disabledTracks:[${doc.disabledTracks.join(",")}]` : ""),
       ...mixLine(doc),
       `MEDIA (${doc.media.length}):`,
-      ...doc.media.map((m) => `  ${m.id} ${m.kind} "${m.name}"${m.duration ? " " + m.duration + "s" : ""}` +
-        (m.derivedFrom ? ` (${m.denoise ? "denoised " + m.denoise : "derived"} from ${m.derivedFrom})` : "")),
+      ...(() => {
+        const uses = MediaLib.usageCounts(doc);
+        return doc.media.map((m) => {
+          const info = MediaLib.describe(m);
+          return `  ${m.id} ${m.kind} "${m.name}"${m.duration ? " " + m.duration + "s" : ""}` +
+            (info ? ` ${info.replace(/ · /g, " ")}` : "") +
+            (m.favorite ? " ★" : "") + (m.tags && m.tags.length ? " " + m.tags.map((t) => "#" + t.replace(/\s+/g, "_")).join(" ") : "") +
+            (m.folderId ? ` folder:${m.folderId}` : "") + ` uses:${uses.get(m.id) || 0}` +
+            (m.derivedFrom ? ` (${m.denoise ? "denoised " + m.denoise : "derived"} from ${m.derivedFrom})` : "");
+        });
+      })(),
+      ...(doc.collections && doc.collections.length
+        ? [`COLLECTIONS (${doc.collections.length}): ` + doc.collections.map((c) => `${c.id} "${c.name}" [${(c.media || []).join(",")}]`).join(" · ")]
+        : []),
       `CLIPS (${doc.clips.length}), by track/time:`,
       ...doc.clips
         .slice()
@@ -1037,6 +1109,14 @@
   }
 
   function checkProject(doc) {
+    if (doc.collections != null) {
+      if (!Array.isArray(doc.collections)) throw new Error("collections must be a list of {id, name, media:[…]}");
+      doc.collections = MediaLib.normalizeCollections(doc.collections, doc.media || []);
+    }
+    for (const m of doc.media || []) {
+      if (m && m.tags != null) { const t = MediaLib.normalizeTags(m.tags); if (t.length) m.tags = t; else delete m.tags; }
+      if (m && m.favorite != null && m.favorite !== true) delete m.favorite;
+    }
     if (doc.comps != null) {
       if (!Array.isArray(doc.comps)) throw new Error("comps must be a list of compositions");
       // saved as normalized (trimmed id, default name and size, rounded duration)

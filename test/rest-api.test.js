@@ -414,3 +414,29 @@ test("traversal out of the served roots and dot-directories are refused", async 
   assert.equal(ok.status, 200);
   assert.match(ok.body, /<svg/);
 });
+
+test("/api/media-info answers a file's metadata, null for a missing one, and never leaves media/ or library/", async (t) => {
+  const { dir, base } = await boot(t);
+  // a 0.1 s mono 8 kHz WAV, written by hand so the test needs no ffmpeg
+  const n = 800, wav = Buffer.alloc(44 + n * 2);
+  wav.write("RIFF", 0); wav.writeUInt32LE(36 + n * 2, 4); wav.write("WAVE", 8); wav.write("fmt ", 12);
+  wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22); wav.writeUInt32LE(8000, 24);
+  wav.writeUInt32LE(16000, 28); wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34); wav.write("data", 36); wav.writeUInt32LE(n * 2, 40);
+  fs.mkdirSync(path.join(dir, "media"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "media", "tone.wav"), wav);
+  const one = await (await fetch(base + "/api/media-info?src=/media/tone.wav")).json();
+  assert.equal(one.info.size, wav.length);
+  if (one.info.probe === "ffprobe") {
+    assert.equal(one.info.audioChannels, 1);
+    assert.equal(one.info.sampleRate, 8000);
+    assert.equal(one.info.audioCodec, "pcm_s16le");
+  }
+  const many = await (await fetch(base + "/api/media-info", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ srcs: ["/media/tone.wav", "/media/gone.mp4", "/media/../project.json", "C:/Windows/win.ini"] }),
+  })).json();
+  assert.equal(many.info["/media/tone.wav"].size, wav.length);
+  assert.equal(many.info["/media/gone.mp4"], null);
+  assert.equal(many.info["/media/../project.json"], null, "no way out of media/");
+  assert.equal(many.info["C:/Windows/win.ini"], null, "only /media/ and /library/ srcs");
+});

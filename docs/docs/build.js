@@ -94,6 +94,11 @@ const PAGES = [
     parts: [["project.json schema", "Presets and templates"]],
   },
   {
+    slug: "media", nav: "Media management", title: "Media management", group: "The timeline",
+    lede: "File details, search, filters, sorting, favorites, tags, collections and where each file is used.",
+    parts: [["project.json schema", "Media management"]],
+  },
+  {
     slug: "editing", nav: "Editing rules", title: "Editing rules", group: "The timeline",
     lede: "How tracks, links, locks, targeting and the trim tools behave, for people and agents alike.",
     parts: [["project.json schema", "Semantics"]],

@@ -67,8 +67,10 @@ Editing via full get→modify→set costs thousands of tokens per change. Cheape
    Re-check the clips, then retry with that revision.
 3. **Docs**: request `fablecut_docs {section:"schema"}` (or "Recipes", "Remake", …)
    instead of the whole manual; skip it entirely if the schema is already in context.
-4. **Media questions** (duration, fps, size): read them from the registered media
-   entries — don't shell out to ffprobe; the browser probes and writes them back.
+4. **Media questions** (duration, resolution, fps, codec, audio channels, file
+   size, how often it is used): read them from the registered media entries or
+   the compact view's MEDIA lines — don't shell out to ffprobe; the editor
+   probes every file and writes them back (see "Media management").
    For what the footage *looks like*, use `fablecut_frame` — it is far cheaper
    than reading a file, and far more reliable than inferring from a number.
 5. Batch related changes into ONE patch call (ops apply in order, one revision bump).
@@ -281,6 +283,8 @@ Examples in `library/svg/`: `sparkles.svg` (loop), `lower-third.svg`,
     { "id": "A4", "kind": "audio" }
   ],
   "buses": [ { "id": "B1", "name": "Dialogue", "gain": -2, "fx": [ { "type": "compressor" } ] } ],
+  "collections": [ { "id": "col_sel", "name": "Selects", "media": [ "m_abc" ] } ],
+  // ^ optional — Project-bin collections: media grouped across folders; see "Media management"
   "comps": [ { "id": "lt", "name": "Lower third", "width": 1280, "height": 720, "duration": 5, "clips": [ /* … */ ] } ],
   // ^ optional — compositions (nested sequences), placed with kind:"comp" clips; see "Compositions (nested sequences)"
   // ^ optional — submix buses B1…B8: name, gain (dB), pan, mute, fx; tracks route in with `out`
@@ -288,6 +292,9 @@ Examples in `library/svg/`: `sparkles.svg` (loop), `lower-third.svg`,
     { "id": "m_abc", "name": "intro.mp4", "kind": "video",  // video|audio|image|svg
       "src": "/media/intro.mp4",             // path under ./media or ./library (never a raw https:// URL)
       "duration": 12.4, "width": 1920, "height": 1080,
+      "fps": 29.97, "codec": "h264", "audioCodec": "aac", "audioChannels": 2, "sampleRate": 48000,
+      "size": 45200000, "bitrate": 29300000, // probed from the file (read-only; see "Media management")
+      "favorite": true, "tags": [ "interview", "day 1" ],   // optional: bin organization
       "folderId": null },                    // optional: id of a folders[] entry
     { "id": "m_abd", "name": "intro.denoise-medium.flac", "kind": "audio", "src": "/media/intro.denoise-medium.flac",
       "derivedFrom": "m_abc", "denoise": "medium" }  // a noise-reduced copy of m_abc (see "Audio mix")
@@ -1359,6 +1366,74 @@ with `fields:{logo:"<your logo's media id>", brand, accent}` at 0;
 it in every project; **titles that arrive and leave the same way** —
 `applyPreset` an In and an Out on every title in one patch.
 
+### Media management
+
+The Project bin knows each file's details and helps find, group and track
+footage. Everything here is organization: none of it changes what plays or
+exports.
+
+**Metadata.** The editor reads every file in `media/` and `library/` with
+ffprobe (via `GET /api/media-info`) and writes what it finds onto the media
+entry. These fields are read-only — they describe the file:
+
+| key | does |
+|---|---|
+| `fps` | video frame rate (29.97, 25, 59.94 …); absent for stills and audio |
+| `codec` | video codec (`h264`, `hevc`, `prores`, `vp9` …), or the image format (`png`, `mjpeg`) |
+| `audioCodec` · `audioChannels` · `sampleRate` | first audio stream: codec, channel count (`0` = the file has no audio), Hz |
+| `size` · `bitrate` | file size in bytes · overall bitrate, bits per second |
+| `width` · `height` · `duration` | as before; filled in when missing (phone footage shot rotated reports its upright size) |
+
+Without ffprobe on PATH only `size` is filled in; the browser still probes
+`duration`, `width` and `height`.
+
+**Organizing.** `favorite: true` stars a file; `tags` is a list of free-form
+labels (at most 24, each up to 32 characters, matched without regard to case).
+`collections` at the top of the document group media across folders — a file
+can be in any number of them, while it sits in one folder (`folderId`).
+
+**Usage.** A file's *placements* are the clips that show it, on the main
+timeline and inside every composition. A video and the audio stems linked to it
+count as one placement, so a shot used twice reads "used 2×".
+
+In the editor, the Project tab has:
+
+- **Search** — every word must match the name, kind, extension, codec,
+  resolution (`3840x2160`, `2160p`) or a tag; `#word` matches tags only. Esc clears it.
+- **Show** — All media · ★ Favorites · Used in the edit · Unused · a kind · a
+  collection · a tag. While searching or filtering, the bin lists the hits flat
+  (each with its folder), with a count and **Clear**; a collection's view also
+  has **Rename** and **Delete** (its media stay).
+- **Sort** — name (natural: `shot 2` before `shot 10`), kind, duration,
+  resolution, frame rate, codec, audio channels, file size or times used, with
+  ↑ / ↓. Files missing a value sort last either way. Folders keep their tree;
+  the sort applies inside each.
+- **☰ List view** — one row per file with columns: name, duration, resolution,
+  FPS, codec, audio, size and uses; click a column heading to sort by it. On a
+  narrow bin the columns drop out right to left; widen the panel to see them all.
+- On each file: **☆** stars it, the **uses** badge opens its placements.
+  Right-click a file → **Open in Source**, **Find timeline instances** (every
+  placement, main timeline and comps, with track and time — click one to jump
+  there, opening its comp if needed), **Media info…**, favorites, **Tags…**,
+  **Add to / Remove from** a collection, **New collection…**, **Remove from project**.
+- Right-click a clip on the timeline → **Reveal in project** scrolls the bin to
+  its file (or its comp), opening folders and clearing a search that hides it.
+
+**Agents:**
+
+- `{op:"updateMedia", id | ids, set:{name?, favorite?, tags?, folderId?}, addTags?, removeTags?}`
+  — organize files (`favorite:false` unstars; `tags:[]` clears). Metadata keys
+  are refused: they come from the file.
+- `{op:"setCollection", id?, name?, media?, add?, remove?}` creates a collection
+  (a new `id`, or a `name` no collection has) or changes one: `media` replaces
+  its list, `add` / `remove` edit it. `{op:"removeCollection", id}` deletes it;
+  its media stay. `removeMedia` takes a file out of every collection.
+- The compact view lists each file with its metadata, ★, tags, folder and
+  `uses:N`, and the collections on one line:
+  `m_abc video "intro.mp4" 12.4s 1920×1080 29.97 fps h264 stereo 48 kHz 45 MB ★ #interview uses:2`.
+- `fablecut_import_media` probes the file as it imports it, so the entry it
+  returns already has these fields.
+
 ### Semantics
 
 - Rendering order: V1 is drawn first, then V2, V3, … on top. SVG/image/text clips
@@ -1548,6 +1623,11 @@ obvious cuts were missed, raise it if motion is being misread as cuts.
   Append `?force=1` to overwrite unconditionally. Writes are atomic (tmp file +
   rename), so a crashed write never corrupts the file.
 - `GET  /api/media`   — list files in ./media (name, src, size)
+- `GET  /api/media-info?src=/media/x.mp4` → `{src, info}` · `POST /api/media-info {srcs:[…]}` →
+  `{info:{src: info}}` (up to 500) — a file's metadata from ffprobe: `size`, `fps`, `codec`,
+  `audioCodec`, `audioChannels`, `sampleRate`, `bitrate`, `duration`, `width`, `height` and
+  `probe` (`"ffprobe"`, or `"stat"` when only the size could be read). `info` is `null` when
+  the src names no file under `/media/` or `/library/`. Cached per file version.
 - `GET  /api/library?dir=sfx|elements|svg|fonts|presets|templates` — list library assets
 - `GET  /api/presets` · `GET /api/templates` — the saved presets / templates, validated (bad files skipped);
   `POST /api/presets {preset}` · `POST /api/templates {template}` — validate one and save it as

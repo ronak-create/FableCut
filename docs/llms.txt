@@ -63,6 +63,10 @@ about 150 ms. A human and an agent can work the same timeline at once.
   shutter-angle motion blur samples sub-frames in preview and export; titles
   run along lines, arcs, circles and drawn paths with a keyframable offset.
   Agents use the `setMotionPath` and `setTextPath` patch ops.
+- Media management: the Project bin shows each file's frame rate, codecs,
+  audio channels and size (ffprobe), searches and filters by them, by tag,
+  favorite, collection or usage, and finds every place a file is used.
+  Agents use the `updateMedia`, `setCollection` and `removeCollection` patch ops.
 - Compositions (nested sequences): a timeline of its own, placed as one clip
   that transforms, masks, grades and blends like a picture while its media
   plays and exports; nests 4 deep, opens on the timeline, precompose a

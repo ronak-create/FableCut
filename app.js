@@ -438,6 +438,7 @@ function showClipCtxMenu(clientX, clientY, c) {
     item("Parent to a new null", "", parentSelectionToNull, locked ? "Locked — unlock to change" : null);
   item("Precompose", "", precomposeSelection, locked ? "Locked — unlock to change" : null);
   if (c.kind === "comp") item("Open composition", "", () => enterComp(c.compId, c));
+  if (c.mediaId || c.kind === "comp") item("Reveal in project", "", () => revealInProject(c));
   const linked = selectedClips().some((x) => x.linkGroup || x.linkedId);
   if (linked) item("Unlink audio / video", "Ctrl+L", toggleLinkSelected, locked ? "Locked — unlock to change" : null);
   else if (c.kind === "video" || c.kind === "audio") {
@@ -757,6 +758,8 @@ const $ = (id) => document.getElementById(id);
 const els = {
   binList: $("binList"), binEmpty: $("binEmpty"), fileInput: $("fileInput"),
   binTabs: $("binTabs"), libList: $("libList"), toast: $("toast"),
+  binTools: $("binTools"), binSearch: $("binSearch"), binFilter: $("binFilter"), binSort: $("binSort"),
+  binSortDir: $("binSortDir"), binViewBtn: $("binViewBtn"),
   preview: $("preview"), tcCurrent: $("tcCurrent"), tcTotal: $("tcTotal"),
   tcIo: $("tcIo"), tcIn: $("tcIn"), tcOut: $("tcOut"), tcDur: $("tcDur"),
   btnPlay: $("btnPlay"), inspector: $("inspector"),
@@ -1238,6 +1241,23 @@ function normalizeWorkArea(i, o, t0 = TIMELINE_START_TIME) {
   }
   return { inPoint, outPoint };
 }
+/* Project-bin media management: metadata, search / filter / sort, tags,
+   collections and usage live in media-lib.js (shared with the agent ops). */
+const MediaLib = self.FableCutMedia;
+const BIN_PREFS_KEY = "fablecut.binPrefs";
+const binView = (() => {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(BIN_PREFS_KEY) || "{}") || {}; } catch { }
+  return {
+    q: "", filter: "",   // per session: search text and the "Show" filter
+    sort: MediaLib.SORT_KEYS.includes(saved.sort) ? saved.sort : "name",
+    dir: saved.dir === "desc" ? "desc" : "asc",
+    list: saved.list === true,   // list view: metadata columns
+  };
+})();
+function saveBinPrefs() {
+  try { localStorage.setItem(BIN_PREFS_KEY, JSON.stringify({ sort: binView.sort, dir: binView.dir, list: binView.list })); } catch { }
+}
 function getFolder(id) {
   return id ? project.folders.find((f) => f.id === id) : null;
 }
@@ -1261,17 +1281,20 @@ function normalizeFolders(list) {
 }
 function normalizeMediaEntry(m) {
   if (!m || typeof m !== "object") return m;
-  return { ...m, folderId: m.folderId || null };
+  const out = { ...m, folderId: m.folderId || null };
+  const tags = MediaLib.normalizeTags(m.tags);
+  if (tags.length) out.tags = tags; else delete out.tags;
+  if (out.favorite !== true) delete out.favorite;
+  return out;
 }
 function folderChildren(parentId) {
   return project.folders
     .filter((f) => (f.parentId || null) === (parentId || null))
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
 }
-function mediaInFolder(folderId) {
-  return project.media
-    .filter((m) => (m.folderId || null) === (folderId || null))
-    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+function mediaInFolder(folderId, ctx) {
+  return MediaLib.sortMedia(project.media.filter((m) => (m.folderId || null) === (folderId || null)),
+    binView.sort, binView.dir, ctx);
 }
 /* True if ancestorId is the same as nodeId or an ancestor of nodeId. */
 function isSelfOrFolderAncestor(ancestorId, nodeId) {
@@ -1439,6 +1462,7 @@ function applyProject(data, opts = {}) {
     revision: data.revision || 0,
     folders: normalizeFolders(data.folders),
     media: (data.media || []).map(normalizeMediaEntry),
+    collections: MediaLib.normalizeCollections(data.collections, data.media || []),
     clips: data.clips || [],
     markers: normalizeMarkers(data.markers),
     inPoint: wa.inPoint,
@@ -1568,8 +1592,12 @@ function projectJSONHere() {
     folders: (folders || []).map(({ id, name, parentId, open }) =>
       ({ id, name, parentId: parentId || null, open: open !== false })),
     tracks: serializeTracks(),
-    media: media.filter((m) => !m.transient).map(({ id, name, kind, src, duration, width, height, folderId, derivedFrom, denoise }) => {
+    media: media.filter((m) => !m.transient).map((m) => {
+      const { id, name, kind, src, duration, width, height, folderId, derivedFrom, denoise } = m;
       const mo = { id, name, kind, src, duration, width, height, folderId: folderId || null };
+      for (const k of MediaLib.INFO_KEYS) if (m[k] != null) mo[k] = m[k];
+      if (m.favorite === true) mo.favorite = true;
+      if (m.tags && m.tags.length) mo.tags = m.tags.slice();
       if (derivedFrom) { mo.derivedFrom = derivedFrom; if (denoise) mo.denoise = denoise; }
       return mo;
     }),
@@ -1579,6 +1607,8 @@ function projectJSONHere() {
     outPoint: outPoint == null ? null : outPoint,
     disabledTracks: normalizeDisabledTracks(disabledTracks),
   };
+  const collections = MediaLib.normalizeCollections(project.collections, out.media);
+  if (collections.length) out.collections = collections;
   const locked = normalizeDisabledTracks(project.lockedTracks);
   const untargeted = normalizeDisabledTracks(project.untargetedTracks);
   if (locked.length) out.lockedTracks = locked;
@@ -1674,6 +1704,7 @@ async function probeMissingMeta() {
   }
   if (changed) { renderBin(); scheduleSave(); }
   state.dirtyTimeline = true;
+  refreshMediaInfo();
 }
 function probeAV(src, kind) {
   return new Promise((resolve, reject) => {
@@ -1817,6 +1848,7 @@ async function importFiles(fileList) {
     added++;
   }
   renderBin(); scheduleSave();
+  refreshMediaInfo(addedMedia);
   if (!added && skipped)
     toast("Couldn't import — unsupported or unreadable file type");
   else if (skipped)
@@ -1895,12 +1927,15 @@ async function importFromUrl(url) {
 }
 
 function renderBin() {
-  els.binList.querySelectorAll(".bin-item, .bin-folder, .bin-drop-root, .comp-item").forEach((n) => n.remove());
+  els.binList.querySelectorAll(".bin-item, .bin-folder, .bin-drop-root, .comp-item, .bin-filterbar, .bin-colhead, .bin-noresult").forEach((n) => n.remove());
+  syncBinTools();
   const comps = project.comps || [];
   const empty = !project.media.length && !project.folders.length && !comps.length;
   els.binEmpty.style.display = empty ? "" : "none";
+  els.binList.classList.toggle("list-view", binView.list && !empty);
   if (empty) return;
-  for (const comp of comps) els.binList.appendChild(makeCompItem(comp));
+  const ctx = binCtx();
+  const flat = !!(binView.q.trim() || binView.filter);   // searching / filtering → one flat list of hits
 
   const clearBinDropHints = () => {
     els.binList.querySelectorAll(".bin-drop-over").forEach((n) => n.classList.remove("bin-drop-over"));
@@ -1957,26 +1992,44 @@ function renderBin() {
 
   const makeMediaItem = (m, depth) => {
     const item = document.createElement("div");
-    item.className = "bin-item";
+    item.className = "bin-item" + (binView.list ? " bin-row" : "");
     item.draggable = true;
     item.dataset.mediaId = m.id;
-    item.style.setProperty("--bin-depth", depth);
+    item.style.setProperty("--bin-depth", flat ? 0 : depth);
     const aux = runtime.mediaAux.get(m.id) || {};
     const icon = mediaKindIcon(m.kind, "🎞");
     const thumbSrc = aux.thumb || (m.kind === "image" || m.kind === "svg" ? m.src : null);
-    item.innerHTML = `
-      <div class="bin-thumb"></div>
-      <div class="bin-meta">
-        <div class="bin-name"></div>
-        <div class="bin-sub">${m.kind}${m.duration ? " · " + fmt(m.duration) : ""}</div>
-      </div>
-      <span class="bin-del" title="Remove (and its clips)">✕</span>`;
+    const uses = ctx.usage.get(m.id) || 0;
+    const folder = flat && m.folderId ? getFolder(m.folderId) : null;
+    const usesHtml = `<button type="button" class="bin-uses${uses ? "" : " none"}" title="${uses ? `Used ${uses}× — click to find every instance` : "Not used on the timeline"}">${uses}</button>`;
+    const favHtml = `<button type="button" class="bin-fav${m.favorite ? " on" : ""}" title="${m.favorite ? "Favorite — click to unstar" : "Mark as favorite"}" aria-pressed="${!!m.favorite}">${m.favorite ? "★" : "☆"}</button>`;
+    if (binView.list) {
+      const cell = (v, cls = "") => `<span class="bin-cell${cls}">${escapeHtml(v || "—")}</span>`;
+      item.innerHTML = `
+        <span class="bin-cell bin-cell-name">${favHtml}<span class="bin-thumb sm"></span><span class="bin-name"></span></span>
+        ${cell(MediaLib.fmtDur(m.duration), " num c-duration")}${cell(MediaLib.fmtRes(m), " num c-resolution")}${cell(MediaLib.fmtFps(m.fps), " num c-fps")}
+        ${cell(m.codec, " c-codec")}${cell(MediaLib.fmtAudio(m), " c-audio")}${cell(MediaLib.fmtSize(m.size), " num c-size")}
+        <span class="bin-cell num c-usage">${usesHtml}</span>
+        <span class="bin-del" title="Remove (and its clips)">✕</span>`;
+    } else {
+      const sub = [folder ? "📁 " + folder.name : "", m.kind, m.duration ? fmt(m.duration) : "", MediaLib.fmtRes(m), m.fps ? MediaLib.fmtFps(m.fps) + " fps" : ""]
+        .filter(Boolean).join(" · ");
+      item.innerHTML = `
+        <div class="bin-thumb"></div>
+        <div class="bin-meta">
+          <div class="bin-name"></div>
+          <div class="bin-sub">${escapeHtml(sub)}</div>
+          ${m.tags && m.tags.length ? `<div class="bin-tags">${m.tags.map((t) => `<span class="bin-tag">#${escapeHtml(t)}</span>`).join("")}</div>` : ""}
+        </div>
+        <div class="bin-side">${favHtml}${usesHtml}</div>
+        <span class="bin-del" title="Remove (and its clips)">✕</span>`;
+    }
     const thumbEl = item.querySelector(".bin-thumb");
     if (thumbSrc) thumbEl.style.backgroundImage = `url(${JSON.stringify(thumbSrc)})`;
     else thumbEl.textContent = icon;
     const nameEl = item.querySelector(".bin-name");
     nameEl.textContent = m.name;
-    nameEl.title = m.name;
+    item.title = [m.name, MediaLib.describe(m), m.tags && m.tags.length ? m.tags.map((t) => "#" + t).join(" ") : ""].filter(Boolean).join("\n");
     item.addEventListener("dragstart", (e) => {
       runtime.binDragFolderId = null;
       e.dataTransfer.setData("text/fablecut-media", m.id);
@@ -1991,13 +2044,14 @@ function renderBin() {
     // Don't bubble to the root drop zone while hovering a media row
     item.addEventListener("dragover", (e) => e.stopPropagation());
     item.addEventListener("click", (e) => {
-      if (e.target.closest(".bin-del")) return;
+      if (e.target.closest(".bin-del, .bin-fav, .bin-uses")) return;
       if (e.ctrlKey || e.metaKey) return; // reserved for import
       if (!getSetting("linkSelect")) return;
       e.preventDefault();
       selectClipsByMediaId(m.id);
     });
-    item.addEventListener("dblclick", () => {
+    item.addEventListener("dblclick", (e) => {
+      if (e.target.closest(".bin-del, .bin-fav, .bin-uses")) return;
       // Double-click loads Source (single-click only selects when link-select is on).
       if (state.source.mediaId === m.id) {
         setMonitorMode("source");
@@ -2006,17 +2060,16 @@ function renderBin() {
       }
       if (getSetting("linkSelect")) flashMonitorAttention();
     });
+    item.addEventListener("contextmenu", (e) => { e.preventDefault(); e.stopPropagation(); showMediaMenu(e.clientX, e.clientY, m); });
+    item.querySelector(".bin-fav").addEventListener("click", (e) => { e.stopPropagation(); setMediaFavorite([m.id], !m.favorite); });
+    item.querySelector(".bin-uses").addEventListener("click", (e) => {
+      e.stopPropagation();
+      const r = e.currentTarget.getBoundingClientRect();
+      showMediaInstances(m, r.left, r.bottom + 4);
+    });
     item.querySelector(".bin-del").addEventListener("click", (e) => {
       e.stopPropagation();
-      if (state.compCtx && (state.compCtx.root.clips || []).some((c) => c.mediaId === m.id)) { toast("It's used on the main timeline — go back to Main to delete it"); return; }
-      pushUndo(JSON.stringify({ clips: project.clips, markers: project.markers || [], comps: project.comps || [], media: project.media }));   // undo brings the media back too
-      project.media = project.media.filter((x) => x.id !== m.id);
-      project.clips = project.clips.filter((c) => c.mediaId !== m.id);
-      // and its clips inside comps (and on the main timeline while a comp is open)
-      project.comps = (project.comps || []).map((cp) => ({ ...cp, clips: (cp.clips || []).filter((c) => c.mediaId !== m.id) }));
-      runtime.compGen = (runtime.compGen || 0) + 1;
-      if (state.source.mediaId === m.id) clearSource();
-      renderBin(); scheduleSave(); renderInspector();
+      removeMediaFromBin(m);
     });
     return item;
   };
@@ -2075,18 +2128,363 @@ function renderBin() {
       els.binList.appendChild(row);
       if (f.open) renderLevel(f.id, depth + 1);
     }
-    for (const m of mediaInFolder(parentId)) els.binList.appendChild(makeMediaItem(m, depth));
+    for (const m of mediaInFolder(parentId, ctx)) els.binList.appendChild(makeMediaItem(m, depth));
   };
 
-  renderLevel(null, 0);
-
-  // Root drop zone at the bottom so items can be moved out of folders
-  const root = document.createElement("div");
-  root.className = "bin-drop-root";
-  root.textContent = "Drop here to move to root";
-  bindFolderDropTarget(root, null);
-  els.binList.appendChild(root);
+  if (flat) {
+    const hits = MediaLib.query(project.media, binView, ctx);
+    els.binList.appendChild(makeFilterBar(hits.length));
+    if (binView.list) els.binList.appendChild(makeColumnHead());
+    const q = binView.q.trim().toLowerCase();
+    if (!binView.filter) for (const comp of comps) if (q && String(comp.name).toLowerCase().includes(q)) els.binList.appendChild(makeCompItem(comp));
+    for (const m of hits) els.binList.appendChild(makeMediaItem(m, 0));
+    if (!hits.length) {
+      const none = document.createElement("div");
+      none.className = "bin-noresult";
+      none.textContent = "No media matches.";
+      els.binList.appendChild(none);
+    }
+  } else {
+    if (binView.list) els.binList.appendChild(makeColumnHead());
+    for (const comp of comps) els.binList.appendChild(makeCompItem(comp));
+    renderLevel(null, 0);
+    // Root drop zone at the bottom so items can be moved out of folders
+    const root = document.createElement("div");
+    root.className = "bin-drop-root";
+    root.textContent = "Drop here to move to root";
+    bindFolderDropTarget(root, null);
+    els.binList.appendChild(root);
+  }
   syncBinSelectionFromTimeline();
+}
+
+/* ── Project bin: media management ──
+   Search, the Show filter, sort, list view, favorites, tags, collections,
+   usage counts, find instances, reveal in project, server-probed metadata. */
+/** The whole document as it stands now — with an open comp's live clips written into it. */
+function usageDoc() {
+  if (!state.compCtx) return project;
+  const id = compCtxId();
+  return {
+    media: project.media,
+    clips: state.compCtx.root.clips || [],
+    comps: (project.comps || []).map((c) => (c.id === id ? { ...c, clips: project.clips } : c)),
+  };
+}
+function binCtx() {
+  return { usage: MediaLib.usageCounts(usageDoc()), collections: project.collections || [] };
+}
+function getCollection(id) { return (project.collections || []).find((c) => c.id === id) || null; }
+
+/* Fill the Show / Sort controls from the project (tags and collections change). */
+function syncBinTools() {
+  const tools = els.binTools;
+  if (!tools) return;
+  const tags = MediaLib.allTags(project.media);
+  const cols = project.collections || [];
+  // a filter whose tag / collection is gone falls back to everything
+  const f = binView.filter;
+  if ((f.startsWith("tag:") && !tags.some((t) => t.toLowerCase() === f.slice(4).toLowerCase())) ||
+    (f.startsWith("col:") && !getCollection(f.slice(4)))) binView.filter = "";
+  const opt = (v, label) => `<option value="${escapeHtml(v)}"${v === binView.filter ? " selected" : ""}>${escapeHtml(label)}</option>`;
+  const html = opt("", "All media") + opt("fav", "★ Favorites") + opt("used", "Used in the edit") + opt("unused", "Unused") +
+    `<optgroup label="Kind">${MediaLib.KINDS.map((k) => opt("kind:" + k, k[0].toUpperCase() + k.slice(1))).join("")}</optgroup>` +
+    (cols.length ? `<optgroup label="Collections">${cols.map((c) => opt("col:" + c.id, c.name + ` (${c.media.length})`)).join("")}</optgroup>` : "") +
+    (tags.length ? `<optgroup label="Tags">${tags.map((t) => opt("tag:" + t, "#" + t)).join("")}</optgroup>` : "");
+  if (els.binFilter.innerHTML !== html) els.binFilter.innerHTML = html;
+  els.binFilter.value = binView.filter;
+  els.binFilter.classList.toggle("on", !!binView.filter);
+  els.binSort.value = binView.sort;
+  els.binSortDir.textContent = binView.dir === "desc" ? "↓" : "↑";
+  els.binSortDir.title = binView.dir === "desc" ? "Descending — click for ascending" : "Ascending — click for descending";
+  els.binViewBtn.classList.toggle("on", binView.list);
+  els.binViewBtn.title = binView.list ? "Thumbnail view" : "List view: metadata columns";
+  if (els.binSearch.value !== binView.q && document.activeElement !== els.binSearch) els.binSearch.value = binView.q;
+}
+function setBinFilter(filter) {
+  binView.filter = filter || "";
+  renderBin();
+}
+/* The strip above search / filter results: how many, the active collection's actions, Clear. */
+function makeFilterBar(n) {
+  const bar = document.createElement("div");
+  bar.className = "bin-filterbar";
+  const col = binView.filter.startsWith("col:") ? getCollection(binView.filter.slice(4)) : null;
+  bar.innerHTML = `<span class="bin-filter-count">${n} of ${project.media.length}</span>` +
+    (col ? `<span class="bin-filter-name" title="Collection">▣ ${escapeHtml(col.name)}</span>
+      <button type="button" class="btn tiny" data-col-rename>Rename</button>
+      <button type="button" class="btn tiny" data-col-delete title="Delete the collection (keeps the media)">Delete</button>` : "") +
+    `<button type="button" class="btn tiny" data-clear title="Show everything (Esc in the search box)">Clear</button>`;
+  bar.querySelector("[data-clear]").addEventListener("click", () => { binView.q = ""; els.binSearch.value = ""; setBinFilter(""); });
+  if (col) {
+    bar.querySelector("[data-col-rename]").addEventListener("click", (e) => {
+      const r = e.currentTarget.getBoundingClientRect();
+      promptBinText(r.left, r.bottom + 4, "Collection name", col.name, (name) => { col.name = name.slice(0, 80); scheduleSave(); renderBin(); });
+    });
+    bar.querySelector("[data-col-delete]").addEventListener("click", () => {
+      project.collections = (project.collections || []).filter((c) => c.id !== col.id);
+      binView.filter = "";
+      scheduleSave(); renderBin();
+      toast(`Deleted the collection “${col.name}” — its media stay in the bin`);
+    });
+  }
+  return bar;
+}
+/* List view header: click a column to sort by it (again to flip the direction). */
+const BIN_COLUMNS = [["name", "Name"], ["duration", "Duration"], ["resolution", "Resolution"], ["fps", "FPS"],
+  ["codec", "Codec"], ["audio", "Audio"], ["size", "Size"], ["usage", "Uses"]];
+function makeColumnHead() {
+  const head = document.createElement("div");
+  head.className = "bin-colhead bin-row";
+  for (const [key, label] of BIN_COLUMNS) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "bin-cell c-" + key + (key === "name" ? " bin-cell-name" : "") + (["duration", "resolution", "fps", "size", "usage"].includes(key) ? " num" : "") + (binView.sort === key ? " on" : "");
+    b.textContent = label + (binView.sort === key ? (binView.dir === "desc" ? " ↓" : " ↑") : "");
+    b.addEventListener("click", () => {
+      if (binView.sort === key) binView.dir = binView.dir === "desc" ? "asc" : "desc";
+      else { binView.sort = key; binView.dir = key === "name" || key === "codec" ? "asc" : "desc"; }
+      saveBinPrefs(); renderBin();
+    });
+    head.appendChild(b);
+  }
+  head.appendChild(document.createElement("span"));
+  return head;
+}
+
+/* Server-probed metadata (fps, codecs, channels, sample rate, size) for media
+   that has none yet. Without ffprobe the server still answers the size. */
+let mediaInfoBusy = false;
+async function refreshMediaInfo(list) {
+  if (!state.connected || mediaInfoBusy) return;
+  const todo = (list || project.media).filter((m) => !m.transient && m.size == null && /^\/(media|library)\//.test(m.src || ""));
+  if (!todo.length) return;
+  mediaInfoBusy = true;
+  try {
+    const res = await fetch("/api/media-info", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ srcs: [...new Set(todo.map((m) => m.src))] }),
+    });
+    if (!res.ok) return;
+    const { info } = await res.json();
+    let changed = false;
+    for (const m of project.media) {
+      const i = info && info[m.src];
+      if (!i) continue;
+      for (const k of MediaLib.INFO_KEYS) if (i[k] != null && m[k] !== i[k]) { m[k] = i[k]; changed = true; }
+      if (!(m.width > 0) && i.width > 0) { m.width = i.width; m.height = i.height; changed = true; }
+    }
+    if (changed) { renderBin(); scheduleSave(); if (state.selId) renderInspector(); }
+  } catch { } finally { mediaInfoBusy = false; }
+}
+
+function setMediaFavorite(ids, on) {
+  for (const id of ids) {
+    const m = getMedia(id);
+    if (!m) continue;
+    if (on) m.favorite = true; else delete m.favorite;
+  }
+  scheduleSave(); renderBin();
+}
+function setMediaTags(m, tags) {
+  const t = MediaLib.normalizeTags(tags);
+  if (t.length) m.tags = t; else delete m.tags;
+  scheduleSave(); renderBin();
+}
+function addToCollection(colId, mediaId, on = true) {
+  const col = getCollection(colId);
+  if (!col) return;
+  if (on && !col.media.includes(mediaId)) col.media.push(mediaId);
+  if (!on) col.media = col.media.filter((id) => id !== mediaId);
+  scheduleSave(); renderBin();
+}
+function newCollection(name, mediaIds) {
+  const col = { id: "col_" + uid(), name: String(name).trim().slice(0, 80) || "Collection", media: [...new Set(mediaIds || [])] };
+  project.collections = [...(project.collections || []), col];
+  scheduleSave(); renderBin();
+  return col;
+}
+function removeMediaFromBin(m) {
+  if (state.compCtx && (state.compCtx.root.clips || []).some((c) => c.mediaId === m.id)) { toast("It's used on the main timeline — go back to Main to delete it"); return; }
+  pushUndo(JSON.stringify({ clips: project.clips, markers: project.markers || [], comps: project.comps || [], media: project.media }));   // undo brings the media back too
+  project.media = project.media.filter((x) => x.id !== m.id);
+  project.clips = project.clips.filter((c) => c.mediaId !== m.id);
+  // and its clips inside comps (and on the main timeline while a comp is open)
+  project.comps = (project.comps || []).map((cp) => ({ ...cp, clips: (cp.clips || []).filter((c) => c.mediaId !== m.id) }));
+  runtime.compGen = (runtime.compGen || 0) + 1;
+  if (state.source.mediaId === m.id) clearSource();
+  renderBin(); scheduleSave(); renderInspector();
+}
+
+/* A one-line text prompt as a popover (Enter saves, Esc cancels). */
+function promptBinText(x, y, label, value, onOk, opts = {}) {
+  const pop = document.createElement("div");
+  pop.className = "ctx-menu bin-pop";
+  pop.innerHTML = `<label class="bin-pop-label">${escapeHtml(label)}</label>
+    <input type="text" class="bin-pop-input" maxlength="${opts.max || 80}" spellcheck="false">
+    ${opts.hint ? `<div class="bin-pop-hint">${escapeHtml(opts.hint)}</div>` : ""}
+    <div class="bin-pop-chips"></div>
+    <div class="bin-pop-btns"><button type="button" class="btn tiny" data-cancel>Cancel</button><button type="button" class="btn tiny accent" data-ok>${escapeHtml(opts.ok || "OK")}</button></div>`;
+  const input = pop.querySelector("input");
+  input.value = value || "";
+  if (opts.placeholder) input.placeholder = opts.placeholder;
+  const chips = pop.querySelector(".bin-pop-chips");
+  for (const c of opts.chips || []) {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "bin-tag chip"; b.textContent = "#" + c;
+    b.title = "Add or remove this tag";
+    b.addEventListener("click", () => {
+      const cur = MediaLib.normalizeTags(input.value);
+      const has = cur.some((t) => t.toLowerCase() === c.toLowerCase());
+      input.value = (has ? cur.filter((t) => t.toLowerCase() !== c.toLowerCase()) : [...cur, c]).join(", ");
+      input.focus();
+    });
+    chips.appendChild(b);
+  }
+  if (!chips.children.length) chips.remove();
+  const ok = () => {
+    const v = input.value.trim();
+    if (!v && !opts.allowEmpty) { input.focus(); return; }
+    hideTrackCtxMenu();
+    onOk(v);
+  };
+  pop.querySelector("[data-ok]").addEventListener("click", ok);
+  pop.querySelector("[data-cancel]").addEventListener("click", () => hideTrackCtxMenu());
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); ok(); }
+    else if (e.key === "Escape") { e.preventDefault(); hideTrackCtxMenu(); }
+    e.stopPropagation();
+  });
+  showPopover(pop, x, y);
+  input.focus(); input.select();
+}
+
+/* Right-click a media item in the Project bin. */
+function showMediaMenu(x, y, m) {
+  hideTrackCtxMenu();
+  closeBinCtxMenu();
+  const menu = document.createElement("div");
+  menu.className = "ctx-menu";
+  const uses = MediaLib.placements(usageDoc(), m.id).length;
+  const item = (label, run, why, keys) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "ctx-item";
+    b.innerHTML = `<span>${escapeHtml(label)}</span>` + (keys ? `<kbd>${escapeHtml(keys)}</kbd>` : "");
+    if (why) { b.disabled = true; b.title = why; } else b.addEventListener("click", () => { hideTrackCtxMenu(); run(); });
+    menu.appendChild(b);
+    return b;
+  };
+  const sep = () => { const d = document.createElement("div"); d.className = "ctx-sep"; menu.appendChild(d); };
+  item("Open in Source", () => loadSourceFromMedia(m));
+  item(`Find timeline instances (${uses})`, () => showMediaInstances(m, x, y), uses ? null : "Not used on the timeline");
+  item("Media info…", () => showMediaInfo(m, x, y));
+  sep();
+  item(m.favorite ? "Remove from favorites" : "Add to favorites", () => setMediaFavorite([m.id], !m.favorite));
+  item("Tags…", () => promptBinText(x, y, `Tags for ${m.name}`, (m.tags || []).join(", "), (v) => setMediaTags(m, v),
+    { allowEmpty: true, max: 400, ok: "Save", placeholder: "interview, b-roll, day 1", hint: "Comma-separated. Search #tag to find them.",
+      chips: MediaLib.allTags(project.media) }));
+  for (const col of project.collections || []) {
+    const inIt = col.media.includes(m.id);
+    item(inIt ? `Remove from “${col.name}”` : `Add to “${col.name}”`, () => addToCollection(col.id, m.id, !inIt));
+  }
+  item("New collection…", () => promptBinText(x, y, "New collection", "", (name) => {
+    const col = newCollection(name, [m.id]);
+    toast(`Added ${m.name} to the collection “${col.name}”`);
+  }, { placeholder: "Selects, Interviews…", ok: "Create" }));
+  sep();
+  item("Remove from project", () => removeMediaFromBin(m));
+  document.body.appendChild(menu);
+  menu.id = "trackCtxMenu";
+  trackCtxMenu = menu;
+  menu.style.left = Math.max(6, Math.min(x, innerWidth - menu.offsetWidth - 6)) + "px";
+  menu.style.top = Math.max(6, Math.min(y, innerHeight - menu.offsetHeight - 6)) + "px";
+}
+
+/* Media info: everything the bin knows about one file. */
+function showMediaInfo(m, x, y) {
+  const doc = usageDoc();
+  const uses = MediaLib.placements(doc, m.id);
+  const folder = m.folderId ? getFolder(m.folderId) : null;
+  const cols = (project.collections || []).filter((c) => c.media.includes(m.id)).map((c) => c.name);
+  const audio = m.audioChannels == null ? "" : m.audioChannels === 0 ? "none" :
+    [m.audioCodec, MediaLib.fmtAudio(m)].filter(Boolean).join(" · ");
+  const rows = [
+    ["Kind", m.kind], ["File", decodeURIComponent(String(m.src || "").split("?")[0])],
+    ["Duration", m.duration > 0 ? MediaLib.fmtDur(m.duration) + ` (${(+m.duration).toFixed(3)} s)` : ""],
+    ["Resolution", MediaLib.fmtRes(m)], ["Frame rate", m.fps ? MediaLib.fmtFps(m.fps) + " fps" : ""],
+    ["Video codec", m.kind === "video" ? m.codec : ""], ["Format", m.kind !== "video" && m.codec ? m.codec : ""],
+    ["Audio", audio], ["Bitrate", m.bitrate ? (m.bitrate >= 1e6 ? (m.bitrate / 1e6).toFixed(1) + " Mb/s" : Math.round(m.bitrate / 1000) + " kb/s") : ""],
+    ["Size", MediaLib.fmtSize(m.size)], ["Used", uses.length ? uses.length + "×" : "not used"],
+    ["Folder", folder ? folder.name : ""], ["Tags", (m.tags || []).map((t) => "#" + t).join(" ")],
+    ["Collections", cols.join(", ")], ["Favorite", m.favorite ? "★ yes" : ""],
+  ].filter(([, v]) => v);
+  const pop = document.createElement("div");
+  pop.className = "ctx-menu bin-pop bin-info";
+  pop.innerHTML = `<div class="bin-pop-title"></div><table>${rows.map(([k, v]) => `<tr><th>${escapeHtml(k)}</th><td>${escapeHtml(v)}</td></tr>`).join("")}</table>` +
+    (m.size == null && state.connected ? `<div class="bin-pop-hint">Reading the file's details…</div>` : "");
+  pop.querySelector(".bin-pop-title").textContent = m.name;
+  showPopover(pop, x, y);
+  if (m.size == null) refreshMediaInfo([m]);
+}
+
+/* Find all timeline instances: every placement (main timeline and inside comps); click one to go there. */
+function showMediaInstances(m, x, y) {
+  const list = MediaLib.placements(usageDoc(), m.id);
+  if (!list.length) { toast(`${m.name} isn't used on the timeline`); return; }
+  // select the instances on the timeline that is open now
+  const here = compCtxId();
+  const local = list.filter((p) => p.comp === here).map((p) => p.clipId);
+  if (local.length) selectClipsByMediaId(m.id);
+  const pop = document.createElement("div");
+  pop.className = "ctx-menu bin-pop bin-instances";
+  pop.innerHTML = `<div class="bin-pop-title"></div><div class="bin-pop-hint">${list.length} instance${list.length === 1 ? "" : "s"} — click one to jump to it</div>`;
+  pop.querySelector(".bin-pop-title").textContent = m.name;
+  for (const p of list) {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "ctx-item";
+    b.innerHTML = `<span>${escapeHtml(p.comp ? `▣ ${p.compName}` : "Main")} · ${escapeHtml(p.track)}</span><kbd>${fmt(p.start)} → ${fmt(p.start + p.duration)}</kbd>`;
+    b.addEventListener("click", () => { goToPlacement(p); });
+    pop.appendChild(b);
+  }
+  showPopover(pop, x, y);
+}
+function goToPlacement(p) {
+  const here = compCtxId();
+  if (p.comp !== here) {
+    if (state.compCtx) exitComp(state.compCtx.path.length);
+    if (p.comp) enterComp(p.comp);
+  }
+  const c = getClip(p.clipId);
+  if (!c) return;
+  if (isSourceMode()) setMonitorMode("program");
+  setSelection([...withLinked([c])].map((x) => x.id), c.id);
+  setTime(c.start);
+  revealTime(c.start);
+}
+
+/* Reveal in project: show a clip's media (or comp) in the Project bin. */
+function revealInProject(c) {
+  const id = c.kind === "comp" ? null : c.mediaId;
+  if (state.binTab !== "project") setBinTab("project");
+  let sel;
+  if (id) {
+    const m = getMedia(id);
+    if (!m) { toast("Its media is no longer in the project"); return; }
+    if ((binView.q || binView.filter) && !MediaLib.query([m], binView, binCtx()).length) { binView.q = ""; binView.filter = ""; }
+    for (let f = getFolder(m.folderId); f; f = getFolder(f.parentId)) f.open = true;
+    renderBin();
+    sel = `.bin-item[data-media-id="${CSS.escape(id)}"]`;
+  } else if (c.compId) {
+    binView.q = ""; binView.filter = "";
+    renderBin();
+    sel = `.comp-item[data-comp-id="${CSS.escape(c.compId)}"]`;
+  }
+  const el = sel && els.binList.querySelector(sel);
+  if (!el) return;
+  el.scrollIntoView({ block: "nearest" });
+  el.classList.remove("bin-flash");
+  void el.offsetWidth;
+  el.classList.add("bin-flash");
 }
 
 /* Open the native file dialog. Windows anchors it to the <input>'s screen
@@ -2101,6 +2499,17 @@ function openFileImport(clientX, clientY) {
   }
   setTimeout(() => input.click(), 0);
 }
+
+/* Bin search / Show / Sort / view controls. */
+els.binSearch.addEventListener("input", () => { binView.q = els.binSearch.value; renderBin(); });
+els.binSearch.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") { e.preventDefault(); binView.q = ""; els.binSearch.value = ""; renderBin(); els.binSearch.blur(); }
+  e.stopPropagation();
+});
+els.binFilter.addEventListener("change", () => setBinFilter(els.binFilter.value));
+els.binSort.addEventListener("change", () => { binView.sort = els.binSort.value; saveBinPrefs(); renderBin(); });
+els.binSortDir.addEventListener("click", () => { binView.dir = binView.dir === "desc" ? "asc" : "desc"; saveBinPrefs(); renderBin(); });
+els.binViewBtn.addEventListener("click", () => { binView.list = !binView.list; saveBinPrefs(); renderBin(); });
 
 /* Ctrl/Cmd+click in the Project bin opens the file importer. */
 els.binList.addEventListener("click", (e) => {
@@ -2229,6 +2638,7 @@ function setBinTab(tab) {
   const isProj = tab === "project";
   els.binList.classList.toggle("hidden", !isProj);
   els.libList.classList.toggle("hidden", isProj);
+  if (els.binTools) els.binTools.classList.toggle("hidden", !isProj);
   if (tab === "shapes") renderShapesTab();
   else if (tab === "templates") { renderTemplatesTab(); fetchSaved("templates").then(() => { if (state.binTab === "templates") renderTemplatesTab(); }); }
   else if (!isProj) fetchLibrary(tab).then(renderLibrary);
@@ -9288,7 +9698,7 @@ function commitCompCtx() {
   const comps = (cur.comps || []).map((c) => (c.id === id
     ? { ...c, clips: cur.clips, tracks: cur.tracks, disabledTracks: cur.disabledTracks && cur.disabledTracks.length ? cur.disabledTracks : undefined, markers: cur.markers && cur.markers.length ? cur.markers : undefined, background: c.background }
     : c));
-  x.root = { ...x.root, media: cur.media, folders: cur.folders, fps: cur.fps, master: cur.master, buses: cur.buses, revision: cur.revision, comps };
+  x.root = { ...x.root, media: cur.media, folders: cur.folders, collections: cur.collections, fps: cur.fps, master: cur.master, buses: cur.buses, revision: cur.revision, comps };
   return x.root;
 }
 function enterComp(compId, viaClip) {
@@ -9382,6 +9792,7 @@ function addCompClip(comp, trackId, at) {
 function makeCompItem(comp) {
   const item = document.createElement("div");
   item.className = "bin-item comp-item";
+  item.dataset.compId = comp.id;
   item.draggable = true;
   const used = CompLib.usages(state.compCtx ? state.compCtx.root : project, comp.id).length;
   item.innerHTML = `<div class="bin-thumb comp-thumb">▣</div>

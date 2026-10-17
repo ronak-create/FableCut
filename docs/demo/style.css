@@ -3725,3 +3725,186 @@ input[type="range"].cq-hue {
   border-radius: 3px;
   height: 6px;
 }
+
+/* ── Project bin: search, filter, sort, list view, tags, usage ── */
+.bin-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px 8px 0;
+  align-items: center;
+}
+.bin-tools.hidden { display: none; }
+.bin-tools .bin-search {
+  flex: 1 1 100%;
+  min-width: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text);
+  font: 12px "Segoe UI", sans-serif;
+  padding: 4px 8px;
+  outline: none;
+  user-select: text;
+}
+.bin-tools .bin-search:focus { border-color: var(--accent); }
+.bin-tools select {
+  flex: 1 1 0;
+  min-width: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text);
+  font: 11px "Segoe UI", sans-serif;
+  padding: 3px 4px;
+}
+.bin-tools select.on { border-color: var(--accent); color: #cfc8ff; }
+.bin-tools .btn.tiny { flex: none; min-width: 26px; }
+.bin-tools .btn.tiny.on { border-color: var(--accent); color: #cfc8ff; }
+
+.bin-filterbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  color: var(--dim);
+  padding: 0 2px 2px;
+}
+.bin-filter-count { font-variant-numeric: tabular-nums; }
+.bin-filter-name { color: #cfc8ff; font-weight: 600; }
+.bin-filterbar [data-clear] { margin-left: auto; }
+.bin-noresult { color: var(--dim); font-size: 12px; text-align: center; padding: 14px 6px; }
+
+.bin-side {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.bin-fav,
+.bin-uses {
+  border: 0;
+  background: transparent;
+  color: var(--dim);
+  cursor: pointer;
+  font: 12px/1 "Segoe UI", sans-serif;
+  padding: 2px 3px;
+  border-radius: 4px;
+}
+.bin-fav { opacity: .45; font-size: 13px; }
+.bin-item:hover .bin-fav { opacity: .9; }
+.bin-fav.on { color: #ffd166; opacity: 1; }
+.bin-fav:hover { background: #ffffff10; }
+.bin-uses {
+  min-width: 18px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  background: #2a2a33;
+  color: var(--text);
+}
+.bin-uses.none { background: transparent; color: #5c5c66; cursor: default; }
+.bin-uses:not(.none):hover { background: #7b6cff33; color: #fff; }
+.bin-tags { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 2px; }
+.bin-tag {
+  font-size: 10px;
+  line-height: 1.4;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: #7b6cff22;
+  color: #cfc8ff;
+  white-space: nowrap;
+}
+.bin-tag.chip { border: 0; cursor: pointer; font-family: inherit; }
+.bin-tag.chip:hover { background: #7b6cff44; }
+.bin-flash { animation: bin-flash 1.2s ease-out; }
+@keyframes bin-flash {
+  0%, 40% { border-color: var(--accent); background: #7b6cff3a; box-shadow: 0 0 0 2px #7b6cff66; }
+}
+
+/* list view: one row of metadata columns per file */
+/* columns drop out as the bin narrows (widen the panel to see them all) */
+.bin-list.list-view {
+  container-type: inline-size;
+  --bin-cols: minmax(140px, 1fr) 62px 76px 42px 50px 92px 54px 30px 14px;
+}
+.bin-list.list-view .bin-row {
+  display: grid;
+  grid-template-columns: var(--bin-cols);
+  gap: 6px;
+  align-items: center;
+  padding: 3px 6px;
+}
+@container (max-width: 640px) {
+  .bin-row .c-codec, .bin-row .c-audio { display: none; }
+  .bin-row { --bin-cols: minmax(120px, 1fr) 62px 76px 42px 54px 30px 14px; }
+}
+@container (max-width: 470px) {
+  .bin-row .c-fps, .bin-row .c-size { display: none; }
+  .bin-row { --bin-cols: minmax(110px, 1fr) 62px 76px 30px 14px; }
+}
+@container (max-width: 330px) {
+  .bin-row .c-resolution { display: none; }
+  .bin-row { --bin-cols: minmax(100px, 1fr) 58px 30px 14px; }
+}
+.bin-list.list-view .bin-item.bin-row { padding-left: calc(6px + var(--bin-depth, 0) * 14px); }
+.bin-cell {
+  min-width: 0;
+  font-size: 11px;
+  color: var(--dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bin-cell.num { font-variant-numeric: tabular-nums; text-align: right; }
+.bin-cell-name { display: flex; align-items: center; gap: 5px; color: var(--text); }
+.bin-cell-name .bin-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.bin-thumb.sm { width: 28px; height: 18px; font-size: 11px; border-radius: 3px; }
+.bin-colhead {
+  position: sticky;
+  top: -8px;
+  z-index: 2;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+.bin-colhead .bin-cell {
+  border: 0;
+  background: transparent;
+  font: 600 10px "Segoe UI", sans-serif;
+  text-transform: uppercase;
+  letter-spacing: .3px;
+  cursor: pointer;
+  padding: 4px 0;
+  text-align: left;
+}
+.bin-colhead .bin-cell.num { text-align: right; }
+.bin-colhead .bin-cell:hover,
+.bin-colhead .bin-cell.on { color: #cfc8ff; }
+.bin-list.list-view .bin-folder { padding-top: 3px; padding-bottom: 3px; }
+.bin-list.list-view .bin-del { align-self: center; }
+
+/* bin popovers: prompt, media info, instances */
+.ctx-sep { height: 1px; background: var(--border); margin: 4px 2px; }
+.bin-pop { padding: 8px; min-width: 230px; max-width: 340px; }
+.bin-pop-label, .bin-pop-title { display: block; font-size: 12px; font-weight: 600; color: #e8e8ee; margin-bottom: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bin-pop-input {
+  width: 100%;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text);
+  font: 12px "Segoe UI", sans-serif;
+  padding: 5px 7px;
+  outline: none;
+  user-select: text;
+}
+.bin-pop-input:focus { border-color: var(--accent); }
+.bin-pop-hint { font-size: 11px; color: var(--dim); margin: 5px 0 2px; }
+.bin-pop-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; max-height: 90px; overflow-y: auto; }
+.bin-pop-btns { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
+.bin-info table { border-collapse: collapse; font-size: 11px; width: 100%; }
+.bin-info th { color: var(--dim); font-weight: 400; text-align: left; padding: 2px 10px 2px 0; vertical-align: top; white-space: nowrap; }
+.bin-info td { color: var(--text); padding: 2px 0; word-break: break-all; user-select: text; }
+.bin-instances { max-height: 60vh; overflow-y: auto; }
+.bin-instances .ctx-item kbd { font-variant-numeric: tabular-nums; }
