@@ -253,8 +253,10 @@ const DRY_RUN_TIMEOUT_MS = 15_000;
 function dryRunProfile(profile, { fps = 30, hasAudio = true } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fablecut-dry-"));
   const out = path.join(dir, `probe${profile.extension}`);
+  // 256×144: hardware encoders refuse tiny frames (NVENC's minimum is about
+  // 145×49), and a profile that can't pass the dry run can never export.
   const args = ["-y", "-hide_banner", "-f", "lavfi",
-    "-i", `color=c=black:s=64x64:r=${fps}:d=0.1`];
+    "-i", `color=c=black:s=256x144:r=${fps}:d=0.1`];
   if (hasAudio) args.push("-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo");
   args.push("-t", "0.1", ...withInputColor(profile, "bt709"), out);
   return new Promise((resolve) => {
@@ -283,8 +285,12 @@ function dryRunProfile(profile, { fps = 30, hasAudio = true } = {}) {
     proc.stderr.on("data", (d) => { stderr = (stderr + d).slice(-4000); });
     proc.on("close", (code) => {
       if (code === 0) { finish({ ok: true }); return; }
-      const lines = stderr.trim().split("\n").filter(Boolean);
-      finish({ ok: false, error: lines.slice(-3).join(" · ") || `ffmpeg exited ${code}` });
+      // ffmpeg ends with generic lines ("Conversion failed!"); lead with the ones naming the cause
+      const lines = stderr.trim().split("\n").map((l) => l.trim()).filter(Boolean);
+      const cause = lines.filter((l) => /error|invalid|unknown|not found|unrecognized|failed|minimum|unsupported|no such/i.test(l)
+        && !/^Conversion failed/i.test(l));
+      const picked = cause.length ? cause.slice(0, 2).concat(lines.slice(-1)) : lines.slice(-3);
+      finish({ ok: false, error: [...new Set(picked)].join(" · ") || `ffmpeg exited ${code}` });
     });
   });
 }

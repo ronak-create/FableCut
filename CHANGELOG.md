@@ -15,6 +15,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead (luma levels on 0–1, dominant colours, texture, saturation and
   per-cell motion) for agents without vision. Reading a local file by `path=`
   requires the `X-FableCut-Client` header.
+- **NVIDIA GPU export profiles** `nvenc-h264` and `nvenc-hevc`. They need an
+  NVIDIA card and an ffmpeg built with NVENC.
+
+### Changed
+- **Export decodes video with WebCodecs instead of seeking `<video>`**: about
+  5× faster (95.7 s → 18.8 s on a 28 s 720p project) and frame-exact. Files it
+  can't decode, and background-removal clips, keep the `<video>` path.
+
+### Fixed
+- **Hardware-encoder profiles pass the export dry run.** It probed a 64×64
+  frame, which NVENC refuses; it now uses 256×144 and reports ffmpeg's reason.
 
 ### Changed
 - **Chroma key, temperature, tint and RGB split run on the GPU** (WebGL2), in

@@ -63,6 +63,32 @@
         "-c:a", "pcm_s16le",
         "-shortest"
       ]
+    },
+    "nvenc-h264": {
+      "label": "NVIDIA GPU · H.264",
+      "description": "Encodes on an NVIDIA GPU (NVENC): frees the CPU for rendering. Needs an NVIDIA card and an ffmpeg built with NVENC.",
+      "jpegQuality": 0.95,
+      "extension": ".mp4",
+      "color": { "matrix": "bt709", "primaries": "bt709", "trc": "bt709", "range": "tv" },
+      "args": [
+        "-c:v", "h264_nvenc", "-preset", "p5", "-tune", "hq", "-rc", "vbr", "-cq", "19", "-b:v", "0",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-b:a", "192k",
+        "-movflags", "+faststart", "-shortest"
+      ]
+    },
+    "nvenc-hevc": {
+      "label": "NVIDIA GPU · HEVC",
+      "description": "HEVC on an NVIDIA GPU (NVENC): smaller files than H.264 at similar quality. Needs an NVIDIA card and an ffmpeg built with NVENC.",
+      "jpegQuality": 0.95,
+      "extension": ".mp4",
+      "color": { "matrix": "bt709", "primaries": "bt709", "trc": "bt709", "range": "tv" },
+      "args": [
+        "-c:v", "hevc_nvenc", "-preset", "p5", "-tune", "hq", "-rc", "vbr", "-cq", "21", "-b:v", "0",
+        "-pix_fmt", "yuv420p", "-tag:v", "hvc1",
+        "-c:a", "aac", "-b:a", "192k",
+        "-movflags", "+faststart", "-shortest"
+      ]
     }
   }
 }
