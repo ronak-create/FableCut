@@ -54,6 +54,9 @@ A file marked `OFFLINE` in the compact view or `fablecut_status` is missing
 from `media/`: find it, put it back under `media/` and `relinkMedia` it —
 its clips keep their timing. `replaceMedia` swaps in a different file.
 
+Proxies (`fablecut_proxy`) only make the preview smoother; export, frames and
+scopes always use the originals. Make them only when the user asks.
+
 ## Things that trip people up
 
 - Cut, ripple, trim and insert with the `fablecut_patch_project` edit ops
