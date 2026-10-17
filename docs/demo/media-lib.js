@@ -50,14 +50,14 @@
     if (dur > 0) out.duration = round(dur, 3);
     const br = Number(fmt.bit_rate);
     if (br > 0) out.bitrate = Math.round(br);
+    // stills (png/jpg/webp, gif) report 25/1 — not a frame rate anyone shot at
+    const still = !!v && /^(png|mjpeg|jpeg|webp|bmp|tiff|gif)$/.test(String(v.codec_name || "")) && !(dur > 0 && Number(v.nb_frames) > 1);
     if (v) {
       if (v.codec_name) out.codec = String(v.codec_name);
       let w = Number(v.width) || 0, h = Number(v.height) || 0;
       const rot = Number(((v.side_data_list || []).find((d) => d.rotation != null) || {}).rotation ?? (v.tags && v.tags.rotate)) || 0;
       if (Math.abs(rot) % 180 === 90) [w, h] = [h, w];
       if (w > 0 && h > 0) { out.width = w; out.height = h; }
-      // stills (png/jpg/webp, gif) report 25/1 — not a frame rate anyone shot at
-      const still = /^(png|mjpeg|jpeg|webp|bmp|tiff|gif)$/.test(out.codec || "") && !(dur > 0 && Number(v.nb_frames) > 1);
       const fps = ratio(v.avg_frame_rate) || ratio(v.r_frame_rate);
       if (!still && fps > 0 && fps < 1000) out.fps = round(fps, 3);
     }
@@ -67,7 +67,7 @@
       if (ch > 0) out.audioChannels = ch;
       const sr = Number(a.sample_rate);
       if (sr > 0) out.sampleRate = sr;
-    } else if (v) out.audioChannels = 0;
+    } else if (v && !still) out.audioChannels = 0;   // a video without sound says so; a picture has no audio to speak of
     return out;
   }
 
