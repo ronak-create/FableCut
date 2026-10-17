@@ -186,3 +186,31 @@ test("checkProject normalizes tags, favorites and collections", () => {
   assert.equal(doc.media[1].favorite, undefined);
   assert.deepEqual(doc.collections.find((c) => c.id === "bad"), { id: "bad", name: "Collection", media: [] });
 });
+
+test("usage: a denoised stem in a video's link group counts for its own file, and the video still counts once", () => {
+  const doc = {
+    media: [{ id: "mv", kind: "video" }, { id: "md", kind: "audio", derivedFrom: "mv" }],
+    clips: [
+      { id: "v", mediaId: "mv", kind: "video", track: "V1", start: 0, duration: 4, linkGroup: "g" },
+      { id: "a1", mediaId: "md", kind: "audio", track: "A1", start: 0, duration: 4, linkGroup: "g" },
+      { id: "a2", mediaId: "md", kind: "audio", track: "A2", start: 0, duration: 4, linkGroup: "g" },
+    ],
+  };
+  const u = M.usageCounts(doc);
+  assert.equal(u.get("mv"), 1);
+  assert.equal(u.get("md"), 1, "the cleaned audio file is used once too");
+  assert.deepEqual(M.placements(doc, "md").map((p) => p.clipId), ["a1"]);
+});
+
+test("media-probe answers asynchronously (ffprobe never blocks the server)", async () => {
+  const { probeFile } = require("../media-probe");
+  const fs = require("node:fs"), os = require("node:os"), path = require("node:path");
+  const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "fc-probe-")), "x.bin");
+  fs.writeFileSync(f, "12345");
+  const p = probeFile(f);
+  assert.ok(p instanceof Promise);
+  const info = await p;
+  assert.equal(info.size, 5);
+  assert.equal(await probeFile(f + ".missing"), null);
+  fs.rmSync(path.dirname(f), { recursive: true, force: true });
+});

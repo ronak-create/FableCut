@@ -164,7 +164,8 @@
       const seen = new Set();
       for (const c of clips || []) {
         if (!c.mediaId) continue;
-        const key = c.linkGroup ? "g:" + c.linkGroup : "c:" + c.id;
+        // per file: a denoised stem shares its video's linkGroup but plays another file
+        const key = (c.linkGroup ? "g:" + c.linkGroup : "c:" + c.id) + "|" + c.mediaId;
         if (seen.has(key)) continue;
         seen.add(key);
         n.set(c.mediaId, (n.get(c.mediaId) || 0) + 1);

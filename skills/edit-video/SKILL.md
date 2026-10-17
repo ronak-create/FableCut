@@ -45,7 +45,9 @@ overwriting. On conflict, re-read, re-apply your change, and call it again.
 with its details read from the file: duration, resolution, frame rate, codecs,
 audio channels and size. The compact view's MEDIA lines show them for every
 file (plus tags, favorites and `uses:N`), so read them there instead of shelling
-out to ffprobe. To organize the bin, use `updateMedia` (favorite, tags, folder)
+out to ffprobe. Without ffprobe on the machine only the size is known at first;
+the open editor fills in duration and resolution, so check a field is there
+before relying on it. To organize the bin, use `updateMedia` (favorite, tags, folder)
 and `setCollection`.
 
 ## Things that trip people up

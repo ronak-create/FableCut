@@ -1081,7 +1081,7 @@ async function callTool(name, args, attempt = 0) {
         src: "/media/" + encodeURIComponent(path.basename(target)),
         duration: kind === "image" || kind === "svg" ? undefined : ffprobeDuration(target),
       };
-      Object.assign(entry, infoForEntry(probeFile(target), entry));
+      Object.assign(entry, infoForEntry(await probeFile(target), entry));
       const proj = readProject();
       // import only appends a media entry (never touches clips), so it merges
       // into the live document; keep lastReadRevision in step only if it

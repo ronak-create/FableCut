@@ -2254,9 +2254,10 @@ function makeColumnHead() {
 
 /* Server-probed metadata (fps, codecs, channels, sample rate, size) for media
    that has none yet. Without ffprobe the server still answers the size. */
-let mediaInfoBusy = false;
+let mediaInfoBusy = false, mediaInfoAgain = false;
 async function refreshMediaInfo(list) {
-  if (!state.connected || mediaInfoBusy) return;
+  if (!state.connected) return;
+  if (mediaInfoBusy) { mediaInfoAgain = true; return; }   // run once more when this one ends
   const todo = (list || project.media).filter((m) => !m.transient && m.size == null && /^\/(media|library)\//.test(m.src || ""));
   if (!todo.length) return;
   mediaInfoBusy = true;
@@ -2275,7 +2276,11 @@ async function refreshMediaInfo(list) {
       if (!(m.width > 0) && i.width > 0) { m.width = i.width; m.height = i.height; changed = true; }
     }
     if (changed) { renderBin(); scheduleSave(); if (state.selId) renderInspector(); }
-  } catch { } finally { mediaInfoBusy = false; }
+  } catch { } finally {
+    mediaInfoBusy = false;
+    // files imported (or a Media info opened) meanwhile: everything still without details
+    if (mediaInfoAgain) { mediaInfoAgain = false; refreshMediaInfo(); }
+  }
 }
 
 function setMediaFavorite(ids, on) {
