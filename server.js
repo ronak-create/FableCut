@@ -554,7 +554,7 @@ const server = http.createServer(async (req, res) => {
       }
       if (p === "/api/proxy" && !HAS_FFMPEG) { sendJSON(res, 503, { error: "proxies need ffmpeg on PATH" }); return; }
       const status = {};
-      for (const src of srcs) status[src] = p === "/api/proxy" ? proxies.start(src, body.height) : proxies.status(src);
+      for (const src of srcs) status[src] = p === "/api/proxy" ? await proxies.start(src, body.height) : await proxies.status(src);
       sendJSON(res, 200, { status });
     } catch (e) { sendJSON(res, 400, { error: String(e.message || e) }); }
     return;

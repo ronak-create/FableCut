@@ -9,11 +9,11 @@
    grabs — named after the source file *and its size and mtime*: when the
    original changes, its old proxy simply stops matching.
 
-     createProxies({dir, resolveSrc, probe, broadcast, ffmpeg?}) → {
-       status(src)           → {state:"ready", src:"/proxies/…", height, width?, size}
+     createProxies({dir, resolveSrc, probe, broadcast, ffmpeg?}) → {   (probe: async, media-probe.js)
+       status(src)           → Promise of {state:"ready", src:"/proxies/…", height, width?, size}
                               | {state:"queued"|"running", progress 0…1, height}
                               | {state:"failed", error} | {state:"none"} | null (no such file)
-       start(src, height?)   → status (queued, or ready when one exists at that height)
+       start(src, height?)   → Promise of a status (queued, or ready when one exists at that height)
        remove(src)           → number of proxy files deleted (a running job is stopped)
        file(name)            → the path of a proxy file to serve, or null
      }
@@ -52,17 +52,17 @@ function createProxies({ dir, resolveSrc, probe, broadcast = () => { }, ffmpeg =
   let running = null;
   let fpsModeFlag = ["-fps_mode", "passthrough"];   // ffmpeg ≥ 5.1; older builds get -vsync 0
   const existing = (file) => findProxies(dir, file);
-  function readyStatus(e) {
+  async function readyStatus(e) {
     const full = path.join(dir, e.name);
     let size = 0; try { size = fs.statSync(full).size; } catch { }
-    const info = probe ? probe(full) : null;
+    const info = probe ? await probe(full) : null;
     return { state: "ready", src: "/proxies/" + encodeURIComponent(e.name), height: (info && info.height) || e.height, width: info && info.width, size };
   }
   function jobStatus(j) {
     if (j.state === "failed") return { state: "failed", error: j.error, height: j.height };
     return { state: j.state, progress: Math.round((j.progress || 0) * 1000) / 1000, height: j.height };
   }
-  function status(src) {
+  async function status(src) {
     const file = resolveSrc(src);
     if (!file) return null;
     const j = jobs.get(src);
@@ -70,9 +70,11 @@ function createProxies({ dir, resolveSrc, probe, broadcast = () => { }, ffmpeg =
     const e = existing(file)[0];
     return e ? readyStatus(e) : { state: "none" };
   }
-  function tell(j) { try { broadcast("proxy", JSON.stringify({ src: j.src, status: j.state === "done" ? status(j.src) : jobStatus(j) })); } catch { } }
+  async function tell(j) {
+    try { broadcast("proxy", JSON.stringify({ src: j.src, status: j.state === "done" ? await status(j.src) : jobStatus(j) })); } catch { }
+  }
 
-  function start(src, height = DEFAULT_HEIGHT) {
+  async function start(src, height = DEFAULT_HEIGHT) {
     const file = resolveSrc(src);
     if (!file) return null;
     height = HEIGHTS.includes(+height) ? +height : DEFAULT_HEIGHT;
@@ -100,13 +102,13 @@ function createProxies({ dir, resolveSrc, probe, broadcast = () => { }, ffmpeg =
       "-movflags", "+faststart", "-map_metadata", "-1",
       "-progress", "pipe:1", "-nostats", "-f", "mp4", part];
   }
-  function pump() {
+  async function pump() {
     if (running || !queue.length) return;
     const j = queue.shift();
     if (j.state !== "queued") return pump();
     running = j;
     j.state = "running";
-    const info = probe ? probe(j.file) : null;
+    const info = probe ? await probe(j.file) : null;
     const dur = (info && info.duration) || 0;
     const part = j.out + ".part";
     let err = "", last = 0;

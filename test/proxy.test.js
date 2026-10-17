@@ -24,7 +24,7 @@ function makeClip(file, seconds = 2) {
     "-c:a", "aac", "-shortest", file]);
 }
 
-test("proxy names follow the source version, so a changed original stops matching its old proxy", (t) => {
+test("proxy names follow the source version, so a changed original stops matching its old proxy", async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fablecut-proxy-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const src = path.join(dir, "Shot 1.mp4");
@@ -34,14 +34,14 @@ test("proxy names follow the source version, so a changed original stops matchin
   assert.deepEqual(findProxies(pdir, src), []);
   // what a finished 540p job leaves behind
   const p = createProxies({ dir: pdir, resolveSrc: () => src });
-  assert.deepEqual(p.status("/media/Shot%201.mp4"), { state: "none" });
+  assert.deepEqual(await p.status("/media/Shot%201.mp4"), { state: "none" });
   const st = fs.statSync(src);
   const h = crypto.createHash("sha1").update(path.resolve(src) + "|" + st.size + "|" + Math.round(st.mtimeMs)).digest("hex").slice(0, 10);
   fs.writeFileSync(path.join(pdir, `Shot_1-${h}-540p.mp4`), "proxy");
   fs.writeFileSync(path.join(pdir, `Shot_1-${h}-720p.mp4`), "proxy, bigger");
   assert.deepEqual(findProxies(pdir, src).map((x) => x.height), [720, 540], "largest first");
-  assert.equal(p.status("/media/Shot%201.mp4").state, "ready");
-  assert.match(p.status("/media/Shot%201.mp4").src, /^\/proxies\/Shot_1-[0-9a-f]{10}-720p\.mp4$/);
+  assert.equal((await p.status("/media/Shot%201.mp4")).state, "ready");
+  assert.match((await p.status("/media/Shot%201.mp4")).src, /^\/proxies\/Shot_1-[0-9a-f]{10}-720p\.mp4$/);
   fs.writeFileSync(src, "v2 — re-rendered");
   assert.deepEqual(findProxies(pdir, src), [], "a new version of the file has no proxy yet");
   assert.equal(p.file("../secret.mp4"), null);
