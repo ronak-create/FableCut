@@ -50,6 +50,10 @@ the open editor fills in duration and resolution, so check a field is there
 before relying on it. To organize the bin, use `updateMedia` (favorite, tags, folder)
 and `setCollection`.
 
+A file marked `OFFLINE` in the compact view or `fablecut_status` is missing
+from `media/`: find it, put it back under `media/` and `relinkMedia` it —
+its clips keep their timing. `replaceMedia` swaps in a different file.
+
 ## Things that trip people up
 
 - Cut, ripple, trim and insert with the `fablecut_patch_project` edit ops
