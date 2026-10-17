@@ -472,6 +472,7 @@ const DEFAULT_SETTINGS = {
   webCodecsBitrateMbps: null, // null = auto from canvas size
   webCodecsBitrateMode: "variable", // "variable" | "constant"
   snapTargets: { clips: true, playhead: true, markers: true, inout: true, keyframes: false, frames: true },
+  useProxies: true, // play proxies (when a file has one) while editing; export always reads the original
 };
 let settings = { ...DEFAULT_SETTINGS };
 function loadSettings() {
@@ -759,7 +760,7 @@ const els = {
   binList: $("binList"), binEmpty: $("binEmpty"), fileInput: $("fileInput"),
   binTabs: $("binTabs"), libList: $("libList"), toast: $("toast"),
   binTools: $("binTools"), binSearch: $("binSearch"), binFilter: $("binFilter"), binSort: $("binSort"),
-  binSortDir: $("binSortDir"), binViewBtn: $("binViewBtn"),
+  binSortDir: $("binSortDir"), binViewBtn: $("binViewBtn"), btnProxy: $("btnProxy"),
   preview: $("preview"), tcCurrent: $("tcCurrent"), tcTotal: $("tcTotal"),
   tcIo: $("tcIo"), tcIn: $("tcIn"), tcOut: $("tcOut"), tcDur: $("tcDur"),
   btnPlay: $("btnPlay"), inspector: $("inspector"),
@@ -1627,6 +1628,7 @@ function listenSSE() {
   const es = new EventSource("/api/events");
   // Named events: "change" = project/media/library; "profiles" = encoding-profiles.json only
   es.addEventListener("change", () => { noteActivity(); syncFromServer(); scheduleOfflineCheck(); });
+  es.addEventListener("proxy", (e) => onProxyEvent(e.data));
   es.addEventListener("export", (e) => {
     noteActivity();
     try { runExportJob(JSON.parse(e.data)); } catch { }
@@ -1706,6 +1708,7 @@ async function probeMissingMeta() {
   state.dirtyTimeline = true;
   refreshMediaInfo();
   scheduleOfflineCheck(0);
+  syncProxyButton();
 }
 function probeAV(src, kind) {
   return new Promise((resolve, reject) => {
@@ -2020,6 +2023,7 @@ function renderBin() {
         <span class="bin-cell bin-cell-name">${favHtml}<span class="bin-thumb sm"></span>${offline ? `<span class="bin-offline" title="The file is missing — right-click → Relink…">OFFLINE</span>` : ""}<span class="bin-name"></span></span>
         ${cell(MediaLib.fmtDur(m.duration), " num c-duration")}${cell(MediaLib.fmtRes(m), " num c-resolution")}${cell(MediaLib.fmtFps(m.fps), " num c-fps")}
         ${cell(m.codec, " c-codec")}${cell(MediaLib.fmtAudio(m), " c-audio")}${cell(MediaLib.fmtSize(m.size), " num c-size")}
+        <span class="bin-cell c-proxy">${proxyBadgeHtml(m) || escapeHtml(m.kind === "video" ? "—" : "")}</span>
         <span class="bin-cell num c-usage">${usesHtml}</span>
         <span class="bin-del" title="Remove (and its clips)">✕</span>`;
     } else {
@@ -2032,7 +2036,7 @@ function renderBin() {
           <div class="bin-sub">${offline ? `<span class="bin-offline" title="The file is missing — right-click → Relink…">OFFLINE</span> ` : ""}${escapeHtml(sub)}</div>
           ${m.tags && m.tags.length ? `<div class="bin-tags">${m.tags.map((t) => `<span class="bin-tag">#${escapeHtml(t)}</span>`).join("")}</div>` : ""}
         </div>
-        <div class="bin-side">${favHtml}${usesHtml}</div>
+        <div class="bin-side">${favHtml}${usesHtml}${proxyBadgeHtml(m)}</div>
         <span class="bin-del" title="Remove (and its clips)">✕</span>`;
     }
     const thumbEl = item.querySelector(".bin-thumb");
@@ -2185,7 +2189,8 @@ function usageDoc() {
 function binCtx() {
   return {
     usage: MediaLib.usageCounts(usageDoc()), collections: project.collections || [],
-    extraFilter: (m, f) => (f === "offline" ? isMediaOffline(m.id) : true),
+    extraFilter: (m, f) => (f === "offline" ? isMediaOffline(m.id)
+      : f === "proxy" ? !!proxyOf(m) : f === "noproxy" ? m.kind === "video" && !proxyOf(m) : true),
   };
 }
 function getCollection(id) { return (project.collections || []).find((c) => c.id === id) || null; }
@@ -2203,6 +2208,7 @@ function syncBinTools() {
   const opt = (v, label) => `<option value="${escapeHtml(v)}"${v === binView.filter ? " selected" : ""}>${escapeHtml(label)}</option>`;
   const html = opt("", "All media") + opt("fav", "★ Favorites") + opt("used", "Used in the edit") + opt("unused", "Unused") +
     (mediaOffline.size || binView.filter === "offline" ? opt("offline", `⚠ Offline (${mediaOffline.size})`) : "") +
+    (project.media.some((m) => m.kind === "video") ? opt("proxy", "Has a proxy") + opt("noproxy", "Video without a proxy") : "") +
     `<optgroup label="Kind">${MediaLib.KINDS.map((k) => opt("kind:" + k, k[0].toUpperCase() + k.slice(1))).join("")}</optgroup>` +
     (cols.length ? `<optgroup label="Collections">${cols.map((c) => opt("col:" + c.id, c.name + ` (${c.media.length})`)).join("")}</optgroup>` : "") +
     (tags.length ? `<optgroup label="Tags">${tags.map((t) => opt("tag:" + t, "#" + t)).join("")}</optgroup>` : "");
@@ -2249,11 +2255,12 @@ function makeFilterBar(n) {
 }
 /* List view header: click a column to sort by it (again to flip the direction). */
 const BIN_COLUMNS = [["name", "Name"], ["duration", "Duration"], ["resolution", "Resolution"], ["fps", "FPS"],
-  ["codec", "Codec"], ["audio", "Audio"], ["size", "Size"], ["usage", "Uses"]];
+  ["codec", "Codec"], ["audio", "Audio"], ["size", "Size"], ["proxy", "Proxy"], ["usage", "Uses"]];
 function makeColumnHead() {
   const head = document.createElement("div");
   head.className = "bin-colhead bin-row";
   for (const [key, label] of BIN_COLUMNS) {
+    if (key === "proxy") { const sp = document.createElement("span"); sp.className = "bin-cell c-proxy"; sp.textContent = label; head.appendChild(sp); continue; }
     const b = document.createElement("button");
     b.type = "button";
     b.className = "bin-cell c-" + key + (key === "name" ? " bin-cell-name" : "") + (["duration", "resolution", "fps", "size", "usage"].includes(key) ? " num" : "") + (binView.sort === key ? " on" : "");
@@ -2403,6 +2410,15 @@ function showMediaMenu(x, y, m) {
   item("Media info…", () => showMediaInfo(m, x, y));
   item(isMediaOffline(m.id) ? "Relink…" : "Relink to another copy…", () => openRelinkDialog([m]), isLocalSrc(m.src) || m.transient ? null : "Not a project file");
   item("Replace file…", () => replaceMediaFile(m), state.connected ? null : "Needs the FableCut server");
+  if (m.kind === "video") {
+    const ps = proxyStatus.get(m.id);
+    const why = !state.connected ? "Needs the FableCut server" : !state.ffmpeg ? "Needs ffmpeg on the server's PATH" : isMediaOffline(m.id) ? "The file is offline" : null;
+    if (ps && (ps.state === "ready" || ps.state === "running" || ps.state === "queued")) item(ps.state === "ready" ? "Delete proxy" : "Stop making the proxy", () => deleteProxies([m]));
+    else {
+      item("Create proxy (540p)", () => createProxies([m], 540), why);
+      item("Create proxy (720p)", () => createProxies([m], 720), why);
+    }
+  }
   sep();
   item(m.favorite ? "Remove from favorites" : "Add to favorites", () => setMediaFavorite([m.id], !m.favorite));
   item("Tags…", () => promptBinText(x, y, `Tags for ${m.name}`, (m.tags || []).join(", "), (v) => setMediaTags(m, v),
@@ -2440,6 +2456,12 @@ function showMediaInfo(m, x, y) {
     ["Video codec", m.kind === "video" ? m.codec : ""], ["Format", m.kind !== "video" && m.codec ? m.codec : ""],
     ["Audio", audio], ["Bitrate", m.bitrate ? (m.bitrate >= 1e6 ? (m.bitrate / 1e6).toFixed(1) + " Mb/s" : Math.round(m.bitrate / 1000) + " kb/s") : ""],
     ["Size", MediaLib.fmtSize(m.size)], ["Used", uses.length ? uses.length + "×" : "not used"],
+    ["Proxy", m.kind !== "video" ? "" : (() => {
+      const ps = proxyStatus.get(m.id);
+      if (!ps) return "none";
+      if (ps.state === "ready") return `${ps.width ? ps.width + "×" : ""}${ps.height} · ${MediaLib.fmtSize(ps.size)}${proxiesOn() ? " · playing it" : " · Proxy button off"}`;
+      return ps.state === "running" ? `making it — ${Math.round((ps.progress || 0) * 100)}%` : ps.state + (ps.error ? ": " + ps.error : "");
+    })()],
     ["Folder", folder ? folder.name : ""], ["Tags", (m.tags || []).map((t) => "#" + t).join(" ")],
     ["Collections", cols.join(", ")], ["Favorite", m.favorite ? "★ yes" : ""],
   ].filter(([, v]) => v);
@@ -2524,7 +2546,7 @@ const isLocalSrc = (src) => /^\/(media|library)\//.test(String(src || ""));
 let offlineCheckTimer = null, offlineChecking = false;
 function scheduleOfflineCheck(delay = 300) {
   clearTimeout(offlineCheckTimer);
-  offlineCheckTimer = setTimeout(checkOffline, delay);
+  offlineCheckTimer = setTimeout(() => { checkOffline(); refreshProxyStatus(); }, delay);
 }
 async function checkOffline() {
   if (!state.connected || offlineChecking) return;
@@ -2770,6 +2792,130 @@ async function openRelinkDialog(list) {
   }
 }
 
+/* ── Proxies ──
+   The server makes light H.264 copies of heavy footage (proxy.js). With the
+   monitor's Proxy button on, video clips and the Source monitor play the
+   proxy; export, still renders for agents and scopes always switch back to
+   the original — so a proxy changes how smoothly you edit, never the result. */
+const proxyStatus = new Map();   // media id → {state, src?, height, width?, size?, progress?, error?}
+function proxyOf(m) { const s = m && proxyStatus.get(m.id); return s && s.state === "ready" ? s : null; }
+function proxiesOn() { return getSetting("useProxies") !== false; }
+/** The file a player should load for this media now: the proxy while editing, the original for output. */
+function mediaPlaySrc(m) {
+  if (!m || m.kind !== "video" || state.exporting || runtime.forceOriginals || !proxiesOn()) return m && m.src;
+  const p = proxyOf(m);
+  return p ? p.src : m.src;
+}
+/** Switch every player to the original files and wait until they can draw (export, still renders). */
+async function useOriginalPlayers() {
+  runtime.forceOriginals = true;
+  const waits = [];
+  for (const c of mediaClips()) {
+    if (c.kind !== "video" || !clipRenders(c)) continue;
+    const el = getClipEl(c);
+    if (el) waits.push(waitMediaEl(el));
+  }
+  await Promise.all(waits);
+}
+function releaseOriginalPlayers() {
+  if (!runtime.forceOriginals) return;
+  runtime.forceOriginals = false;
+  state.dirtyTimeline = true;
+  seekMediaWhilePaused();
+}
+async function refreshProxyStatus() {
+  if (!state.connected) return;
+  const vids = project.media.filter((m) => m.kind === "video" && !m.transient && isLocalSrc(m.src));
+  if (!vids.length) { if (proxyStatus.size) { proxyStatus.clear(); renderBin(); } return; }
+  try {
+    const res = await fetch("/api/proxy/status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ srcs: [...new Set(vids.map((m) => m.src))] }) });
+    if (!res.ok) return;
+    const { status } = await res.json();
+    const before = JSON.stringify([...proxyStatus]);
+    proxyStatus.clear();
+    for (const m of vids) { const s = status[m.src]; if (s && s.state !== "none") proxyStatus.set(m.id, s); }
+    if (JSON.stringify([...proxyStatus]) !== before) onProxiesChanged();
+  } catch { }
+}
+/** SSE "proxy": one file's proxy moved on (queued, progress, ready, failed, deleted). */
+function onProxyEvent(data) {
+  let ev; try { ev = JSON.parse(data); } catch { return; }
+  let hit = false;
+  for (const m of project.media) {
+    if (m.src !== ev.src) continue;
+    hit = true;
+    const s = ev.status || { state: "none" };
+    if (s.state === "none") proxyStatus.delete(m.id); else proxyStatus.set(m.id, s);
+    if (s.state === "ready" && runtime.proxyAsked?.has(m.id)) { runtime.proxyAsked.delete(m.id); toast(`Proxy ready: ${m.name}`); }
+    if (s.state === "failed" && runtime.proxyAsked?.has(m.id)) { runtime.proxyAsked.delete(m.id); toast(`Couldn't make a proxy of ${m.name}: ${s.error}`); }
+  }
+  if (!hit) return;
+  if (ev.status && ev.status.state === "running") { renderBinProxyBadges(); return; }   // progress: just the badges
+  onProxiesChanged();
+}
+function onProxiesChanged() {
+  renderBin();
+  syncProxyButton();
+  state.dirtyTimeline = true;
+  seekMediaWhilePaused();   // players switch file on the next frame; park the new ones on the playhead
+}
+/* Progress ticks repaint only the badges, not the whole bin. */
+function renderBinProxyBadges() {
+  for (const el of els.binList.querySelectorAll(".bin-item[data-media-id] .bin-proxy")) {
+    const s = proxyStatus.get(el.closest(".bin-item").dataset.mediaId);
+    if (s && s.state === "running") el.textContent = `P ${Math.round((s.progress || 0) * 100)}%`;
+  }
+}
+function proxyBadgeHtml(m) {
+  const s = proxyStatus.get(m.id);
+  if (!s || m.kind !== "video") return "";
+  if (s.state === "ready") return `<span class="bin-proxy ready${proxiesOn() ? " on" : ""}" title="Proxy ready (${s.width ? s.width + "×" : ""}${s.height}p, ${MediaLib.fmtSize(s.size)})${proxiesOn() ? " — playing it while you edit" : " — the Proxy button is off"}">P</span>`;
+  if (s.state === "running" || s.state === "queued") return `<span class="bin-proxy busy" title="Making a ${s.height}p proxy">P ${s.state === "running" ? Math.round((s.progress || 0) * 100) + "%" : "…"}</span>`;
+  if (s.state === "failed") return `<span class="bin-proxy failed" title="Proxy failed: ${escapeHtml(s.error || "")}">P ✕</span>`;
+  return "";
+}
+function proxyLabel(m) {
+  const s = proxyStatus.get(m.id);
+  if (m.kind !== "video") return "";
+  if (!s) return "none";
+  if (s.state === "ready") return `${s.height}p`;
+  if (s.state === "running") return Math.round((s.progress || 0) * 100) + "%";
+  return s.state;
+}
+async function createProxies(list, height) {
+  list = list.filter((m) => m.kind === "video" && !m.transient && isLocalSrc(m.src) && !isMediaOffline(m.id));
+  if (!list.length) { toast("No video to make proxies of"); return; }
+  if (!state.ffmpeg) { toast("Proxies need ffmpeg on the server's PATH"); return; }
+  (runtime.proxyAsked ||= new Set());
+  for (const m of list) runtime.proxyAsked.add(m.id);
+  try {
+    const res = await fetch("/api/proxy", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ srcs: [...new Set(list.map((m) => m.src))], height }) });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || res.status);
+    for (const m of list) { const s = body.status[m.src]; if (s) proxyStatus.set(m.id, s); if (s && s.state === "ready") runtime.proxyAsked.delete(m.id); }
+    onProxiesChanged();
+    const queued = list.filter((m) => proxyStatus.get(m.id)?.state !== "ready").length;
+    toast(queued ? `Making ${queued} prox${queued === 1 ? "y" : "ies"} in the background — the bin shows the progress` : "Already has a proxy");
+  } catch (e) { toast("Couldn't start the proxies: " + (e.message || e)); }
+}
+async function deleteProxies(list) {
+  try {
+    await fetch("/api/proxy/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ srcs: list.map((m) => m.src) }) });
+  } catch { }
+  for (const m of list) proxyStatus.delete(m.id);
+  onProxiesChanged();
+}
+function syncProxyButton() {
+  const b = els.btnProxy;
+  if (!b) return;
+  const n = project.media.filter((m) => proxyOf(m)).length;
+  b.classList.toggle("on", proxiesOn());
+  b.classList.toggle("has", n > 0);
+  b.title = (proxiesOn() ? "Proxies on: " : "Proxies off: ") +
+    (n ? `${n} file${n === 1 ? " has a proxy" : "s have proxies"}` : "no proxies yet (right-click a video in the bin → Create proxy)") +
+    ". Export always uses the originals.";
+}
+
 /* Open the native file dialog. Windows anchors it to the <input>'s screen
    position — park the input under the cursor and open after the mouse
    gesture finishes so the dialog doesn't appear then jump. */
@@ -2793,6 +2939,12 @@ els.binFilter.addEventListener("change", () => setBinFilter(els.binFilter.value)
 els.binSort.addEventListener("change", () => { binView.sort = els.binSort.value; saveBinPrefs(); renderBin(); });
 els.binSortDir.addEventListener("click", () => { binView.dir = binView.dir === "desc" ? "asc" : "desc"; saveBinPrefs(); renderBin(); });
 els.binViewBtn.addEventListener("click", () => { binView.list = !binView.list; saveBinPrefs(); renderBin(); });
+
+els.btnProxy?.addEventListener("click", () => {
+  setSetting("useProxies", !proxiesOn());
+  onProxiesChanged();
+  toast(proxiesOn() ? "Proxies on — files with a proxy play it while you edit" : "Proxies off — every clip plays its original");
+});
 
 /* Ctrl/Cmd+click in the Project bin opens the file importer. */
 els.binList.addEventListener("click", (e) => {
@@ -6458,9 +6610,10 @@ function ensureSourceEl(m) {
     });
     runtime.sourceEl = el;
   }
-  if (el.dataset.src !== m.src) {
-    el.src = m.src;
-    el.dataset.src = m.src;
+  const want = mediaPlaySrc(m);
+  if (el.dataset.src !== want) {
+    el.src = want;
+    el.dataset.src = want;
     runtime.sourceHold = null;
     runtime.sourceHoldOk = false;
     runtime.sourceSeekPending = null;
@@ -7029,13 +7182,17 @@ function drawSourceFrame() {
 function getClipEl(c) {
   let el = runtime.clipEls.get(c.id);
   const m = getMedia(c.mediaId);
-  // The clip now plays another file (noise reduction, or undoing it): rebuild.
-  if (el && m && el._fcSrc !== m.src) { releaseClipEl(c.id); el = null; }
+  // video plays its proxy while editing (never during export); audio always the original
+  const src = c.kind === "video" ? mediaPlaySrc(m) : m && m.src;
+  // The clip now plays another file (noise reduction or undoing it, a relink, proxies on / off): rebuild.
+  if (el && m && el._fcSrc !== src) { releaseClipEl(c.id); el = null; }
   if (el) return el;
   if (!m) return null;
   el = document.createElement(c.kind === "audio" ? "audio" : "video");
-  el.preload = "auto"; el.src = m.src; el.playsInline = true;
-  el._fcSrc = m.src;
+  el.preload = "auto"; el.src = src; el.playsInline = true;
+  el._fcSrc = src;
+  // a proxy is smaller than the original: fit "none" (native pixels) scales it back up
+  el._fcScale = src !== m.src && m.height > 0 ? (proxyOf(m)?.height || m.height) / m.height : 1;
   runtime.clipEls.set(c.id, el);
   hookAudio(c, el);
   return el;
@@ -10844,7 +11001,7 @@ function drawClipPicture(c, W, H, t, layered) {
     let dw, dh;
     if (p.fit === "cover") { const f = Math.max(W / cw, H / ch) * sc; dw = cw * f; dh = ch * f; }
     else if (p.fit === "stretch") { dw = W * sc; dh = H * sc; }
-    else if (p.fit === "none") { dw = cw * sc; dh = ch * sc; }
+    else if (p.fit === "none") { const k = src._fcScale || 1; dw = cw * sc / k; dh = ch * sc / k; }
     else { const f = Math.min(W / cw, H / ch) * sc; dw = cw * f; dh = ch * f; }
     if (p.flipH || p.flipV) ctx2d.scale(p.flipH ? -1 : 1, p.flipV ? -1 : 1);
     if (p.cornerRadius > 0) {
@@ -14727,6 +14884,7 @@ async function fastExport(opts = {}) {
     await loadProjectFonts();
     resetExportCanvases();
     await armExportCors();
+    await useOriginalPlayers();   // proxies are for editing — export reads the originals
     // JPEG off the compositor thread: snapshot is sync, encode/upload run ahead
     // under backpressure. Awaiting toBlob every frame was slower than ffmpeg.
     const up = createExportUploader(sessId, {
@@ -14817,6 +14975,7 @@ async function fastExport(opts = {}) {
     restoreExportVideoState();
     endExportWindow();
     state.exporting = false; state.rendering = false;
+    releaseOriginalPlayers();
     els.exportOverlay.classList.add("hidden");
     els.exportNote.textContent = "Rendering your sequence in real time. Keep this tab focused.";
     if (runtime.pendingSync) syncFromServer();
@@ -14980,6 +15139,10 @@ async function runTrackJob(ticket, fail) {
    tracks), then measure it with color.js scopeStats. The user's playhead
    stays where it is. */
 async function renderStillAt(t) {
+  if (!runtime.forceOriginals) {   // measured and shown to agents as export renders it: the originals
+    await useOriginalPlayers();
+    try { return await renderStillAt(t); } finally { releaseOriginalPlayers(); }
+  }
   const waits = [];
   for (const c of mediaClips()) {
     if (!clipRenders(c) || !activeAt(c, t)) continue;
@@ -15209,6 +15372,7 @@ async function webCodecsExport() {
     await loadProjectFonts();
     resetExportCanvases();
     await armExportCors();
+    await useOriginalPlayers();   // proxies are for editing — export reads the originals
 
     for (let f = 0; f < frames; f++) {
       if (renderCancelled || signal.aborted) throw new Error("cancelled");
@@ -15267,6 +15431,7 @@ async function webCodecsExport() {
     restoreExportVideoState();
     endExportWindow();
     state.exporting = false; state.rendering = false;
+    releaseOriginalPlayers();
     els.exportOverlay.classList.add("hidden");
     els.exportNote.textContent = "Rendering your sequence in real time. Keep this tab focused.";
     if (runtime.pendingSync) syncFromServer();
@@ -15292,6 +15457,7 @@ async function startExport() {
   pause();
   const { start } = beginExportWindow();
   state.time = start;
+  await useOriginalPlayers();   // proxies are for editing — export reads the originals
   seekMediaWhilePaused();
   await new Promise((r) => setTimeout(r, 350)); // let first frames decode
   await loadProjectFonts();
@@ -15323,6 +15489,7 @@ async function startExport() {
 function finishExport(keep) {
   if (!state.exporting) return;
   state.exporting = false;
+  releaseOriginalPlayers();
   endExportWindow();
   if (runtime.pendingSync) syncFromServer();
   recDiscard = !keep;
@@ -15566,6 +15733,14 @@ function openProjectTabMenu(clientX, clientY) {
     enterComp(comp.id);
   });
   menu.appendChild(compItem);
+  const vids = project.media.filter((m) => m.kind === "video" && !proxyOf(m) && !isMediaOffline(m.id));
+  if (vids.length && state.connected && state.ffmpeg) {
+    const px = document.createElement("div");
+    px.className = "ctx-opt";
+    px.textContent = `Create proxies for ${vids.length} video${vids.length === 1 ? "" : "s"}`;
+    px.addEventListener("click", () => { closeBinCtxMenu(); createProxies(vids, 540); });
+    menu.appendChild(px);
+  }
   document.body.appendChild(menu);
   const pad = 6;
   const w = menu.offsetWidth, h = menu.offsetHeight;

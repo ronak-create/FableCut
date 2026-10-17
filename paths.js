@@ -36,6 +36,9 @@ const LIBRARY_DIR = path.join(DATA_DIR, "library");
    cache, so it lives inside analysis/ rather than becoming a fifth top-level
    folder users have to think about. */
 const FRAMES_DIR = path.join(ANALYSIS_DIR, "frames");
+/* Proxies (light copies of heavy footage the editor plays while editing).
+   A regenerable cache too, so also inside analysis/. */
+const PROXIES_DIR = path.join(ANALYSIS_DIR, "proxies");
 const PROJECT_FILE = path.join(DATA_DIR, "project.json");
 const LIBRARY_SUBDIRS = ["sfx", "elements", "svg", "fonts", "presets", "templates"];
 
@@ -96,7 +99,7 @@ function superseded(rel, file) {
 /* Create the writable tree. Safe to call from both servers; whoever runs first
    wins and the other no-ops. */
 function ensureDirs() {
-  for (const d of [DATA_DIR, MEDIA_DIR, EXPORTS_DIR, ANALYSIS_DIR, FRAMES_DIR])
+  for (const d of [DATA_DIR, MEDIA_DIR, EXPORTS_DIR, ANALYSIS_DIR, FRAMES_DIR, PROXIES_DIR])
     fs.mkdirSync(d, { recursive: true });
   for (const d of LIBRARY_SUBDIRS)
     fs.mkdirSync(path.join(LIBRARY_DIR, d), { recursive: true });
@@ -129,5 +132,5 @@ function writeSaved(kind, id, data) {
 module.exports = {
   APP_DIR, DATA_DIR, SPLIT,
   MEDIA_DIR, EXPORTS_DIR, ANALYSIS_DIR, LIBRARY_DIR, PROJECT_FILE,
-  LIBRARY_SUBDIRS, FRAMES_DIR, ensureDirs, readSaved, writeSaved,
+  LIBRARY_SUBDIRS, FRAMES_DIR, PROXIES_DIR, ensureDirs, readSaved, writeSaved,
 };

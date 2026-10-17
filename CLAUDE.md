@@ -49,6 +49,9 @@ Every Claude Code session then has these tools:
   select. See "Color" and "Masks" below.
 - `fablecut_track` — motion tracking: follow a region of a video clip, store it as
   a track, and make a mask or another clip follow it. See "Tracking" below.
+- `fablecut_proxy` — make, check or delete proxies: light copies of heavy footage
+  the editor plays while editing (export always reads the originals). See
+  "Media management" below.
 
 ### Token-efficient editing (important for agents)
 
@@ -1444,6 +1447,33 @@ Files under `media/` may sit in subfolders (`/media/archive/a.mp4`).
   swap the file of one clip only, use the Inspector's **Source** menu instead.
 - Relink and replace are one undo step each.
 
+**Proxies.** Heavy footage — 4K, HEVC, ProRes, long phone clips — can stutter
+while you scrub and play. A *proxy* is a light copy the editor plays instead
+while you edit: H.264 at 540p (or 720p / 1080p, never larger than the
+source), a keyframe every 12 frames so seeking is quick, the source's own
+timestamps (frame for frame — no frames added or dropped) and its first audio
+stream. The edit always refers to the original: the timeline, `project.json`
+and every clip stay the same whether proxies are on or off.
+
+**Export always reads the originals**, and so do `fablecut_frame` (timeline
+mode), `fablecut_scopes`, tracking and every other measurement — the
+players switch to the original files for the render and back afterwards. A
+proxy only changes how smoothly the preview runs, never the result.
+
+- Right-click a video in the bin → **Create proxy (540p)** / **(720p)**;
+  right-click the **Project** tab → **Create proxies for N videos**. ffmpeg
+  makes them on the server one at a time in the background; the bin shows
+  each file's progress (**P 42%**), then a green **P** once it is ready.
+  **Delete proxy** removes one. The bin's list view has a **Proxy** column,
+  Show has **Has a proxy** / **Video without a proxy**, and **Media info**
+  says which file is playing.
+- The monitor's **Proxy** button turns proxy playback on and off (on by
+  default; remembered in this browser). The Source monitor follows it too.
+- Proxies live in `analysis/proxies/`, a disposable cache: each is named
+  after its source file *and that file's size and modification time*, so a
+  re-rendered or replaced original simply has no proxy until you make a new
+  one. Deleting the folder loses nothing but time. Proxies need ffmpeg.
+
 **Agents:**
 
 - `{op:"updateMedia", id | ids, set:{name?, favorite?, tags?, folderId?}, addTags?, removeTags?}`
@@ -1459,7 +1489,11 @@ Files under `media/` may sit in subfolders (`/media/archive/a.mp4`).
 - `fablecut_import_media` probes the file as it imports it, so the entry it
   returns already has these fields.
 - `fablecut_status` lists offline media, and the compact view marks each
-  `OFFLINE (file missing — relinkMedia)`.
+  `OFFLINE (file missing — relinkMedia)` and each video with a proxy `proxy:540p`.
+- `fablecut_proxy {}` reports every video's proxy; `{create:true, mediaIds?, height?}`
+  makes them (waits until done unless `wait:false`); `{delete:true, mediaIds?}`
+  removes them. Proxies never change what you measure or export, so an agent
+  only needs them when the user asks for smoother playback.
 - `{op:"relinkMedia", id, src:"/media/…", name?}` — the same footage found
   elsewhere: put the file in `media/` (copy it, or `fablecut_import_media` and
   `removeMedia` the extra entry it registers), then relink. The note warns when
@@ -1664,6 +1698,13 @@ obvious cuts were missed, raise it if motion is being misread as cuts.
   `audioCodec`, `audioChannels`, `sampleRate`, `bitrate`, `duration`, `width`, `height` and
   `probe` (`"ffprobe"`, or `"stat"` when only the size could be read). `info` is `null` when
   the src names no file under `/media/` or `/library/`. Cached per file version.
+- `POST /api/proxy {srcs:[…], height?:540|720|1080}` → `{status:{src: status}}` queues proxies
+  (ffmpeg, one at a time); `POST /api/proxy/status {srcs}` → `{status:{src: status | null}}`;
+  `POST /api/proxy/delete {srcs}` → `{deleted:{src: n}}`. A status is
+  `{state:"ready", src:"/proxies/…", width, height, size}`, `{state:"queued"|"running", progress, height}`,
+  `{state:"failed", error}` or `{state:"none"}` (`null` = no such source file). Progress and
+  results are also pushed as SSE event `proxy` (`{src, status}`). `GET /proxies/<name>` serves
+  a proxy file from `analysis/proxies/`. `/api/proxy` answers 503 without ffmpeg.
 - `POST /api/relink/candidates {media:[{id, name, src?, size?, kind?}]}` →
   `{candidates:{id:[{src, name, size, score, why}]}}` — where a missing file might be now:
   files under `media/` and `library/` (subfolders included) of the same kind, ranked by
@@ -1712,7 +1753,8 @@ obvious cuts were missed, raise it if motion is being misread as cuts.
   `fablecut_frame {time}` shows an agent the composed program picture.
 - `GET  /api/events`  — SSE: named event `change` when project.json, ./media or
   ./library changes; named event `profiles` when `encoding-profiles.json` changes
-  (UI refreshes the export-profile list only — no project reload)
+  (UI refreshes the export-profile list only — no project reload); named event
+  `proxy` as a proxy is queued, makes progress, finishes or is deleted
 - Fast / WebCodecs export (browser compositor → server ffmpeg):
   `GET /api/export/ffmpeg` → `{available}` · `GET /api/export/profiles[?detail=1]` →
   `{default, profiles, issues}` · `POST /api/export/begin`

@@ -39,11 +39,12 @@ const { denoiseFile, AMOUNT_IDS: DENOISE_AMOUNTS } = require("./denoise");
 
 const {
   APP_DIR, DATA_DIR, MEDIA_DIR, EXPORTS_DIR, ANALYSIS_DIR, LIBRARY_DIR,
-  PROJECT_FILE, LIBRARY_SUBDIRS, FRAMES_DIR, ensureDirs, readSaved, writeSaved,
+  PROJECT_FILE, LIBRARY_SUBDIRS, FRAMES_DIR, PROXIES_DIR, ensureDirs, readSaved, writeSaved,
 } = require("./paths");
 const Templates = require("./templates");
 const { probeFile } = require("./media-probe");
 const MediaLib = require("./media-lib");
+const { createProxies } = require("./proxy");
 
 /* Static app files are served from the install dir; everything the user creates
    lives under DATA_DIR. The two are the same unless FABLECUT_DATA_DIR is set. */
@@ -106,6 +107,7 @@ function broadcast(event = "change", data = event) {
   const payload = `event: ${event}\ndata: ${data}\n\n`;
   for (const res of sseClients) res.write(payload);
 }
+const proxies = createProxies({ dir: PROXIES_DIR, resolveSrc, probe: probeFile, broadcast: (ev, data) => broadcast(ev, data) });
 let debounce = null;
 let profilesDebounce = null;
 function onFsChange() {
@@ -531,6 +533,29 @@ const server = http.createServer(async (req, res) => {
           .filter((f) => f.score > 0).sort((a, b) => b.score - a.score || a.name.localeCompare(b.name)).slice(0, 5);
       }
       sendJSON(res, 200, { candidates });
+    } catch (e) { sendJSON(res, 400, { error: String(e.message || e) }); }
+    return;
+  }
+
+  /* API: proxies (see proxy.js).
+       POST /api/proxy {srcs:[…], height?:540|720|1080} → {status:{src: status}} — queue them
+       POST /api/proxy/status {srcs:[…]} → {status:{src: status | null}}
+       POST /api/proxy/delete {srcs:[…]} → {deleted:{src: n}}
+     Progress and results also arrive as SSE event "proxy". */
+  if ((p === "/api/proxy" || p === "/api/proxy/status" || p === "/api/proxy/delete") && req.method === "POST") {
+    try {
+      const body = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+      const srcs = Array.isArray(body.srcs) ? body.srcs.slice(0, 2000).map(String) : [];
+      if (p === "/api/proxy/delete") {
+        const deleted = {};
+        for (const src of srcs) deleted[src] = proxies.remove(src);
+        sendJSON(res, 200, { deleted });
+        return;
+      }
+      if (p === "/api/proxy" && !HAS_FFMPEG) { sendJSON(res, 503, { error: "proxies need ffmpeg on PATH" }); return; }
+      const status = {};
+      for (const src of srcs) status[src] = p === "/api/proxy" ? proxies.start(src, body.height) : proxies.status(src);
+      sendJSON(res, 200, { status });
     } catch (e) { sendJSON(res, 400, { error: String(e.message || e) }); }
     return;
   }
@@ -971,6 +996,14 @@ const server = http.createServer(async (req, res) => {
   if (p.startsWith("/media/")) {
     const file = path.normalize(path.join(MEDIA_DIR, p.slice("/media/".length)));
     if (!file.startsWith(MEDIA_DIR + path.sep)) { res.writeHead(403); res.end(); return; }
+    serveFile(req, res, file);
+    return;
+  }
+
+  /* Proxies (analysis/proxies) */
+  if (p.startsWith("/proxies/")) {
+    const file = proxies.file(p.slice("/proxies/".length));
+    if (!file) { res.writeHead(404); res.end(); return; }
     serveFile(req, res, file);
     return;
   }

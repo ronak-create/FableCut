@@ -69,6 +69,8 @@ about 150 ms. A human and an agent can work the same timeline at once.
   Missing files are flagged offline and relinked (found by name and size) or
   replaced. Agents use the `updateMedia`, `setCollection`, `removeCollection`,
   `relinkMedia` and `replaceMedia` patch ops.
+- Proxies: light H.264 copies of heavy footage played while editing; export,
+  scopes and frame grabs always use the originals. Agents use `fablecut_proxy`.
 - Compositions (nested sequences): a timeline of its own, placed as one clip
   that transforms, masks, grades and blends like a picture while its media
   plays and exports; nests 4 deep, opens on the timeline, precompose a

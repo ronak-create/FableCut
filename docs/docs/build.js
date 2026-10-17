@@ -95,7 +95,7 @@ const PAGES = [
   },
   {
     slug: "media", nav: "Media management", title: "Media management", group: "The timeline",
-    lede: "File details, search, filters, sorting, favorites, tags, collections, where each file is used, and relinking missing files.",
+    lede: "File details, search, filters, sorting, tags and collections, where each file is used, relinking missing files, and proxies for heavy footage.",
     parts: [["project.json schema", "Media management"]],
   },
   {

@@ -3827,7 +3827,7 @@ input[type="range"].cq-hue {
 /* columns drop out as the bin narrows (widen the panel to see them all) */
 .bin-list.list-view {
   container-type: inline-size;
-  --bin-cols: minmax(140px, 1fr) 62px 76px 42px 50px 92px 54px 30px 14px;
+  --bin-cols: minmax(140px, 1fr) 62px 76px 42px 50px 92px 54px 46px 30px 14px;
 }
 .bin-list.list-view .bin-row {
   display: grid;
@@ -3836,12 +3836,12 @@ input[type="range"].cq-hue {
   align-items: center;
   padding: 3px 6px;
 }
-@container (max-width: 640px) {
+@container (max-width: 700px) {
   .bin-row .c-codec, .bin-row .c-audio { display: none; }
-  .bin-row { --bin-cols: minmax(120px, 1fr) 62px 76px 42px 54px 30px 14px; }
+  .bin-row { --bin-cols: minmax(120px, 1fr) 62px 76px 42px 54px 46px 30px 14px; }
 }
-@container (max-width: 470px) {
-  .bin-row .c-fps, .bin-row .c-size { display: none; }
+@container (max-width: 520px) {
+  .bin-row .c-fps, .bin-row .c-size, .bin-row .c-proxy { display: none; }
   .bin-row { --bin-cols: minmax(110px, 1fr) 62px 76px 30px 14px; }
 }
 @container (max-width: 330px) {
@@ -3950,3 +3950,19 @@ input[type="range"].cq-hue {
   font: 12px "Segoe UI", sans-serif;
   padding: 4px 6px;
 }
+
+/* proxies: bin badge, monitor button */
+.bin-proxy {
+  display: inline-block;
+  font: 700 9px/1.5 "Segoe UI", sans-serif;
+  padding: 0 4px;
+  border-radius: 3px;
+  white-space: nowrap;
+  background: #2a2a33;
+  color: var(--dim);
+}
+.bin-proxy.ready { background: #2f6f4f; color: #d6ffe8; }
+.bin-proxy.ready:not(.on) { background: #2a2a33; color: #9fd9b9; }
+.bin-proxy.busy { background: #4f3f12; color: #ffe2a3; font-variant-numeric: tabular-nums; }
+.bin-proxy.failed { background: #5a1d20; color: #ffb3b5; }
+.proxy-btn:not(.has) { opacity: .6; }

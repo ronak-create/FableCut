@@ -33,6 +33,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   entry, trimming clips to fit. Agents: `relinkMedia` and `replaceMedia`
   patch ops, `POST /api/relink/candidates`; offline files show in
   `fablecut_status` and the compact view.
+- **Proxies.** Create a light H.264 copy (540p or 720p, frame-accurate,
+  short GOP) of heavy footage from the bin, made by ffmpeg in the
+  background with progress in the bin. With the monitor's **Proxy** button on
+  (the default), clips and the Source monitor play the proxy while you edit;
+  export, scopes and frame grabs always switch back to the originals. Proxies
+  are a cache in `analysis/proxies/`, tied to the source file's version.
+  Agents: `fablecut_proxy` (make, check, delete); `/api/proxy` endpoints and
+  SSE event `proxy`; the compact view shows `proxy:540p`.
 
 ### Changed
 - `/media/` serves files in subfolders of `media/` too.

@@ -1063,7 +1063,8 @@
     return { notes, toSave };
   }
 
-  /** opts.offline(media) → true when the media's file is missing. */
+  /** opts.offline(media) → true when the media's file is missing;
+   *  opts.proxy(media) → its proxy's height (540, 720…) or null. */
   function compactView(doc, opts = {}) {
     const hex = (v) => typeof v === "string" && /^#[0-9a-f]{3}$/i.test(v)
       ? "#" + [...v.slice(1)].map((c) => c + c).join("").toLowerCase()
@@ -1120,6 +1121,7 @@
           return `  ${m.id} ${m.kind} "${m.name}"${m.duration ? " " + m.duration + "s" : ""}` +
             (info ? ` ${info.replace(/ · /g, " ")}` : "") +
             (opts.offline && opts.offline(m) ? " OFFLINE (file missing — relinkMedia)" : "") +
+            (opts.proxy && m.kind === "video" && opts.proxy(m) ? ` proxy:${opts.proxy(m)}p` : "") +
             (m.favorite ? " ★" : "") + (m.tags && m.tags.length ? " " + m.tags.map((t) => "#" + t.replace(/\s+/g, "_")).join(" ") : "") +
             (m.folderId ? ` folder:${m.folderId}` : "") + ` uses:${uses.get(m.id) || 0}` +
             (m.derivedFrom ? ` (${m.denoise ? "denoised " + m.denoise : "derived"} from ${m.derivedFrom})` : "");

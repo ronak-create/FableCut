@@ -21,7 +21,7 @@ const { spawn, spawnSync } = require("child_process");
 const { loadEncodeProfiles, listProfilesPublic, resolveProfile, profileSummary } = require("./encode-profiles");
 
 const {
-  APP_DIR, DATA_DIR, MEDIA_DIR, EXPORTS_DIR, ANALYSIS_DIR, LIBRARY_DIR, PROJECT_FILE, ensureDirs, readSaved, writeSaved,
+  APP_DIR, DATA_DIR, MEDIA_DIR, EXPORTS_DIR, ANALYSIS_DIR, LIBRARY_DIR, PROJECT_FILE, PROXIES_DIR, ensureDirs, readSaved, writeSaved,
 } = require("./paths");
 const { downloadImportUrl, kindFromName, maybeFaststart } = require("./import-url");
 const FX = require("./audio-fx");
@@ -36,6 +36,7 @@ const Motion = require("./motion");
 const CompLib = require("./comp");
 const Templates = require("./templates");
 const { probeFile, infoForEntry } = require("./media-probe");
+const { findProxies } = require("./proxy");
 /** The user's saved presets / templates (library/presets, library/templates), validated; bad files skipped. */
 const savedItems = (kind) => readSaved(kind).map((x) => (kind === "presets" ? Templates.normalizePreset(x.data) : Templates.normalizeTemplate(x.data))).filter(Boolean);
 
@@ -279,6 +280,21 @@ const TOOLS = [
         force: { type: "boolean", description: "Also change clips the user locked (only when they asked)" },
       },
       required: ["clipIds"],
+    },
+  },
+  {
+    name: "fablecut_proxy",
+    description: "Proxies: light H.264 copies (540p by default, 720p or 1080p; never larger than the source) of heavy footage — 4K, HEVC, ProRes, long phone clips — that the editor plays while the user edits, so playback and scrubbing stay smooth. Export, fablecut_frame, fablecut_scopes and every measurement always read the original, so a proxy never changes the result. Without create or delete it reports each video's proxy (ready, being made with its progress, failed, none). create:true makes them (one at a time, in the background on the server) and waits until they are done unless wait:false; delete:true removes them. mediaIds defaults to every video in the project. The user turns proxy playback on or off with the monitor's Proxy button. Needs ffmpeg on PATH.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        mediaIds: { type: "array", items: { type: "string" }, description: "Video media ids (default: all video media)" },
+        create: { type: "boolean", description: "Make proxies for these files" },
+        delete: { type: "boolean", description: "Delete their proxies" },
+        height: { type: "number", enum: [540, 720, 1080], description: "Proxy height in pixels (default 540)" },
+        wait: { type: "boolean", description: "With create: wait until every proxy is done (default true)" },
+        timeout: { type: "number", description: "Seconds to wait with create (default 900)" },
+      },
     },
   },
   {
@@ -535,6 +551,46 @@ function describeExportJob(j) {
   return `Export ${j.id} ${j.status}${j.status === "running" ? ` — ${pct}%` : ""} (in ${j.via === "headless" ? "a headless browser" : "the open editor tab"}). ` +
     `Check again with fablecut_export {job:"${j.id}"}, or stop it with {cancel:"${j.id}"}.`;
 }
+/* fablecut_proxy: the server makes proxies (proxy.js); this asks it, and waits. */
+async function proxyTool(args) {
+  if (!(await ensureUIServer())) throw new Error(`the editor server is not running and could not be started on port ${PORT}`);
+  const proj = readProject();
+  const ids = Array.isArray(args.mediaIds) && args.mediaIds.length ? args.mediaIds : proj.media.filter((m) => m.kind === "video").map((m) => m.id);
+  const list = ids.map((id) => {
+    const m = proj.media.find((x) => x.id === id);
+    if (!m) throw new Error(`no media ${id}`);
+    if (m.kind !== "video") throw new Error(`${id} is ${m.kind === "audio" || m.kind === "image" ? "an" : "a"} ${m.kind} — only video gets a proxy`);
+    return m;
+  });
+  if (!list.length) return "No video in the project.";
+  const srcs = list.map((m) => m.src);
+  if (args.delete) {
+    const r = await apiJSON("POST", "/api/proxy/delete", { srcs });
+    if (r.status !== 200) throw new Error(r.body?.error || "delete failed");
+    return list.map((m) => `${m.id} "${m.name}": ${r.body.deleted[m.src] ? "proxy deleted" : "had no proxy"}`).join("\n");
+  }
+  let r = await apiJSON("POST", args.create ? "/api/proxy" : "/api/proxy/status", { srcs, height: args.height });
+  if (r.status !== 200) throw new Error(r.body?.error || `proxy request failed (${r.status})`);
+  let status = r.body.status;
+  const busy = () => Object.values(status).some((s) => s && (s.state === "queued" || s.state === "running"));
+  if (args.create && args.wait !== false) {
+    const deadline = Date.now() + 1000 * (Number.isFinite(args.timeout) && args.timeout > 0 ? args.timeout : 900);
+    while (busy() && Date.now() < deadline) {
+      await sleep(1000);
+      r = await apiJSON("POST", "/api/proxy/status", { srcs });
+      if (r.status === 200) status = r.body.status;
+    }
+  }
+  const line = (m) => {
+    const s = status[m.src];
+    if (!s) return `${m.id} "${m.name}": OFFLINE — the file is missing`;
+    if (s.state === "ready") return `${m.id} "${m.name}": proxy ready — ${s.width ? s.width + "×" + s.height : s.height + "p"}, ${(s.size / 1048576).toFixed(1)} MB (${s.src})`;
+    if (s.state === "running" || s.state === "queued") return `${m.id} "${m.name}": proxy ${s.state}${s.state === "running" ? ` ${Math.round(s.progress * 100)}%` : ""} (${s.height}p)`;
+    if (s.state === "failed") return `${m.id} "${m.name}": proxy FAILED — ${s.error}`;
+    return `${m.id} "${m.name}": no proxy${m.height ? ` (source ${m.width}×${m.height})` : ""}`;
+  };
+  return list.map(line).join("\n") + (busy() ? "\nStill working — call fablecut_proxy again (without create) to check." : "");
+}
 async function exportTool(args) {
   if (!(await ensureUIServer())) throw new Error(`the editor server is not running and could not be started on port ${PORT}`);
   if (args.cancel) {
@@ -770,6 +826,8 @@ async function callTool(name, args, attempt = 0) {
       return frameTool(args);
     case "fablecut_denoise":
       return denoiseTool(args);
+    case "fablecut_proxy":
+      return proxyTool(args);
     case "fablecut_status": {
       const up = await ensureUIServer();
       const proj = readProject();
@@ -829,7 +887,10 @@ async function callTool(name, args, attempt = 0) {
       const doc = readProject();
       lastReadRevision = doc.revision || 0;
       if (!args.compact) return JSON.stringify(doc);
-      return ProjectOps.compactView(doc, { offline: (m) => /^\/(media|library)\//.test(m.src || "") && !mediaFile(m.src) });
+      return ProjectOps.compactView(doc, {
+        offline: (m) => /^\/(media|library)\//.test(m.src || "") && !mediaFile(m.src),
+        proxy: (m) => { const f = mediaFile(m.src); const p = f && findProxies(PROXIES_DIR, f)[0]; return p ? p.height : null; },
+      });
     }
     case "fablecut_patch_project": {
       if (!Array.isArray(args.ops) || !args.ops.length) throw new Error("`ops` must be a non-empty array");
