@@ -2275,7 +2275,8 @@ let mediaInfoBusy = false, mediaInfoAgain = false;
 async function refreshMediaInfo(list) {
   if (!state.connected) return;
   if (mediaInfoBusy) { mediaInfoAgain = true; return; }   // run once more when this one ends
-  const todo = (list || project.media).filter((m) => !m.transient && m.size == null && /^\/(media|library)\//.test(m.src || ""));
+  // blob: srcs are files a hosted editor reads from a folder (a local session's own blobs are transient)
+  const todo = (list || project.media).filter((m) => !m.transient && m.size == null && (isLocalSrc(m.src) || /^blob:/.test(m.src || "")));
   if (!todo.length) return;
   mediaInfoBusy = true;
   try {
@@ -2527,7 +2528,7 @@ function scheduleOfflineCheck(delay = 300) {
 }
 async function checkOffline() {
   if (!state.connected || offlineChecking) return;
-  const list = project.media.filter((m) => !m.transient && isLocalSrc(m.src));
+  const list = project.media.filter((m) => !m.transient && (isLocalSrc(m.src) || /^blob:/.test(m.src || "")));
   offlineChecking = true;
   try {
     const res = await fetch("/api/media-info", {
@@ -2690,7 +2691,7 @@ async function openRelinkDialog(list) {
       const opt = (v, label) => { const o = document.createElement("option"); o.value = v; o.textContent = label; sel.appendChild(o); };
       opt("", options.length || cur ? "— leave it —" : "— not found: Browse… or Choose folder… —");
       if (cur && !options.some((o) => o.src === cur.src)) opt(cur.src, cur.label);
-      for (const o of options) opt(o.src, `${decodeURIComponent(o.src)} · ${MediaLib.fmtSize(o.size)} (${o.why})`);
+      for (const o of options) opt(o.src, `${decodeURIComponent(o.path || o.src)} · ${MediaLib.fmtSize(o.size)} (${o.why})`);
       sel.value = cur ? cur.src : "";
       sel.addEventListener("change", () => {
         const o = options.find((x) => x.src === sel.value);
