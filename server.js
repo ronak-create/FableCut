@@ -485,7 +485,7 @@ const server = http.createServer(async (req, res) => {
       }
       const body = JSON.parse((await readBody(req)).toString("utf8") || "{}");
       const srcs = Array.isArray(body.srcs) ? body.srcs.slice(0, 500).map(String) : [];
-      const info = {};
+      const info = Object.create(null);   // any src is a plain key, "__proto__" too
       // probed side by side (media-probe.js caps how many ffprobes run at once)
       await Promise.all(srcs.map(async (src) => { const file = resolveSrc(src); info[src] = file ? await probeFile(file) : null; }));
       sendJSON(res, 200, { info });
