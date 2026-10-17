@@ -41,9 +41,12 @@ overwriting. On conflict, re-read, re-apply your change, and call it again.
 
 ## Getting footage in
 
-`fablecut_import_media` copies a local file into the project and registers it.
-Media entries may omit `duration` — the browser probes it and writes it back, so
-re-read after a moment instead of shelling out to ffprobe.
+`fablecut_import_media` copies a local file into the project and registers it
+with its details read from the file: duration, resolution, frame rate, codecs,
+audio channels and size. The compact view's MEDIA lines show them for every
+file (plus tags, favorites and `uses:N`), so read them there instead of shelling
+out to ffprobe. To organize the bin, use `updateMedia` (favorite, tags, folder)
+and `setCollection`.
 
 ## Things that trip people up
 
