@@ -2408,7 +2408,7 @@ function showMediaMenu(x, y, m) {
   item("Open in Source", () => loadSourceFromMedia(m));
   item(`Find timeline instances (${uses})`, () => showMediaInstances(m, x, y), uses ? null : "Not used on the timeline");
   item("Media info…", () => showMediaInfo(m, x, y));
-  item(isMediaOffline(m.id) ? "Relink…" : "Relink to another copy…", () => openRelinkDialog([m]), isLocalSrc(m.src) || m.transient ? null : "Not a project file");
+  item(isMediaOffline(m.id) ? "Relink…" : "Relink to another copy…", () => openRelinkDialog([m]), state.connected ? null : "Needs the FableCut server");
   item("Replace file…", () => replaceMediaFile(m), state.connected ? null : "Needs the FableCut server");
   if (m.kind === "video") {
     const ps = proxyStatus.get(m.id);
