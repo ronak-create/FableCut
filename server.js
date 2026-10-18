@@ -329,12 +329,36 @@ async function beginDeliveryExport(rate, name, hasAudio, extra) {
   // the single-output fields stay as they were for one delivery
   return { id, mode: "jpeg", input, jpegQuality, outputs: view, ...view[0] };
 }
+/** Integrated loudness and true peak of a file's first audio stream (ffmpeg ebur128). */
+async function measureLoudness(file) {
+  const r = await runFfmpeg(Delivery.LOUDNESS_ARGS(file), 10 * 60 * 1000);
+  return r.code === 0 ? Delivery.parseEbur128(r.stderr) : null;
+}
+function ffprobeJSON(file) {
+  return new Promise((resolve) => {
+    execFile("ffprobe", ["-v", "error", "-show_streams", "-show_format", "-of", "json", file], { timeout: 60000, maxBuffer: 8 * 1024 * 1024, windowsHide: true },
+      (err, stdout) => { try { resolve(err ? null : JSON.parse(stdout)); } catch { resolve(null); } });
+  });
+}
+/** Check a finished output against its spec: size, frames, fps, codecs, length, loudness, file size. */
+async function verifyDeliveryOutput(sess, o, file) {
+  try {
+    const [probe, loud] = await Promise.all([ffprobeJSON(file), o.spec.audio.codec !== "none" && sess.wav ? measureLoudness(file) : null]);
+    if (!probe) return null;
+    let size = 0;
+    try { size = fs.statSync(file).size; } catch {}
+    return Delivery.verify(o.spec, probe, {
+      fps: sess.fps, frames: sess.frames || (sess.duration ? Math.round(sess.duration * sess.fps) : null), duration: sess.duration,
+      size, loud, frame: o.frame, hasAudio: !!sess.wav,
+    });
+  } catch { return null; }
+}
 /** Spawn one ffmpeg per output of a delivery session. */
 function startDeliveryEncoders(sess) {
   for (const o of sess.outputs) {
     const proc = spawn("ffmpeg", Delivery.ffmpegArgs(o.spec, {
       fps: sess.fps, input: sess.input, canvasW: sess.canvasW, canvasH: sess.canvasH, frame: o.frame,
-      wavPath: sess.wav, outPath: o.partPath, duration: sess.duration,
+      wavPath: sess.wav, outPath: o.partPath, duration: sess.duration, loudnorm: o.loudnorm,
     }), { stdio: ["pipe", "ignore", "pipe"] });
     proc.stderr.on("data", (d) => { o.stderr = (o.stderr + d).slice(-2000); });
     proc.stdin.on("error", () => { });
@@ -962,6 +986,14 @@ const server = http.createServer(async (req, res) => {
     try {
       const wavPath = path.join(sess.dir, "audio.wav");
       fs.writeFileSync(wavPath, await readBody(req));
+      // outputs that normalize loudness need the mix measured (loudnorm pass one) before ffmpeg starts
+      const byTarget = new Map();
+      for (const o of sess.outputs || []) {
+        if (o.spec.audio.loudness == null || o.spec.audio.codec === "none") continue;
+        const k = `${o.spec.audio.loudness}/${o.spec.audio.truePeak}`;
+        if (!byTarget.has(k)) byTarget.set(k, runFfmpeg(Delivery.LOUDNORM_ARGS(wavPath, o.spec), 10 * 60 * 1000).then((r) => Delivery.parseLoudnorm(r.stderr)));
+        o.loudnorm = await byTarget.get(k);
+      }
       sess.wav = wavPath;
       touchExport(sess);
       sendJSON(res, 200, { ok: true });
@@ -990,7 +1022,9 @@ const server = http.createServer(async (req, res) => {
           try { fs.renameSync(o.partPath, o.outPath); }
           catch (e) { return { file, ok: false, error: "could not save the file: " + (e.message || e) }; }
           o.partPath = null; // renamed — cleanup must not delete the finished file
-          return { file, ok: true, src: "/exports/" + encodeURIComponent(file) };
+          const report = await verifyDeliveryOutput(sess, o, o.outPath);
+          return { file, ok: true, src: "/exports/" + encodeURIComponent(file), ...(report ? { report } : {}),
+            ...(o.loudnorm ? { mixLoudness: o.loudnorm.input_i } : {}) };
         }));
         cleanupExport(id);
         const ok = results.filter((x) => x.ok);

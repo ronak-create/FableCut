@@ -2030,7 +2030,7 @@ arguments to write — that `delivery.js` turns into one ffmpeg pass:
 | `x` | 1920×1080, H.264 CRF 20 capped at 25 Mb/s, AAC 192k; warns past 2:20 and 512 MB |
 | `linkedin` | 1920×1080, H.264 CRF 20 capped at 20 Mb/s, AAC 192k; warns past 15 min and 5 GB |
 | `master` (default) | the picture's own size, H.264 CRF 16, AAC 320k |
-| `broadcast` | 1920×1080 ProRes 422 HQ MOV, PCM 24-bit 48 kHz, Rec. 709; warns off 25 / 29.97 / 50 / 59.94 fps |
+| `broadcast` | 1920×1080 ProRes 422 HQ MOV, PCM 24-bit 48 kHz, Rec. 709, normalized to −23 LUFS / −1 dBTP (EBU R128); warns off 25 / 29.97 / 50 / 59.94 fps |
 | `web` | 1280×720 H.264 CRF 23, AAC 128k, fast start |
 | `archive` | the picture's own size, lossless FFV1 4:2:2 10-bit MKV, PCM 24-bit |
 | `custom` | your own settings |
@@ -2054,8 +2054,10 @@ A spec (every key optional — what is left out comes from its `preset`):
     "pixFmt": "yuv420p",           // 4:2:0 / 4:2:2 / 4:4:4, 8 or 10 bit, as the codec allows
     "profile": null                // ProRes: proxy lt standard hq 4444 4444xq · DNxHR: lb sq hq hqx 444
   },
-  "audio": { "codec": "aac", "bitrate": 320, "sampleRate": 48000, "channels": 2 },
+  "audio": { "codec": "aac", "bitrate": 320, "sampleRate": 48000, "channels": 2,
+             "loudness": null, "truePeak": -1 },
                                    // aac · opus · mp3 · pcm16 · pcm24 · flac · none
+                                   // loudness: a LUFS target (−14 streaming, −16 podcast, −23 EBU R128, −24 ATSC) or null
   "color": "bt709",                // bt709 · bt709-full · bt601-625 (PAL) · bt601-525 (NTSC)
   "filename": "{project}_{preset}_{res}",
   // tokens: {project} {preset} {res} (1080p, 1080x1920, 1080sq) {w} {h} {fps} {codec} {date} {time} {range} {n}
@@ -2073,6 +2075,19 @@ A spec (every key optional — what is left out comes from its `preset`):
 - Outputs that keep more than 4:2:0 8-bit (ProRes, DNxHR, FFV1, 10-bit, 4:2:2, 4:4:4)
   get raw RGBA frames instead of JPEG, so no chroma is lost on the way. Slower to send.
 - The audio is cut to exactly the frames' length.
+- **Loudness** (`audio.loudness`): the mix is measured and turned to the target with
+  ffmpeg's two-pass `loudnorm` — one linear gain, and a true-peak limiter at `truePeak`.
+  When the peaks leave no room for the gain it compresses instead and may land under the
+  target; the check after the export says so. Off (null) leaves the mix as mixed —
+  except Broadcast, which normalizes to −23 LUFS / −1 dBTP. Mixes shorter than 3 s may
+  not reach the target.
+- **Checked after the export.** Every file is read back with ffprobe and measured
+  (BS.1770 integrated loudness and true peak) and compared with what was asked:
+  size, frame rate, frame count, codec, color tags, audio codec / rate / channels,
+  length, loudness against the target (±1 LU) and the true-peak ceiling, and file size
+  against the platform's limit. Without a target the report says where the platform
+  plays it ("YouTube plays it 4.2 dB quieter"). The report shows in the queue, a toast
+  after a single export, and the `fablecut_export` reply.
 - **Saved presets**: "Save preset…" in the dialog writes `library/delivery/<id>.json`,
   listed under "Saved" in every project (`GET / POST /api/export/presets`,
   `POST /api/export/presets/delete {id}`).
@@ -2115,7 +2130,7 @@ ones and starts.
 - REST: `POST /api/export/begin {deliveries:[{delivery, name}, …], canvasW, canvasH,
   region?, duration, fps, hasAudio}` → `{id, input, jpegQuality, outputs:[{file, spec,
   summary, notes, size}]}`; frames and audio as for one output; `/api/export/end` →
-  `{src, outputs:[{file, ok, src | error}]}`.
+  `{src, outputs:[{file, ok, src, report:{ok, checks:[{ok, text}], line}, mixLoudness?} | {file, ok:false, error}]}`.
 
 ### Encoding profiles (`encoding-profiles.json`)
 

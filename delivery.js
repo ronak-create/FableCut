@@ -14,7 +14,9 @@
                 maxrate: null (kbps, caps a CRF encode), keyint: 2 (s, 0 = encoder default),
                 pixFmt: "yuv420p", speed: "fast" | "balanced" | "best",
                 profile: null (ProRes / DNxHR flavour) },
-       audio: { codec: "aac", bitrate: 320, sampleRate: 48000, channels: 2 },
+       audio: { codec: "aac", bitrate: 320, sampleRate: 48000, channels: 2,
+                loudness: null (LUFS target — the mix is turned up / down to it),
+                truePeak: -1 (dBTP ceiling while normalizing) },
        color: "bt709",                    // a COLORS key
        filename: "{project}_{preset}_{res}",
        metadata: { title, artist, description, copyright, date } }
@@ -203,9 +205,9 @@
     broadcast: {
       label: "Broadcast", group: "Delivery", width: 1920, height: 1080, container: "mov",
       video: { codec: "prores", profile: "hq", pixFmt: "yuv422p10le" },
-      audio: { codec: "pcm24", sampleRate: 48000, channels: 2 },
+      audio: { codec: "pcm24", sampleRate: 48000, channels: 2, loudness: -23, truePeak: -1 },
       filename: "{project}_broadcast_{res}_{fps}", limits: { fpsList: [25, 29.97, 50, 59.94] },
-      note: "ProRes 422 HQ · PCM 24-bit 48 kHz · Rec. 709",
+      note: "ProRes 422 HQ · PCM 24-bit 48 kHz · Rec. 709 · −23 LUFS (EBU R128)",
     },
     web: {
       label: "Web", group: "Delivery", width: 1280, height: 720, container: "mp4",
@@ -224,6 +226,10 @@
     },
   };
   const PRESET_IDS = Object.keys(PRESETS);
+  /* Where each platform plays a mix (streaming players turn louder ones down).
+     Only a reference for the report; a spec normalizes only when audio.loudness is set. */
+  const PLATFORM_LOUDNESS = { youtube: -14, "youtube-shorts": -14, "instagram-reels": -14, tiktok: -14, x: -14, linkedin: -14, broadcast: -23 };
+  const LOUDNESS_TARGETS = [[-14, "−14 LUFS · streaming and social"], [-16, "−16 LUFS · podcast, dialogue"], [-23, "−23 LUFS · broadcast (EBU R128)"], [-24, "−24 LUFS · broadcast (ATSC A/85)"]];
   const DEFAULT_PRESET = "master";
 
   /* ── Normalize ──────────────────────────────────────────────────────── */
@@ -341,6 +347,10 @@
       audio.sampleRate = pick(SAMPLE_RATES, +a.sampleRate, 48000);
       if (ac === "opus") audio.sampleRate = 48000;
       audio.channels = +a.channels === 1 ? 1 : 2;
+      // loudness: null = leave the mix as it is
+      const lu = a.loudness == null || a.loudness === "" || a.loudness === "off" ? null : +a.loudness;
+      audio.loudness = Number.isFinite(lu) ? Math.round(clamp(lu, -36, -5) * 10) / 10 : null;
+      if (audio.loudness != null) audio.truePeak = Math.round(clamp(num(a.truePeak, -1), -9, 0) * 10) / 10;
     }
     spec.audio = audio;
 
@@ -473,7 +483,8 @@
   }
 
   /** One ffmpeg pass. o: {fps, input:"jpeg"|"rgba", canvasW, canvasH, frame
-   *  (from reframe), wavPath|null, outPath, duration (s, frames ÷ fps), dry}. `dry` swaps stdin for a
+   *  (from reframe), wavPath|null, outPath, duration (s, frames ÷ fps),
+   *  loudnorm (pass-one measurement, when the spec has a loudness target), dry}. `dry` swaps stdin for a
    *  0.1 s synthetic picture of the canvas size, to check the settings
    *  before anything is rendered. */
   function ffmpegArgs(spec, o) {
@@ -498,7 +509,7 @@
     // the mix ends a fraction of a frame early (29.97 fps), trimmed when it runs
     // long. -shortest alone overshoots by up to half a second on slow inputs.
     const dur = +o.duration > 0 ? (+o.duration).toFixed(6) : null;
-    if (audio && !o.dry) args.push("-af", dur ? `apad=whole_dur=${dur},atrim=0:${dur}` : "apad");
+    if (audio && !o.dry) args.push("-af", [o.loudnorm ? loudnormFilter(spec, o.loudnorm) : "", dur ? `apad=whole_dur=${dur},atrim=0:${dur}` : "apad"].filter(Boolean).join(","));
     args.push(...(audio ? audioArgs(spec) : ["-an"]));
     for (const [k, v] of Object.entries(spec.metadata || {})) {
       if (k === "description") args.push("-metadata", `description=${v}`, "-metadata", `comment=${v}`);
@@ -509,6 +520,100 @@
     else if (audio && !dur) args.push("-shortest");
     args.push(o.outPath);
     return args;
+  }
+
+  /* Loudness normalization is ffmpeg's two-pass loudnorm (EBU R128): pass one
+     measures the mix (LOUDNORM_ARGS → parseLoudnorm), pass two — this filter —
+     applies one linear gain to the target, with a true-peak limiter (4×
+     oversampled inside loudnorm) at the ceiling. When the peaks leave no room
+     for the gain, loudnorm compresses instead, and may land under the target:
+     the check after the export says so. */
+  const LOUDNORM_ARGS = (file, spec) => ["-hide_banner", "-nostats", "-i", file, "-map", "0:a:0",
+    "-af", `loudnorm=I=${spec.audio.loudness}:TP=${spec.audio.truePeak ?? -1}:LRA=11:print_format=json`, "-f", "null", "-"];
+  /** loudnorm's pass-one JSON (the last {...} in its stderr) → numbers, or null. */
+  function parseLoudnorm(stderr) {
+    const m = /\{[^{}]*"input_i"[^{}]*\}/.exec(String(stderr || "").split(/Parsed_loudnorm/).pop() || "");
+    if (!m) return null;
+    try {
+      const j = JSON.parse(m[0]);
+      const out = {};
+      for (const k of ["input_i", "input_tp", "input_lra", "input_thresh", "target_offset"]) out[k] = Number(j[k]);
+      return Object.values(out).every(Number.isFinite) && out.input_i > -70 ? out : null;   // silence: nothing to normalize
+    } catch { return null; }
+  }
+  function loudnormFilter(spec, m) {
+    const a = spec.audio;
+    if (a.loudness == null || !m) return "";
+    const lra = Math.max(11, Math.ceil(m.input_lra + 1));   // linear mode needs the range to fit
+    return `loudnorm=I=${a.loudness}:TP=${a.truePeak ?? -1}:LRA=${lra}:measured_I=${m.input_i}:measured_TP=${m.input_tp}` +
+      `:measured_LRA=${m.input_lra}:measured_thresh=${m.input_thresh}:offset=${m.target_offset}:linear=true`;
+  }
+  /** `-af ebur128=peak=true` summary → {lufs, truePeak} (null where ffmpeg said -inf). */
+  function parseEbur128(stderr) {
+    const txt = String(stderr || "");
+    const i = [...txt.matchAll(/\bI:\s+(-?[\d.]+|-inf)\s+LUFS/g)].pop();
+    const p = [...txt.matchAll(/True peak:\s*[\r\n]+\s*Peak:\s+(-?[\d.]+|-inf)\s+dBFS/g)].pop();
+    const val = (m) => (m && m[1] !== "-inf" ? +m[1] : null);
+    return { lufs: val(i), truePeak: val(p) };
+  }
+  const LOUDNESS_ARGS = (file) => ["-hide_banner", "-nostats", "-i", file, "-map", "0:a:0", "-af", "ebur128=peak=true:framelog=quiet", "-f", "null", "-"];
+
+  /** What came out vs what was asked: ffprobe JSON of the file (+ its loudness)
+   *  against the spec. ctx: {fps, frames, duration, size (bytes), loud:{lufs,
+   *  truePeak}|null, frame (from reframe)}. → {ok, checks:[{ok, text}], line}. */
+  function verify(spec, probe, ctx = {}) {
+    const checks = [];
+    const add = (ok, text) => checks.push({ ok: !!ok, text });
+    const streams = (probe && probe.streams) || [];
+    const v = streams.find((x) => x.codec_type === "video");
+    const a = streams.find((x) => x.codec_type === "audio");
+    const fr = ctx.frame || {};
+    const near = (x, y, tol) => Math.abs(x - y) <= tol;
+    const rate = (r) => { const [n, d] = String(r || "0/1").split("/").map(Number); return d ? n / d : 0; };
+    const CODEC = { h264: "h264", hevc: "hevc", av1: "av1", vp9: "vp9", prores: "prores", dnxhr: "dnxhd", mpeg2: "mpeg2video", ffv1: "ffv1" };
+    if (!v) add(false, "no video stream in the file");
+    else {
+      if (fr.outW) add(v.width === fr.outW && v.height === fr.outH, `${v.width}×${v.height}${v.width === fr.outW && v.height === fr.outH ? "" : ` (asked ${fr.outW}×${fr.outH})`}`);
+      const got = rate(v.avg_frame_rate) || rate(v.r_frame_rate);
+      if (ctx.fps) add(near(got, ctx.fps, 0.01), `${Math.round(got * 1000) / 1000} fps${near(got, ctx.fps, 0.01) ? "" : ` (asked ${ctx.fps})`}`);
+      const n = +v.nb_frames;
+      if (ctx.frames && Number.isFinite(n) && n > 0) add(n === ctx.frames, `${n} frames${n === ctx.frames ? "" : ` (rendered ${ctx.frames})`}`);
+      add(v.codec_name === CODEC[spec.video.codec], `${v.codec_name}${v.codec_name === CODEC[spec.video.codec] ? "" : ` (asked ${spec.video.codec})`}`);
+      const c = COLORS[spec.color];
+      if (c && v.color_space && v.color_space !== "unknown") add(v.color_space === c.matrix, `color ${v.color_space}${v.color_space === c.matrix ? "" : ` (asked ${c.matrix})`}`);
+    }
+    if (spec.audio.codec === "none") add(!a, a ? "has an audio stream (asked none)" : "no audio");
+    else if (!a) add(!ctx.hasAudio, ctx.hasAudio ? "no audio stream" : "no audio (the timeline is silent)");
+    else {
+      const A = AUDIO[spec.audio.codec];
+      add(a.codec_name === A.encoder || (A.encoder === "libopus" && a.codec_name === "opus") || (A.encoder === "libmp3lame" && a.codec_name === "mp3"),
+        `${a.codec_name} ${Math.round(+a.sample_rate / 100) / 10} kHz ${+a.channels === 1 ? "mono" : +a.channels === 2 ? "stereo" : a.channels + " ch"}`);
+      if (+a.sample_rate !== spec.audio.sampleRate) add(false, `sample rate ${a.sample_rate} (asked ${spec.audio.sampleRate})`);
+    }
+    const dur = +(probe && probe.format && probe.format.duration);
+    if (ctx.duration && Number.isFinite(dur)) add(near(dur, ctx.duration, Math.max(0.05, 1.5 / (ctx.fps || 30))), `${fmtClock(dur)}${near(dur, ctx.duration, Math.max(0.05, 1.5 / (ctx.fps || 30))) ? "" : ` (timeline ${fmtClock(ctx.duration)})`}`);
+    const L = ctx.loud;
+    if (L && L.lufs != null) {
+      const target = spec.audio.loudness;
+      const tp = L.truePeak;
+      if (target != null) {
+        add(near(L.lufs, target, 1), `${L.lufs.toFixed(1)} LUFS${near(L.lufs, target, 1) ? "" : ` (target ${target})`}`);
+        if (tp != null) add(tp <= (spec.audio.truePeak ?? -1) + 0.5, `${tp.toFixed(1)} dBTP${tp <= (spec.audio.truePeak ?? -1) + 0.5 ? "" : ` (ceiling ${spec.audio.truePeak ?? -1})`}`);
+      } else {
+        const ref = PLATFORM_LOUDNESS[spec.preset];
+        const loudNote = ref != null && L.lufs > ref + 1 ? ` — ${PRESETS[spec.preset].label} plays it ${(L.lufs - ref).toFixed(1)} dB quieter (set Loudness to ${ref} LUFS to match)` : "";
+        add(true, `${L.lufs.toFixed(1)} LUFS${tp != null ? ` · ${tp.toFixed(1)} dBTP` : ""}${loudNote}`);
+        if (tp != null && tp > 0) add(false, `true peak ${tp.toFixed(1)} dBTP — over 0, it will clip after encoding`);
+      }
+    }
+    const lim = (PRESETS[spec.preset] && PRESETS[spec.preset].limits) || {};
+    if (ctx.size) add(!(lim.size && ctx.size > lim.size), `${fmtBytes(ctx.size)}${lim.size && ctx.size > lim.size ? ` (over ${PRESETS[spec.preset].label}'s ${fmtBytes(lim.size)})` : ""}`);
+    const bad = checks.filter((x) => !x.ok);
+    return { ok: !bad.length, checks, line: checks.map((x) => (x.ok ? "" : "⚠ ") + x.text).join(" · ") };
+  }
+  function fmtClock(s) {
+    const m = Math.floor(s / 60), r = s - m * 60;
+    return `${m}:${r < 10 ? "0" : ""}${r.toFixed(2)}`;
   }
 
   /** How the browser should hand frames over: JPEG is 4:2:0 8-bit, so
@@ -565,7 +670,7 @@
     else if (v.rate === "vbr") vid += ` VBR ${fmtRate(v.bitrate)}`;
     else if (v.rate === "cbr") vid += ` CBR ${fmtRate(v.bitrate)}`;
     parts.push(vid);
-    parts.push(a.codec === "none" ? "no audio" : `${AUDIO[a.codec].label}${a.bitrate ? " " + a.bitrate + "k" : ""}`);
+    parts.push(a.codec === "none" ? "no audio" : `${AUDIO[a.codec].label}${a.bitrate ? " " + a.bitrate + "k" : ""}${a.loudness != null ? ` · ${a.loudness} LUFS` : ""}`);
     parts.push(spec.container.toUpperCase());
     return parts.join(" · ");
   }
@@ -607,7 +712,7 @@
     return out;
   }
   function fmtDur(s) { s = Math.round(s); const m = Math.floor(s / 60); return m ? `${m} min${s % 60 ? ` ${s % 60} s` : ""}` : `${s} s`; }
-  function fmtBytes(b) { return b >= 1024 ** 3 ? `${(b / 1024 ** 3).toFixed(1)} GB` : `${Math.round(b / 1024 ** 2)} MB`; }
+  function fmtBytes(b) { return b >= 1024 ** 3 ? `${(b / 1024 ** 3).toFixed(1)} GB` : b >= 1024 ** 2 ? `${(b / 1024 ** 2).toFixed(b >= 100 * 1024 ** 2 ? 0 : 1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`; }
 
   /** Presets in dropdown order, grouped: [{group, items:[{id, label, note}]}].
    *  User presets (id → spec with a label) come under "Saved". */
@@ -658,6 +763,7 @@
     FPS_CHOICES, RESOLUTIONS, SPEEDS, SAMPLE_RATES, META_KEYS, FILENAME_TOKENS,
     normalize, encodersFor, reframe, ffmpegArgs, videoFilter, frameInput, jpegQuality, fpsRational,
     renderFilename, projectFilename, describe, estimateSize, checks, presetGroups, presetId, savedPresets, parseEncoders,
+    PLATFORM_LOUDNESS, LOUDNESS_TARGETS, LOUDNESS_ARGS, LOUDNORM_ARGS, parseLoudnorm, loudnormFilter, parseEbur128, verify,
     fmtBytes, fmtDur,
   };
 });

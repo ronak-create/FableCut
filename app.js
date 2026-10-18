@@ -14156,6 +14156,14 @@ function fillDeliveryControls() {
   showField("dlvARateField", a.codec !== "none" && a.codec !== "opus");
   showField("dlvAChField", a.codec !== "none");
   if (a.codec !== "none") { $("dlvARate").value = a.sampleRate; $("dlvACh").value = a.channels; }
+  showField("dlvLoudField", a.codec !== "none");
+  showField("dlvTpField", a.codec !== "none" && a.loudness != null);
+  if (a.codec !== "none") {
+    const opts = [["off", "Off — as mixed"], ...Delivery.LOUDNESS_TARGETS];
+    if (a.loudness != null && !opts.some((o) => +o[0] === a.loudness)) opts.push([a.loudness, `${a.loudness} LUFS`]);
+    setOptions($("dlvLoud"), opts, a.loudness == null ? "off" : a.loudness);
+    if (a.loudness != null && document.activeElement !== $("dlvTp")) $("dlvTp").value = a.truePeak;
+  }
   // file name + metadata (left alone while typing)
   const fn = $("dlvFilename");
   if (document.activeElement !== fn) fn.value = sp.filename;
@@ -14202,6 +14210,8 @@ function readDeliveryControls(changed) {
     if (!$("dlvABitrateField").classList.contains("hidden")) a.bitrate = +dlvVal("dlvABitrate");
     a.sampleRate = +dlvVal("dlvARate") || a.sampleRate;
     a.channels = +dlvVal("dlvACh") || a.channels;
+    a.loudness = dlvVal("dlvLoud") === "off" || dlvVal("dlvLoud") === "" ? null : +dlvVal("dlvLoud");
+    if (dlvVal("dlvTp") !== "") a.truePeak = +dlvVal("dlvTp");
   } else delete a.bitrate;
   raw.filename = dlvVal("dlvFilename");
   for (const k of Delivery.META_KEYS) raw.metadata[k] = dlvVal("dlvMeta" + k[0].toUpperCase() + k.slice(1));
@@ -15312,6 +15322,18 @@ async function fastExport(opts = {}) {
     result = { outputs: outs.map((o, i) => ({ ...o, ...(begin.outputs && begin.outputs[i] ? { summary: begin.outputs[i].summary, notes: begin.outputs[i].notes } : {}) })) };
     if (job) await reportExportJob(job, { status: "done", src: end.src, ...(delivery ? { result: { summary: begin.summary, notes: begin.notes || [], outputs: result.outputs } } : {}) }, true);
     else if (opts.silent) { /* the queue lists the files */ }
+    else if (delivery && result.outputs[0]) {
+      const o = result.outputs[0];
+      exportQueue.push({ id: "q" + Math.random().toString(36).slice(2, 8), label: queueLabel(delivery), spec: delivery,
+        name: String(o.file || "").replace(/\.[^.]+$/, ""), range: exportRangeMode(), status: "done", progress: 1,
+        src: o.src, file: o.file, report: o.report || null });
+      renderQueue();
+      toast(o.report && !o.report.ok ? `Exported ${o.file} — check: ${o.report.checks.filter((c) => !c.ok).map((c) => c.text).join("; ")} (Export → Queue)` : `Exported ${o.file}${o.report ? " — checks passed" : ""}`);
+      const a = document.createElement("a");
+      a.href = end.src;
+      a.download = decodeURIComponent(end.src.split("/").pop());
+      a.click();
+    }
     else {
       const a = document.createElement("a");
       a.href = end.src;
@@ -15397,7 +15419,9 @@ function renderQueue() {
     return `<li class="${q.status}" data-q="${q.id}"><div class="xq-main"><b>${escapeHtml(q.label)} — ${escapeHtml(q.name + ext)}</b>` +
       `<span class="xq-sub">${escapeHtml(Delivery.describe(q.spec, { width: fr.outW, height: fr.outH, fps }))} · ${q.range === "in-out" ? "IN–OUT" : "entire timeline"}</span>` +
       (q.status === "running" ? `<div class="progress"><div class="progress-fill" style="width:${(q.progress * 100).toFixed(1)}%"></div></div>` : "") +
-      `<span class="xq-status">${escapeHtml(status)}</span></div><div class="xq-actions">${actions}</div></li>`;
+      `<span class="xq-status">${escapeHtml(status)}</span>` +
+      (q.report ? `<span class="xq-report${q.report.ok ? "" : " warn"}">${q.report.ok ? "✓ " : ""}${escapeHtml(q.report.line)}</span>` : "") +
+      `</div><div class="xq-actions">${actions}</div></li>`;
   }).join("");
 }
 function renderQueueProgress() {
@@ -15433,7 +15457,7 @@ async function runQueue() {
       } finally { exportRangeForced = null; }
       group.forEach((q, i) => {
         const o = res && res.outputs && res.outputs[i];
-        if (o && o.ok) Object.assign(q, { status: "done", src: o.src, file: o.file, progress: 1 });
+        if (o && o.ok) Object.assign(q, { status: "done", src: o.src, file: o.file, progress: 1, report: o.report || null });
         else if (res && res.cancelled) q.status = "cancelled";
         else Object.assign(q, { status: "failed", error: (o && o.error) || (res && res.error) || "export failed" });
       });
@@ -15444,7 +15468,8 @@ async function runQueue() {
     renderQueue();
   }
   const done = exportQueue.filter((q) => q.status === "done").length, failed = exportQueue.filter((q) => q.status === "failed").length;
-  if (done || failed) toast(`Export queue: ${done} done${failed ? `, ${failed} failed` : ""}`);
+  const warned = exportQueue.filter((q) => q.status === "done" && q.report && !q.report.ok).length;
+  if (done || failed) toast(`Export queue: ${done} done${failed ? `, ${failed} failed` : ""}${warned ? ` — ${warned} with warnings` : ""}`);
 }
 function stopQueue() {
   queueStop = true;

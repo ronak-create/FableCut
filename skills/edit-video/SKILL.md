@@ -94,3 +94,5 @@ scopes always use the originals. Make them only when the user asks.
   square…): `outputs:[{preset:"master"}, {preset:"youtube"}, …]` renders the
   timeline once per frame rate and encodes every file from it; `setProject {outputs:[…]}`
   saves the list with the project and `outputs:true` exports it.
+  `delivery:{audio:{loudness:-14}}` normalizes the mix (−23 for broadcast);
+  the reply checks each file — read it and tell the user about any ⚠ line.

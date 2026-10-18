@@ -316,8 +316,11 @@ same time.
   stretch to another shape), frame rate, codec (H.264, HEVC, AV1, VP9, ProRes,
   DNxHR, XDCAM HD422, FFV1) and hardware encoder, CRF / VBR / CBR, max rate,
   keyframe interval, pixel format, color, container, audio codec, bitrate and
-  rate, a file-name template and metadata. Save your own presets; the dialog
-  warns about upscaling, crops and platform limits before it renders
+  rate, loudness normalization (−14 / −16 / −23 / −24 LUFS with a true-peak
+  ceiling), a file-name template and metadata. Save your own presets; the
+  dialog warns about upscaling, crops and platform limits before it renders,
+  and every finished file is read back and checked — size, frame rate, frame
+  count, codecs, length, loudness, true peak and file size
 - **Batch export**: one project → many files (master, YouTube 1080p, a 9:16
   reel, a square, a 720p preview…) from **one render per frame rate and
   range** (up to 8 outputs each) — every frame is drawn once and each output's ffmpeg

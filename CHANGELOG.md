@@ -67,6 +67,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   16:9 file of a project framed for 9:16 reframes the whole canvas. Agents:
   `fablecut_export {outputs:true | [...]}`, `setProject {outputs}`; REST
   `/api/export/begin {deliveries:[...]}`.
+- **Loudness normalization and delivery checks.** A delivery can normalize the
+  mix to a loudness target (−14 streaming, −16 podcast, −23 EBU R128, −24
+  ATSC A/85) with a true-peak ceiling, using ffmpeg's two-pass `loudnorm`;
+  Broadcast does −23 LUFS / −1 dBTP by default. Every exported file is read
+  back with ffprobe and measured, and checked against what was asked: size,
+  frame rate, frame count, codec, color, audio, length, loudness, true peak and
+  the platform's file-size limit. The report shows in the export queue, after a
+  single export, and in the `fablecut_export` reply.
 
 ### Changed
 - `/media/` serves files in subfolders of `media/` too.

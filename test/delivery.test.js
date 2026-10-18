@@ -331,3 +331,81 @@ test("export/begin with several deliveries: one stream of frames, one file per o
   assert.equal(many.status, 400);
   assert.match((await many.json()).error, /at most 8/);
 });
+
+test("loudness: spec, gain, limiter filter and the ebur128 parser", () => {
+  const b = D.normalize("broadcast").spec;
+  assert.equal(b.audio.loudness, -23, "Broadcast normalizes to EBU R128");
+  assert.equal(b.audio.truePeak, -1);
+  assert.equal(D.normalize("youtube").spec.audio.loudness, null, "platforms leave the mix alone unless asked");
+  assert.equal(D.normalize({ preset: "youtube", audio: { loudness: "off" } }).spec.audio.loudness, null);
+  assert.equal(D.normalize({ preset: "youtube", audio: { loudness: -50 } }).spec.audio.loudness, -36);
+  const m = D.parseLoudnorm('[Parsed_loudnorm_0 @ x] \n{\n\t"input_i" : "-21.81",\n\t"input_tp" : "-21.09",\n\t"input_lra" : "0.40",\n\t"input_thresh" : "-31.81",\n\t"output_i" : "-23.0",\n\t"target_offset" : "-0.10"\n}\n');
+  assert.deepEqual(m, { input_i: -21.81, input_tp: -21.09, input_lra: 0.4, input_thresh: -31.81, target_offset: -0.1 });
+  assert.equal(D.parseLoudnorm('{"input_i" : "-inf", "input_tp" : "-inf", "input_lra" : "0", "input_thresh" : "-70", "target_offset" : "0"}'), null, "silence");
+  assert.equal(D.loudnormFilter(b, m), "loudnorm=I=-23:TP=-1:LRA=11:measured_I=-21.81:measured_TP=-21.09:measured_LRA=0.4:measured_thresh=-31.81:offset=-0.1:linear=true");
+  const yt = D.normalize("youtube").spec;
+  assert.equal(D.loudnormFilter(yt, m), "", "no target → no filter");
+  const args = D.ffmpegArgs(b, { fps: 25, input: "rgba", canvasW: 64, canvasH: 64, frame: D.reframe(b, 64, 64), wavPath: "a.wav", outPath: "o.mov", duration: 2, loudnorm: m });
+  assert.match(args[args.indexOf("-af") + 1], /^loudnorm=I=-23:.*:linear=true,apad=whole_dur=2\.000000,atrim=0:2\.000000$/);
+  const plain = D.ffmpegArgs(yt, { fps: 25, input: "jpeg", canvasW: 64, canvasH: 64, frame: D.reframe(yt, 64, 64), wavPath: "a.wav", outPath: "o.mp4", duration: 2, loudnorm: m });
+  assert.equal(plain[plain.indexOf("-af") + 1], "apad=whole_dur=2.000000,atrim=0:2.000000");
+  const st = "[Parsed_ebur128_0 @ x] Summary:\n\n  Integrated loudness:\n    I:         -14.2 LUFS\n    Threshold: -24.2 LUFS\n\n  True peak:\n    Peak:       -1.3 dBFS\n";
+  assert.deepEqual(D.parseEbur128(st), { lufs: -14.2, truePeak: -1.3 });
+  assert.deepEqual(D.parseEbur128("I: -inf LUFS\n  True peak:\n    Peak: -inf dBFS"), { lufs: null, truePeak: null });
+});
+
+test("verify: what came out against what was asked", () => {
+  const sp = D.normalize({ preset: "youtube", audio: { loudness: -14 } }).spec;
+  const frame = D.reframe(sp, 1920, 1080);
+  const probe = {
+    streams: [
+      { codec_type: "video", codec_name: "h264", width: 1920, height: 1080, avg_frame_rate: "30/1", nb_frames: "60", color_space: "bt709" },
+      { codec_type: "audio", codec_name: "aac", sample_rate: "48000", channels: 2 },
+    ],
+    format: { duration: "2.000000" },
+  };
+  const good = D.verify(sp, probe, { fps: 30, frames: 60, duration: 2, size: 3e6, loud: { lufs: -14.2, truePeak: -1.4 }, frame, hasAudio: true });
+  assert.ok(good.ok, good.line);
+  assert.match(good.line, /1920×1080 · 30 fps · 60 frames · h264 · color bt709 · aac 48 kHz stereo · 0:02\.00 · -14\.2 LUFS · -1\.4 dBTP/);
+  const bad = D.verify(sp, { ...probe, streams: [{ ...probe.streams[0], width: 1280, height: 720, nb_frames: "59" }, probe.streams[1]] },
+    { fps: 30, frames: 60, duration: 2, loud: { lufs: -17, truePeak: 0.4 }, frame, hasAudio: true });
+  assert.equal(bad.ok, false);
+  assert.deepEqual(bad.checks.filter((c) => !c.ok).map((c) => c.text), ["1280×720 (asked 1920×1080)", "59 frames (rendered 60)", "-17.0 LUFS (target -14)", "0.4 dBTP (ceiling -1)"]);
+  const loudYt = D.verify(D.normalize("youtube").spec, probe, { fps: 30, loud: { lufs: -8, truePeak: -0.5 }, frame, hasAudio: true });
+  assert.ok(loudYt.ok);
+  assert.match(loudYt.line, /plays it 6\.0 dB quieter/);
+  const x = D.normalize("x").spec;
+  assert.equal(D.verify(x, probe, { size: 600 * 1024 * 1024, frame: D.reframe(x, 1920, 1080) }).ok, false, "over the platform's file size");
+});
+
+test("export with a loudness target: the mix is measured, turned to the target, limited, and the file is checked", async (t) => {
+  const { dir, base } = await boot(t);
+  const ff = await (await fetch(base + "/api/export/ffmpeg")).json();
+  if (!ff.available) return;
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "fc-dlv-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  // a quiet mix whose peaks sit near full scale: +14 dB of gain would clip them without the limiter
+  const wav = path.join(tmp, "mix.wav");
+  execFileSync("ffmpeg", ["-y", "-v", "error", "-f", "lavfi", "-i", "sine=f=220:d=4:r=48000,volume=0.05,aformat=channel_layouts=stereo",
+    "-f", "lavfi", "-i", "aevalsrc='if(lt(mod(t,1),0.001),0.6,0)':d=4:s=48000:c=stereo", "-filter_complex", "amix=inputs=2:normalize=0", "-c:a", "pcm_s16le", wav]);
+  const jpg = path.join(tmp, "f.jpg");
+  execFileSync("ffmpeg", ["-y", "-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=64x64", "-frames:v", "1", jpg]);
+  const begin = await post(base, "/api/export/begin", {
+    fps: 25, hasAudio: true, duration: 4, canvasW: 64, canvasH: 64,
+    deliveries: [{ delivery: { preset: "custom", audio: { loudness: -14, truePeak: -1 } }, name: "loud" }],
+  });
+  const sess = await begin.json();
+  assert.equal(begin.status, 200, sess.error);
+  assert.equal((await fetch(base + "/api/export/audio?id=" + sess.id, { method: "POST", body: fs.readFileSync(wav) })).status, 200);
+  const frame = fs.readFileSync(jpg);
+  assert.equal((await fetch(base + "/api/export/frame?id=" + sess.id, { method: "POST", body: Buffer.concat(Array(100).fill(frame)) })).status, 200);
+  const end = await (await fetch(base + "/api/export/end?id=" + sess.id, { method: "POST" })).json();
+  const o = end.outputs && end.outputs[0];
+  assert.ok(o && o.ok, JSON.stringify(end));
+  assert.ok(o.mixLoudness < -20, `the mix was measured: ${o.mixLoudness}`);
+  assert.ok(o.report && o.report.checks.length >= 6, JSON.stringify(o.report));
+  const tp = /(-?\d+\.\d) dBTP/.exec(o.report.line), lu = /(-?\d+\.\d) LUFS/.exec(o.report.line);
+  assert.ok(tp && +tp[1] <= -0.5, `true peak held under the ceiling: ${o.report.line}`);
+  assert.ok(lu && +lu[1] > o.mixLoudness + 3, `turned up towards the target: ${o.report.line}`);
+  assert.ok(fs.existsSync(path.join(dir, "exports", "loud.mp4")));
+});
