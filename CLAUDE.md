@@ -276,6 +276,8 @@ Examples in `library/svg/`: `sparkles.svg` (loop), `lower-third.svg`,
   "encodeProfile": "hq",  // optional — fast-export profile id (see encoding-profiles.json)
   "delivery": { "preset": "youtube", "width": 1920, "height": 1080, "…": "…" },
   // ^ optional — the delivery spec exports use by default (see "Delivery presets"); setProject takes a preset id
+  "outputs": [ { "id": "o_1", "on": true, "preset": "master", "…": "…" } ],
+  // ^ optional — batch outputs: files made together from one render (see "Batch outputs and the export queue")
   "master": { "gain": -1.5, "fx": [ { "type": "limiter", "ceiling": -1 } ] },
   // ^ optional — master fader, dB (−60 = silence … +12; omit = 0 dB) and master effects (see "Audio mix")
   "tracks": [                          // optional — timeline lanes (default V3…V1 + A1…A4)
@@ -2006,6 +2008,9 @@ agent last wrote, so an export right after a patch includes that patch.
   settings (`{preset:"youtube", delivery:{fps:60, video:{rate:"vbr", bitrate:16000}}}`).
   `profile:"hq"` picks a raw encoding profile instead. With neither, `project.delivery`
   is used when set, else `project.encodeProfile`, else the server's default profile.
+- `outputs:true` exports the project's checked batch outputs; `outputs:[{preset:"master"},
+  {preset:"youtube"}, {preset:"instagram-reels"}, …]` exports a list. One render per
+  frame rate; the reply lists every file (or why one failed).
 - `where:"headless"` renders in the background and leaves the user's tab alone;
   `where:"tab"` refuses if no tab is open.
 - Long edits: `wait:false` returns a job id at once; poll with `{job:"x_…"}`
@@ -2075,6 +2080,42 @@ A spec (every key optional — what is left out comes from its `preset`):
 - The dialog remembers the last settings in this browser. `setProject {delivery:"youtube"}`
   (or a spec) pins them in the project, for the dialog and for `fablecut_export`.
 - Fast export only — WebCodecs and Realtime export encode their own way.
+
+### Batch outputs and the export queue
+
+**One project → many files.** `project.outputs` is the project's list of files to make
+(up to 16), each a delivery spec plus `{id, on}`. In the Export dialog, **Batch outputs**
+lists them: **+ Add these settings** adds the preset shown above, **+ Typical set** adds
+Master, YouTube 1080p, Reel 1080×1920, Square 1080 and a 720p preview, the checkbox picks
+which go out, **Load** shows one's settings above. **Export checked** queues the checked
+ones and starts.
+
+```jsonc
+// setProject {outputs:[…]} — a preset id or a spec each; stored complete with an id
+{"op":"setProject","set":{"outputs":[
+  "master", "youtube",
+  {"preset":"instagram-reels"},
+  {"preset":"custom","width":1080,"height":1080,"filename":"{project}_square_{res}"},
+  {"preset":"web","filename":"{project}_preview_{res}","on":false}
+]}}
+```
+
+- **Rendered once.** Outputs with the same frame rate and range go out in ONE render:
+  the compositor draws each frame once and every output's ffmpeg encodes it (up to 8 per
+  render). Four 1080p files take about as long as one. Outputs at another frame rate get
+  their own render. When any output needs full chroma (ProRes, 10-bit, lossless) the
+  frames go as RGBA to all of them.
+- **The export frame** is the picture for outputs of its own shape (and for the
+  picture's own size). An output of another shape reframes the whole canvas — a project
+  framed for 9:16 still makes a proper 16:9 file.
+- **The export queue** (Export dialog → **Add to queue**, or **Queue**) runs waiting
+  outputs back to back with a progress bar each, **Stop**, **Retry** for a failed one,
+  **Open** for a finished file and **Clear finished**. It lives in the tab: a reload
+  empties it. One output that fails does not stop the others in its render.
+- REST: `POST /api/export/begin {deliveries:[{delivery, name}, …], canvasW, canvasH,
+  region?, duration, fps, hasAudio}` → `{id, input, jpegQuality, outputs:[{file, spec,
+  summary, notes, size}]}`; frames and audio as for one output; `/api/export/end` →
+  `{src, outputs:[{file, ok, src | error}]}`.
 
 ### Encoding profiles (`encoding-profiles.json`)
 

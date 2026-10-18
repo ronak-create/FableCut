@@ -534,6 +534,7 @@ const project = {
   exportFrame: null, // optional {x,y,w,h} delivery crop inside width×height canvas
   encodeProfile: null, // optional fast-export profile id (overrides browser setting)
   delivery: null, // optional delivery spec (delivery.js) — the default for exports, agents' included
+  outputs: null, // optional batch outputs: [{id, on, …delivery spec}] — one render, several files
   tracks: null, // optional [{id, kind, gain?, pan?}] — null means default V3…V1 + A1…A4
   master: null, // optional {gain} — master bus fader (dB)
   buses: [],    // submix buses [{id:"B1", name?, gain?, pan?, mute?, fx?}]; tracks[].out routes into one
@@ -1474,6 +1475,7 @@ function applyProject(data, opts = {}) {
     exportFrame: normalizeExportFrame(data.exportFrame, data.width || 1280, data.height || 720),
     encodeProfile: data.encodeProfile || null,
     delivery: data.delivery && typeof data.delivery === "object" ? data.delivery : null,
+    outputs: Array.isArray(data.outputs) ? data.outputs.filter((o) => o && typeof o === "object") : null,
     master: normalizeMaster(data.master),
     buses: normalizeBuses(data.buses),
     comps: (Array.isArray(data.comps) ? data.comps : []).filter((cp) => cp && cp.id).map((cp) => ({
@@ -1590,7 +1592,7 @@ function projectJSON() {
 }
 /** The project as it is loaded right now (an open comp's stand-in project, or the root). */
 function projectJSONHere() {
-  const { name, width, height, fps, background, revision, folders, media, clips, markers, inPoint, outPoint, disabledTracks, encodeProfile, delivery } = project;
+  const { name, width, height, fps, background, revision, folders, media, clips, markers, inPoint, outPoint, disabledTracks, encodeProfile, delivery, outputs } = project;
   const out = {
     name, width, height, fps, background, revision,
     panSchema: 1,
@@ -1622,6 +1624,7 @@ function projectJSONHere() {
   if (ef) out.exportFrame = ef;
   if (encodeProfile) out.encodeProfile = encodeProfile;
   if (delivery) out.delivery = delivery;
+  if (outputs && outputs.length) out.outputs = outputs;
   const master = normalizeMaster(project.master);
   if (master) out.master = master;
   const buses = normalizeBuses(project.buses);
@@ -14270,6 +14273,8 @@ async function deleteDeliveryPreset() {
 function syncExportProfileVisibility() {
   const show = els.engineFast.checked && !els.engineFast.disabled;
   els.exportProfileRow?.classList.toggle("hidden", !show);
+  // the batch list and the queue are Fast export (ffmpeg) only
+  for (const id of ["dlvBatch", "btnQueueExport", "btnBatchExport"]) $(id)?.classList.toggle("hidden", !show);
   if (!show) { const w = $("dlvWarn"); if (w) w.classList.add("hidden"); }
   else if (selectedExportChoice().kind === "delivery") refreshDeliveryNotes();
 }
@@ -14383,6 +14388,8 @@ async function openExportSetup() {
   Promise.all([fetchEncodeProfiles(), fetchDeliveryInfo()]).then(() => {
     populateExportProfileSelect();
     syncExportProfileVisibility();
+    renderBatchList();
+    renderQueue();
     els.exportSetup.classList.remove("hidden");
     // aria-modal hides what is behind — focus has to come inside
     if (!els.exportSetup.contains(document.activeElement)) $("exportRangeSel")?.focus();
@@ -15169,20 +15176,25 @@ async function prepareFrameAssets(t) {
 /** opts.job: an agent's export job id — progress and the result go back to
  *  the server instead of an alert / download (nobody may be watching).
  *  opts.profile: encoding profile id for this run.
- *  opts.delivery: a delivery spec (delivery.js) instead of a profile. */
+ *  opts.delivery: a delivery spec (delivery.js) instead of a profile.
+ *  opts.deliveries: [{delivery, name?}] — several files from one render (same fps).
+ *  opts.silent: no overlay, alert or download (the export queue shows it);
+ *  opts.onProgress(0…1). Resolves {outputs:[{file, ok, src?, error?}]} or {error, cancelled}. */
 async function fastExport(opts = {}) {
-  if (state.exporting) return;
+  if (state.exporting) return { error: "an export is already running" };
   const job = opts.job || null;
   pause();
   state.exporting = true; state.rendering = true; renderCancelled = false;
   exportAbort = new AbortController();
   const signal = exportAbort.signal;
-  els.exportOverlay.classList.remove("hidden");
+  if (!opts.silent) els.exportOverlay.classList.remove("hidden");
   els.exportProgress.style.width = "0%";
   els.exportNote.textContent = "Rendering frames → ffmpeg. You can switch tabs; export continues.";
   restoreExportVideoState();
-  const delivery = opts.delivery || null;
+  const deliveries = opts.deliveries || (opts.delivery ? [{ delivery: opts.delivery }] : null);
+  const delivery = deliveries ? deliveries[0].delivery : null;
   const fps = (delivery && delivery.fps) || projectFps();
+  let result = null;
   const { start: t0, end: t1, frames } = beginExportWindow(fps);
   let sessId = null;
   let uploadError = null;
@@ -15196,7 +15208,8 @@ async function fastExport(opts = {}) {
     const begin = await fetch("/api/export/begin", {
       method: "POST",
       body: JSON.stringify(delivery ? {
-        fps, name: deliveryFileName(delivery, fps), delivery, duration: frames / fps,
+        fps, duration: frames / fps,
+        deliveries: deliveries.map((d) => ({ delivery: d.delivery, name: d.name || deliveryFileName(d.delivery, fps) })),
         canvasW: cv.w, canvasH: cv.h, region: cv.region, hasAudio: !!wav,
       } : {
         fps,
@@ -15281,6 +15294,7 @@ async function fastExport(opts = {}) {
       const pct = ((f + 1) / frames) * 100;
       els.exportProgress.style.width = pct.toFixed(1) + "%";
       els.exportTitle.textContent = `Rendering… ${pct.toFixed(0)}%`;
+      if (opts.onProgress) opts.onProgress(0.97 * (f + 1) / frames);
       if (job) reportExportJob(job, { progress: 0.97 * (f + 1) / frames });
     }
     await pixelChain;
@@ -15293,7 +15307,11 @@ async function fastExport(opts = {}) {
     }
     const end = await fetch("/api/export/end?id=" + sessId, { method: "POST", signal }).then((r) => r.json());
     if (!end.src) throw new Error(end.error || "encode failed");
-    if (job) await reportExportJob(job, { status: "done", src: end.src, ...(delivery ? { result: { summary: begin.summary, notes: begin.notes || [] } } : {}) }, true);
+    const outs = end.outputs || [{ file: decodeURIComponent(end.src.split("/").pop()), ok: true, src: end.src }];
+    // what each output was asked to be, beside what came out
+    result = { outputs: outs.map((o, i) => ({ ...o, ...(begin.outputs && begin.outputs[i] ? { summary: begin.outputs[i].summary, notes: begin.outputs[i].notes } : {}) })) };
+    if (job) await reportExportJob(job, { status: "done", src: end.src, ...(delivery ? { result: { summary: begin.summary, notes: begin.notes || [], outputs: result.outputs } } : {}) }, true);
+    else if (opts.silent) { /* the queue lists the files */ }
     else {
       const a = document.createElement("a");
       a.href = end.src;
@@ -15303,8 +15321,9 @@ async function fastExport(opts = {}) {
   } catch (e) {
     if (sessId) fetch("/api/export/end?id=" + sessId + "&discard=1", { method: "POST" }).catch(() => { });
     const msg = e?.name === "AbortError" ? "cancelled" : String(e.message || e);
+    result = { error: msg, cancelled: msg === "cancelled" };
     if (job) await reportExportJob(job, { status: "failed", error: msg }, true);
-    else if (msg !== "cancelled") alert("Export failed: " + msg);
+    else if (msg !== "cancelled" && !opts.silent) alert("Export failed: " + msg);
   } finally {
     exportAbort = null;
     exportFullCanvas = false;
@@ -15315,6 +15334,181 @@ async function fastExport(opts = {}) {
     els.exportOverlay.classList.add("hidden");
     els.exportNote.textContent = "Rendering your sequence in real time. Keep this tab focused.";
     if (runtime.pendingSync) syncFromServer();
+  }
+  return result;
+}
+
+/* ── Export queue ──
+   Renders waiting outputs back to back. Outputs that share a frame rate and a
+   range go out in ONE render: the frames are drawn once and every output's
+   ffmpeg encodes them (up to 8 at a time). Lives in this tab only. */
+const exportQueue = [];
+let queueRunning = false, queueStop = false;
+function queueLabel(spec) {
+  const p = Delivery.PRESETS[spec.preset] || deliveryInfo.saved[spec.preset];
+  return p ? p.label : "Custom";
+}
+function queueAdd(spec, name) {
+  const fps = spec.fps || projectFps();
+  exportQueue.push({
+    id: "q" + Math.random().toString(36).slice(2, 8), label: queueLabel(spec), spec,
+    name: name || deliveryFileName(spec, fps), range: exportRangeMode(), status: "pending", progress: 0,
+  });
+  renderQueue();
+}
+function openQueue() {
+  renderQueue();
+  $("exportQueue").classList.remove("hidden");
+  ($("btnQueueStart").disabled ? $("btnQueueClose") : $("btnQueueStart")).focus();
+}
+function closeQueue() {
+  if (queueRunning) return;
+  $("exportQueue").classList.add("hidden");
+  $("btnExport")?.focus();
+}
+function renderQueue() {
+  const list = $("exportQueueList");
+  if (!list) return;
+  const pending = exportQueue.filter((q) => q.status === "pending").length;
+  const done = exportQueue.filter((q) => q.status === "done").length;
+  $("exportQueueNote").textContent = queueRunning
+    ? "Exporting — outputs with the same frame rate and range share one render."
+    : exportQueue.length ? `${pending} waiting · ${done} done` : "Nothing queued — pick settings in Export and press Add to queue.";
+  const btnOpen = $("btnOpenQueue");
+  if (btnOpen) btnOpen.textContent = exportQueue.length ? `Queue · ${pending || exportQueue.length}` : "Queue";
+  const start = $("btnQueueStart");
+  start.textContent = queueRunning ? "Stop" : "Start";
+  start.disabled = !queueRunning && !pending;
+  $("btnQueueClose").disabled = queueRunning;
+  $("btnQueueClear").disabled = queueRunning || !exportQueue.some((q) => q.status !== "pending" && q.status !== "running");
+  if (!exportQueue.length) { list.innerHTML = `<li class="xq-empty">The queue is empty</li>`; return; }
+  list.innerHTML = exportQueue.map((q) => {
+    const ext = Delivery.CONTAINERS[q.spec.container].ext;
+    const fr = deliveryFrame(q.spec), fps = q.spec.fps || projectFps();
+    const status = q.status === "running" ? `Rendering… ${Math.round(q.progress * 100)}%`
+      : q.status === "done" ? `Done → exports/${q.file || q.name + ext}`
+        : q.status === "failed" ? `Failed: ${q.error || "unknown error"}`
+          : q.status === "cancelled" ? "Stopped" : "Waiting";
+    const actions = [
+      q.status === "done" && q.src ? `<a class="btn tiny" href="${escapeHtml(q.src)}" target="_blank" rel="noopener" download>Open</a>` : "",
+      q.status === "failed" || q.status === "cancelled" ? `<button type="button" class="btn tiny" data-q-retry="${q.id}">Retry</button>` : "",
+      q.status !== "running" ? `<button type="button" class="btn tiny" data-q-remove="${q.id}" title="Remove from the queue">✕</button>` : "",
+    ].join("");
+    return `<li class="${q.status}" data-q="${q.id}"><div class="xq-main"><b>${escapeHtml(q.label)} — ${escapeHtml(q.name + ext)}</b>` +
+      `<span class="xq-sub">${escapeHtml(Delivery.describe(q.spec, { width: fr.outW, height: fr.outH, fps }))} · ${q.range === "in-out" ? "IN–OUT" : "entire timeline"}</span>` +
+      (q.status === "running" ? `<div class="progress"><div class="progress-fill" style="width:${(q.progress * 100).toFixed(1)}%"></div></div>` : "") +
+      `<span class="xq-status">${escapeHtml(status)}</span></div><div class="xq-actions">${actions}</div></li>`;
+  }).join("");
+}
+function renderQueueProgress() {
+  for (const q of exportQueue) {
+    if (q.status !== "running") continue;
+    const li = document.querySelector(`#exportQueueList li[data-q="${q.id}"]`);
+    if (!li) continue;
+    const fill = li.querySelector(".progress-fill"), st = li.querySelector(".xq-status");
+    if (fill) fill.style.width = (q.progress * 100).toFixed(1) + "%";
+    if (st) st.textContent = `Rendering… ${Math.round(q.progress * 100)}%`;
+  }
+}
+async function runQueue() {
+  if (queueRunning || state.exporting) return;
+  if (!(state.connected && state.ffmpeg)) { alert("The export queue needs the server and ffmpeg (Fast export)."); return; }
+  queueRunning = true; queueStop = false;
+  renderQueue();
+  try {
+    while (!queueStop) {
+      const first = exportQueue.find((q) => q.status === "pending");
+      if (!first) break;
+      const fps = first.spec.fps || projectFps();
+      const group = exportQueue.filter((q) => q.status === "pending" && (q.spec.fps || projectFps()) === fps && q.range === first.range).slice(0, 8);
+      for (const q of group) { q.status = "running"; q.progress = 0; q.error = null; }
+      renderQueue();
+      exportRangeForced = first.range === "in-out" && hasWorkArea() ? "in-out" : "entire";
+      let res;
+      try {
+        res = await fastExport({
+          deliveries: group.map((q) => ({ delivery: q.spec, name: q.name })), silent: true,
+          onProgress: (f) => { for (const q of group) q.progress = f; renderQueueProgress(); },
+        });
+      } finally { exportRangeForced = null; }
+      group.forEach((q, i) => {
+        const o = res && res.outputs && res.outputs[i];
+        if (o && o.ok) Object.assign(q, { status: "done", src: o.src, file: o.file, progress: 1 });
+        else if (res && res.cancelled) q.status = "cancelled";
+        else Object.assign(q, { status: "failed", error: (o && o.error) || (res && res.error) || "export failed" });
+      });
+      renderQueue();
+    }
+  } finally {
+    queueRunning = false;
+    renderQueue();
+  }
+  const done = exportQueue.filter((q) => q.status === "done").length, failed = exportQueue.filter((q) => q.status === "failed").length;
+  if (done || failed) toast(`Export queue: ${done} done${failed ? `, ${failed} failed` : ""}`);
+}
+function stopQueue() {
+  queueStop = true;
+  renderCancelled = true;
+  try { exportAbort?.abort(); } catch { }
+}
+
+/* ── Batch outputs (project.outputs) ──
+   The project's list of files to make from one timeline. Each entry is a
+   delivery spec plus {id, on}; "Export checked" queues the checked ones. */
+function projectOutputs() { return Array.isArray(project.outputs) ? project.outputs : []; }
+function setProjectOutputs(list) {
+  project.outputs = list.length ? list : null;
+  scheduleSave();
+  renderBatchList();
+}
+function addBatchOutput(spec) {
+  const list = projectOutputs().slice();
+  if (list.length >= 16) { toast("At most 16 batch outputs"); return; }
+  list.push({ id: "o_" + Math.random().toString(36).slice(2, 8), on: true, ...spec });
+  setProjectOutputs(list);
+}
+const TYPICAL_SET = [
+  { preset: "master", filename: "{project}_master_{res}" },
+  { preset: "youtube", filename: "{project}_youtube_{res}" },
+  { preset: "instagram-reels", filename: "{project}_reel_{res}" },
+  { preset: "custom", width: 1080, height: 1080, filename: "{project}_square_{res}" },
+  { preset: "web", filename: "{project}_preview_{res}" },
+];
+function renderBatchList() {
+  const ul = $("dlvBatchList");
+  if (!ul) return;
+  const list = projectOutputs();
+  const on = list.filter((o) => o.on !== false).length;
+  $("dlvBatchCount").textContent = list.length ? `· ${on} of ${list.length} checked` : "";
+  const be = $("btnBatchExport");
+  if (be) { be.disabled = !on; be.textContent = on ? `Export checked (${on})` : "Export checked"; }
+  if (!list.length) { ul.innerHTML = `<li class="bo-empty">No batch outputs yet — add the settings above, or a typical set</li>`; return; }
+  ul.innerHTML = list.map((o) => {
+    const sp = normalizeDelivery(o).spec, fr = deliveryFrame(sp), fps = sp.fps || projectFps();
+    return `<li class="${o.on === false ? "off" : ""}" data-o="${escapeHtml(o.id)}">` +
+      `<input type="checkbox" data-o-on="${escapeHtml(o.id)}"${o.on === false ? "" : " checked"} aria-label="Include ${escapeHtml(queueLabel(sp))}">` +
+      `<div class="bo-main"><b>${escapeHtml(deliveryFileName(sp, fps) + Delivery.CONTAINERS[sp.container].ext)}</b>` +
+      `<span>${escapeHtml(queueLabel(sp))} · ${escapeHtml(Delivery.describe(sp, { width: fr.outW, height: fr.outH, fps }))}</span></div>` +
+      `<button type="button" class="btn tiny" data-o-load="${escapeHtml(o.id)}" title="Show these settings above">Load</button>` +
+      `<button type="button" class="btn tiny" data-o-remove="${escapeHtml(o.id)}" title="Remove">✕</button></li>`;
+  }).join("");
+}
+function onBatchListClick(e) {
+  const t = e.target;
+  const id = t.dataset.oOn || t.dataset.oLoad || t.dataset.oRemove;
+  if (!id) return;
+  const list = projectOutputs().slice();
+  const i = list.findIndex((o) => o.id === id);
+  if (i < 0) return;
+  if (t.dataset.oOn) { list[i] = { ...list[i], on: t.checked }; setProjectOutputs(list); }
+  else if (t.dataset.oRemove) { list.splice(i, 1); setProjectOutputs(list); }
+  else if (t.dataset.oLoad) {
+    const { id: _id, on: _on, ...spec } = list[i];
+    const n = normalizeDelivery(spec);
+    els.exportProfileSel.value = "d:" + n.spec.preset;
+    if (els.exportProfileSel.value !== "d:" + n.spec.preset) els.exportProfileSel.value = "d:custom";
+    dlvSpec = n.spec; dlvNotes = n.notes;
+    syncExportChoiceUi("edited");
   }
 }
 
@@ -15363,9 +15557,30 @@ async function runExportJob(ticket) {
     if (exportRange().frames < 1) return fail("the export range is empty — IN/OUT is at or past the end of the timeline");
     reportExportJob(ticket.id, { progress: 0 }, true);
     // an explicit profile wins; then the job's delivery spec, the project's, else the raw default
-    const want = ticket.profile ? null : ticket.delivery || project.delivery || null;
-    if (want) await fetchDeliveryInfo();
-    await fastExport(want ? { job: ticket.id, delivery: normalizeDelivery(want).spec } : { job: ticket.id, profile: ticket.profile });
+    const want = ticket.profile || ticket.deliveries ? null : ticket.delivery || project.delivery || null;
+    if (want || ticket.deliveries) await fetchDeliveryInfo();
+    if (ticket.deliveries) {
+      // one render per frame rate; the job reports every file at the end
+      const specs = ticket.deliveries.map((d) => normalizeDelivery(d).spec);
+      const groups = new Map();
+      for (const sp of specs) { const k = sp.fps || projectFps(); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(sp); }
+      if (groups.size === 1) await fastExport({ job: ticket.id, deliveries: specs.map((delivery) => ({ delivery })) });
+      else {
+        const all = [];
+        let i = 0;
+        for (const group of groups.values()) {
+          const res = await fastExport({ deliveries: group.map((delivery) => ({ delivery })), silent: true,
+            onProgress: (f) => reportExportJob(ticket.id, { progress: (i + f) / groups.size }) });
+          i++;
+          if (res && res.cancelled) return reportExportJob(ticket.id, { status: "failed", error: "cancelled" }, true);
+          if (res && res.outputs) all.push(...res.outputs);
+          else all.push(...group.map((sp) => ({ file: deliveryFileName(sp), ok: false, error: (res && res.error) || "export failed" })));
+        }
+        const ok = all.find((o) => o.ok);
+        if (!ok) return fail(all.map((o) => o.error).join(" · "));
+        await reportExportJob(ticket.id, { status: "done", src: ok.src, result: { outputs: all } }, true);
+      }
+    } else await fastExport(want ? { job: ticket.id, delivery: normalizeDelivery(want).spec } : { job: ticket.id, profile: ticket.profile });
   } finally {
     exportRangeForced = null;
   }
@@ -15903,6 +16118,55 @@ $("dlvSaveName")?.addEventListener("keydown", (e) => {
 });
 $("dlvSaveCancel")?.addEventListener("click", () => $("dlvSaveRow").classList.add("hidden"));
 $("dlvDeleteBtn")?.addEventListener("click", deleteDeliveryPreset);
+$("dlvBatchList")?.addEventListener("click", onBatchListClick);
+$("dlvBatchList")?.addEventListener("change", onBatchListClick);
+$("dlvBatchAdd")?.addEventListener("click", () => { if (dlvSpec) addBatchOutput(dlvSpec); });
+$("dlvBatchTypical")?.addEventListener("click", () => {
+  const have = new Set(projectOutputs().map((o) => o.filename));
+  for (const t of TYPICAL_SET) if (!have.has(t.filename)) addBatchOutput(normalizeDelivery(t).spec);
+});
+function exportPreflight() {
+  if (exportRange().frames < 1) {
+    alert("Export range is empty — IN/OUT is at or past the end of the timeline. Choose Entire timeline, or move the markers.");
+    return false;
+  }
+  return true;
+}
+$("btnQueueExport")?.addEventListener("click", () => {
+  if (selectedExportChoice().kind !== "delivery" || !dlvSpec) { alert("The queue takes delivery presets — pick one above (encoding profiles export one at a time)."); return; }
+  if (!exportPreflight()) return;
+  setSetting("exportKind", "delivery");
+  setSetting("delivery", dlvSpec);
+  queueAdd(dlvSpec);
+  els.exportSetup.classList.add("hidden");
+  openQueue();
+});
+$("btnBatchExport")?.addEventListener("click", () => {
+  const on = projectOutputs().filter((o) => o.on !== false);
+  if (!on.length || !exportPreflight()) return;
+  for (const o of on) { const { id: _id, on: _on, ...spec } = o; queueAdd(normalizeDelivery(spec).spec); }
+  els.exportSetup.classList.add("hidden");
+  openQueue();
+  runQueue();
+});
+$("btnOpenQueue")?.addEventListener("click", () => { els.exportSetup.classList.add("hidden"); openQueue(); });
+$("btnQueueStart")?.addEventListener("click", () => (queueRunning ? stopQueue() : runQueue()));
+$("btnQueueClose")?.addEventListener("click", closeQueue);
+$("exportQueue")?.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeQueue(); }
+});
+$("btnQueueClear")?.addEventListener("click", () => {
+  for (let i = exportQueue.length - 1; i >= 0; i--) if (exportQueue[i].status !== "pending" && exportQueue[i].status !== "running") exportQueue.splice(i, 1);
+  renderQueue();
+});
+$("exportQueueList")?.addEventListener("click", (e) => {
+  const r = e.target.dataset.qRetry, x = e.target.dataset.qRemove;
+  const q = exportQueue.find((v) => v.id === (r || x));
+  if (!q) return;
+  if (r) { q.status = "pending"; q.error = null; q.progress = 0; }
+  else exportQueue.splice(exportQueue.indexOf(q), 1);
+  renderQueue();
+});
 $("btnCancelSetup").addEventListener("click", closeExportSetup);
 els.exportSetup?.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && !e.defaultPrevented) { e.preventDefault(); e.stopPropagation(); closeExportSetup(); }

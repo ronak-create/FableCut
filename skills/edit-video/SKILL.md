@@ -90,4 +90,7 @@ scopes always use the originals. Make them only when the user asks.
   `delivery:{…}` (fps, codec, bitrate, file name, metadata); a 16:9 timeline
   exported to a vertical preset is cropped from the middle unless the project
   has an export frame, so say so or set one. `fablecut_encode_profiles` lists
-  the presets.
+  the presets. Several files at once (a master, a YouTube cut, a reel, a
+  square…): `outputs:[{preset:"master"}, {preset:"youtube"}, …]` renders the
+  timeline once and encodes every file from it; `setProject {outputs:[…]}`
+  saves the list with the project and `outputs:true` exports it.

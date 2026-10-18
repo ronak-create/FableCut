@@ -318,6 +318,11 @@ same time.
   keyframe interval, pixel format, color, container, audio codec, bitrate and
   rate, a file-name template and metadata. Save your own presets; the dialog
   warns about upscaling, crops and platform limits before it renders
+- **Batch export**: one project → many files (master, YouTube 1080p, a 9:16
+  reel, a square, a 720p preview…) from **one render** — every frame is drawn
+  once and each output's ffmpeg encodes it. Batch outputs are saved with the
+  project; an **export queue** runs them back to back with progress, stop,
+  retry and open
 - Fast export: browser renders every frame + an offline audio mix; ffmpeg
   encodes them with a delivery preset, or a raw **encoding profile** from
   `encoding-profiles.json` (keeps rendering if you switch tabs). Encode and
@@ -329,7 +334,8 @@ same time.
 - Realtime MediaRecorder fallback when ffmpeg or WebCodecs isn't available
 - Agents export too: `fablecut_export` runs the Fast export in the open editor,
   or in a headless Chrome / Edge the server starts, and returns the file path;
-  `preset` and `delivery` pick and adjust a delivery preset
+  `preset` and `delivery` pick and adjust a delivery preset; `outputs` makes
+  several files in one go
 - Export **Range** dropdown: Entire timeline or IN–OUT (defaults to IN–OUT when
   markers are set). Effective IN/OUT export bounds are clamped to `projDur()`.
 

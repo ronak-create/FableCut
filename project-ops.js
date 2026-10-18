@@ -1028,7 +1028,7 @@
           break;
         }
         case "setProject": {
-          const allowed = ["name", "width", "height", "fps", "background", "markers", "disabledTracks", "lockedTracks", "untargetedTracks", "exportFrame", "encodeProfile", "delivery", "master", "inPoint", "outPoint"];
+          const allowed = ["name", "width", "height", "fps", "background", "markers", "disabledTracks", "lockedTracks", "untargetedTracks", "exportFrame", "encodeProfile", "delivery", "outputs", "master", "inPoint", "outPoint"];
           for (const [k, v] of Object.entries(op.set || {})) {
             if (!allowed.includes(k)) throw new Error(`setProject: '${k}' not settable (allowed: ${allowed.join(", ")})`);
             if ((k === "inPoint" || k === "outPoint") && v != null && (typeof v !== "number" || !Number.isFinite(v) || v < 0))
@@ -1045,6 +1045,21 @@
                 throw new Error(`setProject: no delivery preset "${v}" (built-in: ${Delivery.PRESET_IDS.join(", ")})`);
               proj.delivery = n.spec;
               notes.push(`delivery ${n.spec.preset}: ${Delivery.describe(n.spec)}${n.notes.length ? ` (adjusted: ${n.notes.join("; ")})` : ""}`);
+              continue;
+            }
+            if (k === "outputs" && v != null) {
+              // the batch list: each entry a preset id or a spec, stored complete with {id, on}
+              if (!Array.isArray(v) || v.length > 16) throw new Error("setProject: outputs is a list of up to 16 delivery specs (or preset ids)");
+              const presets = (ctx && ctx.deliveryPresets) || {};
+              proj.outputs = v.map((o, i) => {
+                if (typeof o !== "string" && (!o || typeof o !== "object" || Array.isArray(o))) throw new Error(`setProject: outputs[${i}] is a preset id or a spec`);
+                if (typeof o === "string" && !Delivery.PRESETS[o] && !presets[o]) throw new Error(`setProject: outputs[${i}]: no delivery preset "${o}"`);
+                const n = Delivery.normalize(o, { presets });
+                const id = typeof o === "object" && typeof o.id === "string" && o.id ? o.id.slice(0, 40) : "o_" + uid();
+                return { id, on: !(typeof o === "object" && o.on === false), ...n.spec };
+              });
+              if (!proj.outputs.length) delete proj.outputs;
+              notes.push(`outputs: ${(proj.outputs || []).map((o) => Delivery.projectFilename(o, proj)).join(", ") || "none"}`);
               continue;
             }
             if (k === "master" && v != null) {

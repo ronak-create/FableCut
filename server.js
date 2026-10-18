@@ -272,41 +272,81 @@ function deliveryEncoders() {
 }
 /** Saved delivery presets: library/delivery/<id>.json, each a spec plus a label. */
 function savedDeliveryPresets() { return Delivery.savedPresets(readSaved("delivery")); }
+/* One render, several files: `deliveries:[{delivery, name}, …]` (up to 8) or a
+   single `delivery` + name. Every output gets its own ffmpeg, fed the same
+   frames; the browser renders each frame once. Frames are raw RGBA when any
+   output needs more than 4:2:0 8-bit, else JPEG at the highest quality asked. */
+const MAX_OUTPUTS = 8;
 async function beginDeliveryExport(rate, name, hasAudio, extra) {
   const available = await deliveryEncoders();
-  const { spec, notes } = Delivery.normalize(extra.delivery, { available, presets: savedDeliveryPresets() });
+  const presets = savedDeliveryPresets();
+  const list = Array.isArray(extra.deliveries) ? extra.deliveries : [{ delivery: extra.delivery, name }];
+  if (!list.length) throw new Error("deliveries is empty");
+  if (list.length > MAX_OUTPUTS) throw new Error(`at most ${MAX_OUTPUTS} outputs per render`);
   const canvasW = extra.canvasW | 0, canvasH = extra.canvasH | 0;
   if (canvasW < 2 || canvasH < 2 || canvasW > 16384 || canvasH > 16384) throw new Error("export width/height required (canvasW, canvasH)");
   const r = extra.region;
   const region = r && typeof r === "object" && [r.x, r.y, r.w, r.h].every(Number.isFinite) && r.w > 0 && r.h > 0 &&
     r.x >= 0 && r.y >= 0 && r.x + r.w <= canvasW + 0.5 && r.y + r.h <= canvasH + 0.5 ? r : null;
-  const frame = Delivery.reframe(spec, canvasW, canvasH, region);
-  const input = Delivery.frameInput(spec);
-  const ext = Delivery.CONTAINERS[spec.container].ext;
-  // check the settings on a 0.1 s synthetic canvas before the browser renders anything
+  const outs = list.map((d) => {
+    const { spec, notes } = Delivery.normalize(d && d.delivery !== undefined ? d.delivery : d, { available, presets });
+    return { spec, notes, name: d && typeof d.name === "string" ? d.name : name, frame: Delivery.reframe(spec, canvasW, canvasH, region) };
+  });
+  const input = outs.some((o) => Delivery.frameInput(o.spec) === "rgba") ? "rgba" : "jpeg";
+  // check every output on a 0.1 s synthetic canvas before the browser renders anything
   const dryDir = fs.mkdtempSync(path.join(os.tmpdir(), "fablecut-dry-"));
   try {
-    const dry = await runFfmpeg(Delivery.ffmpegArgs(spec, { fps: rate, input, canvasW, canvasH, frame, hasAudio, dry: true,
-      outPath: path.join(dryDir, "probe" + ext) }), 30000);
-    if (dry.code !== 0) {
-      const why = dry.stderr.trim().split("\n").filter(Boolean).slice(-3).map((l) => l.trim()).join(" · ");
-      throw new Error(`ffmpeg rejected these settings (${Delivery.describe(spec)}): ${why || "exit " + dry.code}`);
+    const dry = await Promise.all(outs.map((o, i) => runFfmpeg(Delivery.ffmpegArgs(o.spec, { fps: rate, input, canvasW, canvasH, frame: o.frame,
+      hasAudio, dry: true, outPath: path.join(dryDir, `probe${i}` + Delivery.CONTAINERS[o.spec.container].ext) }), 30000)));
+    const bad = dry.map((d, i) => [d, outs[i]]).filter(([d]) => d.code !== 0);
+    if (bad.length) {
+      throw new Error(bad.map(([d, o]) => {
+        const why = d.stderr.trim().split("\n").filter(Boolean).slice(-3).map((l) => l.trim()).join(" · ");
+        return `ffmpeg rejected these settings (${Delivery.describe(o.spec)}): ${why || "exit " + d.code}`;
+      }).join("\n"));
     }
   } finally { try { fs.rmSync(dryDir, { recursive: true, force: true }); } catch {} }
   const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
   const dir = fs.mkdtempSync(path.join(EXPORTS_DIR, "fablecut-"));
-  const { outPath, partPath } = reserveExportPaths(EXPORTS_DIR, safeName(name || "export"), ext);
   const duration = Number.isFinite(+extra.duration) && +extra.duration > 0 ? +extra.duration : null;
+  for (const o of outs) {
+    const ext = Delivery.CONTAINERS[o.spec.container].ext;
+    Object.assign(o, reserveExportPaths(EXPORTS_DIR, safeName(o.name || "export"), ext), { proc: null, stderr: "", done: null, failed: null });
+    o.err = () => o.stderr.trim().split("\n").filter(Boolean).slice(-3).map((l) => l.trim()).join(" · ");
+  }
   const sess = {
-    mode: "jpeg", proc: null, fps: rate, delivery: spec, frame, input, canvasW, canvasH, duration,
-    name: path.basename(outPath, ext), hasAudio: !!hasAudio, dir, wav: null, partPath, outPath,
-    stderr: "", done: null, lastTouch: Date.now(),
-    err: () => sess.stderr.trim().split("\n").filter(Boolean).slice(-3).map((l) => l.trim()).join(" · "),
+    mode: "jpeg", proc: null, fps: rate, outputs: outs, input, canvasW, canvasH, duration,
+    hasAudio: !!hasAudio, dir, wav: null, partPath: null, outPath: null,
+    stderr: "", done: null, lastTouch: Date.now(), err: () => "",
   };
   sess.writeLock = Promise.resolve();
   exportSessions.set(id, sess);
-  return { id, mode: "jpeg", input, jpegQuality: Delivery.jpegQuality(spec), spec, notes, summary: Delivery.describe(spec),
-    file: path.basename(outPath), size: { w: frame.outW, h: frame.outH } };
+  const jpegQuality = Math.max(...outs.map((o) => Delivery.jpegQuality(o.spec)));
+  const view = outs.map((o) => ({ file: path.basename(o.outPath), spec: o.spec, notes: o.notes, summary: Delivery.describe(o.spec), size: { w: o.frame.outW, h: o.frame.outH } }));
+  // the single-output fields stay as they were for one delivery
+  return { id, mode: "jpeg", input, jpegQuality, outputs: view, ...view[0] };
+}
+/** Spawn one ffmpeg per output of a delivery session. */
+function startDeliveryEncoders(sess) {
+  for (const o of sess.outputs) {
+    const proc = spawn("ffmpeg", Delivery.ffmpegArgs(o.spec, {
+      fps: sess.fps, input: sess.input, canvasW: sess.canvasW, canvasH: sess.canvasH, frame: o.frame,
+      wavPath: sess.wav, outPath: o.partPath, duration: sess.duration,
+    }), { stdio: ["pipe", "ignore", "pipe"] });
+    proc.stderr.on("data", (d) => { o.stderr = (o.stderr + d).slice(-2000); });
+    proc.stdin.on("error", () => { });
+    o.proc = proc;
+    o.done = new Promise((res) => proc.on("close", res));
+  }
+  sess.proc = sess.outputs[0].proc; // "started"
+}
+/** The same frames to every output still running. One that fails is marked and
+ *  left behind; the render goes on for the rest, and fails only when none is left. */
+async function writeDeliveryFrame(sess, body) {
+  const live = sess.outputs.filter((o) => !o.failed);
+  await Promise.all(live.map((o) => writeExportFrame(o, body).catch((e) => { o.failed = String(e.message || e); })));
+  if (!sess.outputs.some((o) => !o.failed))
+    throw new Error(sess.outputs.map((o) => `${path.basename(o.outPath)}: ${o.failed}`).join(" · "));
 }
 async function beginExport(fps, name, profileId, hasAudio, mode, extra = {}) {
   const m = mode === "annexb" ? "annexb" : "jpeg";
@@ -320,7 +360,7 @@ async function beginExport(fps, name, profileId, hasAudio, mode, extra = {}) {
   if (pixelFormat === "rgba" && (width < 2 || height < 2)) {
     throw new Error("export width/height required for rgba");
   }
-  if (m === "jpeg" && extra.delivery) return beginDeliveryExport(rate, name, hasAudio, extra);
+  if (m === "jpeg" && (extra.delivery || extra.deliveries)) return beginDeliveryExport(rate, name, hasAudio, extra);
   const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
   const safe = safeName(name || "export");
   // Same filesystem as the finished file so renameSync(partPath, out) cannot EXDEV.
@@ -362,15 +402,11 @@ async function beginExport(fps, name, profileId, hasAudio, mode, extra = {}) {
 /* Encode into the paths reserved at /begin; rename .part → final on clean exit
    so an aborted render never leaves something that looks like a finished file. */
 function startEncoder(sess) {
-  const args = sess.delivery
-    ? Delivery.ffmpegArgs(sess.delivery, {
-      fps: sess.fps, input: sess.input, canvasW: sess.canvasW, canvasH: sess.canvasH, frame: sess.frame,
-      wavPath: sess.wav, outPath: sess.partPath, duration: sess.duration,
-    })
-    : buildExportArgs(sess.profile, {
-      fps: sess.fps, wavPath: sess.wav, outPath: sess.partPath,
-      pixelFormat: sess.pixelFormat, width: sess.width, height: sess.height,
-    });
+  if (sess.outputs) return startDeliveryEncoders(sess);
+  const args = buildExportArgs(sess.profile, {
+    fps: sess.fps, wavPath: sess.wav, outPath: sess.partPath,
+    pixelFormat: sess.pixelFormat, width: sess.width, height: sess.height,
+  });
   const proc = spawn("ffmpeg", args, { stdio: ["pipe", "ignore", "pipe"] });
   proc.stderr.on("data", (d) => { sess.stderr = (sess.stderr + d).slice(-2000); });
   // EPIPE on end()/late writes is normal once ffmpeg has exited; writeExportFrame
@@ -437,6 +473,10 @@ function cleanupExport(id) {
   if (!s) return;
   exportSessions.delete(id);
   try { s.proc?.kill(); } catch {}
+  for (const o of s.outputs || []) {
+    try { o.proc?.kill(); } catch {}
+    if (o.partPath) try { fs.rmSync(o.partPath, { force: true }); } catch {}
+  }
   try { fs.rmSync(s.dir, { recursive: true, force: true }); } catch {}
   if (s.partPath) try { fs.rmSync(s.partPath, { force: true }); } catch {}
 }
@@ -727,7 +767,26 @@ const server = http.createServer(async (req, res) => {
       const opts = JSON.parse((await readBody(req)).toString("utf8") || "{}");
       if (!HAS_FFMPEG) { sendJSON(res, 400, { error: "ffmpeg not found on PATH — export needs it" }); return; }
       if (opts.profile) resolveProfile(String(opts.profile));
-      if (opts.profile && (opts.preset || opts.delivery)) { sendJSON(res, 400, { error: "pass a profile (raw ffmpeg args) or a preset / delivery spec, not both" }); return; }
+      if (opts.profile && (opts.preset || opts.delivery || opts.outputs)) { sendJSON(res, 400, { error: "pass a profile (raw ffmpeg args) or a preset / delivery spec / outputs, not both" }); return; }
+      // several files from one render: outputs:true = the project's checked batch outputs, or a list of specs
+      let deliveries = null, outNotes = [];
+      if (opts.outputs) {
+        let list = opts.outputs;
+        if (list === true) {
+          let proj = {};
+          try { proj = JSON.parse(fs.readFileSync(PROJECT_FILE, "utf8").replace(/^\uFEFF/, "")); } catch {}
+          list = (Array.isArray(proj.outputs) ? proj.outputs : []).filter((o) => o && o.on !== false);
+          if (!list.length) { sendJSON(res, 400, { error: "the project has no checked batch outputs — pass outputs:[{preset…}, …], or add some with setProject {outputs}" }); return; }
+        }
+        if (!Array.isArray(list) || !list.length) { sendJSON(res, 400, { error: "outputs is true or a list of delivery specs" }); return; }
+        if (list.length > 16) { sendJSON(res, 400, { error: "at most 16 outputs" }); return; }
+        const available = await deliveryEncoders(), presets = savedDeliveryPresets();
+        deliveries = list.map((o, i) => {
+          const n = Delivery.normalize(typeof o === "string" ? o : o, { available, presets });
+          for (const note of n.notes) outNotes.push(`output ${i + 1}: ${note}`);
+          return n.spec;
+        });
+      }
       // a delivery preset with overrides → one complete spec, checked against this ffmpeg
       let delivery = null, notes = [];
       if (opts.preset || opts.delivery) {
@@ -738,8 +797,9 @@ const server = http.createServer(async (req, res) => {
       }
       let revision = null;
       try { revision = JSON.parse(fs.readFileSync(PROJECT_FILE, "utf8").replace(/^\uFEFF/, "")).revision ?? null; } catch {}
-      const job = exportJobs.request({ range: opts.range, profile: opts.profile, delivery, where: opts.where, revision });
-      sendJSON(res, 200, delivery ? { ...job, delivery: Delivery.describe(delivery), notes } : job);
+      const job = exportJobs.request({ range: opts.range, profile: opts.profile, delivery: deliveries ? null : delivery, deliveries, where: opts.where, revision });
+      sendJSON(res, 200, deliveries ? { ...job, delivery: `${deliveries.length} outputs from one render`, notes: outNotes }
+        : delivery ? { ...job, delivery: Delivery.describe(delivery), notes } : job);
     } catch (e) {
       const code = e.code === 409 || e.code === 400 ? e.code : /^Unknown encoding profile/.test(e.message || "") ? 400 : 500;
       sendJSON(res, code, { error: String(e.message || e) });
@@ -861,7 +921,7 @@ const server = http.createServer(async (req, res) => {
       sendJSON(res, 200, await beginExport(opts.fps, opts.name, opts.profile, opts.hasAudio !== false, mode, opts));
     } catch (e) {
       // an unusable profile is the caller's problem, not a server fault
-      const bad = /^Unknown encoding profile|was rejected by ffmpeg|ffmpeg rejected these settings|export fps required|export width\/height required/.test(e.message || "");
+      const bad = /^Unknown encoding profile|was rejected by ffmpeg|ffmpeg rejected these settings|at most \d+ outputs|deliveries is empty|export fps required|export width\/height required/.test(e.message || "");
       sendJSON(res, bad ? 400 : 500, { error: String(e.message || e) });
     }
     return;
@@ -880,7 +940,7 @@ const server = http.createServer(async (req, res) => {
       // queue behind any in-flight write so concurrent POSTs cannot interleave stdin
       const run = async () => {
         if (!sess.proc) sess.mode === "annexb" ? startAnnexbEncoder(sess) : startEncoder(sess);
-        await writeExportFrame(sess, body);
+        await (sess.outputs ? writeDeliveryFrame(sess, body) : writeExportFrame(sess, body));
       };
       const writeJob = sess.writeLock.then(run, run);
       sess.writeLock = writeJob.catch(() => {}); // keep the chain alive after a failed write
@@ -913,6 +973,26 @@ const server = http.createServer(async (req, res) => {
       if (url.searchParams.get("discard")) { cleanupExport(id); sendJSON(res, 200, { ok: true }); return; }
       touchExport(sess); // keep alive through final mux
       if (!sess.proc) throw new Error("no frames were uploaded");
+      if (sess.outputs) {
+        // every output finishes on its own; the reply lists each file or why it failed
+        const results = await Promise.all(sess.outputs.map(async (o) => {
+          const file = path.basename(o.outPath);
+          if (!o.failed) {
+            o.proc.stdin.end();
+            const code = await o.done;
+            if (code !== 0) o.failed = "ffmpeg encode failed: " + o.err();
+          }
+          if (o.failed) return { file, ok: false, error: o.failed };
+          fs.renameSync(o.partPath, o.outPath);
+          o.partPath = null; // renamed — cleanup must not delete the finished file
+          return { file, ok: true, src: "/exports/" + encodeURIComponent(file) };
+        }));
+        cleanupExport(id);
+        const ok = results.filter((x) => x.ok);
+        if (!ok.length) throw new Error(results.map((x) => `${x.file}: ${x.error}`).join(" · "));
+        sendJSON(res, 200, { ok: true, src: ok[0].src, outputs: results });
+        return;
+      }
       sess.proc.stdin.end();
       const code = await sess.done;
       if (code !== 0) throw new Error("ffmpeg encode failed: " + sess.err());

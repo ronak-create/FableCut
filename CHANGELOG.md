@@ -57,6 +57,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `delivery`; `setProject {delivery}` pins a project default;
   `fablecut_encode_profiles` lists the presets and the usable encoders.
   Encoding profiles still work and sit at the bottom of the list.
+- **Batch export and an export queue.** A project keeps a list of outputs
+  (`project.outputs`; "+ Typical set" adds master, YouTube 1080p, a 9:16 reel,
+  a square and a 720p preview), and **Export checked** makes them all from one
+  render: each frame is drawn once and every output's ffmpeg encodes it, so
+  four 1080p files take about as long as one. The queue runs outputs back to
+  back with progress, stop, retry and open; one failed output does not stop
+  the rest. An export frame of another shape no longer squeezes an output: a
+  16:9 file of a project framed for 9:16 reframes the whole canvas. Agents:
+  `fablecut_export {outputs:true | [...]}`, `setProject {outputs}`; REST
+  `/api/export/begin {deliveries:[...]}`.
 
 ### Changed
 - `/media/` serves files in subfolders of `media/` too.

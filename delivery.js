@@ -360,9 +360,13 @@
    *  is set, else the whole canvas. Returns
    *  {crop:{x,y,w,h}|null, scaleW, scaleH, outW, outH, padX, padY, upscale}. */
   function reframe(spec, canvasW, canvasH, region) {
-    const r = region && region.w > 0 && region.h > 0
-      ? { x: region.x | 0, y: region.y | 0, w: region.w | 0, h: region.h | 0 }
-      : { x: 0, y: 0, w: canvasW | 0, h: canvasH | 0 };
+    /* The export frame is the picture for outputs of its own shape (and for
+       "the picture's size"); an output of another shape — the 16:9 file of a
+       project framed for 9:16 — reframes the whole canvas instead. */
+    const full = { x: 0, y: 0, w: canvasW | 0, h: canvasH | 0 };
+    let r = region && region.w > 0 && region.h > 0
+      ? { x: region.x | 0, y: region.y | 0, w: region.w | 0, h: region.h | 0 } : full;
+    if (r !== full && spec.width && Math.abs(spec.width / spec.height - r.w / r.h) > 0.01) r = full;
     // the picture's own size rounds down to even, so it is never scaled up by a pixel
     const outW = spec.width || Math.max(2, r.w - (r.w & 1)), outH = spec.height || Math.max(2, r.h - (r.h & 1));
     let crop = { ...r }, scaleW = outW, scaleH = outH, padX = 0, padY = 0;
@@ -543,6 +547,11 @@
     s = s.replace(/[\\/:*?"<>|\u0000-\u001f]+/g, "_").replace(/\s+/g, " ").trim().replace(/^\.+/, "");
     return s.slice(0, 120) || "export";
   }
+  /** The file name an output gets in a project (its size, export frame and fps). */
+  function projectFilename(spec, proj = {}) {
+    const fr = reframe(spec, proj.width || 1920, proj.height || 1080, proj.exportFrame || null);
+    return renderFilename(spec.filename, spec, { project: proj.name, width: fr.outW, height: fr.outH, fps: spec.fps || proj.fps });
+  }
   const FILENAME_TOKENS = ["project", "preset", "res", "w", "h", "fps", "codec", "date", "time", "range", "n"];
 
   function fmtRate(kbps) { return kbps >= 1000 ? `${Math.round(kbps / 100) / 10} Mb/s` : `${kbps} kb/s`; }
@@ -648,7 +657,7 @@
     CONTAINERS, CODECS, ENCODERS, AUDIO, COLORS, PRESETS, PRESET_IDS, DEFAULT_PRESET,
     FPS_CHOICES, RESOLUTIONS, SPEEDS, SAMPLE_RATES, META_KEYS, FILENAME_TOKENS,
     normalize, encodersFor, reframe, ffmpegArgs, videoFilter, frameInput, jpegQuality, fpsRational,
-    renderFilename, describe, estimateSize, checks, presetGroups, presetId, savedPresets, parseEncoders,
+    renderFilename, projectFilename, describe, estimateSize, checks, presetGroups, presetId, savedPresets, parseEncoders,
     fmtBytes, fmtDur,
   };
 });

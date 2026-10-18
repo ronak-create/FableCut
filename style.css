@@ -4053,4 +4053,34 @@ input[type="range"].cq-hue {
 .bin-proxy.failed { background: #5a1d20; color: #ffb3b5; }
 .proxy-btn:not(.has) { opacity: .6; }
 .dialog.export-dialog p { margin-bottom: 0; }
+.export-dialog .dialog-actions { flex-wrap: wrap; }
+.dlv-queue-open { margin-right: auto; }
+.dlv-batch-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.dlv-batch-list li {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--panel); font-size: 12px; min-width: 0;
+}
+.dlv-batch-list li.off { opacity: .55; }
+.dlv-batch-list input[type="checkbox"] { accent-color: var(--accent); flex: none; }
+.dlv-batch-list .bo-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.dlv-batch-list .bo-main b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dlv-batch-list .bo-main span { color: var(--muted, #9a9aaa); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dlv-batch-list .bo-empty { justify-content: center; color: var(--muted, #9a9aaa); border-style: dashed; }
+.xq-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.xq-list li {
+  display: flex; gap: 10px; align-items: center;
+  padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2);
+  font-size: 12px; min-width: 0;
+}
+.xq-list .xq-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.xq-list .xq-main b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.xq-list .xq-sub { color: var(--muted, #9a9aaa); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.xq-list .progress { margin: 2px 0 0; height: 5px; }
+.xq-list .xq-status { font-size: 11px; color: var(--muted, #9a9aaa); word-break: break-word; }
+.xq-list li.done .xq-status { color: #8fd6ae; }
+.xq-list li.failed .xq-status { color: #ff9a9e; }
+.xq-list .xq-actions { display: flex; gap: 6px; flex: none; }
+.xq-list .xq-empty { justify-content: center; color: var(--muted, #9a9aaa); border-style: dashed; }
 .dialog.export-dialog p.dlv-tokens { margin-bottom: 8px; }
+.xq-list .xq-actions a.btn { text-decoration: none; }

@@ -373,6 +373,17 @@
         <p class="dim dlv-summary" id="dlvSummary"></p>
       </div>
     </div>
+    <div class="export-profile-row dlv-batch" id="dlvBatch">
+      <div class="dlv-preset-line">
+        <span class="export-profile-label">Batch outputs <span class="dim" id="dlvBatchCount"></span></span>
+        <span class="dlv-preset-actions">
+          <button type="button" class="btn tiny" id="dlvBatchAdd" title="Add the settings above to this project's outputs">+ Add these settings</button>
+          <button type="button" class="btn tiny" id="dlvBatchTypical" title="Master, YouTube 1080p, Reel 1080×1920, Square 1080 and a 720p preview">+ Typical set</button>
+        </span>
+      </div>
+      <p class="dim export-profile-hint" id="dlvBatchHint">One render, several files: every checked output is encoded from the same frames. Saved with the project.</p>
+      <ul class="dlv-batch-list" id="dlvBatchList"></ul>
+    </div>
     <div class="export-wc-opts hidden" id="exportWcOpts">
       <label class="export-wc-field" for="exportWcBitrate">Bitrate
         <select id="exportWcBitrate" class="export-wc-sel">
@@ -400,8 +411,25 @@
     <div class="export-track-warn hidden" id="exportTrackWarn" role="status"></div>
     </div>
     <div class="dialog-actions">
+      <button class="btn dlv-queue-open" id="btnOpenQueue" title="Show the export queue">Queue</button>
       <button class="btn" id="btnCancelSetup">Cancel</button>
+      <button class="btn" id="btnBatchExport" title="Queue every checked batch output and start">Export checked</button>
+      <button class="btn" id="btnQueueExport" title="Add these settings to the export queue">Add to queue</button>
       <button class="btn primary" id="btnStartExport">Export</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ EXPORT QUEUE ══════════ -->
+<div class="overlay hidden" id="exportQueue">
+  <div class="dialog export-dialog" role="dialog" aria-modal="true" aria-labelledby="exportQueueTitle">
+    <h2 id="exportQueueTitle">Export queue</h2>
+    <p class="dim" id="exportQueueNote"></p>
+    <div class="export-body"><ol class="xq-list" id="exportQueueList"></ol></div>
+    <div class="dialog-actions">
+      <button class="btn" id="btnQueueClear">Clear finished</button>
+      <button class="btn" id="btnQueueClose">Close</button>
+      <button class="btn primary" id="btnQueueStart">Start</button>
     </div>
   </div>
 </div>

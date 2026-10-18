@@ -105,6 +105,8 @@
   <span class="tk-k">"encodeProfile"</span>: <span class="tk-s">"hq"</span>,  <span class="tk-c">// optional — fast-export profile id (see encoding-profiles.json)</span>
   <span class="tk-k">"delivery"</span>: { <span class="tk-k">"preset"</span>: <span class="tk-s">"youtube"</span>, <span class="tk-k">"width"</span>: <span class="tk-n">1920</span>, <span class="tk-k">"height"</span>: <span class="tk-n">1080</span>, <span class="tk-k">"…"</span>: <span class="tk-s">"…"</span> },
   <span class="tk-c">// ^ optional — the delivery spec exports use by default (see "Delivery presets"); setProject takes a preset id</span>
+  <span class="tk-k">"outputs"</span>: [ { <span class="tk-k">"id"</span>: <span class="tk-s">"o_1"</span>, <span class="tk-k">"on"</span>: <span class="tk-n">true</span>, <span class="tk-k">"preset"</span>: <span class="tk-s">"master"</span>, <span class="tk-k">"…"</span>: <span class="tk-s">"…"</span> } ],
+  <span class="tk-c">// ^ optional — batch outputs: files made together from one render (see "Batch outputs and the export queue")</span>
   <span class="tk-k">"master"</span>: { <span class="tk-k">"gain"</span>: <span class="tk-n">-1.5</span>, <span class="tk-k">"fx"</span>: [ { <span class="tk-k">"type"</span>: <span class="tk-s">"limiter"</span>, <span class="tk-k">"ceiling"</span>: <span class="tk-n">-1</span> } ] },
   <span class="tk-c">// ^ optional — master fader, dB (−60 = silence … +12; omit = 0 dB) and master effects (see "Audio mix")</span>
   <span class="tk-k">"tracks"</span>: [                          <span class="tk-c">// optional — timeline lanes (default V3…V1 + A1…A4)</span>

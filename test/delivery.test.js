@@ -234,7 +234,7 @@ test("export/begin with a delivery spec: crops, scales and encodes the frames it
   const begin = await post(base, "/api/export/begin", {
     fps: 30, name: "vertical", hasAudio: false, duration: 0.2,
     delivery: { preset: "custom", width: 90, height: 160, reframe: "fill" },
-    canvasW: 320, canvasH: 180, region: { x: 0, y: 0, w: 160, h: 180 },
+    canvasW: 320, canvasH: 180, region: { x: 20, y: 0, w: 100, h: 178 },   // 9:16, inside the red half
   });
   const sess = await begin.json();
   assert.equal(begin.status, 200, sess.error);
@@ -268,4 +268,62 @@ test("export/begin with a delivery spec: ffmpeg's refusal comes back before any 
   assert.equal(r.status, 400);
   assert.match((await r.json()).error, /ffmpeg rejected these settings/);
   assert.ok(list.encoders.includes("libx264") || true);
+});
+
+test("reframe: an export frame of another shape is ignored — the output reframes the whole canvas", () => {
+  const ef = { x: 656, y: 0, w: 608, h: 1080 };   // framed for 9:16
+  assert.equal(D.reframe(D.normalize("youtube").spec, 1920, 1080, ef).crop, null, "16:9 takes the whole 16:9 canvas");
+  assert.deepEqual(D.reframe(D.normalize("tiktok").spec, 1920, 1080, ef).crop, ef, "9:16 takes the frame");
+  assert.deepEqual(D.reframe(D.normalize("master").spec, 1920, 1080, ef).crop, ef, "the picture's own size is the frame");
+});
+
+test("setProject outputs: the batch list is stored complete, with ids and checkboxes", () => {
+  const proj = seedProject();
+  const { notes } = ProjectOps.applyPatch(proj, [{ op: "setProject", set: { outputs: ["master", { preset: "instagram-reels", on: false }, { preset: "custom", width: 1080, height: 1080, filename: "{project}_square_{res}", id: "sq" }] } }], {});
+  assert.equal(proj.outputs.length, 3);
+  assert.equal(proj.outputs[0].preset, "master");
+  assert.equal(proj.outputs[1].on, false);
+  assert.equal(proj.outputs[2].id, "sq");
+  assert.equal(proj.outputs[2].width, 1080);
+  assert.ok(proj.outputs.every((o) => /^o_|^sq$/.test(o.id)));
+  assert.match(notes.join(" "), /Test Project_square_1080sq/);
+  assert.throws(() => ProjectOps.applyPatch(seedProject(), [{ op: "setProject", set: { outputs: ["nope"] } }], {}), /no delivery preset/);
+  assert.throws(() => ProjectOps.applyPatch(seedProject(), [{ op: "setProject", set: { outputs: Array(17).fill("web") } }], {}), /up to 16/);
+});
+
+test("export/begin with several deliveries: one stream of frames, one file per output", async (t) => {
+  const { dir, base } = await boot(t);
+  const ff = await (await fetch(base + "/api/export/ffmpeg")).json();
+  if (!ff.available) return;
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "fc-dlv-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const raw = path.join(tmp, "f.rgba");
+  execFileSync("ffmpeg", ["-y", "-v", "error", "-f", "lavfi", "-i", "color=c=green:s=320x180", "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgba", raw]);
+  const frame = fs.readFileSync(raw);
+
+  const begin = await post(base, "/api/export/begin", {
+    fps: 25, hasAudio: false, duration: 0.2, canvasW: 320, canvasH: 180,
+    deliveries: [
+      { delivery: { preset: "custom", width: 320, height: 180 }, name: "wide" },
+      { delivery: { preset: "custom", width: 90, height: 160 }, name: "tall" },
+      { delivery: { preset: "custom", video: { codec: "prores", profile: "proxy" } }, name: "master" },
+    ],
+  });
+  const sess = await begin.json();
+  assert.equal(begin.status, 200, sess.error);
+  assert.equal(sess.input, "rgba", "ProRes in the batch → every output reads RGBA");
+  assert.equal(sess.outputs.length, 3);
+  assert.deepEqual(sess.outputs.map((o) => o.file), ["wide.mp4", "tall.mp4", "master.mov"]);
+  const up = await fetch(base + "/api/export/frame?id=" + sess.id, { method: "POST", body: Buffer.concat(Array(5).fill(frame)) });
+  assert.equal(up.status, 200);
+  const end = await (await fetch(base + "/api/export/end?id=" + sess.id, { method: "POST" })).json();
+  assert.equal(end.outputs.length, 3, end.error);
+  assert.ok(end.outputs.every((o) => o.ok), JSON.stringify(end.outputs));
+  for (const [file, w, h] of [["wide.mp4", 320, 180], ["tall.mp4", 90, 160], ["master.mov", 320, 180]]) {
+    const pr = JSON.parse(execFileSync("ffprobe", ["-v", "error", "-show_entries", "stream=width,height,nb_frames", "-of", "json", path.join(dir, "exports", file)], { encoding: "utf8" }));
+    assert.deepEqual([pr.streams[0].width, pr.streams[0].height, +pr.streams[0].nb_frames], [w, h, 5], file);
+  }
+  const many = await post(base, "/api/export/begin", { fps: 25, hasAudio: false, canvasW: 64, canvasH: 64, deliveries: Array(9).fill({ delivery: "web" }) });
+  assert.equal(many.status, 400);
+  assert.match((await many.json()).error, /at most 8/);
 });
