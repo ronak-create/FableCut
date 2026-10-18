@@ -544,7 +544,9 @@
   function loudnormFilter(spec, m) {
     const a = spec.audio;
     if (a.loudness == null || !m) return "";
-    const lra = Math.max(11, Math.ceil(m.input_lra + 1));   // linear mode needs the range to fit
+    // linear mode needs the range to fit; 20 LU is the most every ffmpeg build takes
+    // (a wider mix makes loudnorm compress instead — the check reports where it lands)
+    const lra = Math.min(20, Math.max(11, Math.ceil(m.input_lra + 1)));
     return `loudnorm=I=${a.loudness}:TP=${a.truePeak ?? -1}:LRA=${lra}:measured_I=${m.input_i}:measured_TP=${m.input_tp}` +
       `:measured_LRA=${m.input_lra}:measured_thresh=${m.input_thresh}:offset=${m.target_offset}:linear=true`;
   }
@@ -589,10 +591,12 @@
       add(a.codec_name === A.encoder || (A.encoder === "libopus" && a.codec_name === "opus") || (A.encoder === "libmp3lame" && a.codec_name === "mp3"),
         `${a.codec_name} ${Math.round(+a.sample_rate / 100) / 10} kHz ${+a.channels === 1 ? "mono" : +a.channels === 2 ? "stereo" : a.channels + " ch"}`);
       if (+a.sample_rate !== spec.audio.sampleRate) add(false, `sample rate ${a.sample_rate} (asked ${spec.audio.sampleRate})`);
+      if (+a.channels !== spec.audio.channels) add(false, `${a.channels} channel${+a.channels === 1 ? "" : "s"} (asked ${spec.audio.channels})`);
     }
     const dur = +(probe && probe.format && probe.format.duration);
     if (ctx.duration && Number.isFinite(dur)) add(near(dur, ctx.duration, Math.max(0.05, 1.5 / (ctx.fps || 30))), `${fmtClock(dur)}${near(dur, ctx.duration, Math.max(0.05, 1.5 / (ctx.fps || 30))) ? "" : ` (timeline ${fmtClock(ctx.duration)})`}`);
     const L = ctx.loud;
+    if (ctx.loudWanted && a && !(L && L.lufs != null) && !(L && L.silent)) add(false, "loudness could not be measured");
     if (L && L.lufs != null) {
       const target = spec.audio.loudness;
       const tp = L.truePeak;

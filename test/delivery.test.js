@@ -371,6 +371,11 @@ test("verify: what came out against what was asked", () => {
     { fps: 30, frames: 60, duration: 2, loud: { lufs: -17, truePeak: 0.4 }, frame, hasAudio: true });
   assert.equal(bad.ok, false);
   assert.deepEqual(bad.checks.filter((c) => !c.ok).map((c) => c.text), ["1280×720 (asked 1920×1080)", "59 frames (rendered 60)", "-17.0 LUFS (target -14)", "0.4 dBTP (ceiling -1)"]);
+  const mono = D.verify(sp, { ...probe, streams: [probe.streams[0], { ...probe.streams[1], channels: 1 }] }, { frame, hasAudio: true });
+  assert.deepEqual(mono.checks.filter((c) => !c.ok).map((c) => c.text), ["1 channel (asked 2)"]);
+  assert.equal(D.verify(sp, probe, { frame, hasAudio: true, loudWanted: true, loud: null }).ok, false, "a loudness that could not be measured is not a pass");
+  assert.ok(D.verify(sp, probe, { frame, hasAudio: true, loudWanted: true, loud: { lufs: null, truePeak: null, silent: true } }).ok, "silence is measured, not missing");
+  assert.match(D.loudnormFilter(D.normalize("broadcast").spec, { input_i: -20, input_tp: -3, input_lra: 35, input_thresh: -30, target_offset: 0 }), /:LRA=20:/, "LRA capped at 20");
   const loudYt = D.verify(D.normalize("youtube").spec, probe, { fps: 30, loud: { lufs: -8, truePeak: -0.5 }, frame, hasAudio: true });
   assert.ok(loudYt.ok);
   assert.match(loudYt.line, /plays it 6\.0 dB quieter/);

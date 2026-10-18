@@ -330,9 +330,11 @@ async function beginDeliveryExport(rate, name, hasAudio, extra) {
   return { id, mode: "jpeg", input, jpegQuality, outputs: view, ...view[0] };
 }
 /** Integrated loudness and true peak of a file's first audio stream (ffmpeg ebur128). */
-async function measureLoudness(file) {
-  const r = await runFfmpeg(Delivery.LOUDNESS_ARGS(file), 10 * 60 * 1000);
-  return r.code === 0 ? Delivery.parseEbur128(r.stderr) : null;
+async function measureLoudness(file, timeout = 10 * 60 * 1000) {
+  const r = await runFfmpeg(Delivery.LOUDNESS_ARGS(file), timeout);
+  if (r.code !== 0) return null;
+  const m = Delivery.parseEbur128(r.stderr);
+  return m.lufs == null && /I:\s+-inf/.test(r.stderr) ? { ...m, silent: true } : m;   // silence measures as -inf
 }
 function ffprobeJSON(file) {
   return new Promise((resolve) => {
@@ -341,17 +343,20 @@ function ffprobeJSON(file) {
   });
 }
 /** Check a finished output against its spec: size, frames, fps, codecs, length, loudness, file size. */
+const VERIFY_LOUDNESS_MS = 120 * 1000;   // the file is already saved; a long re-measure must not hold the reply
 async function verifyDeliveryOutput(sess, o, file) {
+  const failed = (text) => ({ ok: false, checks: [{ ok: false, text }], line: "⚠ " + text });
   try {
-    const [probe, loud] = await Promise.all([ffprobeJSON(file), o.spec.audio.codec !== "none" && sess.wav ? measureLoudness(file) : null]);
-    if (!probe) return null;
+    const loudWanted = o.spec.audio.codec !== "none" && !!sess.wav;
+    const [probe, loud] = await Promise.all([ffprobeJSON(file), loudWanted ? measureLoudness(file, VERIFY_LOUDNESS_MS) : null]);
+    if (!probe) return failed("could not read the file back to check it (ffprobe)");
     let size = 0;
     try { size = fs.statSync(file).size; } catch {}
     return Delivery.verify(o.spec, probe, {
       fps: sess.fps, frames: sess.frames || (sess.duration ? Math.round(sess.duration * sess.fps) : null), duration: sess.duration,
-      size, loud, frame: o.frame, hasAudio: !!sess.wav,
+      size, loud, loudWanted, frame: o.frame, hasAudio: !!sess.wav,
     });
-  } catch { return null; }
+  } catch (e) { return failed("could not check the file: " + (e.message || e)); }
 }
 /** Spawn one ffmpeg per output of a delivery session. */
 function startDeliveryEncoders(sess) {
