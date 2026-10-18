@@ -843,7 +843,8 @@ const server = http.createServer(async (req, res) => {
       const id = Delivery.presetId(label);
       if (!id) { sendJSON(res, 400, { error: "name the preset (letters or digits)" }); return; }
       if (Delivery.PRESETS[id]) { sendJSON(res, 400, { error: `"${label}" is a built-in preset — pick another name` }); return; }
-      const { spec, notes } = Delivery.normalize({ ...(opts.spec || {}), preset: "custom" });
+      // what the spec leaves out comes from the preset it names (built-in or saved), not from Custom
+      const { spec, notes } = Delivery.normalize(opts.spec || {}, { presets: savedDeliveryPresets() });
       delete spec.preset;
       writeSaved("delivery", id, { id, label, ...spec });
       broadcast("delivery-presets");

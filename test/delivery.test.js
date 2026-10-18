@@ -54,6 +54,8 @@ test("normalize corrects impossible combinations and says how", () => {
 
   r = D.normalize({ preset: "custom", fps: 29.97003 });
   assert.equal(r.spec.fps, 29.97);
+  for (const m of [0, "", "abc", -5, null]) assert.equal(D.normalize({ preset: "instagram-reels", video: { maxrate: m } }).spec.video.maxrate, null, `maxrate ${JSON.stringify(m)} = no cap`);
+  assert.equal(D.normalize({ preset: "custom", video: { maxrate: 50 } }).spec.video.maxrate, 100);
 });
 
 test("normalize picks an encoder this ffmpeg has, and keeps hardware pixel formats legal", () => {
@@ -198,6 +200,9 @@ test("delivery presets: list, save, refuse a built-in name, delete", async (t) =
   const again = await (await fetch(base + "/api/export/presets")).json();
   assert.equal(again.saved["client-4k"].width, 3840);
   assert.equal(again.saved["client-4k"].label, "Client 4K");
+  // the rest came from YouTube, not from Custom
+  assert.equal(again.saved["client-4k"].audio.bitrate, 384);
+  assert.equal(again.saved["client-4k"].video.keyint, 0.5);
 
   assert.equal((await post(base, "/api/export/presets", { name: "YouTube", spec: {} })).status, 400);
   assert.equal((await post(base, "/api/export/presets", { name: "!!!", spec: {} })).status, 400);

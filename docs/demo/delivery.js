@@ -308,7 +308,8 @@
       const [lo, hi, dflt] = C.crf;
       video.crf = Math.round(clamp(num(v.crf, dflt), lo, hi));
       video.bitrate = Math.round(clamp(num(v.bitrate, 12000), 100, 400000));
-      video.maxrate = v.maxrate == null || v.maxrate === "" ? null : Math.round(clamp(num(v.maxrate, 0), 100, 800000)) || null;
+      // 0, empty or not a number = no cap (clamping first would turn 0 into a 100 kb/s cap)
+      video.maxrate = +v.maxrate > 0 ? Math.round(clamp(+v.maxrate, 100, 800000)) : null;
       video.keyint = Math.round(clamp(num(v.keyint, 2), 0, 20) * 100) / 100;
       video.speed = pick(SPEEDS, v.speed, "balanced");
       if (encoder === "libsvtav1" && video.rate === "cbr") { video.rate = "vbr"; notes.push("SVT-AV1 has no CBR here — using VBR"); }

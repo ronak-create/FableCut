@@ -14384,7 +14384,13 @@ async function openExportSetup() {
     populateExportProfileSelect();
     syncExportProfileVisibility();
     els.exportSetup.classList.remove("hidden");
+    // aria-modal hides what is behind — focus has to come inside
+    if (!els.exportSetup.contains(document.activeElement)) $("exportRangeSel")?.focus();
   });
+}
+function closeExportSetup() {
+  els.exportSetup.classList.add("hidden");
+  $("btnExport")?.focus();
 }
 function startChosenExport() {
   persistExportWcOpts();
@@ -14403,7 +14409,7 @@ function startChosenExport() {
     alert("Export range is empty — IN/OUT is at or past the end of the timeline. Choose Entire timeline, or move the markers.");
     return;
   }
-  els.exportSetup.classList.add("hidden");
+  closeExportSetup();
   if (useFast) {
     const c = selectedExportChoice();
     setSetting("exportKind", c.kind);
@@ -15897,7 +15903,10 @@ $("dlvSaveName")?.addEventListener("keydown", (e) => {
 });
 $("dlvSaveCancel")?.addEventListener("click", () => $("dlvSaveRow").classList.add("hidden"));
 $("dlvDeleteBtn")?.addEventListener("click", deleteDeliveryPreset);
-$("btnCancelSetup").addEventListener("click", () => els.exportSetup.classList.add("hidden"));
+$("btnCancelSetup").addEventListener("click", closeExportSetup);
+els.exportSetup?.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !e.defaultPrevented) { e.preventDefault(); e.stopPropagation(); closeExportSetup(); }
+});
 els.engineFast?.addEventListener("change", syncExportWcOpts);
 els.engineRealtime?.addEventListener("change", syncExportWcOpts);
 $("exportWcBitrate")?.addEventListener("change", persistExportWcOpts);
