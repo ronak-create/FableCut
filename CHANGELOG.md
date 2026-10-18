@@ -60,7 +60,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Batch export and an export queue.** A project keeps a list of outputs
   (`project.outputs`; "+ Typical set" adds master, YouTube 1080p, a 9:16 reel,
   a square and a 720p preview), and **Export checked** makes them all with one
-  render per frame rate (up to 8 outputs each): each frame is drawn once and
+  render per frame rate and range (up to 8 outputs each): each frame is drawn once and
   every output's ffmpeg encodes it, so four 1080p files take about as long as one. The queue runs outputs back to
   back with progress, stop, retry and open; one failed output does not stop
   the rest. An export frame of another shape no longer squeezes an output: a

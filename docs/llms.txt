@@ -94,7 +94,7 @@ about 150 ms. A human and an agent can work the same timeline at once.
   pixel format, color, container, audio, file-name templates and metadata;
   saved presets, and warnings about upscaling, crops and platform limits.
 - Batch export: one project → many files (master, YouTube, reel, square,
-  preview), one render per frame rate (up to 8 outputs each), saved with the project; an export queue with
+  preview), one render per frame rate and range (up to 8 outputs each), saved with the project; an export queue with
   progress, stop, retry and open. Agents: `fablecut_export {outputs}`.
 - Export: fast ffmpeg export via delivery presets or encoding profiles, WebCodecs hardware export
   (browser encodes H.264, server muxes), and a realtime MediaRecorder fallback.

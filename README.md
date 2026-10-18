@@ -319,8 +319,8 @@ same time.
   rate, a file-name template and metadata. Save your own presets; the dialog
   warns about upscaling, crops and platform limits before it renders
 - **Batch export**: one project → many files (master, YouTube 1080p, a 9:16
-  reel, a square, a 720p preview…) from **one render per frame rate** (up to
-  8 outputs each) — every frame is drawn once and each output's ffmpeg
+  reel, a square, a 720p preview…) from **one render per frame rate and
+  range** (up to 8 outputs each) — every frame is drawn once and each output's ffmpeg
   encodes it. Batch outputs are saved with the
   project; an **export queue** runs them back to back with progress, stop,
   retry and open
