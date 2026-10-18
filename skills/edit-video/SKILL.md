@@ -84,4 +84,10 @@ scopes always use the originals. Make them only when the user asks.
   or a title that slides in, `addTemplate` and `applyPreset` are one op each.
 - **Export** with `fablecut_export` — the editor's own Fast export, in the
   user's open tab or a headless Chrome / Edge. It needs ffmpeg on PATH; it
-  waits for the file and returns its path.
+  waits for the file and returns its path. For a platform, pass its preset
+  (`preset:"youtube"`, `"youtube-shorts"`, `"instagram-reels"`, `"tiktok"`,
+  `"x"`, `"linkedin"`, `"broadcast"`, `"web"`, `"archive"`) and adjust with
+  `delivery:{…}` (fps, codec, bitrate, file name, metadata); a 16:9 timeline
+  exported to a vertical preset is cropped from the middle unless the project
+  has an export frame, so say so or set one. `fablecut_encode_profiles` lists
+  the presets.

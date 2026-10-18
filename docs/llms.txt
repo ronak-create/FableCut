@@ -87,7 +87,13 @@ about 150 ms. A human and an agent can work the same timeline at once.
   above (alpha, alpha inverted, luma, luma inverted; the matte track stops
   drawing), and laid over the clips below with 17 blend modes. Agents use the
   `setMatte` patch op and `props.blend`.
-- Export: fast ffmpeg export via encoding profiles, WebCodecs hardware export
+- Delivery presets: YouTube, YouTube Shorts, Instagram Reels, TikTok, X,
+  LinkedIn, Master, Broadcast (ProRes), Web, Archive (FFV1) and Custom, with
+  resolution / reframing, frame rate, codec (H.264, HEVC, AV1, VP9, ProRes,
+  DNxHR, XDCAM, FFV1), hardware encoders, CRF / VBR / CBR, keyframe interval,
+  pixel format, color, container, audio, file-name templates and metadata;
+  saved presets, and warnings about upscaling, crops and platform limits.
+- Export: fast ffmpeg export via delivery presets or encoding profiles, WebCodecs hardware export
   (browser encodes H.264, server muxes), and a realtime MediaRecorder fallback.
   Agents can start an export themselves (`fablecut_export`), in the open editor
   or a headless browser.

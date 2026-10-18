@@ -310,18 +310,26 @@ same time.
 
 **Export**
 
+- **Delivery presets**: YouTube, YouTube Shorts, Instagram Reels, TikTok, X,
+  LinkedIn, Master, Broadcast (ProRes 422 HQ), Web, Archive (lossless FFV1) and
+  Custom. Every setting is a control: resolution and reframing (crop, fit or
+  stretch to another shape), frame rate, codec (H.264, HEVC, AV1, VP9, ProRes,
+  DNxHR, XDCAM HD422, FFV1) and hardware encoder, CRF / VBR / CBR, max rate,
+  keyframe interval, pixel format, color, container, audio codec, bitrate and
+  rate, a file-name template and metadata. Save your own presets; the dialog
+  warns about upscaling, crops and platform limits before it renders
 - Fast export: browser renders every frame + an offline audio mix; ffmpeg
-  encodes **JPEG frames** via an **encoding profile** from
+  encodes them with a delivery preset, or a raw **encoding profile** from
   `encoding-profiles.json` (keeps rendering if you switch tabs). Encode and
   upload run ahead of the compositor so a fast timeline is not stalled by
-  `toBlob`. The Export dialog has a profile selector; pin a project default
-  with `encodeProfile` in `project.json`
+  `toBlob`
 - WebCodecs export: the browser HW-encodes Annex-B H.264; the server
   stream-copies and muxes audio. Faster uploads; bitrate/VBR-CBR in the
   Export dialog. Unavailable while an export frame is set (use Fast)
 - Realtime MediaRecorder fallback when ffmpeg or WebCodecs isn't available
 - Agents export too: `fablecut_export` runs the Fast export in the open editor,
-  or in a headless Chrome / Edge the server starts, and returns the file path
+  or in a headless Chrome / Edge the server starts, and returns the file path;
+  `preset` and `delivery` pick and adjust a delivery preset
 - Export **Range** dropdown: Entire timeline or IN–OUT (defaults to IN–OUT when
   markers are set). Effective IN/OUT export bounds are clamped to `projDur()`.
 

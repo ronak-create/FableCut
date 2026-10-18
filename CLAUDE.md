@@ -30,8 +30,10 @@ Every Claude Code session then has these tools:
   `{path, t}` returns one frame of a source clip; `{path, frames}` returns a
   contact sheet across it; with no `path`, `{time}` renders the composed
   timeline. See "Look at the footage" below.
-- `fablecut_encode_profiles` — list export presets from `encoding-profiles.json` (each is a
-  raw ffmpeg args list). Set `project.encodeProfile` via patch to pin a project default.
+- `fablecut_encode_profiles` — list the **delivery presets** (YouTube, Shorts, Reels, TikTok,
+  X, LinkedIn, Master, Broadcast, Web, Archive, saved ones) and the raw ffmpeg **encoding
+  profiles** from `encoding-profiles.json`. `{preset:"youtube"}` returns one preset's spec.
+  See "Export" below.
 - `fablecut_normalize_audio` — measure clips (BS.1770 LUFS or sample peak, via ffmpeg) and
   set their clip gain to a loudness target. See "Audio mix" below.
 - `fablecut_auto_duck` — find where the voice tracks speak and write `duck` keyframes that
@@ -272,6 +274,8 @@ Examples in `library/svg/`: `sparkles.svg` (loop), `lower-third.svg`,
   "untargetedTracks": [ "V2" ],
   // ^ optional — lanes edits skip (split, insert, ripple, close gap…); default: all targeted
   "encodeProfile": "hq",  // optional — fast-export profile id (see encoding-profiles.json)
+  "delivery": { "preset": "youtube", "width": 1920, "height": 1080, "…": "…" },
+  // ^ optional — the delivery spec exports use by default (see "Delivery presets"); setProject takes a preset id
   "master": { "gain": -1.5, "fx": [ { "type": "limiter", "ceiling": -1 } ] },
   // ^ optional — master fader, dB (−60 = silence … +12; omit = 0 dB) and master effects (see "Audio mix")
   "tracks": [                          // optional — timeline lanes (default V3…V1 + A1…A4)
@@ -1997,11 +2001,80 @@ agent last wrote, so an export right after a patch includes that patch.
 
 - `fablecut_export {}` — waits, then returns the file path under `exports/`.
   Range: `inPoint`→`outPoint` when either is set, else the whole timeline;
-  `range:"entire"|"in-out"` overrides. `profile:"hq"` picks an encoding profile.
+  `range:"entire"|"in-out"` overrides.
+- `preset:"instagram-reels"` picks a delivery preset; `delivery:{…}` changes any of its
+  settings (`{preset:"youtube", delivery:{fps:60, video:{rate:"vbr", bitrate:16000}}}`).
+  `profile:"hq"` picks a raw encoding profile instead. With neither, `project.delivery`
+  is used when set, else `project.encodeProfile`, else the server's default profile.
 - `where:"headless"` renders in the background and leaves the user's tab alone;
   `where:"tab"` refuses if no tab is open.
 - Long edits: `wait:false` returns a job id at once; poll with `{job:"x_…"}`
   and stop one with `{cancel:"x_…"}`. One export runs at a time.
+
+### Delivery presets
+
+The Export dialog's **Preset** list. Each preset is a structured spec — no ffmpeg
+arguments to write — that `delivery.js` turns into one ffmpeg pass:
+
+| Preset | Output |
+|---|---|
+| `youtube` | 1920×1080, H.264 CRF 18, keyframe every 0.5 s, AAC 384k 48 kHz |
+| `youtube-shorts` | 1080×1920, as YouTube; warns past 3 min |
+| `instagram-reels` | 1080×1920, H.264 CRF 19 capped at 25 Mb/s, AAC 256k; ≤ 60 fps, warns past 3 min |
+| `tiktok` | 1080×1920, H.264 CRF 19 capped at 20 Mb/s, AAC 256k; warns past 10 min |
+| `x` | 1920×1080, H.264 CRF 20 capped at 25 Mb/s, AAC 192k; warns past 2:20 and 512 MB |
+| `linkedin` | 1920×1080, H.264 CRF 20 capped at 20 Mb/s, AAC 192k; warns past 15 min and 5 GB |
+| `master` (default) | the picture's own size, H.264 CRF 16, AAC 320k |
+| `broadcast` | 1920×1080 ProRes 422 HQ MOV, PCM 24-bit 48 kHz, Rec. 709; warns off 25 / 29.97 / 50 / 59.94 fps |
+| `web` | 1280×720 H.264 CRF 23, AAC 128k, fast start |
+| `archive` | the picture's own size, lossless FFV1 4:2:2 10-bit MKV, PCM 24-bit |
+| `custom` | your own settings |
+
+A spec (every key optional — what is left out comes from its `preset`):
+
+```jsonc
+{
+  "preset": "youtube",
+  "width": 1920, "height": 1080,   // null = the picture's own size (the export frame, else the canvas)
+  "fps": null,                     // null = the project's; 23.976 / 29.97 / 59.94 are exact NTSC rates
+  "reframe": "fill",               // another shape: fill crops the middle (or the export frame), fit pads, stretch
+  "container": "mp4",              // mp4 · mov · mkv · webm · mxf
+  "video": {
+    "codec": "h264",               // h264 · hevc · av1 · vp9 · prores · dnxhr · mpeg2 (XDCAM HD422) · ffv1
+    "encoder": "libx264",          // or h264_nvenc / h264_qsv / h264_amf … — listed only when they work here
+    "rate": "crf",                 // crf · vbr · cbr (ProRes, DNxHR, XDCAM, FFV1 are fixed)
+    "crf": 18, "bitrate": 12000, "maxrate": null,   // kb/s; maxrate caps a CRF or VBR encode
+    "keyint": 2,                   // seconds between keyframes, 0 = the encoder's default
+    "speed": "balanced",           // fast · balanced · best
+    "pixFmt": "yuv420p",           // 4:2:0 / 4:2:2 / 4:4:4, 8 or 10 bit, as the codec allows
+    "profile": null                // ProRes: proxy lt standard hq 4444 4444xq · DNxHR: lb sq hq hqx 444
+  },
+  "audio": { "codec": "aac", "bitrate": 320, "sampleRate": 48000, "channels": 2 },
+                                   // aac · opus · mp3 · pcm16 · pcm24 · flac · none
+  "color": "bt709",                // bt709 · bt709-full · bt601-625 (PAL) · bt601-525 (NTSC)
+  "filename": "{project}_{preset}_{res}",
+  // tokens: {project} {preset} {res} (1080p, 1080x1920, 1080sq) {w} {h} {fps} {codec} {date} {time} {range} {n}
+  "metadata": { "title": "", "artist": "", "description": "", "copyright": "", "date": "", "keywords": "" }
+}
+```
+
+- **Impossible combinations are corrected, and the reply says how** — ProRes moves to MOV,
+  WebM takes Opus, Quick Sync gets 4:2:0. The dialog shows the same notes.
+- **Reframing happens in ffmpeg**: the browser sends the whole canvas and ffmpeg crops
+  the export frame (or the middle, for another shape) and scales. The dialog warns
+  when the output is upscaled or cropped, when a platform's length, size or frame-rate
+  limit is passed, and estimates the file size where it can (bitrate and fixed-rate
+  codecs; CRF cannot know).
+- Outputs that keep more than 4:2:0 8-bit (ProRes, DNxHR, FFV1, 10-bit, 4:2:2, 4:4:4)
+  get raw RGBA frames instead of JPEG, so no chroma is lost on the way. Slower to send.
+- The audio is cut to exactly the frames' length.
+- **Saved presets**: "Save preset…" in the dialog writes `library/delivery/<id>.json`,
+  listed under "Saved" in every project (`GET / POST /api/export/presets`,
+  `POST /api/export/presets/delete {id}`).
+- The settings are checked by a 0.1 s ffmpeg dry run before anything renders.
+- The dialog remembers the last settings in this browser. `setProject {delivery:"youtube"}`
+  (or a spec) pins them in the project, for the dialog and for `fablecut_export`.
+- Fast export only — WebCodecs and Realtime export encode their own way.
 
 ### Encoding profiles (`encoding-profiles.json`)
 
@@ -2066,11 +2139,12 @@ ffmpeg -y -f image2pipe -framerate <fps> -i - [-i audio.wav] <jpeg-color> <args�
 not `-i source.mp4`. Filters and codec settings apply to that frame stream. To transcode
 an existing file verbatim, run ffmpeg directly — that is outside the compositor path.
 
-**Which profile is used (priority):**
-1. Profile picked in the Export dialog (one-off; saved to browser settings unless overridden)
-2. `project.encodeProfile` — set via UI reload or `{op:"setProject", set:{encodeProfile:"hq"}}`
-3. Browser setting `encodeProfile` in localStorage (set when you change the Export dropdown)
-4. `default` in `encoding-profiles.json`
+Encoding profiles are listed at the bottom of the Export dialog's Preset list.
+
+**What the Export dialog opens on (priority):**
+1. `project.delivery`, then `project.encodeProfile` — set with `setProject`
+2. The last preset or profile used in this browser
+3. The `master` delivery preset
 
 **MCP:** `fablecut_encode_profiles` lists profiles; `{detail:true}` includes each `args`
 array; `{profile:"hq"}` returns one profile. `fablecut_status` shows the effective profile.

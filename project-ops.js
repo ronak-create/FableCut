@@ -28,10 +28,11 @@
   const dep = (file, name) => (node ? require(file) : root[name]);
   const api = factory(dep("./audio-fx", "FableCutFx"), dep("./edit-ops", "FableCutEdit"), dep("./color", "FableCutColor"),
     dep("./mask", "FableCutMask"), dep("./tracker", "FableCutTracker"), dep("./motion", "FableCutMotion"),
-    dep("./comp", "FableCutComp"), dep("./templates", "FableCutTemplates"), dep("./media-lib", "FableCutMedia"));
+    dep("./comp", "FableCutComp"), dep("./templates", "FableCutTemplates"), dep("./media-lib", "FableCutMedia"),
+    dep("./delivery", "FableCutDelivery"));
   if (node) module.exports = api;
   else root.FableCutProjectOps = api;
-})(typeof self !== "undefined" ? self : this, function (FX, EditOps, Color, Mask, Tracker, Motion, CompLib, Templates, MediaLib) {
+})(typeof self !== "undefined" ? self : this, function (FX, EditOps, Color, Mask, Tracker, Motion, CompLib, Templates, MediaLib, Delivery) {
   "use strict";
 
   const DEFAULT_TRACKS = EditOps.DEFAULT_TRACKS;
@@ -1027,13 +1028,24 @@
           break;
         }
         case "setProject": {
-          const allowed = ["name", "width", "height", "fps", "background", "markers", "disabledTracks", "lockedTracks", "untargetedTracks", "exportFrame", "encodeProfile", "master", "inPoint", "outPoint"];
+          const allowed = ["name", "width", "height", "fps", "background", "markers", "disabledTracks", "lockedTracks", "untargetedTracks", "exportFrame", "encodeProfile", "delivery", "master", "inPoint", "outPoint"];
           for (const [k, v] of Object.entries(op.set || {})) {
             if (!allowed.includes(k)) throw new Error(`setProject: '${k}' not settable (allowed: ${allowed.join(", ")})`);
             if ((k === "inPoint" || k === "outPoint") && v != null && (typeof v !== "number" || !Number.isFinite(v) || v < 0))
               throw new Error(`setProject: ${k} must be seconds ≥ 0 (null clears it)`);
             if (k === "encodeProfile" && v != null) {
               if (ctx && ctx.checkProfile) ctx.checkProfile(String(v)); // validate id exists
+            }
+            if (k === "delivery" && v != null) {
+              // a preset id or a spec → the complete spec, so the editor and agents read the same thing
+              if (typeof v !== "string" && (typeof v !== "object" || Array.isArray(v)))
+                throw new Error("setProject: delivery is a preset id ('youtube') or a spec {preset?, width?, height?, fps?, video?, audio?, …}");
+              const n = Delivery.normalize(v, { presets: (ctx && ctx.deliveryPresets) || {} });
+              if (typeof v === "string" && !Delivery.PRESETS[v] && !(ctx && ctx.deliveryPresets && ctx.deliveryPresets[v]))
+                throw new Error(`setProject: no delivery preset "${v}" (built-in: ${Delivery.PRESET_IDS.join(", ")})`);
+              proj.delivery = n.spec;
+              notes.push(`delivery ${n.spec.preset}: ${Delivery.describe(n.spec)}${n.notes.length ? ` (adjusted: ${n.notes.join("; ")})` : ""}`);
+              continue;
             }
             if (k === "master" && v != null) {
               const g = v.gain;

@@ -34,7 +34,7 @@
     { "name": "fablecut_import_media", "description": "Copy a local file into the project's media folder and register it" },
     { "name": "fablecut_analyze_reference", "description": "Analyze a reference video into an edit blueprint: shot cuts, beats, BPM, energy curve, drop; extracts its music" },
     { "name": "fablecut_frame", "description": "Look at the footage: one JPEG frame of a source clip at a timestamp, an N-up contact sheet across a clip, or the composed timeline rendered and graded at a moment - returned inline as an image the agent can see" },
-    { "name": "fablecut_encode_profiles", "description": "List the ffmpeg encoding profiles available for Fast export" },
+    { "name": "fablecut_encode_profiles", "description": "List the delivery presets (YouTube, Reels, Broadcast…) and ffmpeg encoding profiles available for export" },
     { "name": "fablecut_normalize_audio", "description": "Loudness-normalize clips (BS.1770 LUFS or sample peak) by setting their clip gain" },
     { "name": "fablecut_auto_duck", "description": "Duck music under dialogue: write duck keyframes wherever the voice tracks speak" },
     { "name": "fablecut_denoise", "description": "Reduce background noise on audio clips: render a cleaned copy of the file and switch the clips to it" },

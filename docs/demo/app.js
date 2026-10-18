@@ -468,6 +468,8 @@ const SETTINGS_KEY = "fablecut-settings";
 const DEFAULT_SETTINGS = {
   linkSelect: false, // timeline ↔ project bin selection sync
   encodeProfile: null, // null = server default from encoding-profiles.json
+  exportKind: null, // "delivery" | "profile" — what the Export dialog last used
+  delivery: null, // last delivery spec used in the Export dialog (delivery.js)
   // WebCodecs has no CRF — bitrate (Mbps) + constant|variable mode
   webCodecsBitrateMbps: null, // null = auto from canvas size
   webCodecsBitrateMode: "variable", // "variable" | "constant"
@@ -531,6 +533,7 @@ const project = {
   untargetedTracks: [], // track ids edits skip (split, insert, ripple, close gap…)
   exportFrame: null, // optional {x,y,w,h} delivery crop inside width×height canvas
   encodeProfile: null, // optional fast-export profile id (overrides browser setting)
+  delivery: null, // optional delivery spec (delivery.js) — the default for exports, agents' included
   tracks: null, // optional [{id, kind, gain?, pan?}] — null means default V3…V1 + A1…A4
   master: null, // optional {gain} — master bus fader (dB)
   buses: [],    // submix buses [{id:"B1", name?, gain?, pan?, mute?, fx?}]; tracks[].out routes into one
@@ -1470,6 +1473,7 @@ function applyProject(data, opts = {}) {
     outPoint: wa.outPoint,
     exportFrame: normalizeExportFrame(data.exportFrame, data.width || 1280, data.height || 720),
     encodeProfile: data.encodeProfile || null,
+    delivery: data.delivery && typeof data.delivery === "object" ? data.delivery : null,
     master: normalizeMaster(data.master),
     buses: normalizeBuses(data.buses),
     comps: (Array.isArray(data.comps) ? data.comps : []).filter((cp) => cp && cp.id).map((cp) => ({
@@ -1586,7 +1590,7 @@ function projectJSON() {
 }
 /** The project as it is loaded right now (an open comp's stand-in project, or the root). */
 function projectJSONHere() {
-  const { name, width, height, fps, background, revision, folders, media, clips, markers, inPoint, outPoint, disabledTracks, encodeProfile } = project;
+  const { name, width, height, fps, background, revision, folders, media, clips, markers, inPoint, outPoint, disabledTracks, encodeProfile, delivery } = project;
   const out = {
     name, width, height, fps, background, revision,
     panSchema: 1,
@@ -1617,6 +1621,7 @@ function projectJSONHere() {
   const ef = getExportFrame();
   if (ef) out.exportFrame = ef;
   if (encodeProfile) out.encodeProfile = encodeProfile;
+  if (delivery) out.delivery = delivery;
   const master = normalizeMaster(project.master);
   if (master) out.master = master;
   const buses = normalizeBuses(project.buses);
@@ -1632,6 +1637,17 @@ function listenSSE() {
   es.addEventListener("export", (e) => {
     noteActivity();
     try { runExportJob(JSON.parse(e.data)); } catch { }
+  });
+  es.addEventListener("delivery-presets", () => {
+    fetchDeliveryInfo().then(() => {
+      if (els.exportSetup && !els.exportSetup.classList.contains("hidden")) {
+        const keep = els.exportProfileSel.value;
+        populateExportProfileSelect();
+        els.exportProfileSel.value = keep;
+        if (els.exportProfileSel.value !== keep) els.exportProfileSel.value = "d:" + Delivery.DEFAULT_PRESET;
+        syncExportChoiceUi(dlvSource);
+      }
+    });
   });
   es.addEventListener("profiles", () => {
     fetchEncodeProfiles().then(() => {
@@ -3945,8 +3961,9 @@ function exportRangeMode() {
   if (v === "in-out" && !hasWorkArea()) return "entire";
   return v;
 }
-function exportRange() {
-  const fps = projectFps();
+/** fps: the output's frame rate when it differs from the project's (delivery). */
+function exportRange(fpsOverride) {
+  const fps = fpsOverride || projectFps();
   const span = Math.max(projDur(), 0);
   let start = 0, end = span;
   if (exportRangeMode() === "in-out") {
@@ -13965,28 +13982,296 @@ function updateExportProfileNote(id) {
     } else if (getSetting("encodeProfile")) {
       els.exportProfileHint.textContent = "Browser default — saved when you change this dropdown.";
     } else {
-      els.exportProfileHint.textContent = "Using server default from encoding-profiles.json.";
+      els.exportProfileHint.textContent = "Raw ffmpeg arguments from encoding-profiles.json.";
     }
   }
 }
+
+/* ── Delivery presets (delivery.js) ──
+   The Preset dropdown lists the delivery presets (YouTube, Reels, Broadcast…,
+   saved ones, Custom) and, last, the raw encoding profiles. A delivery preset
+   fills the controls below it; any change makes it "modified" and is kept as
+   the browser's last settings. Values: "d:<preset id>" / "p:<profile id>". */
+const Delivery = window.FableCutDelivery;
+let deliveryInfo = { encoders: null, saved: {} };
+let dlvSpec = null;
+let dlvNotes = [];
+async function fetchDeliveryInfo() {
+  if (!state.connected) return;
+  try {
+    const r = await fetch("/api/export/presets", { cache: "no-store" });
+    if (!r.ok) return;
+    const d = await r.json();
+    deliveryInfo = { encoders: Array.isArray(d.encoders) ? d.encoders : null, saved: d.saved && typeof d.saved === "object" ? d.saved : {} };
+  } catch { }
+}
+function deliveryOpts() {
+  return { available: deliveryInfo.encoders ? new Set(deliveryInfo.encoders) : null, presets: deliveryInfo.saved };
+}
+function normalizeDelivery(input) { return Delivery.normalize(input, deliveryOpts()); }
+/** What an export uses when nobody picks: the project's pin, else this browser's last choice. */
+function exportChoice() {
+  if (project.delivery) return { kind: "delivery", spec: project.delivery, source: "project" };
+  if (project.encodeProfile) return { kind: "profile", id: project.encodeProfile, source: "project" };
+  const kind = getSetting("exportKind") || (getSetting("encodeProfile") ? "profile" : "delivery");
+  if (kind === "profile") return { kind, id: effectiveEncodeProfileId(), source: "browser" };
+  const last = getSetting("delivery");
+  return { kind: "delivery", spec: last && typeof last === "object" ? last : Delivery.DEFAULT_PRESET, source: last ? "browser" : "default" };
+}
+function selectedExportChoice() {
+  const v = els.exportProfileSel?.value || "";
+  return v.startsWith("p:") ? { kind: "profile", id: v.slice(2) } : { kind: "delivery", id: v.slice(2) || Delivery.DEFAULT_PRESET };
+}
 function populateExportProfileSelect() {
-  if (!els.exportProfileSel) return;
+  const sel = els.exportProfileSel;
+  if (!sel) return;
+  const choice = exportChoice();
+  let cur;
+  if (choice.kind === "delivery") {
+    const n = normalizeDelivery(choice.spec);
+    dlvSpec = n.spec; dlvNotes = n.notes;
+    cur = "d:" + dlvSpec.preset;
+  } else cur = "p:" + choice.id;
+  const opt = (v, label) => `<option value="${escapeHtml(v)}">${escapeHtml(label)}</option>`;
+  let html = Delivery.presetGroups(deliveryInfo.saved).map((g) =>
+    `<optgroup label="${escapeHtml(g.group)}">${g.items.map((it) => opt("d:" + it.id, it.label)).join("")}</optgroup>`).join("");
   const ids = Object.keys(encodeProfiles.profiles);
-  const cur = effectiveEncodeProfileId();
   // a project/browser default naming a deleted profile must stay visible rather
   // than silently falling through to whichever option happens to be first
-  if (cur && !ids.includes(cur)) ids.unshift(cur);
-  els.exportProfileSel.innerHTML = ids.map((id) => {
+  if (choice.kind === "profile" && !ids.includes(choice.id)) ids.unshift(choice.id);
+  html += `<optgroup label="Encoding profiles (encoding-profiles.json)">${ids.map((id) => {
     const p = encodeProfiles.profiles[id];
-    const sel = id === cur ? " selected" : "";
-    const label = p ? (p.label || id) : `${id} (not defined on the server)`;
-    return `<option value="${escapeHtml(id)}"${sel}>${escapeHtml(label)}</option>`;
-  }).join("");
-  updateExportProfileNote(els.exportProfileSel.value || cur || "delivery");
+    return opt("p:" + id, p ? (p.label || id) : `${id} (not defined on the server)`);
+  }).join("")}</optgroup>`;
+  sel.innerHTML = html;
+  sel.value = cur;
+  if (sel.value !== cur) sel.value = "d:" + Delivery.DEFAULT_PRESET;
+  syncExportChoiceUi(choice.source);
+}
+/** source: where the current settings came from, for the hint line. */
+function syncExportChoiceUi(source) {
+  const c = selectedExportChoice();
+  const isD = c.kind === "delivery";
+  $("dlvBody")?.classList.toggle("hidden", !isD);
+  $("dlvSaveBtn")?.classList.toggle("hidden", !isD);
+  $("dlvDeleteBtn")?.classList.toggle("hidden", !(isD && deliveryInfo.saved[c.id]));
+  $("dlvSaveRow")?.classList.add("hidden");
+  if (!isD) {
+    updateExportProfileNote(c.id);
+    const w = $("dlvWarn"); if (w) { w.textContent = ""; w.classList.add("hidden"); }
+    return;
+  }
+  if (!dlvSpec || dlvSpec.preset !== c.id) {
+    const n = normalizeDelivery(c.id);
+    dlvSpec = n.spec; dlvNotes = n.notes;
+    source = "preset";
+  }
+  dlvSource = source || dlvSource;
+  fillDeliveryControls();
+  refreshDeliveryNotes();
+}
+let dlvSource = "default";
+function deliveryCanvas() {
+  return { w: els.preview?.width || project.width, h: els.preview?.height || project.height, region: getExportFrame() };
+}
+function deliveryFrame(spec) {
+  const cv = deliveryCanvas();
+  return Delivery.reframe(spec, cv.w, cv.h, cv.region);
+}
+function deliveryFileName(spec, fps) {
+  const fr = deliveryFrame(spec);
+  return Delivery.renderFilename(spec.filename, spec, {
+    project: project.name.replace(/[^\w\- ]+/g, "").trim() || "export",
+    width: fr.outW, height: fr.outH, fps: fps || spec.fps || projectFps(), range: exportRangeMode(),
+  });
+}
+const dlvVal = (id) => $(id)?.value ?? "";
+function setOptions(sel, items, value) {
+  if (!sel) return;
+  sel.innerHTML = items.map(([v, label, disabled]) =>
+    `<option value="${escapeHtml(String(v))}"${disabled ? " disabled" : ""}>${escapeHtml(label)}</option>`).join("");
+  sel.value = String(value);
+}
+function showField(id, on) { $(id)?.classList.toggle("hidden", !on); }
+function fillDeliveryControls() {
+  const sp = dlvSpec, v = sp.video, a = sp.audio, C = Delivery.CODECS[v.codec];
+  const fr = deliveryFrame({ ...sp, width: null, height: null });
+  const avail = deliveryOpts().available;
+  // resolution
+  const res = [["", `Picture size (${fr.outW} × ${fr.outH})`]];
+  for (const [w, h, label] of Delivery.RESOLUTIONS) res.push([`${w}x${h}`, `${w} × ${h} · ${label}`]);
+  res.push(["custom", "Custom…"]);
+  let rv = sp.width ? `${sp.width}x${sp.height}` : "";
+  if (rv && !res.some((r) => r[0] === rv)) rv = "custom";
+  if (dlvCustomRes && sp.width) rv = "custom";
+  setOptions($("dlvRes"), res, rv);
+  showField("dlvWhField", rv === "custom");
+  if (rv === "custom") { $("dlvW").value = sp.width; $("dlvH").value = sp.height; }
+  showField("dlvReframeField", !!sp.width);
+  $("dlvReframe").value = sp.reframe;
+  setOptions($("dlvFps"), [["", `Project (${projectFps()} fps)`], ...Delivery.FPS_CHOICES.map((f) => [f, `${f} fps`])], sp.fps ?? "");
+  setOptions($("dlvCodec"), Object.entries(Delivery.CODECS).map(([k, c]) => {
+    const none = avail && !Delivery.encodersFor(k, avail).length;
+    return [k, c.label + (none ? " — not in this ffmpeg" : ""), none && k !== v.codec];
+  }), v.codec);
+  const encs = Delivery.encodersFor(v.codec, avail);
+  setOptions($("dlvEncoder"), (encs.length ? encs : [v.encoder]).map((e) => [e, Delivery.ENCODERS[e]?.label || e]), v.encoder);
+  showField("dlvEncoderField", encs.length > 1);
+  showField("dlvProfileField", !!C.profiles);
+  if (C.profiles) setOptions($("dlvProfile"), Object.entries(C.profiles), v.profile);
+  const fixed = v.rate === "fixed";
+  showField("dlvRateField", !fixed);
+  if (!fixed) setOptions($("dlvRate"), C.rate.map((r) => [r, { crf: "CRF (constant quality)", vbr: "VBR (variable bitrate)", cbr: "CBR (constant bitrate)" }[r]]), v.rate);
+  showField("dlvCrfField", v.rate === "crf");
+  showField("dlvBitrateField", v.rate === "vbr" || v.rate === "cbr");
+  showField("dlvMaxrateField", v.rate === "crf" || v.rate === "vbr");
+  for (const f of ["dlvKeyintField", "dlvSpeedField"]) showField(f, !fixed);
+  if (!fixed) {
+    const crf = $("dlvCrf"); crf.min = C.crf[0]; crf.max = C.crf[1];
+    if (document.activeElement !== crf) crf.value = v.crf;
+    if (document.activeElement !== $("dlvBitrate")) $("dlvBitrate").value = +(v.bitrate / 1000).toFixed(2);
+    if (document.activeElement !== $("dlvMaxrate")) $("dlvMaxrate").value = v.maxrate ? +(v.maxrate / 1000).toFixed(2) : "";
+    if (document.activeElement !== $("dlvKeyint")) $("dlvKeyint").value = v.keyint;
+    $("dlvSpeed").value = v.speed;
+  }
+  const E = Delivery.ENCODERS[v.encoder] || {};
+  const pix = C.pixFmts.filter((f) => !E.pix || E.pix.includes(f));
+  const PIX = { yuv420p: "4:2:0 8-bit", yuv422p: "4:2:2 8-bit", yuv444p: "4:4:4 8-bit", yuv420p10le: "4:2:0 10-bit", yuv422p10le: "4:2:2 10-bit", yuv444p10le: "4:4:4 10-bit" };
+  setOptions($("dlvPixFmt"), (pix.includes(v.pixFmt) ? pix : [v.pixFmt, ...pix]).map((f) => [f, `${PIX[f] || f} (${f})`]), v.pixFmt);
+  $("dlvPixFmt").disabled = v.codec === "prores" || v.codec === "dnxhr" || pix.length < 2;
+  setOptions($("dlvColor"), Object.entries(Delivery.COLORS).map(([k, c]) => [k, c.label]), sp.color);
+  setOptions($("dlvContainer"), C.containers.map((k) => [k, Delivery.CONTAINERS[k].label]), sp.container);
+  // audio
+  setOptions($("dlvACodec"), Object.entries(Delivery.AUDIO).filter(([, A]) => A.containers.includes(sp.container)).map(([k, A]) => [k, A.label]), a.codec);
+  const A = Delivery.AUDIO[a.codec];
+  showField("dlvABitrateField", !!A.bitrate);
+  if (A.bitrate) {
+    const steps = [64, 96, 128, 160, 192, 256, 320, 384, 448, 512].filter((k) => k >= A.bitrate[0] && k <= A.bitrate[1]);
+    if (!steps.includes(a.bitrate)) steps.push(a.bitrate), steps.sort((x, y) => x - y);
+    setOptions($("dlvABitrate"), steps.map((k) => [k, `${k} kb/s`]), a.bitrate);
+  }
+  showField("dlvARateField", a.codec !== "none" && a.codec !== "opus");
+  showField("dlvAChField", a.codec !== "none");
+  if (a.codec !== "none") { $("dlvARate").value = a.sampleRate; $("dlvACh").value = a.channels; }
+  // file name + metadata (left alone while typing)
+  const fn = $("dlvFilename");
+  if (document.activeElement !== fn) fn.value = sp.filename;
+  for (const k of Delivery.META_KEYS) {
+    const el = $("dlvMeta" + k[0].toUpperCase() + k.slice(1));
+    if (el && document.activeElement !== el) el.value = sp.metadata[k] || "";
+  }
+  $("dlvTokens").textContent = "Tokens: " + Delivery.FILENAME_TOKENS.map((t) => `{${t}}`).join(" ");
+}
+let dlvCustomRes = false;
+/** The controls → a spec. `changed`: the control the user touched. */
+function readDeliveryControls(changed) {
+  const sp = dlvSpec;
+  const raw = { preset: sp.preset, video: { ...sp.video }, audio: { ...sp.audio }, metadata: {} };
+  const r = dlvVal("dlvRes");
+  dlvCustomRes = r === "custom";
+  if (r === "") { raw.width = null; raw.height = null; }
+  else if (r === "custom") {
+    if (changed === "dlvRes") { const fr = deliveryFrame(sp); raw.width = fr.outW; raw.height = fr.outH; }
+    else { raw.width = +dlvVal("dlvW") || null; raw.height = +dlvVal("dlvH") || null; }
+  } else { const [w, h] = r.split("x").map(Number); raw.width = w; raw.height = h; }
+  raw.reframe = dlvVal("dlvReframe");
+  raw.fps = dlvVal("dlvFps") === "" ? null : +dlvVal("dlvFps");
+  raw.container = dlvVal("dlvContainer");
+  raw.color = dlvVal("dlvColor");
+  if (changed === "dlvCodec") raw.video = { codec: dlvVal("dlvCodec"), speed: sp.video.speed, keyint: sp.video.keyint, maxrate: sp.video.maxrate, bitrate: sp.video.bitrate };
+  else {
+    const v = raw.video;
+    v.encoder = dlvVal("dlvEncoder") || v.encoder;
+    if (!$("dlvProfileField").classList.contains("hidden")) v.profile = dlvVal("dlvProfile");
+    if (v.rate !== "fixed") {
+      v.rate = dlvVal("dlvRate") || v.rate;
+      v.crf = +dlvVal("dlvCrf");
+      v.bitrate = Math.round(+dlvVal("dlvBitrate") * 1000) || v.bitrate;
+      v.maxrate = dlvVal("dlvMaxrate") === "" ? null : Math.round(+dlvVal("dlvMaxrate") * 1000);
+      v.keyint = +dlvVal("dlvKeyint");
+      v.speed = dlvVal("dlvSpeed");
+    }
+    v.pixFmt = dlvVal("dlvPixFmt");
+  }
+  const a = raw.audio;
+  a.codec = dlvVal("dlvACodec") || a.codec;
+  if (changed !== "dlvACodec") {
+    if (!$("dlvABitrateField").classList.contains("hidden")) a.bitrate = +dlvVal("dlvABitrate");
+    a.sampleRate = +dlvVal("dlvARate") || a.sampleRate;
+    a.channels = +dlvVal("dlvACh") || a.channels;
+  } else delete a.bitrate;
+  raw.filename = dlvVal("dlvFilename");
+  for (const k of Delivery.META_KEYS) raw.metadata[k] = dlvVal("dlvMeta" + k[0].toUpperCase() + k.slice(1));
+  return raw;
+}
+function onDeliveryControl(e) {
+  const id = e.target?.id || "";
+  if (!id.startsWith("dlv") || id === "dlvSaveName") return;
+  const n = normalizeDelivery(readDeliveryControls(id));
+  dlvSpec = n.spec; dlvNotes = n.notes;
+  dlvSource = "edited";
+  // text fields refresh the preview only; everything else may move other controls
+  if (e.type === "change") fillDeliveryControls();
+  refreshDeliveryNotes();
+}
+function deliveryModified() {
+  if (!dlvSpec) return false;
+  const base = normalizeDelivery(dlvSpec.preset).spec;
+  const strip = (x) => JSON.stringify({ ...x, metadata: null });
+  return strip(base) !== strip(dlvSpec);
+}
+function refreshDeliveryNotes() {
+  if (!dlvSpec) return;
+  const sp = dlvSpec, fr = deliveryFrame(sp), fps = sp.fps || projectFps();
+  const preset = Delivery.PRESETS[sp.preset] || deliveryInfo.saved[sp.preset];
+  const modified = deliveryModified();
+  if (els.exportProfileNote) els.exportProfileNote.textContent = preset?.note || "";
+  if (els.exportProfileHint) {
+    els.exportProfileHint.textContent = dlvSource === "project"
+      ? "Project default (delivery in project.json) — agents export with it too."
+      : modified ? `${preset?.label || "Preset"} · modified — Save preset… keeps these settings for every project.`
+        : dlvSource === "browser" ? "Your last settings in this browser." : "";
+  }
+  const range = exportRange(fps);
+  const size = Delivery.estimateSize(sp, { duration: range.dur, width: fr.outW, height: fr.outH, fps });
+  $("dlvSummary").textContent = `${Delivery.describe(sp, { width: fr.outW, height: fr.outH, fps })}` +
+    (size ? ` · about ${Delivery.fmtBytes(size)}` : "");
+  $("dlvFilePreview").textContent = "→ exports/" + deliveryFileName(sp, fps) + Delivery.CONTAINERS[sp.container].ext;
+  const cv = deliveryCanvas();
+  const warn = [...dlvNotes.map((n) => n[0].toUpperCase() + n.slice(1)),
+    ...Delivery.checks(sp, { duration: range.dur, fps, canvasW: cv.w, canvasH: cv.h, region: cv.region })];
+  const w = $("dlvWarn");
+  if (w) { w.textContent = warn.join(" · "); w.classList.toggle("hidden", !warn.length); }
+}
+async function saveDeliveryPreset() {
+  const name = $("dlvSaveName").value.trim();
+  if (!name) { $("dlvSaveName").focus(); return; }
+  const r = await fetch("/api/export/presets", { method: "POST", body: JSON.stringify({ name, spec: dlvSpec }) })
+    .then((x) => x.json()).catch((e) => ({ error: String(e) }));
+  if (!r.ok) { alert("Could not save the preset: " + (r.error || "unknown error")); return; }
+  await fetchDeliveryInfo();
+  setSetting("exportKind", "delivery");
+  setSetting("delivery", { ...dlvSpec, preset: r.id });
+  if (!project.delivery) populateExportProfileSelect();
+  else { els.exportProfileSel.value = "d:" + r.id; dlvSpec = null; syncExportChoiceUi("preset"); }
+}
+async function deleteDeliveryPreset() {
+  const c = selectedExportChoice();
+  if (c.kind !== "delivery" || !deliveryInfo.saved[c.id]) return;
+  const r = await fetch("/api/export/presets/delete", { method: "POST", body: JSON.stringify({ id: c.id }) }).then((x) => x.json()).catch(() => ({}));
+  if (!r.ok) { alert("Could not delete the preset: " + (r.error || "unknown error")); return; }
+  await fetchDeliveryInfo();
+  els.exportProfileSel.value = "d:" + Delivery.DEFAULT_PRESET;
+  dlvSpec = null;
+  populateExportProfileSelect();
+  els.exportProfileSel.value = "d:" + Delivery.DEFAULT_PRESET;
+  syncExportChoiceUi("preset");
 }
 function syncExportProfileVisibility() {
   const show = els.engineFast.checked && !els.engineFast.disabled;
   els.exportProfileRow?.classList.toggle("hidden", !show);
+  if (!show) { const w = $("dlvWarn"); if (w) w.classList.add("hidden"); }
+  else if (selectedExportChoice().kind === "delivery") refreshDeliveryNotes();
 }
 
 function syncExportWcOpts() {
@@ -14095,8 +14380,9 @@ async function openExportSetup() {
   fillExportRangeSelect();
   syncExportRangeUi();
   syncExportProfileVisibility();
-  fetchEncodeProfiles().then(() => {
+  Promise.all([fetchEncodeProfiles(), fetchDeliveryInfo()]).then(() => {
     populateExportProfileSelect();
+    syncExportProfileVisibility();
     els.exportSetup.classList.remove("hidden");
   });
 }
@@ -14118,7 +14404,14 @@ function startChosenExport() {
     return;
   }
   els.exportSetup.classList.add("hidden");
-  if (useFast) fastExport();
+  if (useFast) {
+    const c = selectedExportChoice();
+    setSetting("exportKind", c.kind);
+    if (c.kind === "delivery") {
+      setSetting("delivery", dlvSpec);
+      fastExport({ delivery: dlvSpec });
+    } else fastExport({ profile: c.id });
+  }
   else if (useSecond && state.connected && state.ffmpeg && state.webCodecs && !getExportFrame()) webCodecsExport();
   else startExport();
 }
@@ -14160,8 +14453,8 @@ function syncExportRangeUi() {
 /* ── Fast export ── */
 let renderCancelled = false;
 let exportAbort = null;
-function beginExportWindow() {
-  exportWindow = exportRange();
+function beginExportWindow(fps) {
+  exportWindow = exportRange(fps);
   return exportWindow;
 }
 function endExportWindow() {
@@ -14169,6 +14462,9 @@ function endExportWindow() {
 }
 let exportCropCanvas = null;
 let exportCropCtx = null;
+/* A delivery export sends the whole canvas; ffmpeg crops the export frame
+   (and reframes) itself, so one stream can feed any output shape. */
+let exportFullCanvas = false;
 function canvasTaintError(e) {
   const tainted = e && (e.name === "SecurityError" || /taint/i.test(String(e.message || e)));
   return tainted
@@ -14177,7 +14473,7 @@ function canvasTaintError(e) {
 }
 function exportSourceCanvas() {
   const ef = getExportFrame();
-  if (!ef) return els.preview;
+  if (!ef || exportFullCanvas) return els.preview;
   if (!exportCropCanvas) exportCropCanvas = document.createElement("canvas");
   if (exportCropCanvas.width !== ef.w) exportCropCanvas.width = ef.w;
   if (exportCropCanvas.height !== ef.h) exportCropCanvas.height = ef.h;
@@ -14202,6 +14498,22 @@ function snapshotExportFrame() {
     }
     const img = src.getContext("2d").getImageData(0, 0, src.width, src.height);
     return { kind: "rgba", data: img.data, w: src.width, h: src.height };
+  } catch (e) { throw canvasTaintError(e); }
+}
+let exportRgbaOff = null, exportRgbaCtx = null;
+/** Raw RGBA of the frame, for outputs that keep more than JPEG's 4:2:0 8-bit
+ *  (ProRes, DNxHR, FFV1, 10-bit, 4:2:2 / 4:4:4). */
+function snapshotExportRgba() {
+  const src = exportSourceCanvas();
+  try {
+    if (!exportRgbaOff || exportRgbaOff.width !== src.width || exportRgbaOff.height !== src.height) {
+      exportRgbaOff = typeof OffscreenCanvas === "function" ? new OffscreenCanvas(src.width, src.height)
+        : Object.assign(document.createElement("canvas"), { width: src.width, height: src.height });
+      exportRgbaCtx = exportRgbaOff.getContext("2d", { alpha: false, willReadFrequently: true });
+    }
+    exportRgbaCtx.drawImage(src, 0, 0);
+    const img = exportRgbaCtx.getImageData(0, 0, src.width, src.height);
+    return new Uint8Array(img.data.buffer, img.data.byteOffset, img.data.byteLength);
   } catch (e) { throw canvasTaintError(e); }
 }
 const JPEG_WORKER_SRC = `"use strict";
@@ -14850,7 +15162,8 @@ async function prepareFrameAssets(t) {
 }
 /** opts.job: an agent's export job id — progress and the result go back to
  *  the server instead of an alert / download (nobody may be watching).
- *  opts.profile: encoding profile id for this run. */
+ *  opts.profile: encoding profile id for this run.
+ *  opts.delivery: a delivery spec (delivery.js) instead of a profile. */
 async function fastExport(opts = {}) {
   if (state.exporting) return;
   const job = opts.job || null;
@@ -14862,8 +15175,9 @@ async function fastExport(opts = {}) {
   els.exportProgress.style.width = "0%";
   els.exportNote.textContent = "Rendering frames → ffmpeg. You can switch tabs; export continues.";
   restoreExportVideoState();
-  const { start: t0, end: t1, frames } = beginExportWindow();
-  const fps = projectFps();
+  const delivery = opts.delivery || null;
+  const fps = (delivery && delivery.fps) || projectFps();
+  const { start: t0, end: t1, frames } = beginExportWindow(fps);
   let sessId = null;
   let uploadError = null;
   const setError = (err) => { if (!uploadError) uploadError = err; };
@@ -14871,12 +15185,14 @@ async function fastExport(opts = {}) {
     els.exportTitle.textContent = "Mixing audio…";
     const wav = await renderAudioMix(t0, t1);
     if (renderCancelled) throw new Error("cancelled");
-    const profileId = job ? (opts.profile || effectiveEncodeProfileId())
-      : els.exportProfileSel?.value || effectiveEncodeProfileId();
-    const jpegQ = exportProfileMeta(profileId).jpegQuality ?? 0.95;
+    const profileId = opts.profile || effectiveEncodeProfileId();
+    const cv = deliveryCanvas();
     const begin = await fetch("/api/export/begin", {
       method: "POST",
-      body: JSON.stringify({
+      body: JSON.stringify(delivery ? {
+        fps, name: deliveryFileName(delivery, fps), delivery, duration: frames / fps,
+        canvasW: cv.w, canvasH: cv.h, region: cv.region, hasAudio: !!wav,
+      } : {
         fps,
         name: project.name.replace(/[^\w\- ]+/g, "") || "export",
         profile: profileId,
@@ -14886,6 +15202,9 @@ async function fastExport(opts = {}) {
     }).then((r) => r.json());
     if (!begin.id) throw new Error(begin.error || "export begin failed");
     sessId = begin.id;
+    const jpegQ = delivery ? begin.jpegQuality ?? 0.95 : exportProfileMeta(profileId).jpegQuality ?? 0.95;
+    const rgba = begin.input === "rgba";
+    exportFullCanvas = !!delivery;
     if (wav) {
       const r = await fetch("/api/export/audio?id=" + sessId, { method: "POST", body: wav, signal });
       if (!r.ok) throw new Error("audio upload failed");
@@ -14927,10 +15246,11 @@ async function fastExport(opts = {}) {
       await seekVideosTo(t, { queueBusy });
       await prepareFrameAssets(t);
       drawFrame(t);
-      const snap = snapshotExportFrame();
+      const snap = rgba ? { kind: "raw", px: snapshotExportRgba() } : snapshotExportFrame();
       pixelsInflight++;
       let jpegP;
-      if (snap.kind === "bmp") {
+      if (snap.kind === "raw") jpegP = Promise.resolve(snap.px);
+      else if (snap.kind === "bmp") {
         jpegP = workers ? workers.encode(snap.bmp, jpegQ) : jpegFromBitmap(snap.bmp, jpegQ);
       } else {
         const c = document.createElement("canvas");
@@ -14967,7 +15287,7 @@ async function fastExport(opts = {}) {
     }
     const end = await fetch("/api/export/end?id=" + sessId, { method: "POST", signal }).then((r) => r.json());
     if (!end.src) throw new Error(end.error || "encode failed");
-    if (job) await reportExportJob(job, { status: "done", src: end.src }, true);
+    if (job) await reportExportJob(job, { status: "done", src: end.src, ...(delivery ? { result: { summary: begin.summary, notes: begin.notes || [] } } : {}) }, true);
     else {
       const a = document.createElement("a");
       a.href = end.src;
@@ -14981,6 +15301,7 @@ async function fastExport(opts = {}) {
     else if (msg !== "cancelled") alert("Export failed: " + msg);
   } finally {
     exportAbort = null;
+    exportFullCanvas = false;
     restoreExportVideoState();
     endExportWindow();
     state.exporting = false; state.rendering = false;
@@ -15035,7 +15356,10 @@ async function runExportJob(ticket) {
   try {
     if (exportRange().frames < 1) return fail("the export range is empty — IN/OUT is at or past the end of the timeline");
     reportExportJob(ticket.id, { progress: 0 }, true);
-    await fastExport({ job: ticket.id, profile: ticket.profile });
+    // an explicit profile wins; then the job's delivery spec, the project's, else the raw default
+    const want = ticket.profile ? null : ticket.delivery || project.delivery || null;
+    if (want) await fetchDeliveryInfo();
+    await fastExport(want ? { job: ticket.id, delivery: normalizeDelivery(want).spec } : { job: ticket.id, profile: ticket.profile });
   } finally {
     exportRangeForced = null;
   }
@@ -15552,13 +15876,27 @@ els.exportSetup?.addEventListener("change", (e) => {
   }
   if (e.target.id === "exportRangeSel") syncExportRangeUi();
 });
-els.exportProfileSel?.addEventListener("change", (e) => {
-  const id = e.target.value;
-  if (!project.encodeProfile) {
-    setSetting("encodeProfile", id === encodeProfiles.default ? null : id);
-  }
-  updateExportProfileNote(id);
+els.exportProfileSel?.addEventListener("change", () => {
+  const c = selectedExportChoice();
+  if (c.kind === "profile" && !project.encodeProfile)
+    setSetting("encodeProfile", c.id === encodeProfiles.default ? null : c.id);
+  syncExportChoiceUi("preset");
 });
+$("dlvBody")?.addEventListener("change", onDeliveryControl);
+$("dlvBody")?.addEventListener("input", onDeliveryControl);
+$("dlvSaveBtn")?.addEventListener("click", () => {
+  $("dlvSaveRow").classList.remove("hidden");
+  const p = Delivery.PRESETS[dlvSpec?.preset] || deliveryInfo.saved[dlvSpec?.preset];
+  $("dlvSaveName").value = p && !Delivery.PRESETS[dlvSpec.preset] ? p.label : "";
+  $("dlvSaveName").focus();
+});
+$("dlvSaveOk")?.addEventListener("click", saveDeliveryPreset);
+$("dlvSaveName")?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); saveDeliveryPreset(); }
+  if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); $("dlvSaveRow").classList.add("hidden"); }
+});
+$("dlvSaveCancel")?.addEventListener("click", () => $("dlvSaveRow").classList.add("hidden"));
+$("dlvDeleteBtn")?.addEventListener("click", deleteDeliveryPreset);
 $("btnCancelSetup").addEventListener("click", () => els.exportSetup.classList.add("hidden"));
 els.engineFast?.addEventListener("change", syncExportWcOpts);
 els.engineRealtime?.addEventListener("change", syncExportWcOpts);

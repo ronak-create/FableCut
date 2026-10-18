@@ -42,6 +42,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Agents: `fablecut_proxy` (make, check, delete); `/api/proxy` endpoints and
   SSE event `proxy`; the compact view shows `proxy:540p`.
 
+- **Delivery presets in the Export dialog.** YouTube, YouTube Shorts,
+  Instagram Reels, TikTok, X, LinkedIn, Master, Broadcast (ProRes 422 HQ, PCM
+  24-bit), Web, Archive (lossless FFV1) and Custom, with every setting as a
+  control: resolution and reframing (crop, fit or stretch to another shape),
+  frame rate, codec (H.264, HEVC, AV1, VP9, ProRes, DNxHR, XDCAM HD422, FFV1),
+  encoder (NVENC, Quick Sync and AMF when they work on the machine), CRF / VBR /
+  CBR, max rate, keyframe interval, encoder speed, pixel format, color,
+  container, audio codec / bitrate / rate / channels, a file-name template and
+  metadata. Presets can be saved for every project (`library/delivery/`). The
+  dialog warns about upscaling, crops, platform length / size / frame-rate
+  limits and estimates the file size. 4:2:2, 4:4:4, 10-bit and lossless
+  outputs get raw RGBA frames. Agents: `fablecut_export` takes `preset` and
+  `delivery`; `setProject {delivery}` pins a project default;
+  `fablecut_encode_profiles` lists the presets and the usable encoders.
+  Encoding profiles still work and sit at the bottom of the list.
+
 ### Changed
 - `/media/` serves files in subfolders of `media/` too.
 - **Chroma key, temperature, tint and RGB split run on the GPU** (WebGL2), in

@@ -3040,6 +3040,92 @@ body.track-size-s .clip.c-comp .comp-open-hint {
   display: none;
 }
 
+/* Export dialog: presets + delivery settings */
+.dialog.export-dialog {
+  width: min(640px, 94vw);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+}
+.export-dialog .export-body {
+  overflow-y: auto;
+  min-height: 0;
+  margin: 0 -6px 12px;
+  padding: 0 6px;
+}
+.dlv-preset-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.dlv-preset-line .export-profile-label { margin: 0; }
+.dlv-preset-actions { display: flex; gap: 6px; }
+.dlv-save-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+.dlv-save-row input { flex: 1; }
+.dlv-save-row.hidden, .dlv-body.hidden, .dlv-f.hidden { display: none; }
+.dlv-body { margin-top: 10px; }
+.dlv-sec {
+  border-top: 1px solid var(--border);
+  padding: 8px 0 4px;
+}
+.dlv-sec > summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 0 6px;
+  user-select: none;
+}
+.dlv-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 8px 12px;
+  padding-bottom: 6px;
+}
+.dlv-f {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--muted, #9a9aaa);
+  min-width: 0;
+}
+.dlv-f.dlv-wide { grid-column: 1 / -1; }
+.dlv-f select, .dlv-f input, .dlv-f textarea, .dlv-save-row input {
+  width: 100%;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  user-select: text;
+}
+.dlv-f textarea { resize: vertical; }
+.dlv-f select:disabled { opacity: .6; }
+.dlv-f select:focus, .dlv-f input:focus, .dlv-f textarea:focus, .dlv-save-row input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.dlv-wh-in { display: flex; align-items: center; gap: 6px; }
+.dlv-wh-in span { color: var(--muted, #9a9aaa); }
+.dlv-file-preview { margin: 6px 0 2px; font-size: 12px; word-break: break-all; }
+.dlv-tokens { margin: 0 0 8px; font-size: 11px; opacity: .75; }
+.dlv-meta { margin-top: 4px; }
+.dlv-summary {
+  margin: 4px 0 0;
+  font-size: 12px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
 .dialog.help {
   width: min(1080px, 94vw);
   max-height: 88vh;
@@ -3966,3 +4052,5 @@ input[type="range"].cq-hue {
 .bin-proxy.busy { background: #4f3f12; color: #ffe2a3; font-variant-numeric: tabular-nums; }
 .bin-proxy.failed { background: #5a1d20; color: #ffb3b5; }
 .proxy-btn:not(.has) { opacity: .6; }
+.dialog.export-dialog p { margin-bottom: 0; }
+.dialog.export-dialog p.dlv-tokens { margin-bottom: 8px; }

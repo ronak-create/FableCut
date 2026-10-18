@@ -270,8 +270,9 @@
 
 <!-- ══════════ EXPORT SETUP ══════════ -->
 <div class="overlay hidden" id="exportSetup">
-  <div class="dialog">
-    <h2>Export</h2>
+  <div class="dialog export-dialog" role="dialog" aria-modal="true" aria-labelledby="exportSetupTitle">
+    <h2 id="exportSetupTitle">Export</h2>
+    <div class="export-body">
     <div class="export-profile-row" id="exportRangeRow">
       <label class="export-profile-label" for="exportRangeSel">Range</label>
       <select class="export-profile-sel" id="exportRangeSel" aria-describedby="exportRangeNote">
@@ -288,11 +289,89 @@
       <input type="radio" name="engine" id="engineRealtime">
       <span><b>WebCodecs (HW encode)</b><br><span class="dim" id="engineWebCodecsNote">Frame-accurate. Browser encodes H.264; server muxes. Needs a modern Chromium and ffmpeg.</span></span>
     </label>
-    <div class="export-profile-row" id="exportProfileRow">
-      <label class="export-profile-label" for="exportProfileSel">Encoding profile</label>
+    <div class="export-profile-row dlv" id="exportProfileRow">
+      <div class="dlv-preset-line">
+        <label class="export-profile-label" for="exportProfileSel">Preset</label>
+        <span class="dlv-preset-actions">
+          <button type="button" class="btn tiny" id="dlvSaveBtn" title="Save these settings as a preset for every project">Save preset…</button>
+          <button type="button" class="btn tiny hidden" id="dlvDeleteBtn" title="Delete this saved preset">Delete</button>
+        </span>
+      </div>
       <select class="export-profile-sel" id="exportProfileSel" aria-describedby="exportProfileNote exportProfileHint"></select>
+      <div class="dlv-save-row hidden" id="dlvSaveRow">
+        <input type="text" id="dlvSaveName" maxlength="60" placeholder="Preset name, e.g. Client 4K" aria-label="Preset name">
+        <button type="button" class="btn tiny primary" id="dlvSaveOk">Save</button>
+        <button type="button" class="btn tiny" id="dlvSaveCancel">Cancel</button>
+      </div>
       <p class="dim export-profile-note" id="exportProfileNote"></p>
       <p class="dim export-profile-hint" id="exportProfileHint"></p>
+      <div class="dlv-body" id="dlvBody">
+        <details class="dlv-sec" id="dlvVideoSec" open>
+          <summary>Video</summary>
+          <div class="dlv-grid">
+            <label class="dlv-f">Resolution<select id="dlvRes"></select></label>
+            <label class="dlv-f dlv-wh hidden" id="dlvWhField">Width × height
+              <span class="dlv-wh-in"><input type="number" id="dlvW" min="16" max="8192" step="2" aria-label="Width"><span>×</span><input type="number" id="dlvH" min="16" max="8192" step="2" aria-label="Height"></span></label>
+            <label class="dlv-f" id="dlvReframeField">Reframe<select id="dlvReframe">
+              <option value="fill">Fill (crop to fit)</option>
+              <option value="fit">Fit (black bars)</option>
+              <option value="stretch">Stretch</option>
+            </select></label>
+            <label class="dlv-f">Frame rate<select id="dlvFps"></select></label>
+            <label class="dlv-f">Codec<select id="dlvCodec"></select></label>
+            <label class="dlv-f" id="dlvEncoderField">Encoder<select id="dlvEncoder"></select></label>
+            <label class="dlv-f" id="dlvProfileField">Profile<select id="dlvProfile"></select></label>
+            <label class="dlv-f" id="dlvRateField">Rate control<select id="dlvRate">
+              <option value="crf">CRF (constant quality)</option>
+              <option value="vbr">VBR (variable bitrate)</option>
+              <option value="cbr">CBR (constant bitrate)</option>
+            </select></label>
+            <label class="dlv-f" id="dlvCrfField">CRF<input type="number" id="dlvCrf" min="0" max="63" step="1" title="Lower = better quality, bigger file"></label>
+            <label class="dlv-f" id="dlvBitrateField">Bitrate (Mb/s)<input type="number" id="dlvBitrate" min="0.1" max="400" step="0.5"></label>
+            <label class="dlv-f" id="dlvMaxrateField">Max rate (Mb/s)<input type="number" id="dlvMaxrate" min="0.1" max="800" step="0.5" placeholder="none"></label>
+            <label class="dlv-f" id="dlvKeyintField">Keyframe every (s)<input type="number" id="dlvKeyint" min="0" max="20" step="0.5" title="0 = the encoder's default"></label>
+            <label class="dlv-f" id="dlvSpeedField">Encoder speed<select id="dlvSpeed">
+              <option value="fast">Fast</option>
+              <option value="balanced">Balanced</option>
+              <option value="best">Best quality (slow)</option>
+            </select></label>
+            <label class="dlv-f">Pixel format<select id="dlvPixFmt"></select></label>
+            <label class="dlv-f">Color<select id="dlvColor"></select></label>
+            <label class="dlv-f">Container<select id="dlvContainer"></select></label>
+          </div>
+        </details>
+        <details class="dlv-sec" id="dlvAudioSec" open>
+          <summary>Audio</summary>
+          <div class="dlv-grid">
+            <label class="dlv-f">Codec<select id="dlvACodec"></select></label>
+            <label class="dlv-f" id="dlvABitrateField">Bitrate (kb/s)<select id="dlvABitrate"></select></label>
+            <label class="dlv-f" id="dlvARateField">Sample rate<select id="dlvARate">
+              <option value="48000">48 kHz</option>
+              <option value="44100">44.1 kHz</option>
+            </select></label>
+            <label class="dlv-f" id="dlvAChField">Channels<select id="dlvACh">
+              <option value="2">Stereo</option>
+              <option value="1">Mono</option>
+            </select></label>
+          </div>
+        </details>
+        <details class="dlv-sec" id="dlvFileSec">
+          <summary>File name and metadata</summary>
+          <label class="dlv-f dlv-wide">File name
+            <input type="text" id="dlvFilename" maxlength="160" spellcheck="false" aria-describedby="dlvFilePreview dlvTokens"></label>
+          <p class="dim dlv-file-preview" id="dlvFilePreview"></p>
+          <p class="dim dlv-tokens" id="dlvTokens"></p>
+          <div class="dlv-grid dlv-meta">
+            <label class="dlv-f">Title<input type="text" id="dlvMetaTitle" maxlength="300"></label>
+            <label class="dlv-f">Artist / author<input type="text" id="dlvMetaArtist" maxlength="300"></label>
+            <label class="dlv-f">Copyright<input type="text" id="dlvMetaCopyright" maxlength="300"></label>
+            <label class="dlv-f">Date<input type="text" id="dlvMetaDate" maxlength="40" placeholder="2026-10-18"></label>
+            <label class="dlv-f dlv-wide">Description<textarea id="dlvMetaDescription" rows="2" maxlength="2000"></textarea></label>
+            <label class="dlv-f dlv-wide">Keywords<input type="text" id="dlvMetaKeywords" maxlength="300" placeholder="comma, separated"></label>
+          </div>
+        </details>
+        <p class="dim dlv-summary" id="dlvSummary"></p>
+      </div>
     </div>
     <div class="export-wc-opts hidden" id="exportWcOpts">
       <label class="export-wc-field" for="exportWcBitrate">Bitrate
@@ -317,7 +396,9 @@
       </label>
       <p class="dim export-wc-hint">WebCodecs has no CRF — quality is driven by bitrate. VBR spends bits on hard frames; CBR holds a steady rate.</p>
     </div>
+    <div class="export-track-warn hidden" id="dlvWarn" role="status"></div>
     <div class="export-track-warn hidden" id="exportTrackWarn" role="status"></div>
+    </div>
     <div class="dialog-actions">
       <button class="btn" id="btnCancelSetup">Cancel</button>
       <button class="btn primary" id="btnStartExport">Export</button>
@@ -521,6 +602,7 @@
 <script src="comp.js"></script>
 <script src="templates.js"></script>
 <script src="media-lib.js"></script>
+<script src="delivery.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

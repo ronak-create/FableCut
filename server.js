@@ -18,6 +18,7 @@
 const http = require("http");
 const crypto = require("crypto");
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 const { spawn, spawnSync, execFile } = require("child_process");
 
@@ -45,6 +46,7 @@ const Templates = require("./templates");
 const { probeFile } = require("./media-probe");
 const MediaLib = require("./media-lib");
 const { createProxies } = require("./proxy");
+const Delivery = require("./delivery");
 
 /* Static app files are served from the install dir; everything the user creates
    lives under DATA_DIR. The two are the same unless FABLECUT_DATA_DIR is set. */
@@ -242,6 +244,70 @@ function attachProc(sess, proc) {
   proc.stdin.on("error", () => {}); // EPIPE if ffmpeg dies mid-stream
   sess.done = new Promise((res) => proc.on("close", res));
 }
+/* Delivery presets (delivery.js) — structured settings instead of raw args.
+   Which encoders exist: `ffmpeg -encoders`, and for the hardware ones a 2-frame
+   test encode, because a build lists h264_nvenc / _qsv / _amf whether or not
+   this machine has the GPU. Asked once, in the background, on first use. */
+let deliveryEncodersP = null;
+function runFfmpeg(args, timeout = 15000) {
+  return new Promise((resolve) => {
+    execFile("ffmpeg", args, { timeout, maxBuffer: 8 * 1024 * 1024, windowsHide: true },
+      (err, stdout, stderr) => resolve({ code: err ? (err.code ?? 1) : 0, stdout: String(stdout || ""), stderr: String(stderr || "") }));
+  });
+}
+function deliveryEncoders() {
+  if (!HAS_FFMPEG) return Promise.resolve(new Set());
+  if (deliveryEncodersP) return deliveryEncodersP;
+  deliveryEncodersP = (async () => {
+    const listed = Delivery.parseEncoders((await runFfmpeg(["-hide_banner", "-encoders"])).stdout);
+    const usable = new Set([...listed].filter((e) => !Delivery.ENCODERS[e]?.hw));
+    await Promise.all([...listed].filter((e) => Delivery.ENCODERS[e]?.hw).map(async (e) => {
+      const r = await runFfmpeg(["-hide_banner", "-v", "error", "-f", "lavfi", "-i", "color=c=black:s=256x144:r=30:d=0.1",
+        "-frames:v", "2", "-c:v", e, "-pix_fmt", Delivery.ENCODERS[e].hw === "nvenc" ? "yuv420p" : "nv12", "-f", "null", "-"]);
+      if (r.code === 0) usable.add(e);
+    }));
+    return usable;
+  })();
+  return deliveryEncodersP;
+}
+/** Saved delivery presets: library/delivery/<id>.json, each a spec plus a label. */
+function savedDeliveryPresets() { return Delivery.savedPresets(readSaved("delivery")); }
+async function beginDeliveryExport(rate, name, hasAudio, extra) {
+  const available = await deliveryEncoders();
+  const { spec, notes } = Delivery.normalize(extra.delivery, { available, presets: savedDeliveryPresets() });
+  const canvasW = extra.canvasW | 0, canvasH = extra.canvasH | 0;
+  if (canvasW < 2 || canvasH < 2 || canvasW > 16384 || canvasH > 16384) throw new Error("export width/height required (canvasW, canvasH)");
+  const r = extra.region;
+  const region = r && typeof r === "object" && [r.x, r.y, r.w, r.h].every(Number.isFinite) && r.w > 0 && r.h > 0 &&
+    r.x >= 0 && r.y >= 0 && r.x + r.w <= canvasW + 0.5 && r.y + r.h <= canvasH + 0.5 ? r : null;
+  const frame = Delivery.reframe(spec, canvasW, canvasH, region);
+  const input = Delivery.frameInput(spec);
+  const ext = Delivery.CONTAINERS[spec.container].ext;
+  // check the settings on a 0.1 s synthetic canvas before the browser renders anything
+  const dryDir = fs.mkdtempSync(path.join(os.tmpdir(), "fablecut-dry-"));
+  try {
+    const dry = await runFfmpeg(Delivery.ffmpegArgs(spec, { fps: rate, input, canvasW, canvasH, frame, hasAudio, dry: true,
+      outPath: path.join(dryDir, "probe" + ext) }), 30000);
+    if (dry.code !== 0) {
+      const why = dry.stderr.trim().split("\n").filter(Boolean).slice(-3).map((l) => l.trim()).join(" · ");
+      throw new Error(`ffmpeg rejected these settings (${Delivery.describe(spec)}): ${why || "exit " + dry.code}`);
+    }
+  } finally { try { fs.rmSync(dryDir, { recursive: true, force: true }); } catch {} }
+  const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  const dir = fs.mkdtempSync(path.join(EXPORTS_DIR, "fablecut-"));
+  const { outPath, partPath } = reserveExportPaths(EXPORTS_DIR, safeName(name || "export"), ext);
+  const duration = Number.isFinite(+extra.duration) && +extra.duration > 0 ? +extra.duration : null;
+  const sess = {
+    mode: "jpeg", proc: null, fps: rate, delivery: spec, frame, input, canvasW, canvasH, duration,
+    name: path.basename(outPath, ext), hasAudio: !!hasAudio, dir, wav: null, partPath, outPath,
+    stderr: "", done: null, lastTouch: Date.now(),
+    err: () => sess.stderr.trim().split("\n").filter(Boolean).slice(-3).map((l) => l.trim()).join(" · "),
+  };
+  sess.writeLock = Promise.resolve();
+  exportSessions.set(id, sess);
+  return { id, mode: "jpeg", input, jpegQuality: Delivery.jpegQuality(spec), spec, notes, summary: Delivery.describe(spec),
+    file: path.basename(outPath), size: { w: frame.outW, h: frame.outH } };
+}
 async function beginExport(fps, name, profileId, hasAudio, mode, extra = {}) {
   const m = mode === "annexb" ? "annexb" : "jpeg";
   const rate = Number(fps);
@@ -254,6 +320,7 @@ async function beginExport(fps, name, profileId, hasAudio, mode, extra = {}) {
   if (pixelFormat === "rgba" && (width < 2 || height < 2)) {
     throw new Error("export width/height required for rgba");
   }
+  if (m === "jpeg" && extra.delivery) return beginDeliveryExport(rate, name, hasAudio, extra);
   const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
   const safe = safeName(name || "export");
   // Same filesystem as the finished file so renameSync(partPath, out) cannot EXDEV.
@@ -295,10 +362,16 @@ async function beginExport(fps, name, profileId, hasAudio, mode, extra = {}) {
 /* Encode into the paths reserved at /begin; rename .part → final on clean exit
    so an aborted render never leaves something that looks like a finished file. */
 function startEncoder(sess) {
-  const proc = spawn("ffmpeg", buildExportArgs(sess.profile, {
-    fps: sess.fps, wavPath: sess.wav, outPath: sess.partPath,
-    pixelFormat: sess.pixelFormat, width: sess.width, height: sess.height,
-  }), { stdio: ["pipe", "ignore", "pipe"] });
+  const args = sess.delivery
+    ? Delivery.ffmpegArgs(sess.delivery, {
+      fps: sess.fps, input: sess.input, canvasW: sess.canvasW, canvasH: sess.canvasH, frame: sess.frame,
+      wavPath: sess.wav, outPath: sess.partPath, duration: sess.duration,
+    })
+    : buildExportArgs(sess.profile, {
+      fps: sess.fps, wavPath: sess.wav, outPath: sess.partPath,
+      pixelFormat: sess.pixelFormat, width: sess.width, height: sess.height,
+    });
+  const proc = spawn("ffmpeg", args, { stdio: ["pipe", "ignore", "pipe"] });
   proc.stderr.on("data", (d) => { sess.stderr = (sess.stderr + d).slice(-2000); });
   // EPIPE on end()/late writes is normal once ffmpeg has exited; writeExportFrame
   // attaches its own error listener while a backpressured write is in flight.
@@ -654,9 +727,19 @@ const server = http.createServer(async (req, res) => {
       const opts = JSON.parse((await readBody(req)).toString("utf8") || "{}");
       if (!HAS_FFMPEG) { sendJSON(res, 400, { error: "ffmpeg not found on PATH — export needs it" }); return; }
       if (opts.profile) resolveProfile(String(opts.profile));
+      if (opts.profile && (opts.preset || opts.delivery)) { sendJSON(res, 400, { error: "pass a profile (raw ffmpeg args) or a preset / delivery spec, not both" }); return; }
+      // a delivery preset with overrides → one complete spec, checked against this ffmpeg
+      let delivery = null, notes = [];
+      if (opts.preset || opts.delivery) {
+        const d = opts.delivery && typeof opts.delivery === "object" ? opts.delivery : {};
+        const n = Delivery.normalize({ ...d, preset: opts.preset || d.preset || undefined },
+          { available: await deliveryEncoders(), presets: savedDeliveryPresets() });
+        delivery = n.spec; notes = n.notes;
+      }
       let revision = null;
       try { revision = JSON.parse(fs.readFileSync(PROJECT_FILE, "utf8").replace(/^\uFEFF/, "")).revision ?? null; } catch {}
-      sendJSON(res, 200, exportJobs.request({ range: opts.range, profile: opts.profile, where: opts.where, revision }));
+      const job = exportJobs.request({ range: opts.range, profile: opts.profile, delivery, where: opts.where, revision });
+      sendJSON(res, 200, delivery ? { ...job, delivery: Delivery.describe(delivery), notes } : job);
     } catch (e) {
       const code = e.code === 409 || e.code === 400 ? e.code : /^Unknown encoding profile/.test(e.message || "") ? 400 : 500;
       sendJSON(res, code, { error: String(e.message || e) });
@@ -735,6 +818,39 @@ const server = http.createServer(async (req, res) => {
     } catch (e) { sendJSON(res, 500, { error: String(e) }); }
     return;
   }
+  /* API: delivery presets — GET lists the saved ones and the encoders this
+     ffmpeg can use (the built-in presets live in delivery.js, which the page
+     loads too); POST {name, spec} saves one to library/delivery/; POST
+     /api/export/presets/delete {id} removes it. */
+  if (p === "/api/export/presets" && req.method === "GET") {
+    const encoders = [...(await deliveryEncoders())].filter((e) => Delivery.ENCODERS[e]).sort();
+    sendJSON(res, 200, { ffmpeg: HAS_FFMPEG, encoders, saved: savedDeliveryPresets(), builtin: Delivery.PRESET_IDS });
+    return;
+  }
+  if ((p === "/api/export/presets" || p === "/api/export/presets/delete") && req.method === "POST") {
+    try {
+      const opts = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+      if (p.endsWith("/delete")) {
+        const id = Delivery.presetId(opts.id);
+        const file = path.join(LIBRARY_DIR, "delivery", id + ".json");
+        if (!id || !fs.existsSync(file)) { sendJSON(res, 404, { error: "no saved delivery preset " + JSON.stringify(opts.id) }); return; }
+        fs.unlinkSync(file);
+        broadcast("delivery-presets");
+        sendJSON(res, 200, { ok: true, id });
+        return;
+      }
+      const label = String(opts.name || "").trim().slice(0, 60);
+      const id = Delivery.presetId(label);
+      if (!id) { sendJSON(res, 400, { error: "name the preset (letters or digits)" }); return; }
+      if (Delivery.PRESETS[id]) { sendJSON(res, 400, { error: `"${label}" is a built-in preset — pick another name` }); return; }
+      const { spec, notes } = Delivery.normalize({ ...(opts.spec || {}), preset: "custom" });
+      delete spec.preset;
+      writeSaved("delivery", id, { id, label, ...spec });
+      broadcast("delivery-presets");
+      sendJSON(res, 200, { ok: true, id, label, notes });
+    } catch (e) { sendJSON(res, 400, { error: String(e.message || e) }); }
+    return;
+  }
   if (p === "/api/export/begin" && req.method === "POST") {
     try {
       const opts = JSON.parse((await readBody(req)).toString("utf8") || "{}");
@@ -744,7 +860,7 @@ const server = http.createServer(async (req, res) => {
       sendJSON(res, 200, await beginExport(opts.fps, opts.name, opts.profile, opts.hasAudio !== false, mode, opts));
     } catch (e) {
       // an unusable profile is the caller's problem, not a server fault
-      const bad = /^Unknown encoding profile|was rejected by ffmpeg|export fps required|export width\/height required/.test(e.message || "");
+      const bad = /^Unknown encoding profile|was rejected by ffmpeg|ffmpeg rejected these settings|export fps required|export width\/height required/.test(e.message || "");
       sendJSON(res, bad ? 400 : 500, { error: String(e.message || e) });
     }
     return;

@@ -103,6 +103,8 @@
   <span class="tk-k">"untargetedTracks"</span>: [ <span class="tk-s">"V2"</span> ],
   <span class="tk-c">// ^ optional — lanes edits skip (split, insert, ripple, close gap…); default: all targeted</span>
   <span class="tk-k">"encodeProfile"</span>: <span class="tk-s">"hq"</span>,  <span class="tk-c">// optional — fast-export profile id (see encoding-profiles.json)</span>
+  <span class="tk-k">"delivery"</span>: { <span class="tk-k">"preset"</span>: <span class="tk-s">"youtube"</span>, <span class="tk-k">"width"</span>: <span class="tk-n">1920</span>, <span class="tk-k">"height"</span>: <span class="tk-n">1080</span>, <span class="tk-k">"…"</span>: <span class="tk-s">"…"</span> },
+  <span class="tk-c">// ^ optional — the delivery spec exports use by default (see "Delivery presets"); setProject takes a preset id</span>
   <span class="tk-k">"master"</span>: { <span class="tk-k">"gain"</span>: <span class="tk-n">-1.5</span>, <span class="tk-k">"fx"</span>: [ { <span class="tk-k">"type"</span>: <span class="tk-s">"limiter"</span>, <span class="tk-k">"ceiling"</span>: <span class="tk-n">-1</span> } ] },
   <span class="tk-c">// ^ optional — master fader, dB (−60 = silence … +12; omit = 0 dB) and master effects (see "Audio mix")</span>
   <span class="tk-k">"tracks"</span>: [                          <span class="tk-c">// optional — timeline lanes (default V3…V1 + A1…A4)</span>
@@ -168,7 +170,7 @@
   ]
 }</code></pre><button class="copy" type="button" aria-label="Copy this example"><svg class="i i-cp" aria-hidden="true"><use href="#i-copy"/></svg><svg class="i i-ok" aria-hidden="true"><use href="#i-check"/></svg></button></div>
     <div class="docs-end">
-      <a class="more" href="https://github.com/ronak-create/FableCut/blob/main/CLAUDE.md#L245" rel="noopener" target="_blank">Edit this in CLAUDE.md <svg class="i i-ne" aria-hidden="true"><use href="#i-ne"/></svg></a>
+      <a class="more" href="https://github.com/ronak-create/FableCut/blob/main/CLAUDE.md#L247" rel="noopener" target="_blank">Edit this in CLAUDE.md <svg class="i i-ne" aria-hidden="true"><use href="#i-ne"/></svg></a>
       <a class="more" href="https://raw.githubusercontent.com/ronak-create/FableCut/main/CLAUDE.md" rel="noopener" target="_blank">The whole manual as Markdown <svg class="i i-ne" aria-hidden="true"><use href="#i-ne"/></svg></a>
     </div>
     <nav class="docs-pn" aria-label="Previous and next page"><a class="docs-pn-prev" href="../mcp/"><span>Previous</span><b>MCP tools</b></a><a class="docs-pn-next" href="../props/"><span>Next</span><b>Clip props</b></a></nav>
