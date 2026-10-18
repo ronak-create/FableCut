@@ -351,7 +351,9 @@ test("loudness: spec, gain, limiter filter and the ebur128 parser", () => {
   assert.equal(plain[plain.indexOf("-af") + 1], "apad=whole_dur=2.000000,atrim=0:2.000000");
   const st = "[Parsed_ebur128_0 @ x] Summary:\n\n  Integrated loudness:\n    I:         -14.2 LUFS\n    Threshold: -24.2 LUFS\n\n  True peak:\n    Peak:       -1.3 dBFS\n";
   assert.deepEqual(D.parseEbur128(st), { lufs: -14.2, truePeak: -1.3 });
-  assert.deepEqual(D.parseEbur128("I: -inf LUFS\n  True peak:\n    Peak: -inf dBFS"), { lufs: null, truePeak: null });
+  assert.deepEqual(D.parseEbur128("I: -inf LUFS\n  True peak:\n    Peak: -inf dBFS"), { lufs: null, truePeak: null, silent: true });
+  assert.deepEqual(D.parseEbur128("    I:         -70.0 LUFS\n  True peak:\n    Peak:      -inf dBFS"), { lufs: null, truePeak: null, silent: true }, "ffmpeg 8 prints the gate for silence");
+  assert.deepEqual(D.parseEbur128("no summary"), { lufs: null, truePeak: null }, "nothing parsed is not silence");
 });
 
 test("verify: what came out against what was asked", () => {
@@ -374,7 +376,10 @@ test("verify: what came out against what was asked", () => {
   const mono = D.verify(sp, { ...probe, streams: [probe.streams[0], { ...probe.streams[1], channels: 1 }] }, { frame, hasAudio: true });
   assert.deepEqual(mono.checks.filter((c) => !c.ok).map((c) => c.text), ["1 channel (asked 2)"]);
   assert.equal(D.verify(sp, probe, { frame, hasAudio: true, loudWanted: true, loud: null }).ok, false, "a loudness that could not be measured is not a pass");
-  assert.ok(D.verify(sp, probe, { frame, hasAudio: true, loudWanted: true, loud: { lufs: null, truePeak: null, silent: true } }).ok, "silence is measured, not missing");
+  const silentTarget = D.verify(sp, probe, { frame, hasAudio: true, loudWanted: true, loud: { lufs: null, truePeak: null, silent: true } });
+  assert.deepEqual(silentTarget.checks.filter((c) => !c.ok).map((c) => c.text), ["silent (target -14 LUFS)"], "silence cannot meet a target");
+  assert.ok(D.verify(D.normalize("youtube").spec, probe, { frame, hasAudio: true, loudWanted: true, loud: { lufs: null, truePeak: null, silent: true } }).ok,
+    "silence as mixed is measured, not missing");
   assert.match(D.loudnormFilter(D.normalize("broadcast").spec, { input_i: -20, input_tp: -3, input_lra: 35, input_thresh: -30, target_offset: 0 }), /:LRA=20:/, "LRA capped at 20");
   const loudYt = D.verify(D.normalize("youtube").spec, probe, { fps: 30, loud: { lufs: -8, truePeak: -0.5 }, frame, hasAudio: true });
   assert.ok(loudYt.ok);
@@ -413,4 +418,11 @@ test("export with a loudness target: the mix is measured, turned to the target, 
   assert.ok(tp && +tp[1] <= -0.5, `true peak held under the ceiling: ${o.report.line}`);
   assert.ok(lu && +lu[1] > o.mixLoudness + 3, `turned up towards the target: ${o.report.line}`);
   assert.ok(fs.existsSync(path.join(dir, "exports", "loud.mp4")));
+});
+
+test("a silent mix through the real ffmpeg measures as silence", (t) => {
+  const r = require("node:child_process").spawnSync("ffmpeg", ["-hide_banner", "-nostats", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo:d=4",
+    "-af", "ebur128=peak=true:framelog=quiet", "-f", "null", "-"], { encoding: "utf8" });
+  if (r.error) return t.skip("no ffmpeg");
+  assert.deepEqual(D.parseEbur128(r.stderr), { lufs: null, truePeak: null, silent: true });
 });

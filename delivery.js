@@ -550,13 +550,17 @@
     return `loudnorm=I=${a.loudness}:TP=${a.truePeak ?? -1}:LRA=${lra}:measured_I=${m.input_i}:measured_TP=${m.input_tp}` +
       `:measured_LRA=${m.input_lra}:measured_thresh=${m.input_thresh}:offset=${m.target_offset}:linear=true`;
   }
-  /** `-af ebur128=peak=true` summary → {lufs, truePeak} (null where ffmpeg said -inf). */
+  /** `-af ebur128=peak=true` summary → {lufs, truePeak} (null where ffmpeg said
+   *  -inf), plus silent:true when it measured and found nothing (I: -inf). */
   function parseEbur128(stderr) {
     const txt = String(stderr || "");
     const i = [...txt.matchAll(/\bI:\s+(-?[\d.]+|-inf)\s+LUFS/g)].pop();
     const p = [...txt.matchAll(/True peak:\s*[\r\n]+\s*Peak:\s+(-?[\d.]+|-inf)\s+dBFS/g)].pop();
     const val = (m) => (m && m[1] !== "-inf" ? +m[1] : null);
-    return { lufs: val(i), truePeak: val(p) };
+    const out = { lufs: val(i), truePeak: val(p) };
+    // nothing above the -70 LUFS gate: ffmpeg prints -70.0 (older builds -inf)
+    if (i && (i[1] === "-inf" || +i[1] <= -69.95)) { out.lufs = null; out.silent = true; }
+    return out;
   }
   const LOUDNESS_ARGS = (file) => ["-hide_banner", "-nostats", "-i", file, "-map", "0:a:0", "-af", "ebur128=peak=true:framelog=quiet", "-f", "null", "-"];
 
@@ -597,6 +601,8 @@
     if (ctx.duration && Number.isFinite(dur)) add(near(dur, ctx.duration, Math.max(0.05, 1.5 / (ctx.fps || 30))), `${fmtClock(dur)}${near(dur, ctx.duration, Math.max(0.05, 1.5 / (ctx.fps || 30))) ? "" : ` (timeline ${fmtClock(ctx.duration)})`}`);
     const L = ctx.loud;
     if (ctx.loudWanted && a && !(L && L.lufs != null) && !(L && L.silent)) add(false, "loudness could not be measured");
+    // silence was measured: fine as mixed, but it cannot meet a loudness target
+    if (L && L.silent && a) add(spec.audio.loudness == null, `silent${spec.audio.loudness != null ? ` (target ${spec.audio.loudness} LUFS)` : ""}`);
     if (L && L.lufs != null) {
       const target = spec.audio.loudness;
       const tp = L.truePeak;

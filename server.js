@@ -332,9 +332,7 @@ async function beginDeliveryExport(rate, name, hasAudio, extra) {
 /** Integrated loudness and true peak of a file's first audio stream (ffmpeg ebur128). */
 async function measureLoudness(file, timeout = 10 * 60 * 1000) {
   const r = await runFfmpeg(Delivery.LOUDNESS_ARGS(file), timeout);
-  if (r.code !== 0) return null;
-  const m = Delivery.parseEbur128(r.stderr);
-  return m.lufs == null && /I:\s+-inf/.test(r.stderr) ? { ...m, silent: true } : m;   // silence measures as -inf
+  return r.code === 0 ? Delivery.parseEbur128(r.stderr) : null;
 }
 function ffprobeJSON(file) {
   return new Promise((resolve) => {
