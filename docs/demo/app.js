@@ -2574,7 +2574,11 @@ async function checkOffline() {
 }
 /* Everything cached from a media file (players, picture, waveform, thumbnail) is dropped and read again. */
 function reloadMediaSource(m, oldSrc) {
-  for (const [id, el] of runtime.clipEls) if (el._fcSrc === m.src || (oldSrc && el._fcSrc === oldSrc)) releaseClipEl(id);
+  // a proxy belongs to a file, not to the entry: the old file's must not stand in for the new one
+  const proxySrc = proxyStatus.get(m.id)?.src;
+  proxyStatus.delete(m.id);
+  for (const [id, el] of runtime.clipEls)
+    if (el._fcSrc === m.src || (oldSrc && el._fcSrc === oldSrc) || (proxySrc && el._fcSrc === proxySrc)) releaseClipEl(id);
   runtime.mediaAux.delete(m.id);
   runtime.wavePeaks.delete(m.id);
   if (state.source.mediaId === m.id) { const sm = m; clearSource(); loadSourceFromMedia(sm); }
@@ -2585,6 +2589,7 @@ function reloadMediaSource(m, oldSrc) {
     seekMediaWhilePaused();
     renderBin(); state.dirtyTimeline = true;
   }).catch(() => { });
+  if (m.kind === "video") refreshProxyStatus();   // the new file may have a proxy of its own
 }
 
 /** Point a media entry at another file. mode "relink" (same footage) or "replace" (a new file). */
@@ -6618,6 +6623,10 @@ function ensureSourceEl(m) {
     runtime.sourceHoldOk = false;
     runtime.sourceSeekPending = null;
     runtime.sourceSeekBusy = false;
+    // a new file (proxy ↔ original) loads at 0 — put it back on the Source playhead
+    el.addEventListener("loadedmetadata", () => {
+      if (runtime.sourceEl === el && el.dataset.src === want && !state.source.playing) seekSourceEl(state.source.time);
+    }, { once: true });
   }
   return el;
 }
@@ -11424,7 +11433,7 @@ function pictureRect(c, p) {
   let dw, dh;
   if (p.fit === "cover") { const f = Math.max(W / cw, H / ch) * sc; dw = cw * f; dh = ch * f; }
   else if (p.fit === "stretch") { dw = W * sc; dh = H * sc; }
-  else if (p.fit === "none") { dw = cw * sc; dh = ch * sc; }
+  else if (p.fit === "none") { const ps = el._fcScale || 1; dw = cw * sc / ps; dh = ch * sc / ps; }   // a proxy is drawn at the original's size
   else { const f = Math.min(W / cw, H / ch) * sc; dw = cw * f; dh = ch * f; }
   return { cx: W / 2 + (+p.x || 0), cy: H / 2 + (+p.y || 0), dw, dh, rot: (p.rotation || 0) * Math.PI / 180, fx: p.flipH ? -1 : 1, fy: p.flipV ? -1 : 1 };
 }
@@ -15163,6 +15172,7 @@ async function renderStillAt(t) {
 }
 async function runScopesJob(ticket, fail) {
   const wasPlaying = state.playing;
+  let heldOriginals = false;
   try {
     if (wasPlaying) pause();
     await loadProjectFonts();
@@ -15176,6 +15186,8 @@ async function runScopesJob(ticket, fail) {
     const kClip = ticket.mask && getClip(ticket.mask.clip), view = runtime.maskView;
     runtime.maskCapture = kClip ? { id: kClip.id } : null;
     runtime.maskView = null;
+    // the matte below re-grades the captured original — keep the originals loaded until then
+    if (!runtime.forceOriginals) { await useOriginalPlayers(); heldOriginals = true; }
     try { await renderStillAt(t); } finally { runtime.matte = shown; runtime.maskView = view; }
     const kcap = runtime.maskCapture;
     runtime.maskCapture = null;
@@ -15257,6 +15269,7 @@ async function runScopesJob(ticket, fail) {
     runtime.gradeCapture = null;
     runtime.maskCapture = null;
     state.rendering = false;
+    if (heldOriginals) releaseOriginalPlayers();
     seekMediaWhilePaused(); // the videos sat on the job's frame — back to the playhead
     if (wasPlaying) play();
   }

@@ -109,6 +109,8 @@ function createProxies({ dir, resolveSrc, probe, broadcast = () => { }, ffmpeg =
     running = j;
     j.state = "running";
     const info = probe ? await probe(j.file) : null;
+    // cancelled (deleted, or asked again at another size) while the probe ran
+    if (j.state !== "running") { finish(); return; }
     const dur = (info && info.duration) || 0;
     const part = j.out + ".part";
     let err = "", last = 0;
