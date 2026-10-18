@@ -292,6 +292,9 @@ async function beginDeliveryExport(rate, name, hasAudio, extra) {
     const { spec, notes } = Delivery.normalize(d && d.delivery !== undefined ? d.delivery : d, { available, presets });
     return { spec, notes, name: d && typeof d.name === "string" ? d.name : name, frame: Delivery.reframe(spec, canvasW, canvasH, region) };
   });
+  // one render has one frame rate: an output asking for another needs a render of its own
+  const off = outs.map((o, i) => [o, i]).filter(([o]) => o.spec.fps != null && Math.abs(o.spec.fps - rate) > 0.01);
+  if (off.length) throw new Error(off.map(([o, i]) => `output ${i + 1} asks for ${o.spec.fps} fps but this render is ${rate} fps`).join("; ") + " — render each frame rate separately");
   const input = outs.some((o) => Delivery.frameInput(o.spec) === "rgba") ? "rgba" : "jpeg";
   // check every output on a 0.1 s synthetic canvas before the browser renders anything
   const dryDir = fs.mkdtempSync(path.join(os.tmpdir(), "fablecut-dry-"));
@@ -921,7 +924,7 @@ const server = http.createServer(async (req, res) => {
       sendJSON(res, 200, await beginExport(opts.fps, opts.name, opts.profile, opts.hasAudio !== false, mode, opts));
     } catch (e) {
       // an unusable profile is the caller's problem, not a server fault
-      const bad = /^Unknown encoding profile|was rejected by ffmpeg|ffmpeg rejected these settings|at most \d+ outputs|deliveries is empty|export fps required|export width\/height required/.test(e.message || "");
+      const bad = /^Unknown encoding profile|was rejected by ffmpeg|ffmpeg rejected these settings|at most \d+ outputs|deliveries is empty|render each frame rate separately|export fps required|export width\/height required/.test(e.message || "");
       sendJSON(res, bad ? 400 : 500, { error: String(e.message || e) });
     }
     return;
@@ -983,7 +986,9 @@ const server = http.createServer(async (req, res) => {
             if (code !== 0) o.failed = "ffmpeg encode failed: " + o.err();
           }
           if (o.failed) return { file, ok: false, error: o.failed };
-          fs.renameSync(o.partPath, o.outPath);
+          // a file that cannot be put in place fails alone; the others keep finishing
+          try { fs.renameSync(o.partPath, o.outPath); }
+          catch (e) { return { file, ok: false, error: "could not save the file: " + (e.message || e) }; }
           o.partPath = null; // renamed — cleanup must not delete the finished file
           return { file, ok: true, src: "/exports/" + encodeURIComponent(file) };
         }));

@@ -277,7 +277,7 @@ Examples in `library/svg/`: `sparkles.svg` (loop), `lower-third.svg`,
   "delivery": { "preset": "youtube", "width": 1920, "height": 1080, "…": "…" },
   // ^ optional — the delivery spec exports use by default (see "Delivery presets"); setProject takes a preset id
   "outputs": [ { "id": "o_1", "on": true, "preset": "master", "…": "…" } ],
-  // ^ optional — batch outputs: files made together from one render (see "Batch outputs and the export queue")
+  // ^ optional — batch outputs: files made together, one render per frame rate (see "Batch outputs and the export queue")
   "master": { "gain": -1.5, "fx": [ { "type": "limiter", "ceiling": -1 } ] },
   // ^ optional — master fader, dB (−60 = silence … +12; omit = 0 dB) and master effects (see "Audio mix")
   "tracks": [                          // optional — timeline lanes (default V3…V1 + A1…A4)

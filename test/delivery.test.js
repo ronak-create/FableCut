@@ -323,6 +323,10 @@ test("export/begin with several deliveries: one stream of frames, one file per o
     const pr = JSON.parse(execFileSync("ffprobe", ["-v", "error", "-show_entries", "stream=width,height,nb_frames", "-of", "json", path.join(dir, "exports", file)], { encoding: "utf8" }));
     assert.deepEqual([pr.streams[0].width, pr.streams[0].height, +pr.streams[0].nb_frames], [w, h, 5], file);
   }
+  const mixed = await post(base, "/api/export/begin", { fps: 25, hasAudio: false, canvasW: 64, canvasH: 64,
+    deliveries: [{ delivery: { preset: "web" } }, { delivery: { preset: "web", fps: 30 } }] });
+  assert.equal(mixed.status, 400, "an output at another frame rate is refused, not encoded at the render's rate");
+  assert.match((await mixed.json()).error, /output 2 asks for 30 fps but this render is 25 fps/);
   const many = await post(base, "/api/export/begin", { fps: 25, hasAudio: false, canvasW: 64, canvasH: 64, deliveries: Array(9).fill({ delivery: "web" }) });
   assert.equal(many.status, 400);
   assert.match((await many.json()).error, /at most 8/);
