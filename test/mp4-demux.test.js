@@ -14,8 +14,11 @@ const { execFileSync } = require("node:child_process");
 const M = require("../mp4-demux.js");
 
 const hasFfmpeg = () => {
-  try { execFileSync("ffmpeg", ["-version"], { stdio: "ignore" }); return true; }
-  catch { return false; }
+  try {
+    execFileSync("ffmpeg", ["-version"], { stdio: "ignore" });
+    execFileSync("ffprobe", ["-version"], { stdio: "ignore" });
+    return true;
+  } catch { return false; }
 };
 
 /* ── tiny box writer ── */
@@ -31,9 +34,10 @@ const zeros = (n) => new Array(n).fill(0);
 const IDENTITY = [0x10000, 0, 0, 0, 0x10000, 0, 0, 0, 0x40000000].map(be32);
 
 /** A one-track moov: 640×360 avc1 at timescale 1000, the given sample tables. */
-function movie({ stts, ctts, cttsVersion = 0, stss, stsc, chunks, sizes, elst, matrix = IDENTITY, co64 = false, movieScale = 1000 }) {
+function movie({ stts, ctts, cttsVersion = 0, stss, stsc, chunks, sizes, elst, matrix = IDENTITY, co64 = false, movieScale = 1000, pasp }) {
   const avcC = box("avcC", [1, 0x64, 0x00, 0x1f, 0xff, 0xe0, 0x00]);
-  const avc1 = box("avc1", zeros(6), be16(1), zeros(16), be16(640), be16(360), zeros(50), avcC);
+  const avc1 = box("avc1", zeros(6), be16(1), zeros(16), be16(640), be16(360), zeros(50), avcC,
+    pasp ? box("pasp", be32(pasp[0]), be32(pasp[1])) : []);
   const stbl = box("stbl",
     full("stsd", 0, be32(1), avc1),
     full("stts", 0, be32(stts.length), stts.map(([c, d]) => [be32(c), be32(d)])),
@@ -114,6 +118,16 @@ test("a rotated track is refused, so the exporter keeps the <video> element", ()
   assert.equal(M.parseMovie(movie({ stts: [[1, 33]], stsc: [[1, 1]], chunks: [0], sizes: [1], matrix: rot90 })), null);
 });
 
+test("pasp: anamorphic pixels widen the display size, square pixels leave it alone", () => {
+  const base = { stts: [[1, 33]], stss: [1], stsc: [[1, 1]], chunks: [0], sizes: [10] };
+  const wide = M.parseMovie(movie({ ...base, pasp: [4, 3] }));
+  assert.deepEqual([wide.width, wide.height, wide.displayWidth, wide.displayHeight], [640, 360, 853, 360]);
+  const square = M.parseMovie(movie({ ...base, pasp: [1, 1] }));
+  assert.deepEqual([square.displayWidth, square.displayHeight], [640, 360]);
+  const none = M.parseMovie(movie(base));
+  assert.deepEqual([none.displayWidth, none.displayHeight], [640, 360]);
+});
+
 test("findMoov walks top-level boxes through range reads", async () => {
   const moov = movie({ stts: [[1, 33]], stsc: [[1, 1]], chunks: [0], sizes: [1] });
   const mdat = box("mdat", zeros(200000));   // moov after a big mdat, as without +faststart
@@ -140,7 +154,7 @@ test("codec strings for HEVC, VP9 and AV1 config boxes", () => {
   assert.equal(cs("av01", [0x81, 0x08, 0x0c]), "av01.0.08M.08");
 });
 
-test("real files match ffprobe's packet list", { skip: !hasFfmpeg() && "ffmpeg not on PATH" }, (t) => {
+test("real files match ffprobe's packet list", { skip: !hasFfmpeg() && "ffmpeg / ffprobe not on PATH" }, (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fablecut-mp4-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const src = ["-f", "lavfi", "-i", "testsrc2=s=320x180:r=30", "-t", "2"];

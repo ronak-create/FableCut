@@ -15026,6 +15026,7 @@ class ExportFrameSource {
       if (!mv || !mv.samples.length) return null;
       const cfg = { codec: mv.codec, codedWidth: mv.width, codedHeight: mv.height };
       if (mv.description) cfg.description = mv.description;
+      if (mv.displayWidth !== mv.width) Object.assign(cfg, { displayAspectWidth: mv.displayWidth, displayAspectHeight: mv.displayHeight });
       const ok = await VideoDecoder.isConfigSupported(cfg).catch(() => null);
       return ok && ok.supported ? new ExportFrameSource(read, size, mv, cfg) : null;
     } catch { return null; }

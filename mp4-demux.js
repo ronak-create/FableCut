@@ -102,7 +102,7 @@
   }
 
   /** The first video track of a moov box: { codec, description, width, height,
-   *  timescale, samples: [{ offset, size, key, pts, dur }] in decode order }.
+   *  displayWidth, displayHeight (pasp applied), timescale, samples: [{ offset, size, key, pts, dur }] in decode order }.
    *  pts and dur are seconds on the presentation clock (edit list applied). */
   function parseMovie(moov) {
     const b = moov, root = { body: 0, end: b.length, type: "root" };
@@ -142,7 +142,11 @@
       const samples = sampleTable(b, stbl, timescale);
       if (!samples) continue;
       applyEdits(b, trak, samples, timescale, movieScale);
-      return { codec, description, width, height, timescale, samples };
+      // pasp: non-square pixels (anamorphic). Display width = coded width × h / v.
+      const pasp = boxes(b, entryBox.body + 78, entryBox.end).find((x) => x.type === "pasp");
+      const hs = pasp ? u32(b, pasp.body) : 0, vs = pasp ? u32(b, pasp.body + 4) : 0;
+      const displayWidth = hs && vs && hs !== vs ? Math.round(width * hs / vs) : width;
+      return { codec, description, width, height, displayWidth, displayHeight: height, timescale, samples };
     }
     return null;
   }
