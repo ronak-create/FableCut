@@ -193,11 +193,10 @@
     for (; i < n; i++) { dts[i] = t; durs[i] = 0; }
     const cto = new Array(n).fill(0);
     if (ctts) {
-      const signed = b[ctts.body] === 1;
       let j = 0;
       for (let e = 0, c = u32(b, ctts.body + 4); e < c; e++) {
         const count = u32(b, ctts.body + 8 + e * 8);
-        const off = signed ? i32(b, ctts.body + 12 + e * 8) : u32(b, ctts.body + 12 + e * 8);
+        const off = i32(b, ctts.body + 12 + e * 8);
         for (let k = 0; k < count && j < n; k++, j++) cto[j] = off;
       }
     }

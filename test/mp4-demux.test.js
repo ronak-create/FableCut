@@ -31,13 +31,13 @@ const zeros = (n) => new Array(n).fill(0);
 const IDENTITY = [0x10000, 0, 0, 0, 0x10000, 0, 0, 0, 0x40000000].map(be32);
 
 /** A one-track moov: 640×360 avc1 at timescale 1000, the given sample tables. */
-function movie({ stts, ctts, stss, stsc, chunks, sizes, elst, matrix = IDENTITY, co64 = false, movieScale = 1000 }) {
+function movie({ stts, ctts, cttsVersion = 0, stss, stsc, chunks, sizes, elst, matrix = IDENTITY, co64 = false, movieScale = 1000 }) {
   const avcC = box("avcC", [1, 0x64, 0x00, 0x1f, 0xff, 0xe0, 0x00]);
   const avc1 = box("avc1", zeros(6), be16(1), zeros(16), be16(640), be16(360), zeros(50), avcC);
   const stbl = box("stbl",
     full("stsd", 0, be32(1), avc1),
     full("stts", 0, be32(stts.length), stts.map(([c, d]) => [be32(c), be32(d)])),
-    ctts ? full("ctts", 0, be32(ctts.length), ctts.map(([c, o]) => [be32(c), be32(o)])) : [],
+    ctts ? full("ctts", cttsVersion, be32(ctts.length), ctts.map(([c, o]) => [be32(c), be32(o)])) : [],
     stss ? full("stss", 0, be32(stss.length), stss.map(be32)) : [],
     full("stsc", 0, be32(stsc.length), stsc.map(([f, n]) => [be32(f), be32(n), be32(1)])),
     full("stsz", 0, be32(0), be32(sizes.length), sizes.map(be32)),
@@ -76,6 +76,19 @@ test("sample table: sizes, chunk offsets, sync samples and B-frame order", () =>
   assert.equal(M.frameAt(mv.samples, order, 10), 4);
   assert.equal(M.syncBefore(mv.samples, 3), 0);
   assert.equal(M.syncBefore(mv.samples, 5), 4);
+});
+
+for (const version of [0, 1]) test(`ctts version ${version}: negative offsets preserve B-frame presentation order`, () => {
+  const mv = M.parseMovie(movie({
+    stts: [[4, 40]], ctts: [[1, 0], [1, 40], [1, -40], [1, 0]], cttsVersion: version,
+    stsc: [[1, 4]], chunks: [1000], sizes: [1, 1, 1, 1],
+  }));
+  assert.deepEqual(mv.samples.map((s) => s.cts), [0, 80, 40, 120]);
+  assert.deepEqual(mv.samples.map((s) => s.pts), [0, 0.08, 0.04, 0.12]);
+  const order = M.presentationOrder(mv.samples);
+  assert.deepEqual(order, [0, 2, 1, 3]);
+  assert.equal(M.frameAt(mv.samples, order, 0.04), 2);
+  assert.equal(M.frameAt(mv.samples, order, 0.08), 1);
 });
 
 test("the edit list moves pts onto the clock a <video> element shows", () => {

@@ -15012,9 +15012,10 @@ class ExportFrameSource {
     if (typeof VideoDecoder !== "function" || !Mp4) return null;
     try {
       const probe = await fetch(src, { headers: { Range: "bytes=0-0" } });
+      if (probe.status !== 206) { try { await probe.body?.cancel(); } catch { } return null; }
       const size = Number((probe.headers.get("content-range") || "").split("/")[1]);
       await probe.arrayBuffer();
-      if (probe.status !== 206 || !(size > 0)) return null;
+      if (!(size > 0)) return null;
       const read = async (a, b) => {
         const r = await fetch(src, { headers: { Range: `bytes=${a}-${b - 1}` } });
         if (r.status !== 206) throw new Error("range request refused");
@@ -15064,9 +15065,9 @@ class ExportFrameSource {
     const k = Mp4.frameAt(this.samples, this.order, t), ts = Math.round(this.samples[k].pts * 1e6);
     if (this.cur && this.cur.timestamp === ts) return this.cur;
     const sync = Mp4.syncBefore(this.samples, k);
-    const ahead = this.out.length && this.out[0].timestamp <= ts;
+    const passed = this.out.length > 0 && this.out[0].timestamp > ts;
     if (!this.dec || this.dec.state === "closed" || (this.cur && this.cur.timestamp > ts)
-      || (k < this.pos && !ahead) || sync > this.pos) this.restart(sync);
+      || (k < this.pos && passed) || sync > this.pos) this.restart(sync);
     const n = this.samples.length;
     for (;;) {
       while (this.out.length && this.out[0].timestamp < ts) this.out.shift().close();

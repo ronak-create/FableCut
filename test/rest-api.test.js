@@ -238,8 +238,10 @@ test("buildExportArgs uses raw RGBA when the client asks for it", () => {
 });
 
 test("the profile dry run probes a frame hardware encoders accept, and names the cause of a failure", async (t) => {
-  const { execFileSync } = require("node:child_process");
-  try { execFileSync("ffmpeg", ["-version"], { stdio: "ignore" }); } catch { t.skip("ffmpeg not on PATH"); return; }
+  let encoders;
+  try { encoders = execFileSync("ffmpeg", ["-hide_banner", "-encoders"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }); }
+  catch { t.skip("ffmpeg not on PATH"); return; }
+  if (!/^\s*V\S*\s+libx264\s/m.test(encoders)) { t.skip("ffmpeg has no libx264 encoder"); return; }
   const { dryRunProfile } = require("../encode-profiles");
   const base = { extension: ".mp4", color: { matrix: "bt709", primaries: "bt709", trc: "bt709", range: "tv" } };
   // NVENC refuses frames under ~145×49; a 200×100 crop stands in for that check without the hardware
