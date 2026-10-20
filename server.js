@@ -47,6 +47,7 @@ const { probeFile } = require("./media-probe");
 const MediaLib = require("./media-lib");
 const { createProxies } = require("./proxy");
 const Delivery = require("./delivery");
+const { createProjects } = require("./projects");
 
 /* Static app files are served from the install dir; everything the user creates
    lives under DATA_DIR. The two are the same unless FABLECUT_DATA_DIR is set. */
@@ -102,6 +103,8 @@ if (!fs.existsSync(PROJECT_FILE)) {
     revision: 0, media: [], clips: [],
   }, null, 2));
 }
+
+const projects = createProjects({ dataDir: DATA_DIR, projectFile: PROJECT_FILE, libraryDir: LIBRARY_DIR });
 
 /* ── SSE clients + file watching ── */
 const sseClients = new Set();
@@ -581,8 +584,53 @@ const server = http.createServer(async (req, res) => {
   /* API: project */
   if (p === "/api/project" && req.method === "GET") {
     // strip UTF-8 BOM some editors/PowerShell prepend, which breaks JSON.parse
-    try { sendJSON(res, 200, JSON.parse(fs.readFileSync(PROJECT_FILE, "utf8").replace(new RegExp("^\\uFEFF"), ""))); }
+    try {
+      const doc = JSON.parse(fs.readFileSync(PROJECT_FILE, "utf8").replace(new RegExp("^\\uFEFF"), ""));
+      // which project this is, once there are several: the editor resets undo when it changes
+      const id = projects.peekActive();
+      res.setHeader("X-FableCut-Projects", "1");
+      if (id) res.setHeader("X-FableCut-Project", id);
+      sendJSON(res, 200, doc);
+    }
     catch (e) { sendJSON(res, 500, { error: String(e) }); }
+    return;
+  }
+
+  /* API: projects — the dashboard. GET lists them (?archived=only|all) with the
+     project templates; POST {action, …} creates, opens, duplicates, renames,
+     archives, deletes, imports, and saves / deletes templates (projects.js).
+     GET / PUT /api/projects/thumb?id= is a project's JPEG thumbnail. */
+  if (p === "/api/projects" && req.method === "GET") {
+    try {
+      const archived = ["only", "all"].includes(url.searchParams.get("archived")) ? url.searchParams.get("archived") : "exclude";
+      sendJSON(res, 200, projects.act({ action: "list", archived }));
+    } catch (e) { sendJSON(res, 500, { error: e.message }); }
+    return;
+  }
+  if (p === "/api/projects" && req.method === "POST") {
+    let a;
+    try { a = JSON.parse((await readBody(req)).toString("utf8") || "{}"); }
+    catch { sendJSON(res, 400, { error: "body must be JSON {action, …}" }); return; }
+    try {
+      const out = projects.act(a);
+      broadcast("projects", JSON.stringify({ action: a.action, id: out.id || a.id || null, active: projects.activeId() }));
+      // opening, or renaming the open project, rewrites ./project.json: reload the tabs now, watcher or not
+      if (out.from || ((a.action === "update" || a.action === "rename") && out.project?.active)) onFsChange();
+      sendJSON(res, 200, out);
+    } catch (e) { sendJSON(res, /^no (project|saved template)/.test(e.message) ? 404 : 400, { error: e.message }); }
+    return;
+  }
+  if (p === "/api/projects/thumb" && (req.method === "GET" || req.method === "PUT")) {
+    const id = url.searchParams.get("id") || "";
+    if (req.method === "GET") {
+      const file = projects.thumbPath(id);
+      if (!file) { res.writeHead(404); res.end(); return; }
+      res.writeHead(200, { "Content-Type": "image/jpeg", "Cache-Control": "no-store" });
+      fs.createReadStream(file).pipe(res);
+      return;
+    }
+    try { sendJSON(res, 200, projects.setThumb(id, await readBody(req))); }
+    catch (e) { sendJSON(res, /^no project/.test(e.message) ? 404 : 400, { error: e.message }); }
     return;
   }
   if (p === "/api/project" && req.method === "PUT") {

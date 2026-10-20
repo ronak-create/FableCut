@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Projects.** One FableCut keeps many projects; `./project.json` stays the
+  open one, so tools and scripts are unchanged. The **Projects** dashboard
+  (top bar) lists them with a picture, size, frame rate and length, and
+  opens, creates (from Landscape, Vertical, Square, Portrait, 4K and 720p
+  canvases or a saved project template), duplicates, renames, tags, takes
+  notes on, archives and deletes them, and imports a project file from
+  elsewhere. Media, exports and the library are shared. Agents use the new
+  `fablecut_projects` tool; REST `GET` / `POST /api/projects`.
 - **NVIDIA GPU export profiles** `nvenc-h264` and `nvenc-hevc`. They need an
   NVIDIA card and an ffmpeg built with NVENC.
 

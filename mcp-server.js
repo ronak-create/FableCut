@@ -28,6 +28,7 @@ const FX = require("./audio-fx");
 const EditOps = require("./edit-ops");
 const ProjectOps = require("./project-ops");
 const Denoise = require("./denoise");
+const { createProjects } = require("./projects");
 const Color = require("./color");
 const FrameStats = require("./frame-stats");
 const Mask = require("./mask");
@@ -282,6 +283,26 @@ const TOOLS = [
         force: { type: "boolean", description: "Also change clips the user locked (only when they asked)" },
       },
       required: ["clipIds"],
+    },
+  },
+  {
+    name: "fablecut_projects",
+    description: "Several projects in one FableCut: the projects dashboard. ./project.json (what every other tool reads and edits) is always the OPEN project; the others are stored beside it and share media/, exports/ and the library, so a duplicate or a template copies no footage. Actions: list (default; archived:'only'|'all' to see archived ones) · open {id} — switches the editor to that project (the open one is saved first; editor tabs reload; your next fablecut_get_project reads the new one) · new {name, template?, fps?, width?, height?, notes?, tags?, open?:true} — template is a built-in canvas (landscape-1080 default, vertical-1080, square-1080, portrait-1350, uhd-4k, landscape-720) or a saved template id · duplicate {id, name?, open?:false} · update {id, name?, notes?, tags?} · archive / unarchive {id} · delete {id} (archived projects only) · templates · save_template {id, name} (the project's canvas, tracks, clips and media references) · delete_template {template}. Opening another project changes what the user sees — only open, archive or delete when the user asked for it.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["list", "open", "new", "duplicate", "update", "archive", "unarchive", "delete", "templates", "save_template", "delete_template"], description: "What to do (default list)" },
+        id: { type: "string", description: "The project (p_…), from list" },
+        name: { type: "string", description: "new / duplicate / update: the project's name · save_template: the template's name" },
+        template: { type: "string", description: "new: the template to start from · delete_template: the saved template's id" },
+        fps: { type: "number", description: "new: frame rate (default: the template's)" },
+        width: { type: "integer", description: "new: canvas width (default: the template's)" },
+        height: { type: "integer", description: "new: canvas height (default: the template's)" },
+        notes: { type: "string", description: "new / update: free-text notes (brief, client, deadline …)" },
+        tags: { type: "array", items: { type: "string" }, description: "new / update: labels (replaces the list)" },
+        open: { type: "boolean", description: "new (default true) / duplicate (default false): open it afterwards" },
+        archived: { type: "string", enum: ["exclude", "only", "all"], description: "list: archived projects too, or only them" },
+      },
     },
   },
   {
@@ -567,6 +588,38 @@ function describeExportJob(j) {
     `Check again with fablecut_export {job:"${j.id}"}, or stop it with {cancel:"${j.id}"}.`;
 }
 /* fablecut_proxy: the server makes proxies (proxy.js); this asks it, and waits. */
+/* fablecut_projects: through the editor server, so it is the only process that
+   switches ./project.json and its tabs hear about it at once. */
+function describeProject(p) {
+  const dur = p.duration == null ? "?" : `${Math.floor(p.duration / 60)}:${String(Math.round(p.duration % 60)).padStart(2, "0")}`;
+  return `${p.id} "${p.name}"${p.active ? " (OPEN)" : ""}${p.archived ? " [archived]" : ""} — ` +
+    (p.unreadable ? "project file unreadable" : `${p.width}x${p.height}@${p.fps} ${dur}, ${p.clips} clip(s), ${p.media} media`) +
+    (p.modified ? `, modified ${p.modified.slice(0, 16).replace("T", " ")}` : "") +
+    (p.tags?.length ? " " + p.tags.map((t) => "#" + t).join(" ") : "") +
+    (p.notes ? `\n    notes: ${p.notes.length > 300 ? p.notes.slice(0, 300) + "…" : p.notes}` : "");
+}
+const describeTemplate = (t) => `${t.id} "${t.name}" ${t.width}x${t.height}@${t.fps}${t.builtin ? " (built-in)" : ` — ${t.clips} clip(s)`}`;
+async function projectsTool(args) {
+  if (!(await ensureUIServer())) throw new Error(`the editor server is not running and could not be started on port ${PORT}`);
+  const action = args.action || "list";
+  if (action === "list") {
+    const r = await apiJSON("GET", "/api/projects?archived=" + encodeURIComponent(args.archived || "exclude"));
+    if (r.status !== 200) throw new Error(r.body?.error || `projects request failed (${r.status})`);
+    const { projects, templates } = r.body;
+    return [`${projects.length} project(s):`, ...projects.map(describeProject),
+      `Templates (action:"new", template): ${templates.map((t) => t.id).join(", ")}`].join("\n");
+  }
+  const r = await apiJSON("POST", "/api/projects", { ...args, action });
+  if (r.status !== 200) throw new Error(r.body?.error || `projects request failed (${r.status})`);
+  const out = r.body;
+  if (action === "templates") return out.templates.map(describeTemplate).join("\n");
+  if (action === "save_template") return `Saved template ${describeTemplate(out.template)}. Start a project from it: {action:"new", template:"${out.template.id}", name}.`;
+  if (action === "delete_template") return `Deleted template ${out.template}.`;
+  if (action === "delete") return `Deleted project ${out.id} (its media stay in media/).`;
+  if (out.already) return `${describeProject(out.project)}\nAlready open.`;
+  if (out.from) return `Opened ${describeProject(out.project)}\nThe editor switched to it (${out.from} was saved first). Read it with fablecut_get_project {compact:true} before editing.`;
+  return describeProject(out.project);
+}
 async function proxyTool(args) {
   if (!(await ensureUIServer())) throw new Error(`the editor server is not running and could not be started on port ${PORT}`);
   const proj = readProject();
@@ -845,6 +898,8 @@ async function callTool(name, args, attempt = 0) {
       return denoiseTool(args);
     case "fablecut_proxy":
       return proxyTool(args);
+    case "fablecut_projects":
+      return projectsTool(args);
     case "fablecut_status": {
       const up = await ensureUIServer();
       const proj = readProject();
@@ -897,6 +952,14 @@ async function callTool(name, args, attempt = 0) {
         })(),
         `Files in media/: ${cap(files, 25).join(", ") || "none"}`,
         `Library assets (./library): ${libSummary}`,
+        ...(() => {
+          try {
+            const pj = createProjects({ dataDir: DATA_DIR, projectFile: PROJECT_FILE, libraryDir: LIBRARY_DIR });
+            if (!pj.peekActive()) return [];
+            const { projects: all } = pj.list();
+            return [`Projects: ${all.length} (fablecut_projects lists, opens and creates them; this one is ${pj.peekActive()})`];
+          } catch { return []; }
+        })(),
         `Project file: ${PROJECT_FILE}`,
         `Tips: fablecut_docs (use \`section\`) for the schema · fablecut_get_project {compact:true} to see the timeline · fablecut_patch_project for edits (cheapest) · fablecut_encode_profiles for export presets.`,
       ].join("\n");

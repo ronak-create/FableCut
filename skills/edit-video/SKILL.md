@@ -57,6 +57,11 @@ its clips keep their timing. `replaceMedia` swaps in a different file.
 Proxies (`fablecut_proxy`) only make the preview smoother; export, frames and
 scopes always use the originals. Make them only when the user asks.
 
+`fablecut_projects` lists the user's projects and opens, creates or duplicates
+them; every other tool works on the open one (`./project.json`). Switch, archive
+or delete only when the user asks — opening another project changes what they
+see — and re-read the project after a switch.
+
 ## Things that trip people up
 
 - Cut, ripple, trim and insert with the `fablecut_patch_project` edit ops

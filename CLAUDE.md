@@ -54,6 +54,9 @@ Every Claude Code session then has these tools:
 - `fablecut_proxy` — make, check or delete proxies: light copies of heavy footage
   the editor plays while editing (export always reads the originals). See
   "Media management" below.
+- `fablecut_projects` — list, open, create (from a canvas or a saved template),
+  duplicate, rename, annotate, archive and delete projects. `./project.json` is
+  always the open one. See "Projects" below.
 
 ### Token-efficient editing (important for agents)
 
@@ -138,9 +141,9 @@ then `/plugin install fablecut@fablecut`) does the registration for you.
 
 ### Where the files are
 
-`project.json`, `media/`, `exports/`, `analysis/` and `library/` normally sit in
+`project.json`, `projects/`, `media/`, `exports/`, `analysis/` and `library/` normally sit in
 the repo next to `server.js`; installed from npm (`npx fablecut`) they sit in
-`~/FableCut`. Set **`FABLECUT_DATA_DIR`** to move all five
+`~/FableCut`. Set **`FABLECUT_DATA_DIR`** to move all six
 somewhere else; the code and the static app files stay in the install directory
 either way. The plugin sets this so a plugin update can replace the install
 directory without touching anyone's timeline or footage. **Don't assume
@@ -1509,6 +1512,70 @@ proxy only changes how smoothly the preview runs, never the result.
   be an existing file under `/media/` or `/library/` of the same kind (an
   audio entry may use a video container).
 
+### Projects
+
+One FableCut keeps any number of projects. **`./project.json` is always the
+open project**: the editor, every MCP tool, the REST API and scripts read and
+edit that file as before. The others wait in `projects/`, and opening one
+swaps it in:
+
+| path | holds |
+|---|---|
+| `projects/index.json` | `{active}` — the open project's id |
+| `projects/<id>/meta.json` | `{id, created, opened, archived, notes, tags, template?}` |
+| `projects/<id>/project.json` | the document (while that project is open, `./project.json` is the live copy) |
+| `projects/<id>/thumb.jpg` | the editor's last picture of it |
+| `library/project-templates/<id>.json` | a saved project template `{name, created, project}` |
+
+`media/`, `exports/`, `analysis/` and `library/` are shared by every project,
+so a duplicate or a project made from a template copies no footage. The first
+time projects are used, the existing `./project.json` becomes the first
+project, unchanged. Ids look like `p_3f9a01c2de`.
+
+**Opening a project** saves the open one into its folder, then copies the
+chosen one to `./project.json` with a `revision` above both. A save based on
+the project that was open before (an editor tab, an agent's
+`fablecut_set_project`, a `baseRevision` patch) is therefore refused as a
+CONFLICT instead of landing in the wrong project. Editor tabs reload, clear
+their undo history and close an open composition. `GET /api/project` names the
+open project in the `X-FableCut-Project` header.
+
+In the editor: **Projects** in the top bar (or a click on the project name)
+opens the dashboard: cards with a picture, size, frame rate and length; search
+by name, notes or `#tag`; sort by last opened, last modified, created or name.
+Pick one to rename it, write notes, tag it, **Open**, **Duplicate**, **Save as
+template** or **Archive** it. **Archived** lists archived projects, where
+**Unarchive** brings one back and **Delete…** (click twice) removes it; only
+archived projects can be deleted, and the open one can be neither archived
+nor deleted. **+ New project** starts one from a canvas (Landscape 16:9 1080p,
+Vertical 9:16, Square 1:1, Portrait 4:5, 4K UHD, Landscape 720p) or a saved
+template, with its own frame rate. **Import…** adds a project file from
+elsewhere (an old backup, another machine); its media must be in `media/`,
+and Relink finds files that moved.
+
+**Agents** use `fablecut_projects` (or `GET /api/projects`, `POST /api/projects`):
+
+- `{}` or `{action:"list", archived?:"only"|"all"}` lists them: id, name, size,
+  length, clips, tags, notes, and which is `(OPEN)`.
+- `{action:"open", id}` switches the editor to that project; re-read it with
+  `fablecut_get_project {compact:true}` before editing.
+- `{action:"new", name, template?, fps?, width?, height?, notes?, tags?, open?}` —
+  `template` is `landscape-1080` (default), `vertical-1080`, `square-1080`,
+  `portrait-1350`, `uhd-4k`, `landscape-720` or a saved template's id; it opens
+  unless `open:false`.
+- `{action:"duplicate", id, name?, open?}` · `{action:"update", id, name?, notes?, tags?}` ·
+  `{action:"archive" | "unarchive" | "delete", id}`.
+- `{action:"templates"}` · `{action:"save_template", id, name}` (the project's
+  canvas, tracks, clips and media references) · `{action:"delete_template", template}`.
+- Opening, archiving or deleting changes what the user sees: do it only when
+  they asked. `fablecut_status` says how many projects there are.
+
+Recipes: **one edit, three versions** — `duplicate` the project per client
+cut, put the brief in `notes`; **house canvas** — build an empty project with
+your tracks, intro and outro, `save_template`, then `new` from it for every
+episode; **park finished work** — `archive` delivered projects to keep the
+list short without deleting anything.
+
 ### Semantics
 
 - Rendering order: V1 is drawn first, then V2, V3, … on top. SVG/image/text clips
@@ -1715,6 +1782,12 @@ obvious cuts were missed, raise it if motion is being misread as cuts.
   `{candidates:{id:[{src, name, size, score, why}]}}` — where a missing file might be now:
   files under `media/` and `library/` (subfolders included) of the same kind, ranked by
   name (same name, same name with another extension, similar name) and size, best 5 each.
+- `GET  /api/projects[?archived=only|all]` → `{active, projects:[{id, name, active, archived, notes, tags, created,
+  opened, modified, width, height, fps, duration, clips, media, thumb}], templates:[…]}` ·
+  `POST /api/projects {action, …}` — the actions of `fablecut_projects` (plus `import {project, name?}`),
+  answering `{id, project}` (`from` when the open project changed) · `GET` / `PUT /api/projects/thumb?id=`
+  — a project's JPEG thumbnail (1 MB max). SSE event `projects` (`{action, id, active}`) after each
+  change. See "Projects".
 - `GET  /api/library?dir=sfx|elements|svg|fonts|presets|templates` — list library assets
 - `GET  /api/presets` · `GET /api/templates` — the saved presets / templates, validated (bad files skipped);
   `POST /api/presets {preset}` · `POST /api/templates {template}` — validate one and save it as

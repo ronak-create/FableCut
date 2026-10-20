@@ -31,3 +31,7 @@ project-kesarix-backup-rev197.json
 projects_desktops/
 pnpm-lock.yaml
 .cursor/mcp.json
+
+# Stored projects (the open one is ./project.json) and saved project templates
+/projects/
+/library/project-templates/

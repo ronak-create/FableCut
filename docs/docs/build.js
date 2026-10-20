@@ -99,6 +99,11 @@ const PAGES = [
     parts: [["project.json schema", "Media management"]],
   },
   {
+    slug: "projects", nav: "Projects", title: "Projects", group: "The timeline",
+    lede: "Keep many projects in one FableCut: a dashboard to open, create from a canvas or template, duplicate, rename, take notes on, tag, archive and delete them, and fablecut_projects for agents.",
+    parts: [["project.json schema", "Projects"]],
+  },
+  {
     slug: "editing", nav: "Editing rules", title: "Editing rules", group: "The timeline",
     lede: "How tracks, links, locks, targeting and the trim tools behave, for people and agents alike.",
     parts: [["project.json schema", "Semantics"]],

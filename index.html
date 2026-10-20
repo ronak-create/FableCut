@@ -15,6 +15,7 @@
   <!-- ══════════ TOP BAR ══════════ -->
   <header class="topbar">
     <div class="logo"><span class="logo-mark">▶</span> Fable<b>Cut</b></div>
+    <button type="button" class="btn tiny hidden" id="btnProjectsDash" title="Projects: open, create, duplicate, archive">Projects</button>
     <div class="topbar-center" id="projectName">Untitled Project</div>
     <div class="topbar-right">
       <span class="btn-group ws-switch" id="wsSwitch" role="tablist" title="Workspace">
@@ -264,6 +265,32 @@
     <div class="dialog-actions">
       <button class="btn" id="btnCancelImportUrl">Cancel</button>
       <button class="btn primary" id="btnDoImportUrl">Import</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ PROJECTS ══════════ -->
+<div class="overlay hidden" id="projectsOverlay">
+  <div class="dialog projects-dialog" id="projectsDialog" role="dialog" aria-modal="true" aria-labelledby="projectsTitle" tabindex="-1">
+    <div class="pj-head">
+      <h2 id="projectsTitle">Projects</h2>
+      <span class="btn-group pj-views" role="tablist">
+        <button type="button" class="btn tiny on" data-pj-view="active">All projects</button>
+        <button type="button" class="btn tiny" data-pj-view="archived">Archived</button>
+      </span>
+      <input type="search" id="pjSearch" class="pj-search" placeholder="Search name, notes, #tag" aria-label="Search projects" spellcheck="false" autocomplete="off">
+      <select id="pjSort" class="pj-sort" aria-label="Sort by" title="Sort by">
+        <option value="opened">Last opened</option><option value="modified">Last modified</option>
+        <option value="created">Created</option><option value="name">Name</option>
+      </select>
+      <label class="btn tiny" for="pjImportFile" title="Add a project file (.json): an old backup, or one from another machine">Import…</label>
+      <input type="file" id="pjImportFile" class="sr-only" accept=".json,application/json">
+      <button type="button" class="btn tiny accent" id="pjNewBtn">+ New project</button>
+      <button type="button" class="btn ghost pj-close" id="pjClose" aria-label="Close" title="Close (Esc)">✕</button>
+    </div>
+    <div class="pj-body">
+      <div class="pj-grid" id="pjGrid"></div>
+      <aside class="pj-side" id="pjSide"></aside>
     </div>
   </div>
 </div>
