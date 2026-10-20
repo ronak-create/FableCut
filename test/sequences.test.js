@@ -177,3 +177,20 @@ test("MCP: sequence ops through fablecut_patch_project, the status and the compa
   assert.equal(r.isError, true);
   assert.match(r.text, /sequence main: clip z references unknown mediaId m_zz/);
 });
+
+test("review: a stale `sequence` never strips a timeline; typos and locks are refused", () => {
+  // `sequence` missing: the open one is the entry without a timeline, wherever it is in the list
+  const doc = { ...seedProject(), sequences: [{ id: "v", name: "V", clips: [{ id: "c_v", start: 0, duration: 1 }] }, { id: "main", name: "Main" }] };
+  SeqLib.normalize(doc);
+  assert.equal(doc.sequence, "main");
+  assert.equal(SeqLib.find(doc, "v").clips.length, 1, "the parked timeline is kept");
+  const all = { ...seedProject(), sequence: "typo", sequences: [{ id: "a", name: "A", clips: [] }, { id: "b", name: "B", clips: [] }] };
+  assert.throws(() => SeqLib.normalize(all), /sequence must name the open sequence/);
+
+  const p = seedProject();
+  assert.throws(() => patch(p, [{ op: "addSequence", name: "X", widht: 1080 }]), /'widht' isn't a sequence setting/);
+  patch(p, [{ op: "addSequence", id: "alt", from: "open" }, { op: "inSequence", sequence: "alt", ops: [{ op: "updateClip", id: "c_a", set: { locked: true } }] }]);
+  assert.throws(() => patch(p, [{ op: "removeSequence", id: "alt" }]), /holds locked clip c_a — the user locked it/);
+  patch(p, [{ op: "removeSequence", id: "alt", force: true }]);
+  assert.equal(SeqLib.entries(p).length, 1);
+});

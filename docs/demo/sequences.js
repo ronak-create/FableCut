@@ -78,7 +78,11 @@
       out.push({ ...s, id, name });
     }
     if (!out.length) { delete doc.sequences; delete doc.sequence; return doc; }
-    const act = out.some((s) => s.id === doc.sequence) ? doc.sequence : out[0].id;
+    // without a valid `sequence`, the open one is an entry without a timeline of its own: never strip one that has one
+    const named = out.some((s) => s.id === doc.sequence);
+    const bare = out.find((s) => !KEYS.some((k) => s[k] !== undefined));
+    if (!named && !bare) throw new Error(`sequence must name the open sequence (${out.map((s) => s.id).join(", ")}): every entry carries a timeline of its own`);
+    const act = named ? doc.sequence : bare.id;
     for (const s of out) {
       if (s.id === act) { for (const k of KEYS) delete s[k]; continue; }
       // a parked sequence carries its own timeline

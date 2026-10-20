@@ -2711,7 +2711,7 @@ function reloadMediaSource(m, oldSrc) {
 /** Point a media entry at another file. mode "relink" (same footage) or "replace" (a new file). */
 async function setMediaSource(m, src, mode, name) {
   const oldSrc = m.src, oldDur = m.duration;
-  pushUndo(JSON.stringify({ clips: project.clips, markers: project.markers || [], comps: project.comps || [], media: project.media }));
+  pushUndo(JSON.stringify({ clips: project.clips, markers: project.markers || [], comps: project.comps || [], media: project.media, seqClips: otherSequenceClips() }));
   m.src = src;
   for (const k of MediaLib.INFO_KEYS) delete m[k];
   if (mode === "replace") {
@@ -3809,8 +3809,14 @@ function pushUndo(snap = undoSnapshot()) {
   if (runtime.undo.length > 100) runtime.undo.shift();
   runtime.redo.length = 0;
 }
+/** The clips of the sequences that aren't open, by id — for the undo of an edit that reaches into them. */
+function otherSequenceClips() { return Object.fromEntries(SeqLib.others(seqRoot()).map((sq) => [sq.id, sq.clips || []])); }
 function restoreSnapshot(json) {
   const snap = JSON.parse(json);
+  if (snap && snap.seqClips) {
+    const open = SeqLib.activeId(seqRoot());
+    for (const [id, clips] of Object.entries(snap.seqClips)) { const sq = SeqLib.find(seqRoot(), id); if (sq && id !== open) sq.clips = clips; }
+  }
   if (Array.isArray(snap)) project.clips = snap;
   else {
     project.clips = snap.clips; project.markers = snap.markers; if (snap.comps) project.comps = snap.comps;
@@ -3828,7 +3834,8 @@ function restoreSnapshot(json) {
  *  (removing, relinking or replacing media), so redo puts it back too. */
 function counterSnapshot(snap) {
   if (!snap.includes('"media":')) return undoSnapshot();
-  return JSON.stringify({ clips: project.clips, markers: project.markers || [], comps: project.comps || [], media: project.media });
+  return JSON.stringify({ clips: project.clips, markers: project.markers || [], comps: project.comps || [], media: project.media,
+    ...(snap.includes('"seqClips":') ? { seqClips: otherSequenceClips() } : {}) });
 }
 function undo() {
   if (!runtime.undo.length) return;
@@ -10949,11 +10956,13 @@ function noteOpenSequence(data) {
   runtime.seqOpen = next;
   runtime.seqBack = null;
   if (!prev || prev === next) return;
+  // the steps only fit the state they were taken on: its timeline, and the comps and media every sequence
+  // shares (undo puts those back too). An agent or the other sequence may change them meanwhile.
+  const here = projectJSONHere();
   runtime.seqUndo.set(prev, { undo: runtime.undo.slice(), redo: runtime.redo.slice(), time: state.time, sel: state.selId,
-    // the steps only fit the timeline they were taken on: an agent may edit it while it waits
-    fp: JSON.stringify(project.clips.map(serializeClip)) });
+    fp: JSON.stringify([here.clips, here.comps || [], here.media]) });
   const back = runtime.seqUndo.get(next);
-  const fits = back && back.fp === JSON.stringify(data.clips || []);
+  const fits = back && back.fp === JSON.stringify([data.clips || [], data.comps || [], (data.media || []).filter((m) => !m.transient)]);
   runtime.undo.splice(0, runtime.undo.length, ...(fits ? back.undo : []));
   runtime.redo.splice(0, runtime.redo.length, ...(fits ? back.redo : []));
   runtime.seqBack = back || null;
@@ -10986,6 +10995,7 @@ function newSequence(opts) {
   try { s = SeqLib.add(doc, opts); } catch (e) { toast(e.message); return; }
   project.sequences = doc.sequences; project.sequence = doc.sequence;
   if (openSequence(s.id)) toast(`New sequence “${s.name}” · ${s.width}×${s.height}`);
+  else { scheduleSave(); syncCompCrumb(); toast(`New sequence “${s.name}” added — open it from the sequence menu`); }
 }
 function renameSequence(id, name) {
   const r = seqRoot();
@@ -11008,7 +11018,13 @@ async function deleteSequence(id) {
         body: JSON.stringify({ action: "save", name: `Before deleting the sequence “${s.name}”`.slice(0, 120), ...(projectId && projectId !== "?" ? { project: projectId } : {}) }) });
       if (res.ok) kept = (await res.json()).version;
     } catch { }
+    // the delete has no undo: without that version it doesn't happen
+    if (!kept) { toast(`Couldn't keep a version of the project, so “${s.name}” was not deleted. Try again in a moment.`); return; }
   }
+  // the editor may have moved on while the version was saved
+  if (state.exporting) { toast("Wait for the export to finish"); return; }
+  if (state.compCtx) exitComp(state.compCtx.path.length);
+  if (!SeqLib.find(project, id) || SeqLib.entries(project).length < 2) return;   // deleted or changed meanwhile (another tab, an agent)
   const wasOpen = SeqLib.activeId(project) === id;
   const doc = projectJSONHere();
   try { SeqLib.remove(doc, id); } catch (e) { toast(e.message); return; }

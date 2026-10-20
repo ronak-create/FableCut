@@ -297,13 +297,13 @@ Examples in `library/svg/`: `sparkles.svg` (loop), `lower-third.svg`,
     { "id": "A4", "kind": "audio" }
   ],
   "buses": [ { "id": "B1", "name": "Dialogue", "gain": -2, "fx": [ { "type": "compressor" } ] } ],
+  // ^ optional — submix buses B1…B8: name, gain (dB), pan, mute, fx; tracks route in with `out`
   "collections": [ { "id": "col_sel", "name": "Selects", "media": [ "m_abc" ] } ],
   // ^ optional — Project-bin collections: media grouped across folders; see "Media management"
   "comps": [ { "id": "lt", "name": "Lower third", "width": 1280, "height": 720, "duration": 5, "clips": [ /* … */ ] } ],
   // ^ optional — compositions (nested sequences), placed with kind:"comp" clips; see "Compositions (nested sequences)"
   "sequence": "main", "sequences": [ { "id": "main", "name": "Main" }, { "id": "seq_v9", "name": "Reel 9:16", "width": 1080, "height": 1920, "clips": [ /* … */ ] } ],
   // ^ optional — several timelines in one project; the open one is this top level; see "Sequences"
-  // ^ optional — submix buses B1…B8: name, gain (dB), pan, mute, fx; tracks route in with `out`
   "media": [
     { "id": "m_abc", "name": "intro.mp4", "kind": "video",  // video|audio|image|svg
       "src": "/media/intro.mp4",             // path under ./media or ./library (never a raw https:// URL)
@@ -1704,7 +1704,8 @@ sequence.
   when the user asked, or to export that sequence.
 - `{op:"updateSequence", id, set:{name?, index?}}` renames or reorders one;
   `{op:"removeSequence", id}` deletes one (only when asked; the last one stays,
-  and deleting the open one opens its neighbour).
+  deleting the open one opens its neighbour, and one holding locked clips or
+  tracks needs `force:true`).
 - The compact view and `fablecut_status` list every sequence (id, name,
   canvas, clips, length, which is open). A version's **Compare** reports each
   sequence's changes on its own, sequences added and removed, and which one

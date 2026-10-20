@@ -1041,6 +1041,9 @@
             // {op:"addSequence", name?, id?, from?: "empty" | "open" | <id>, width?, height?, fps?, open?} (or those in sequence:{…})
             const src = op.sequence && typeof op.sequence === "object" ? op.sequence : {};
             const { op: _op, sequence: _s, open: _o, ...flat } = op;
+            // a typo (widht, form) must not quietly make the wrong sequence
+            for (const k of Object.keys({ ...flat, ...src })) if (!["id", "name", "from", "width", "height", "fps"].includes(k))
+              throw new Error(`addSequence: '${k}' isn't a sequence setting (id, name, from, width, height, fps, open)`);
             let s;
             try { s = SeqLib.add(proj, { ...flat, ...src }); } catch (err) { throw new Error(err.message); }
             notes.push(`+sequence ${s.id} "${s.name}" ${s.width}x${s.height}@${s.fps}${s.clips.length ? ` (${s.clips.length} clips)` : ""}`);
@@ -1063,6 +1066,11 @@
             notes.push(`~sequence ${seq.id}`);
           } else if (name === "removeSequence") {
             const wasOpen = SeqLib.activeId(proj) === seq.id;
+            // a sequence holding the user's locked work goes only when they asked (force:true)
+            const body = wasOpen ? proj : seq;
+            const lockedLanes = new Set(Array.isArray(body.lockedTracks) ? body.lockedTracks : []);
+            const hit = (body.clips || []).find((c) => c.locked === true || lockedLanes.has(c.track));
+            refuseLocked("removeSequence", hit ? `sequence ${seq.id} holds locked clip ${hit.id}` : lockedLanes.size ? `sequence ${seq.id} has locked tracks (${[...lockedLanes].join(", ")})` : null, op);
             try { SeqLib.remove(proj, seq.id); } catch (err) { throw new Error(`removeSequence: ${err.message}`); }
             notes.push(`-sequence ${seq.id}` + (wasOpen ? ` (opened ${SeqLib.activeId(proj)})` : ""));
           } else {
