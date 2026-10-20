@@ -484,6 +484,9 @@ ${ICONS}
       <a href="${docsHome}" aria-current="page">Docs</a>
     </nav>
     <div class="nav-end">
+      <a class="gh" href="https://discord.gg/EFMQH7d6Tv" rel="noopener" target="_blank" aria-label="FableCut on Discord" title="Discord — questions, bugs, ideas">
+        <svg class="i" aria-hidden="true"><use href="#i-discord"/></svg>
+      </a>
       <a class="gh" href="${REPO}" rel="noopener" target="_blank" aria-label="FableCut on GitHub">
         <svg class="i" aria-hidden="true"><use href="#i-gh"/></svg><span class="gh-label">GitHub</span><span class="gh-count" data-stars></span>
       </a>
