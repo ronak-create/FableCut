@@ -256,7 +256,11 @@ function createHistory({ projects, autoMinutes = 10, keepAuto = 30 }) {
     fs.renameSync(projectFile, aside);
     const cands = [];
     if (pid) {
-      for (const e of entries(pid)) cands.push({ t: new Date(e.created).getTime(), file: docPath(pid, e.v), from: `version v${e.v}` });
+      for (const e of entries(pid)) {
+        let t = new Date(e.created).getTime();
+        if (!Number.isFinite(t)) { try { t = fs.statSync(docPath(pid, e.v)).mtimeMs; } catch { t = 0; } }   // a meta file without a usable date
+        cands.push({ t, file: docPath(pid, e.v), from: `version v${e.v}` });
+      }
       const parked = path.join(projects.DIR, pid, "project.json");
       try { cands.push({ t: fs.statSync(parked).mtimeMs, file: parked, from: "its last saved copy" }); } catch { }
     }

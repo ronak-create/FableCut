@@ -1661,8 +1661,9 @@ function listenSSE() {
   es.addEventListener("versions", (e) => {
     let d = {};
     try { d = JSON.parse(e.data); } catch { }
-    if (!(projectsOpen() && pj.verOf && d.project === pj.verOf && !pj.busy)) return;
-    pj.verDiff.clear();   // a comparison made before this change no longer holds
+    if (!(projectsOpen() && pj.verOf && d.project === pj.verOf)) return;
+    if (pj.busy) { pj.verPending = true; return; }   // pjVersionAction refreshes when it is done
+    pjDropDiffs();   // a comparison made before this change no longer holds
     pjLoadVersions();
   });
   es.addEventListener("projects", (e) => {
@@ -1743,7 +1744,7 @@ async function syncFromServer(force) {
     applyProject(data);
     syncCompCrumb();   // the top bar shows the project's name
     // "Compare with now" was against the document before this change
-    if (pj.verDiff.size && pj.verOf === runtime.projectId) { pj.verDiff.clear(); if (projectsOpen()) renderProjectGrid(); }
+    if (pj.verDiff.size && pj.verOf === runtime.projectId) { pjDropDiffs(); if (projectsOpen()) renderProjectGrid(); }
     await probeMissingMeta();
     return true;
   } catch { }
@@ -3188,6 +3189,7 @@ const pj = {
   sel: null, list: [], templates: [], tpl: "landscape-1080",
   sort: "opened", search: "", busy: false, selfSwitch: false,
   verOf: null, versions: [], verDiff: new Map(),   // the versions view: whose, its list, open comparisons
+  verDiffGen: 0, verPending: false,   // bumped when comparisons are dropped · a list refresh waiting for a busy action
 };
 const pjFmtDur = (s) => {
   if (!(s > 0)) return "0:00";
@@ -3252,7 +3254,7 @@ async function openProjects() {
   const ov = $("projectsOverlay");
   if (!ov || !state.connected) return;
   pj.mode = "detail"; pj.view = "active"; pj.sel = runtime.projectId;
-  pj.verOf = null; pj.verDiff.clear();   // a versions list left open last time may be out of date
+  pj.verOf = null; pjDropDiffs();   // a versions list left open last time may be out of date
   ov.classList.remove("hidden");
   $("projectsDialog")?.focus();
   renderProjects();   // the shell at once; cards once the list is in
@@ -3336,7 +3338,7 @@ function pjDetailHtml(p) {
     </div>
     <div class="pj-actions">
       <button type="button" class="btn" data-pj-act="versions" title="Saved versions of this project: compare, restore, mark the final cut">Versions…</button>
-      <a class="btn" href="/api/projects/backup?id=${encodeURIComponent(p.id)}" download title="The project and all its versions as one file. Import… restores it">Download backup</a>
+      <a class="btn" href="/api/projects/backup?id=${encodeURIComponent(p.id)}" download${p.active ? " data-pj-backup" : ""} title="The project and all its versions as one file. Import… restores it">Download backup</a>
     </div>
     <div class="pj-inline hidden" id="pjTplRow">
       <input type="text" id="pjTplName" value="${escapeHtml(p.name)}" maxlength="120" aria-label="Template name" spellcheck="false">
@@ -3416,7 +3418,7 @@ async function pjAction(act, btn) {
   if (!p) return;
   if (act === "open") { pjOpenProject(p.id); return; }
   if (act === "template") { $("pjTplRow")?.classList.toggle("hidden"); $("pjTplName")?.select(); return; }
-  if (act === "versions") { pj.verOf = p.id; pj.versions = []; pj.verDiff.clear(); renderProjectGrid(); pjLoadVersions(); return; }
+  if (act === "versions") { pj.verOf = p.id; pj.versions = []; pjDropDiffs(); renderProjectGrid(); pjLoadVersions(); return; }
   if (pj.busy) return;   // one request at a time: a second click must not duplicate twice
   if (act === "template-save") {
     const out = await pjBusy(() => pjPost({ action: "save_template", id: p.id, name: $("pjTplName")?.value || p.name }));
@@ -3470,6 +3472,8 @@ async function pjImport(file) {
    main area in place of the cards. Restoring never loses anything: the server
    saves what was there as a version first. */
 const VER_KIND = { manual: "", auto: "Auto", agent: "Agent", restore: "Before restore" };
+/** Drop the open comparisons, and any still on their way: they were against an older state. */
+function pjDropDiffs() { pj.verDiff.clear(); pj.verDiffGen++; }
 async function pjLoadVersions() {
   const id = pj.verOf;
   if (!id) return;
@@ -3527,11 +3531,13 @@ function pjVersionsHtml() {
   </div>`;
 }
 async function pjVersionAction(act, btn) {
-  if (act === "back") { pj.verOf = null; pj.verDiff.clear(); renderProjects(); return; }
+  if (act === "back") { pj.verOf = null; pjDropDiffs(); renderProjects(); return; }
   if (pj.busy) return;
   // busy from before the first await, so a second click can't start the same action again
   if (act === "rename") return pjVersionRun(act, btn);
-  return pjBusy(() => pjVersionRun(act, btn));
+  pj.verPending = false;
+  await pjBusy(() => pjVersionRun(act, btn));
+  if (pj.verPending && pj.verOf) { pj.verPending = false; pjDropDiffs(); pjLoadVersions(); }   // changed elsewhere meanwhile
 }
 async function pjVersionRun(act, btn) {
   const p = pj.list.find((x) => x.id === pj.verOf);
@@ -3550,8 +3556,9 @@ async function pjVersionRun(act, btn) {
     if (pj.verDiff.has(v)) { pj.verDiff.delete(v); renderProjectGrid(); return; }
     // compare with what is on screen, or not at all
     if (p.active && !(await flushSaveForVersion("the comparison would miss it"))) return;
+    const gen = pj.verDiffGen, of = pj.verOf;
     const out = await post({ action: "diff", version: v });
-    if (out) { pj.verDiff.set(v, out.lines); renderProjectGrid(); }
+    if (out && gen === pj.verDiffGen && of === pj.verOf) { pj.verDiff.set(v, out.lines); renderProjectGrid(); }
     return;
   }
   if (act === "restore") {
@@ -3569,7 +3576,7 @@ async function pjVersionRun(act, btn) {
       runtime.undo.length = 0; runtime.redo.length = 0;
       await syncFromServer(true);
     }
-    pj.verDiff.clear();
+    pjDropDiffs();
     toast(`Restored v${out.restored.v}. What was there is kept as v${out.saved.v}`);
     await pjLoad();   // the card and details show the restored project
     await pjLoadVersions();
@@ -3680,7 +3687,7 @@ function initProjectsUi() {
     } else if (e.key === "Escape") {
       e.preventDefault();
       if (pj.mode === "new") { pj.mode = "detail"; renderProjects(); }
-      else if (pj.verOf) { pj.verOf = null; pj.verDiff.clear(); renderProjects(); }
+      else if (pj.verOf) { pj.verOf = null; pjDropDiffs(); renderProjects(); }
       else closeProjects();
     } else if ((e.key === "Enter" || e.key === " ") && e.target.dataset?.pjTpldel) {
       e.preventDefault(); e.target.click();
@@ -3719,6 +3726,14 @@ function initProjectsUi() {
   $("pjGrid").addEventListener("dblclick", (e) => { const card = e.target.closest("[data-pj]"); if (card && pj.view === "active") pjOpenProject(card.dataset.pj); });
   const side = $("pjSide");
   side.addEventListener("click", async (e) => {
+    const bk = e.target.closest("[data-pj-backup]");
+    if (bk && !bk.dataset.flushed) {
+      // the open project: write its pending edit, then download
+      e.preventDefault();
+      if (!(await flushSaveForVersion("the backup would miss it"))) return;
+      bk.dataset.flushed = "1"; bk.click(); delete bk.dataset.flushed;
+      return;
+    }
     const del = e.target.closest("[data-pj-tpldel]");
     if (del) {
       e.stopPropagation();
