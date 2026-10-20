@@ -3809,6 +3809,12 @@ function pushUndo(snap = undoSnapshot()) {
   if (runtime.undo.length > 100) runtime.undo.shift();
   runtime.redo.length = 0;
 }
+/** Does this undo step hold other sequences' clips (a top-level seqClips)? Parsed only when the text could say so. */
+function hasSeqClips(json) {
+  if (typeof json !== "string" || !json.includes('"seqClips":')) return false;
+  try { const snap = JSON.parse(json); return !!snap && typeof snap === "object" && !Array.isArray(snap) && Object.hasOwn(snap, "seqClips"); }
+  catch { return false; }
+}
 /** The clips of the sequences that aren't open, by id — for the undo of an edit that reaches into them. */
 function otherSequenceClips() { return Object.fromEntries(SeqLib.others(seqRoot()).map((sq) => [sq.id, sq.clips || []])); }
 function restoreSnapshot(json) {
@@ -3835,7 +3841,7 @@ function restoreSnapshot(json) {
 function counterSnapshot(snap) {
   if (!snap.includes('"media":')) return undoSnapshot();
   return JSON.stringify({ clips: project.clips, markers: project.markers || [], comps: project.comps || [], media: project.media,
-    ...(snap.includes('"seqClips":') ? { seqClips: otherSequenceClips() } : {}) });
+    ...(hasSeqClips(snap) ? { seqClips: otherSequenceClips() } : {}) });
 }
 function undo() {
   if (!runtime.undo.length) return;
@@ -10960,7 +10966,7 @@ function noteOpenSequence(data) {
   // shares (undo puts those back too). An agent or the other sequence may change them meanwhile.
   // A relink / replace step also holds the other sequences' clips: then those must be as they were too.
   const here = projectJSONHere();
-  const withOthers = [...runtime.undo, ...runtime.redo].some((x) => typeof x === "string" && x.includes('"seqClips":'));
+  const withOthers = [...runtime.undo, ...runtime.redo].some(hasSeqClips);
   runtime.seqUndo.set(prev, { undo: runtime.undo.slice(), redo: runtime.redo.slice(), time: state.time, sel: state.selId,
     fp: seqUndoPrint(here, withOthers), withOthers });
   const back = runtime.seqUndo.get(next);
