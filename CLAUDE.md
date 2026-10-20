@@ -1540,10 +1540,10 @@ CONFLICT instead of landing in the wrong project. Editor tabs reload, clear
 their undo history and close an open composition. `GET /api/project` names the
 open project in the `X-FableCut-Project` header.
 
-In the editor: **Projects** in the top bar (or a click on the project name)
-opens the dashboard: cards with a picture, size, frame rate and length; search
+In the editor: **Projects** in the top bar (**Ctrl/Cmd+O**, or a click on the
+project name) opens the dashboard: cards with a picture, size, frame rate and length; search
 by name, notes or `#tag`; sort by last opened, last modified, created or name.
-Pick one to rename it, write notes, tag it, **Open**, **Duplicate**, **Save as
+Pick one to rename it, write notes, tag it, **Open** (or double-click / **Enter** on its card), **Duplicate**, **Save as
 template** or **Archive** it. **Archived** lists archived projects, where
 **Unarchive** brings one back and **Delete…** (click twice) removes it; only
 archived projects can be deleted, and the open one can be neither archived

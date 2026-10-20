@@ -17352,6 +17352,12 @@ window.addEventListener("keydown", (e) => {
       return;
     }
   }
+  // Ctrl/Cmd+O: the Projects dashboard (where the editor server has projects)
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (k === "o" || k === "O") && $("btnProjectsDash") && !$("btnProjectsDash").classList.contains("hidden")) {
+    e.preventDefault();
+    openProjects();
+    return;
+  }
   if (k === "Escape" && els.importUrlOverlay && !els.importUrlOverlay.classList.contains("hidden")) {
     e.preventDefault();
     closeImportUrl();
