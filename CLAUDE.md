@@ -1787,8 +1787,11 @@ obvious cuts were missed, raise it if motion is being misread as cuts.
   name (same name, same name with another extension, similar name) and size, best 5 each.
 - `GET  /api/projects[?archived=only|all]` → `{active, projects:[{id, name, active, archived, notes, tags, created,
   opened, modified, width, height, fps, duration, clips, media, thumb}], templates:[…]}` ·
-  `POST /api/projects {action, …}` — the actions of `fablecut_projects` (plus `import {project, name?}`),
-  answering `{id, project}` (`from` when the open project changed) · `GET` / `PUT /api/projects/thumb?id=`
+  `POST /api/projects {action, …}` — the actions of `fablecut_projects` (plus `import {project, name?}`).
+  The answer depends on the action: `{id, project}` for open / new / duplicate / update / archive /
+  unarchive / import (plus `from` when the open project changed, `already` when it was open), `{id, deleted}`
+  for delete, `{templates}` for templates, `{template}` for save_template (the saved one) and
+  `{template, deleted}` for delete_template · `GET` / `PUT /api/projects/thumb?id=`
   — a project's JPEG thumbnail (1 MB max). SSE event `projects` (`{action, id, active}`) after each
   change. See "Projects".
 - `GET  /api/library?dir=sfx|elements|svg|fonts|presets|templates` — list library assets

@@ -735,8 +735,8 @@ const runtime = {
   clipEls: new Map(),   // clipId -> HTMLMediaElement
   clipGain: new Map(),  // clipId -> GainNode
   mediaAux: new Map(),  // mediaId -> {img?, thumb?, svgText?, svgAnimated?}
-  audioBufs: new Map(), // mediaId -> Promise<AudioBuffer> (waveforms + export mix)
-  wavePeaks: new Map(), // mediaId -> {channels: Float32Array[], max: Float32Array} | Float32Array (legacy) | null (pending)
+  audioBufs: new Map(), // media src -> Promise<AudioBuffer> (waveforms + export mix); by file, so a relinked entry decodes its new one
+  wavePeaks: new Map(), // mediaId -> {src, channels: Float32Array[], max: Float32Array} | Float32Array (legacy) | {src, pending}
   library: {},          // dir -> [{name, rel, src, size}] cached /api/library results
   customFonts: [],      // family names loaded from /library/fonts
   libraryFontReq: new Set(), // library families claimed by a load pass
@@ -1803,20 +1803,24 @@ function getDecodeCtx() {
   return decodeCtx || (decodeCtx = new (window.AudioContext || window.webkitAudioContext)());
 }
 function getAudioBuffer(m) {
-  let p = runtime.audioBufs.get(m.id);
+  const src = m.src;
+  let p = runtime.audioBufs.get(src);
   if (!p) {
-    p = fetch(m.src).then((r) => r.arrayBuffer())
+    p = fetch(src).then((r) => r.arrayBuffer())
       .then((ab) => getDecodeCtx().decodeAudioData(ab));
-    runtime.audioBufs.set(m.id, p);
-    p.catch(() => runtime.audioBufs.delete(m.id));
+    runtime.audioBufs.set(src, p);
+    p.catch(() => runtime.audioBufs.delete(src));
   }
   return p;
 }
 function ensureWave(m) {
   // Also decode peaks from video files when their audio is placed on an A track
-  if ((m.kind !== "audio" && m.kind !== "video") || runtime.wavePeaks.has(m.id)) return;
-  runtime.wavePeaks.set(m.id, null); // pending
+  if (m.kind !== "audio" && m.kind !== "video") return;
+  const have = runtime.wavePeaks.get(m.id), src = m.src;
+  if (have && (have instanceof Float32Array || have.src === src)) return;
+  runtime.wavePeaks.set(m.id, { src, pending: true });
   getAudioBuffer(m).then((buf) => {
+    if (runtime.wavePeaks.get(m.id)?.src !== src) return;   // the entry points at another file now (relink, another project)
     const n = Math.max(1, Math.ceil(buf.duration * WAVE_PEAKS_PER_SEC));
     const step = buf.length / n;
     const channels = [];
@@ -1838,10 +1842,10 @@ function ensureWave(m) {
       for (const p of channels) if (p[i] > mx) mx = p[i];
       max[i] = mx;
     }
-    runtime.wavePeaks.set(m.id, { channels, max });
+    runtime.wavePeaks.set(m.id, { src, channels, max });
     if (m.channels == null) m.channels = buf.numberOfChannels;
     state.dirtyTimeline = true;
-  }).catch(() => runtime.wavePeaks.delete(m.id));
+  }).catch(() => { if (runtime.wavePeaks.get(m.id)?.src === src) runtime.wavePeaks.delete(m.id); });
 }
 function wavePeaksFor(c) {
   const w = runtime.wavePeaks.get(c.mediaId);
@@ -3413,6 +3417,13 @@ function onProjectSwitched() {
   state.compCtx = null;
   clearSource();
   setSelection([]);
+  // players, pictures, waveforms and proxy states are keyed by media / clip id, which a
+  // duplicate or a template shares with a different file: rebuild them for this project
+  pause();
+  for (const id of [...runtime.clipEls.keys()]) releaseClipEl(id);
+  runtime.mediaAux.clear();
+  runtime.wavePeaks.clear();
+  proxyStatus.clear();
 }
 function initProjectsUi() {
   const ov = $("projectsOverlay"), btn = $("btnProjectsDash");
