@@ -1571,15 +1571,19 @@ async function saveNow() {
       // an external tool saved a newer revision while this change was pending
       const loaded = await syncFromServer(true);
       toast("Project was updated externally — your last change may need redoing.");
+      runtime.saveFailed = loaded !== true;
       return loaded === true;   // the newer document on disk is now what this tab shows
     }
+    runtime.saveFailed = !res.ok;
     return res.ok;
-  } catch { return false; }
+  } catch { runtime.saveFailed = true; return false; }
 }
 /** Write a pending edit now (and wait for one in flight), e.g. before switching projects.
  *  False when that save did not land. */
 async function flushSave() {
-  if (runtime.saveTimer) { clearTimeout(runtime.saveTimer); runtime.saveTimer = null; runtime.saving = saveNow(); }
+  try { await runtime.saving; } catch { }
+  // a pending edit, or one whose last save did not land: send it (again) now
+  if (runtime.saveTimer || runtime.saveFailed) { clearTimeout(runtime.saveTimer); runtime.saveTimer = null; runtime.saving = saveNow(); }
   try { return (await runtime.saving) !== false; } catch { return false; }
 }
 async function flushSaveBeforeSwitch() {
@@ -3225,8 +3229,10 @@ async function pjLoad() {
     if (data.active && !runtime.projectId) {
       const r = await fetch("/api/project", { cache: "no-store" }).catch(() => null);
       const doc = r && r.ok ? await r.json().catch(() => null) : null;
-      if (doc && r.headers.get("X-FableCut-Project") === data.active && (doc.revision || 0) === (project.revision || 0)) runtime.projectId = data.active;
-      else syncFromServer(true);
+      const ids = (d) => JSON.stringify([d.name, d.revision || 0, (d.clips || []).map((c) => c.id), (d.media || []).map((m) => m.id)]);
+      const shown = projectJSON();
+      if (doc && r.headers.get("X-FableCut-Project") === data.active && ids(doc) === ids(shown)) runtime.projectId = data.active;
+      else { runtime.projectId = "?"; syncFromServer(true); }   // not what this tab shows: load it as a switch
     } else if (data.active && data.active !== runtime.projectId) syncFromServer(true);
     if (!pj.list.some((p) => p.id === pj.sel)) pj.sel = (pj.list.find((p) => p.active) || pj.list[0] || {}).id || null;
   } catch { pj.list = []; toast("Projects: couldn't read the project list"); }
@@ -3361,8 +3367,8 @@ async function pjOpenProject(id) {
     const out = await pjPost({ action: "open", id });
     if (!out) return;
     closeProjects();
-    await syncFromServer(true);
-    toast(`Opened “${out.project?.name || p.name}”`);
+    if (await syncFromServer(true)) toast(`Opened “${out.project?.name || p.name}”`);
+    else toast(`“${out.project?.name || p.name}” is open, but this tab couldn't load it yet. It will reload when the editor server answers.`);
   } finally { pj.busy = false; pj.selfSwitch = false; }
 }
 async function pjBusy(fn) {
@@ -3385,8 +3391,8 @@ async function pjAction(act, btn) {
       const out = await pjPost({ action: "new", name, template: pj.tpl, fps: fps ? +fps : undefined, open: true });
       if (!out) return;
       closeProjects();
-      await syncFromServer(true);
-      toast(`Created “${name}”`);
+      if (await syncFromServer(true)) toast(`Created “${name}”`);
+      else toast(`“${name}” was created and opened, but this tab couldn't load it yet. It will reload when the editor server answers.`);
     } finally { pj.busy = false; pj.selfSwitch = false; }
     return;
   }
@@ -3447,9 +3453,11 @@ function onProjectSwitched() {
   runtime.projectGen = (runtime.projectGen || 0) + 1;   // loads started before now no longer write the caches
   // queued exports carry the old project's settings and names: they don't render this one
   const queued = exportQueue.length;
-  for (let i = exportQueue.length - 1; i >= 0; i--) if (exportQueue[i].status === "pending") exportQueue.splice(i, 1);
+  for (let i = exportQueue.length - 1; i >= 0; i--)
+    if (["pending", "failed", "cancelled"].includes(exportQueue[i].status)) exportQueue.splice(i, 1);   // Retry would render this project
   if (exportQueue.length !== queued) { renderQueue(); toast("Queued exports of the previous project were removed"); }
   if (runtime.saveTimer) { clearTimeout(runtime.saveTimer); runtime.saveTimer = null; }  // an edit of the old project
+  runtime.saveFailed = false;
   runtime.undo.length = 0; runtime.redo.length = 0;
   state.compCtx = null;
   clearSource();
