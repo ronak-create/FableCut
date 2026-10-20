@@ -1661,7 +1661,9 @@ function listenSSE() {
   es.addEventListener("versions", (e) => {
     let d = {};
     try { d = JSON.parse(e.data); } catch { }
-    if (projectsOpen() && pj.verOf && d.project === pj.verOf && !pj.busy) pjLoadVersions();
+    if (!(projectsOpen() && pj.verOf && d.project === pj.verOf && !pj.busy)) return;
+    pj.verDiff.clear();   // a comparison made before this change no longer holds
+    pjLoadVersions();
   });
   es.addEventListener("projects", (e) => {
     let d = {};
@@ -1740,6 +1742,8 @@ async function syncFromServer(force) {
     }
     applyProject(data);
     syncCompCrumb();   // the top bar shows the project's name
+    // "Compare with now" was against the document before this change
+    if (pj.verDiff.size && pj.verOf === runtime.projectId) { pj.verDiff.clear(); if (projectsOpen()) renderProjectGrid(); }
     await probeMissingMeta();
     return true;
   } catch { }
@@ -3248,6 +3252,7 @@ async function openProjects() {
   const ov = $("projectsOverlay");
   if (!ov || !state.connected) return;
   pj.mode = "detail"; pj.view = "active"; pj.sel = runtime.projectId;
+  pj.verOf = null; pj.verDiff.clear();   // a versions list left open last time may be out of date
   ov.classList.remove("hidden");
   $("projectsDialog")?.focus();
   renderProjects();   // the shell at once; cards once the list is in
@@ -3522,14 +3527,19 @@ function pjVersionsHtml() {
   </div>`;
 }
 async function pjVersionAction(act, btn) {
-  const p = pj.list.find((x) => x.id === pj.verOf);
   if (act === "back") { pj.verOf = null; pj.verDiff.clear(); renderProjects(); return; }
+  if (pj.busy) return;
+  // busy from before the first await, so a second click can't start the same action again
+  if (act === "rename") return pjVersionRun(act, btn);
+  return pjBusy(() => pjVersionRun(act, btn));
+}
+async function pjVersionRun(act, btn) {
+  const p = pj.list.find((x) => x.id === pj.verOf);
   if (!p) return;
   const row = btn.closest("[data-ver]"), v = row ? +row.dataset.ver : null;
-  const post = (body) => pjBusy(() => fetch("/api/versions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project: p.id, ...body }) })
+  const post = (body) => fetch("/api/versions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project: p.id, ...body }) })
     .then(async (r) => { const out = await r.json().catch(() => ({})); if (!r.ok) { toast(out.error || "Versions: request failed"); return null; } return out; })
-    .catch(() => { toast("Versions: the editor server did not answer"); return null; }));
-  if (pj.busy) return;
+    .catch(() => { toast("Versions: the editor server did not answer"); return null; });
   if (act === "save") {
     if (p.active && !(await flushSaveForVersion("no version was made"))) return;
     const out = await post({ action: "save", name: $("verName")?.value, note: $("verNote")?.value });

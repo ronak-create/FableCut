@@ -256,8 +256,7 @@ function createHistory({ projects, autoMinutes = 10, keepAuto = 30 }) {
     fs.renameSync(projectFile, aside);
     const cands = [];
     if (pid) {
-      const last = entries(pid)[0];
-      if (last) cands.push({ t: new Date(last.created).getTime(), file: docPath(pid, last.v), from: `version v${last.v}` });
+      for (const e of entries(pid)) cands.push({ t: new Date(e.created).getTime(), file: docPath(pid, e.v), from: `version v${e.v}` });
       const parked = path.join(projects.DIR, pid, "project.json");
       try { cands.push({ t: fs.statSync(parked).mtimeMs, file: parked, from: "its last saved copy" }); } catch { }
     }
@@ -265,6 +264,8 @@ function createHistory({ projects, autoMinutes = 10, keepAuto = 30 }) {
     for (const c of cands) {
       try {
         const doc = readJSON(c.file);
+        // only a document the editor can open: the next candidate otherwise
+        if (!doc || typeof doc !== "object" || Array.isArray(doc) || !Array.isArray(doc.clips) || !Array.isArray(doc.media)) continue;
         writeJSON(projectFile, { ...doc, revision: (doc.revision || 0) + 1 });
         return { recovered: true, from: c.from, aside };
       } catch { }

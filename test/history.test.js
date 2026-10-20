@@ -232,3 +232,18 @@ test("fablecut_versions: restoring a project that isn't open says so", async (t)
   assert.equal(r.isError, false, r.text);
   assert.match(r.text, new RegExp(`${first} is not the open project, so the editor didn't change; open it`));
 });
+
+test("recovery skips a version that isn't a project and uses the next good one", async (t) => {
+  const { dir, H } = make(t, seedProject({ name: "Good one" }));
+  H.save(null, { name: "Good" });
+  writeProject(dir, seedProject({ name: "Later", revision: 3 }));
+  const v2 = H.save(null, { name: "Broken" }).version;
+  // the newest version's file is valid JSON but not a project
+  fs.writeFileSync(path.join(dir, "projects", H.list().project, "history", `v${String(v2.v).padStart(4, "0")}.json`), JSON.stringify({ hello: 1 }));
+  fs.rmSync(path.join(dir, "projects", H.list().project, "project.json"), { force: true });
+  fs.writeFileSync(path.join(dir, "project.json"), "{ nope");
+  const { base } = await startServer(t, dir, NO_WATCH);
+  const doc = await (await fetch(base + "/api/project")).json();
+  assert.equal(doc.name, "Good one");
+  assert.ok(Array.isArray(doc.clips));
+});
