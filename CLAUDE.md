@@ -1697,8 +1697,9 @@ sequence.
   their positions relative to the centre, and an `exportFrame` is dropped.
 - `{op:"inSequence", sequence, ops:[…]}` runs ops on a sequence **without
   opening it**: clip and timeline ops, `setProject` (its canvas, markers, IN /
-  OUT, delivery), `setTrack`, `setBus`, `setFx` on its tracks — anything but the
-  other sequence ops. The user's editor stays where it is.
+  OUT, delivery), `setTrack`, `setBus`, `setFx` on its tracks, and
+  `updateSequence` (name, index) — not `addSequence`, `openSequence`,
+  `removeSequence` or another `inSequence`. The user's editor stays where it is.
 - `{op:"openSequence", id}` changes what the user's editor shows, and what
   `fablecut_export`, `fablecut_frame {time}` and `fablecut_scopes` render: do it
   when the user asked, or to export that sequence.

@@ -10958,14 +10958,22 @@ function noteOpenSequence(data) {
   if (!prev || prev === next) return;
   // the steps only fit the state they were taken on: its timeline, and the comps and media every sequence
   // shares (undo puts those back too). An agent or the other sequence may change them meanwhile.
+  // A relink / replace step also holds the other sequences' clips: then those must be as they were too.
   const here = projectJSONHere();
+  const withOthers = [...runtime.undo, ...runtime.redo].some((x) => typeof x === "string" && x.includes('"seqClips":'));
   runtime.seqUndo.set(prev, { undo: runtime.undo.slice(), redo: runtime.redo.slice(), time: state.time, sel: state.selId,
-    fp: JSON.stringify([here.clips, here.comps || [], here.media]) });
+    fp: seqUndoPrint(here, withOthers), withOthers });
   const back = runtime.seqUndo.get(next);
-  const fits = back && back.fp === JSON.stringify([data.clips || [], data.comps || [], (data.media || []).filter((m) => !m.transient)]);
+  const fits = back && back.fp === seqUndoPrint(data, back.withOthers);
   runtime.undo.splice(0, runtime.undo.length, ...(fits ? back.undo : []));
   runtime.redo.splice(0, runtime.redo.length, ...(fits ? back.redo : []));
   runtime.seqBack = back || null;
+}
+/** What a sequence's undo steps rely on: its timeline, the shared comps and media, and (for relink /
+ *  replace steps) the clips of the other sequences — in the saved form, so both sides compare alike. */
+function seqUndoPrint(d, withOthers) {
+  return JSON.stringify([d.clips || [], d.comps || [], (d.media || []).filter((m) => !m.transient),
+    ...(withOthers ? [SeqLib.others(d).map((sq) => [sq.id, sq.clips || []])] : [])]);
 }
 /** Open sequence `id` in the editor. False when it can't be opened now. */
 function openSequence(id) {
