@@ -11001,10 +11001,11 @@ async function deleteSequence(id) {
   if (state.compCtx) exitComp(state.compCtx.path.length);
   let kept = null;
   if (state.connected) {
-    if (!(await flushSaveBeforeSwitch())) return;
+    const projectId = runtime.projectId;   // the version is of this project, whatever another tab opens meanwhile
+    if (!(await flushSaveForVersion("the sequence was not deleted"))) return;
     try {
       const res = await fetch("/api/versions", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "save", name: `Before deleting the sequence “${s.name}”`.slice(0, 120) }) });
+        body: JSON.stringify({ action: "save", name: `Before deleting the sequence “${s.name}”`.slice(0, 120), ...(projectId && projectId !== "?" ? { project: projectId } : {}) }) });
       if (res.ok) kept = (await res.json()).version;
     } catch { }
   }
