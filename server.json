@@ -8,12 +8,12 @@
     "source": "github"
   },
   "websiteUrl": "https://fablecut.space/",
-  "version": "1.15.0",
+  "version": "1.16.0",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "fablecut",
-      "version": "1.15.0",
+      "version": "1.16.0",
       "transport": {
         "type": "stdio"
       },
@@ -26,7 +26,7 @@
     },
     {
       "registryType": "mcpb",
-      "identifier": "https://github.com/ronak-create/FableCut/releases/download/v1.15.0/fablecut.mcpb",
+      "identifier": "https://github.com/ronak-create/FableCut/releases/download/v1.16.0/fablecut.mcpb",
       "fileSha256": "544150ad2760943ad5e63ad45ecab12c47dc0ebddb9c77c6208d8d7e83967920",
       "transport": {
         "type": "stdio"
