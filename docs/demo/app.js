@@ -1572,12 +1572,19 @@ async function saveNow() {
       await syncFromServer(true);
       toast("Project was updated externally — your last change may need redoing.");
     }
-  } catch { }
+    return res.ok || res.status === 409;   // 409: the newer document on disk is now loaded, nothing to lose by switching
+  } catch { return false; }
 }
-/** Write a pending edit now (and wait for one in flight), e.g. before switching projects. */
+/** Write a pending edit now (and wait for one in flight), e.g. before switching projects.
+ *  False when that save did not land. */
 async function flushSave() {
   if (runtime.saveTimer) { clearTimeout(runtime.saveTimer); runtime.saveTimer = null; runtime.saving = saveNow(); }
-  try { await runtime.saving; } catch { }
+  try { return (await runtime.saving) !== false; } catch { return false; }
+}
+async function flushSaveBeforeSwitch() {
+  if (await flushSave()) return true;
+  toast("Your last change couldn't be saved, so the project stays open. Try again in a moment.");
+  return false;
 }
 /** One clip as saved: only the fields the editor knows (unknown runtime fields stay out). */
 function serializeClip({ id, mediaId, kind, compId, track, start, in: inn, duration, name, props, keyframes, transitionIn, transitionOut, linkedId, linkGroup, locked, disabled, unlinked, fx, parent }) {
@@ -1688,10 +1695,12 @@ async function syncFromServer(force) {
   fetchSaved("presets");
   loadLibraryFonts();
   fetchEncodeProfiles();
+  const seq = runtime.syncSeq = (runtime.syncSeq || 0) + 1;
   try {
     const res = await fetch("/api/project", { cache: "no-store" });
     if (!res.ok) return;
     const data = await res.json();
+    if (seq !== runtime.syncSeq) return;   // a newer reload is on its way: this answer may be older than it
     if (!data || !Array.isArray(data.clips)) return;
     // another project was opened (the dashboard, another tab, an agent)
     const pid = res.headers.get("X-FableCut-Project");
@@ -1700,6 +1709,10 @@ async function syncFromServer(force) {
     if (switched) {
       onProjectSwitched();
       applyProject(data);
+      { // decoded audio is by file: keep what this project uses, free the rest
+        const srcs = new Set(project.media.map((m) => m.src));
+        for (const src of [...runtime.audioBufs.keys()]) if (!srcs.has(src)) runtime.audioBufs.delete(src);
+      }
       setTime(0);
       syncCompCrumb();
       if (!pj.selfSwitch) toast(`Switched to “${project.name}”`);
@@ -1727,7 +1740,9 @@ async function syncFromServer(force) {
 async function loadMediaMetadata(m) {
   if (m.kind === "svg") { await loadSvgMedia(m); return; }
   if (m.kind === "image") {
+    const gen = runtime.projectGen;
     const img = await loadImage(m.src);
+    if (gen !== runtime.projectGen) return;   // another project was opened meanwhile
     runtime.mediaAux.set(m.id, { ...(runtime.mediaAux.get(m.id) || {}), img, imgSrc: m.src });
     m.width = img.naturalWidth; m.height = img.naturalHeight;
     return;
@@ -1782,6 +1797,7 @@ function loadImage(src) {
   });
 }
 async function grabThumb(m) {
+  const gen = runtime.projectGen;
   const v = document.createElement("video");
   v.muted = true; v.preload = "auto";
   if (isCrossOriginSrc(m.src)) v.crossOrigin = "anonymous";
@@ -1792,6 +1808,7 @@ async function grabThumb(m) {
   const c = document.createElement("canvas");
   c.width = 160; c.height = 90;
   c.getContext("2d").drawImage(v, 0, 0, 160, 90);
+  if (gen !== runtime.projectGen) { v.src = ""; return; }
   runtime.mediaAux.set(m.id, { ...(runtime.mediaAux.get(m.id) || {}), thumb: c.toDataURL("image/jpeg", 0.6) });
   v.src = "";
   renderBin(); state.dirtyTimeline = true;
@@ -1880,7 +1897,7 @@ async function importFiles(fileList) {
     ? runtime.importFolderId : null;
   runtime.importFolderId = null;
   let added = 0, skipped = 0;
-  const addedMedia = [];
+  const addedMedia = [], gen = runtime.projectGen;
   for (const file of files) {
     const kind = mediaKindFromFile(file);
     if (!kind) { skipped++; continue; }
@@ -1900,6 +1917,7 @@ async function importFiles(fileList) {
       if (kind === "video") grabThumb(m).catch(() => { });
       ensureWave(m);
     } catch { skipped++; continue; }
+    if (gen !== runtime.projectGen) { toast("Import stopped: another project was opened. The uploaded files are in media/"); break; }
     project.media.push(m);
     addedMedia.push(m);
     added++;
@@ -3323,7 +3341,7 @@ async function pjOpenProject(id) {
   if (state.exporting) { toast("Wait for the export to finish before switching projects"); return; }
   pj.busy = true;
   try {
-    await flushSave();
+    if (!(await flushSaveBeforeSwitch())) return;
     await pjSnapThumb();
     pj.selfSwitch = true;
     const out = await pjPost({ action: "open", id });
@@ -3347,7 +3365,7 @@ async function pjAction(act, btn) {
     const fps = $("pjNewFps")?.value;
     pj.busy = true;
     try {
-      await flushSave();
+      if (!(await flushSaveBeforeSwitch())) return;
       await pjSnapThumb();
       pj.selfSwitch = true;
       const out = await pjPost({ action: "new", name, template: pj.tpl, fps: fps ? +fps : undefined, open: true });
@@ -3412,6 +3430,7 @@ async function pjImport(file) {
 }
 /* Called by syncFromServer when ./project.json is now another project. */
 function onProjectSwitched() {
+  runtime.projectGen = (runtime.projectGen || 0) + 1;   // loads started before now no longer write the caches
   if (runtime.saveTimer) { clearTimeout(runtime.saveTimer); runtime.saveTimer = null; }  // an edit of the old project
   runtime.undo.length = 0; runtime.redo.length = 0;
   state.compCtx = null;
@@ -3445,6 +3464,8 @@ function initProjectsUi() {
     } else if (e.key === "Escape") {
       e.preventDefault();
       if (pj.mode === "new") { pj.mode = "detail"; renderProjects(); } else closeProjects();
+    } else if ((e.key === "Enter" || e.key === " ") && e.target.dataset?.pjTpldel) {
+      e.preventDefault(); e.target.click();
     } else if (e.key === "Enter" && e.target.dataset?.pj) {
       e.preventDefault(); pjOpenProject(e.target.dataset.pj);
     } else if (e.key === "Enter" && e.target.id === "pjNewName") {
@@ -9755,7 +9776,9 @@ function parseSvgSize(txt) {
   return { width: w || 800, height: h || 600 };
 }
 async function loadSvgMedia(m) {
+  const gen = runtime.projectGen;
   const txt = await (await fetch(m.src)).text();
+  if (gen !== runtime.projectGen) return;   // another project was opened meanwhile
   const { width, height } = parseSvgSize(txt);
   m.width = width; m.height = height;
   const aux = runtime.mediaAux.get(m.id) || {};
@@ -9764,7 +9787,7 @@ async function loadSvgMedia(m) {
   aux.svgFrames = new Map(); // quantized t -> HTMLImageElement (small LRU)
   aux.svgPending = null;
   runtime.mediaAux.set(m.id, aux);
-  if (!aux.svgAnimated) aux.img = await rasterizeSvgMarkup(txt);
+  if (!aux.svgAnimated) { const img = await rasterizeSvgMarkup(txt); if (gen === runtime.projectGen) aux.img = img; }
   state.dirtyTimeline = true;
 }
 function svgMarkupAt(aux, t) {
