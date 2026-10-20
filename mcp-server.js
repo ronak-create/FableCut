@@ -642,7 +642,7 @@ const KIND_LABEL = { manual: "", auto: " (auto)", agent: " (before agent edits)"
 function describeVersion(e) {
   const when = e.created ? e.created.slice(0, 16).replace("T", " ") : "?";
   return `v${e.v}${e.final ? " FINAL" : ""} "${e.name}"${KIND_LABEL[e.kind] || ""} — ${when}, ${e.clips} clip(s), ` +
-    `${Math.floor(e.duration / 60)}:${String(Math.round(e.duration % 60)).padStart(2, "0")}, revision ${e.revision}` +
+    `${Math.floor(Math.round(e.duration) / 60)}:${String(Math.round(e.duration) % 60).padStart(2, "0")}, revision ${e.revision}` +
     (e.note ? `\n    note: ${e.note.length > 300 ? e.note.slice(0, 300) + "…" : e.note}` : "");
 }
 async function versionsTool(args) {
@@ -660,7 +660,9 @@ async function versionsTool(args) {
   if (action === "update") return describeVersion(out.version);
   if (action === "delete") return `Deleted v${out.deleted}.`;
   if (action === "restore") return `Restored v${out.restored.v} "${out.restored.name}". What was there is kept as v${out.saved.v} "${out.saved.name}" (restore it to undo). ` +
-    `The editor reloaded; re-read the project (fablecut_get_project {compact:true}) before editing.`;
+    (out.open === false
+      ? `${out.project} is not the open project, so the editor didn't change; open it (fablecut_projects {action:"open", id:"${out.project}"}) before reading or editing it.`
+      : `The editor reloaded; re-read the project (fablecut_get_project {compact:true}) before editing.`);
   if (action === "diff") return out.same
     ? `No difference between ${out.from === "current" ? "now" : "v" + String(out.from).replace(/^v/, "")} and ${out.to === "current" ? "now" : "v" + String(out.to).replace(/^v/, "")}.`
     : [`From v${String(out.from).replace(/^v/, "")} to ${out.to === "current" ? "now" : "v" + String(out.to).replace(/^v/, "")}:`, ...out.lines.map((l) => "- " + l)].join("\n");
@@ -669,13 +671,18 @@ async function versionsTool(args) {
 /* Before an agent changes the project: a version to go back to. Once per session start
    (or after 10 quiet minutes), and before every whole-document rewrite. */
 let lastAgentVersion = 0;
+/** "" when the version was kept (or wasn't due), else a warning for the tool's answer:
+ *  a version is a safety net, so the edit itself goes ahead either way. */
 function versionBeforeAgent(rewrite) {
-  if (!rewrite && Date.now() - lastAgentVersion < 10 * 60_000) return;
+  if (!rewrite && Date.now() - lastAgentVersion < 10 * 60_000) return "";
   try {
     const pj = createProjects({ dataDir: DATA_DIR, projectFile: PROJECT_FILE, libraryDir: LIBRARY_DIR });
     createHistory({ projects: pj }).beforeAgent(rewrite ? "Before an agent rewrote the project" : "Before agent edits");
     lastAgentVersion = Date.now();
-  } catch { }   // a version is a safety net: never block the edit itself
+    return "";
+  } catch (e) {
+    return ` Warning: no version was saved before this edit (${e.message}) — fablecut_versions {action:"save"} keeps one.`;
+  }
 }
 async function proxyTool(args) {
   if (!(await ensureUIServer())) throw new Error(`the editor server is not running and could not be started on port ${PORT}`);
@@ -1065,6 +1072,8 @@ async function callTool(name, args, attempt = 0) {
         deliveryPresets: savedDeliveryPresets(),
         mediaInfo: (src) => { const f = mediaFile(src); return f ? probeFile(f) : null; },
       });
+      // a version of the project as it was, kept before the last check so the write follows that check at once
+      const verWarn = versionBeforeAgent(false);
       // Someone else saved while the ops ran: writing now would drop their change.
       // Without a baseRevision the ops just re-apply on the newer document.
       let diskRev = readRev;
@@ -1073,12 +1082,11 @@ async function callTool(name, args, attempt = 0) {
         if (base == null && attempt < 3) return callTool(name, args, attempt + 1);
         throw conflict(diskRev);
       }
-      versionBeforeAgent(false);
       proj.revision = readRev + 1;
       writeProject(proj);
       lastReadRevision = proj.revision;
       for (const [kind, item] of toSave) writeSaved(kind, item.id, item);
-      return `Patched (revision ${proj.revision}): ${notes.join(" ")}. Now ${proj.clips.length} clip(s), ${proj.media.length} media. UI hot-reloaded.`;
+      return `Patched (revision ${proj.revision}): ${notes.join(" ")}. Now ${proj.clips.length} clip(s), ${proj.media.length} media. UI hot-reloaded.${verWarn}`;
     }
     case "fablecut_set_project": {
       const doc = args.project;
@@ -1086,6 +1094,7 @@ async function callTool(name, args, attempt = 0) {
       if (!Array.isArray(doc.clips) || !Array.isArray(doc.media))
         throw new Error("project must contain `clips` and `media` arrays");
       ProjectOps.checkProject(doc);
+      const verWarn = versionBeforeAgent(true);   // before the conflict check, so the write follows it at once
       let cur = { revision: 0 };
       try { cur = readProject(); } catch {}
       const curRev = cur.revision || 0;
@@ -1106,10 +1115,9 @@ async function callTool(name, args, attempt = 0) {
       // Agents often omit top-level flags they don't know about. Keep panSchema
       // once established so a rewrite that drops pan:0 cannot re-trigger L/R migration.
       if (!(doc.panSchema >= 1) && (cur.panSchema >= 1)) doc.panSchema = 1;
-      versionBeforeAgent(true);
       writeProject(doc);
       lastReadRevision = doc.revision;
-      return `Saved (revision ${doc.revision}). ${doc.clips.length} clip(s). The editor UI (if open at ${BASE}) has hot-reloaded.`;
+      return `Saved (revision ${doc.revision}). ${doc.clips.length} clip(s). The editor UI (if open at ${BASE}) has hot-reloaded.${verWarn}`;
     }
     case "fablecut_normalize_audio": {
       const ids = Array.isArray(args.clipIds) ? args.clipIds.map(String) : [];

@@ -196,3 +196,39 @@ test("fablecut_versions, and a version before an agent's first edit", async (t) 
   assert.equal(r.isError, true);
   assert.match(r.text, /marked final/);
 });
+
+test("lengths round up into the next minute; imported versions are checked and rebuilt", (t) => {
+  const { dir, H } = make(t);
+  H.save(null);
+  writeProject(dir, seedProject({ revision: 3, clips: [{ id: "c_a", mediaId: "m_a", kind: "video", track: "V1", start: 0, in: 0, duration: 119.7 }] }));
+  assert.ok(H.diff(null, 1).lines.includes("length 0:05 → 2:00"));
+
+  const b = H.backup();
+  b.versions.push(
+    { v: 7, name: "not a project", project: "oops" },
+    { v: 8, name: "no clips", project: { media: [] } },
+    { v: 0, name: "bad number", project: seedProject() },
+    { v: 9, name: "", final: true, kind: "weird", revision: 999, clips: 42, project: seedProject({ revision: 5 }) },
+    { v: 10, name: "Also final", final: true, project: seedProject({ revision: 6 }) });
+  b.versions[0].final = true;
+  const out = H.importBackup(JSON.parse(JSON.stringify(b)));
+  assert.equal(out.versions, 3, "only versions that are projects come in");
+  const vs = H.list(out.id).versions;
+  assert.deepEqual(vs.map((e) => e.v), [10, 9, 1]);
+  assert.deepEqual(vs.filter((e) => e.final).map((e) => e.v), [10], "one final cut");
+  const v9 = vs.find((e) => e.v === 9);
+  assert.deepEqual([v9.name, v9.kind, v9.revision, v9.clips], ["Version 09", "manual", 5, 1], "details come from the document");
+});
+
+test("fablecut_versions: restoring a project that isn't open says so", async (t) => {
+  const dir = makeDataDir(t);
+  const { base, port } = await startServer(t, dir, NO_WATCH);
+  const mcp = startMcp(t, dir, { FABLECUT_PORT: String(port), FABLECUT_NO_AUTOSTART: "1" });
+  await mcp.request("initialize", { protocolVersion: "2025-11-25" });
+  const first = (await (await fetch(base + "/api/projects")).json()).active;
+  await post(base, { action: "save", name: "Keep" });
+  await fetch(base + "/api/projects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "new", name: "Other" }) });
+  const r = await mcp.callTool("fablecut_versions", { action: "restore", version: 1, project: first });
+  assert.equal(r.isError, false, r.text);
+  assert.match(r.text, new RegExp(`${first} is not the open project, so the editor didn't change; open it`));
+});

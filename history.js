@@ -30,7 +30,7 @@ function writeJSON(file, obj) {
 }
 const timelineEnd = (doc) => (Array.isArray(doc.clips) ? doc.clips : [])
   .reduce((m, c) => Math.max(m, (+c.start || 0) + (+c.duration || 0)), 0);
-const fmtDur = (s) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`;
+const fmtDur = (s) => { const t = Math.round(s); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`; };
 
 /* What changed from document a (older) to b (newer), for people and agents. */
 function diffDocs(a, b) {
@@ -229,12 +229,19 @@ function createHistory({ projects, autoMinutes = 10, keepAuto = 30 }) {
     const out = projects.importDoc(b.project, { name: name || b.name, open: false });
     projects.update(out.id, { notes: b.notes || "", tags: b.tags || [] });
     fs.mkdirSync(dir(out.id), { recursive: true });
+    // each version is checked like a project, and its details are worked out again from it
+    const isDoc = (d) => d && typeof d === "object" && !Array.isArray(d) && Array.isArray(d.clips) && Array.isArray(d.media);
+    const good = (Array.isArray(b.versions) ? b.versions : []).filter((e) => e && Number.isInteger(e.v) && e.v > 0 && isDoc(e.project));
+    const finalV = good.filter((e) => e.final === true).map((e) => e.v).pop();   // one final cut: the newest one marked
     let n = 0;
-    for (const e of Array.isArray(b.versions) ? b.versions : []) {
-      if (!e || !e.project || !Number.isInteger(e.v)) continue;
-      const { project, ...m } = e;
-      writeJSON(docPath(out.id, e.v), project);
-      writeJSON(metaPath(out.id, e.v), { ...m, kind: KINDS.includes(m.kind) ? m.kind : "manual" });
+    for (const e of good) {
+      const created = typeof e.created === "string" && !isNaN(Date.parse(e.created)) ? e.created : new Date().toISOString();
+      writeJSON(docPath(out.id, e.v), e.project);
+      writeJSON(metaPath(out.id, e.v), {
+        v: e.v, name: String(e.name || "").trim().slice(0, MAX_NAME) || `Version ${String(e.v).padStart(2, "0")}`,
+        note: String(e.note || "").slice(0, MAX_NOTE), kind: KINDS.includes(e.kind) ? e.kind : "manual", created,
+        revision: e.project.revision || 0, clips: e.project.clips.length, duration: +timelineEnd(e.project).toFixed(2), final: e.v === finalV,
+      });
       n++;
     }
     const res = open ? projects.open(out.id) : { id: out.id, project: projects.list({ archived: "all" }).projects.find((p) => p.id === out.id) };

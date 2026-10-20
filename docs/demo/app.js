@@ -3468,13 +3468,19 @@ const VER_KIND = { manual: "", auto: "Auto", agent: "Agent", restore: "Before re
 async function pjLoadVersions() {
   const id = pj.verOf;
   if (!id) return;
+  const seq = pj.verSeq = (pj.verSeq || 0) + 1;
+  // only the newest request for the project still shown may change the list
+  const current = () => seq === pj.verSeq && pj.verOf === id;
   try {
     const res = await fetch("/api/versions?project=" + encodeURIComponent(id), { cache: "no-store" });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error);
-    if (pj.verOf !== id) return;
+    if (!current()) return;
     pj.versions = data.versions || [];
-  } catch (e) { pj.versions = []; toast("Versions: " + (e.message || "couldn't read them")); }
+  } catch (e) {
+    if (!current()) return;
+    pj.versions = []; toast("Versions: " + (e.message || "couldn't read them"));
+  }
   renderProjectGrid();
 }
 function pjVersionsHtml() {
@@ -3525,14 +3531,15 @@ async function pjVersionAction(act, btn) {
     .catch(() => { toast("Versions: the editor server did not answer"); return null; }));
   if (pj.busy) return;
   if (act === "save") {
-    if (p.active && !(await flushSaveBeforeSwitch())) return;
+    if (p.active && !(await flushSaveForVersion("no version was made"))) return;
     const out = await post({ action: "save", name: $("verName")?.value, note: $("verNote")?.value });
     if (out) { toast(`Saved v${out.version.v} “${out.version.name}”`); await pjLoadVersions(); }
     return;
   }
   if (act === "diff") {
     if (pj.verDiff.has(v)) { pj.verDiff.delete(v); renderProjectGrid(); return; }
-    if (p.active) await flushSave();
+    // compare with what is on screen, or not at all
+    if (p.active && !(await flushSaveForVersion("the comparison would miss it"))) return;
     const out = await post({ action: "diff", version: v });
     if (out) { pj.verDiff.set(v, out.lines); renderProjectGrid(); }
     return;
@@ -3544,7 +3551,7 @@ async function pjVersionAction(act, btn) {
       return;
     }
     if (p.active && state.exporting) { toast("Wait for the export to finish before restoring"); return; }
-    if (p.active && !(await flushSaveBeforeSwitch())) return;
+    if (p.active && !(await flushSaveForVersion("nothing was restored"))) return;
     const out = await post({ action: "restore", version: v });
     if (!out) return;
     if (p.active) {
@@ -3593,14 +3600,24 @@ async function pjVersionAction(act, btn) {
   }
 }
 /* Ctrl/Cmd+S: keep the open project as it is now. */
+let versionSaving = false;
 async function saveVersionNow() {
-  if (!(await flushSaveBeforeSwitch())) return;
+  if (versionSaving) return;   // one at a time
+  versionSaving = true;
   try {
+    if (!(await flushSaveForVersion("no version was made"))) return;
     const res = await fetch("/api/versions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "save" }) });
     const out = await res.json().catch(() => ({}));
     if (!res.ok) { toast(out.error || "Couldn't save a version"); return; }
     toast(`Saved v${out.version.v} “${out.version.name}” · Projects → Versions to go back to it`);
   } catch { toast("Couldn't save a version: the editor server did not answer"); }
+  finally { versionSaving = false; }
+}
+/** Write the open project's pending edit before a version action; false (with a toast) when it didn't land. */
+async function flushSaveForVersion(skipped) {
+  if (await flushSave()) return true;
+  toast(`Your last change couldn't be saved, so ${skipped}. Try again in a moment.`);
+  return false;
 }
 /* Called by syncFromServer when ./project.json is now another project. */
 function onProjectSwitched() {
@@ -3643,7 +3660,7 @@ function initProjectsUi() {
       e.preventDefault(); closeProjects();   // not the browser's Open File dialog
     } else if ((e.ctrlKey || e.metaKey) && (e.key === "s" || e.key === "S")) {
       e.preventDefault();   // not the browser's Save Page dialog
-      saveVersionNow().then(() => { if (pj.verOf) pjLoadVersions(); });
+      if (!e.repeat) saveVersionNow().then(() => { if (pj.verOf) pjLoadVersions(); });   // holding the keys makes one
     } else if (e.target.classList?.contains("ver-rename") && (e.key === "Enter" || e.key === "Escape")) {
       e.preventDefault();
       if (e.key === "Escape") e.target.dataset.cancel = "1";
@@ -17592,7 +17609,7 @@ window.addEventListener("keydown", (e) => {
   // Ctrl/Cmd+S: save a version of the open project (the editor saves every change anyway)
   if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (k === "s" || k === "S")) {
     e.preventDefault();   // never the browser's Save Page dialog, and not S (split) either
-    if ($("btnProjectsDash") && !$("btnProjectsDash").classList.contains("hidden")) saveVersionNow();
+    if (!e.repeat && $("btnProjectsDash") && !$("btnProjectsDash").classList.contains("hidden")) saveVersionNow();   // holding the keys makes one
     return;
   }
   // Ctrl/Cmd+O: the Projects dashboard (where the editor server has projects)

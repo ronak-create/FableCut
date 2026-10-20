@@ -648,8 +648,9 @@ const server = http.createServer(async (req, res) => {
     try {
       const out = history.act(a);
       if (a.action && a.action !== "list" && a.action !== "diff") broadcast("versions", JSON.stringify({ project: out.project, action: a.action }));
-      if (a.action === "restore" && out.project === projects.peekActive()) onFsChange();   // the tabs load the restored document
-      sendJSON(res, 200, out);
+      const isOpen = out.project === projects.peekActive();
+      if (a.action === "restore" && isOpen) onFsChange();   // the tabs load the restored document
+      sendJSON(res, 200, a.action === "restore" ? { ...out, open: isOpen } : out);
     } catch (e) { sendJSON(res, /^no (project|version)/.test(e.message) ? 404 : 400, { error: e.message }); }
     return;
   }
