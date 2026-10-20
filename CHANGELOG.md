@@ -25,6 +25,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   back; an unreadable `project.json` at startup is kept aside and the newest
   good copy restored. Agents use the new `fablecut_versions` tool; REST
   `/api/versions`.
+- **Sequences.** Several timelines in one project — a 16:9 and a 9:16 cut,
+  cut-downs, alternatives — sharing its media and compositions, each with its
+  own canvas, frame rate, IN / OUT, markers, mix and delivery settings. The
+  menu at the left of the timeline toolbar opens, adds (empty or as a copy, at
+  any canvas), duplicates, renames and deletes them; each keeps its own undo
+  history for the session. Media and comps used in any sequence are counted and
+  protected. Agents use the new patch ops `addSequence`, `inSequence` (edit a
+  sequence without opening it), `openSequence`, `updateSequence` and
+  `removeSequence`.
 - **NVIDIA GPU export profiles** `nvenc-h264` and `nvenc-hevc`. They need an
   NVIDIA card and an ffmpeg built with NVENC.
 

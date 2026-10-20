@@ -68,6 +68,13 @@ so the user has a named point to go back to; when they are happy with a cut,
 save one too. `{action:"diff", version}` tells you (and them) what changed since.
 Restore a version only when the user asks.
 
+A project can hold several sequences (timelines sharing its media): the compact
+view lists them under SEQUENCES, and every op works on the open one. For "a
+vertical version" or "a 15 s cut-down", add one with `{op:"addSequence", name,
+from:"open", width?, height?}` and edit it with `{op:"inSequence", sequence,
+ops:[…]}` — the user's editor stays on what they are watching. Open one
+(`openSequence`) only when they ask, or to export it.
+
 ## Things that trip people up
 
 - Cut, ripple, trim and insert with the `fablecut_patch_project` edit ops

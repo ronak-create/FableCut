@@ -4298,3 +4298,47 @@ input[type="range"].cq-hue {
 .ver-actions .btn.tiny { font-size: 11px; }
 .ver-actions .btn:disabled { opacity: .45; cursor: default; }
 a.btn { text-decoration: none; }
+
+/* ── Sequences: the menu at the left of the timeline toolbar ── */
+.seq-btn {
+  max-width: 220px;
+  gap: 4px;
+  margin-right: 6px;
+}
+.seq-btn .seq-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 150px;
+  font-weight: 600;
+}
+.seq-btn .seq-count:not(:empty) {
+  padding: 0 5px;
+  border-radius: 8px;
+  background: #ffffff1f;
+  font-size: 10px;
+  line-height: 15px;
+}
+.seq-menu { min-width: 260px; }
+.seq-menu .ctx-item .seq-check {
+  display: inline-block;
+  width: 14px;
+  color: var(--accent);
+}
+.seq-menu .ctx-item .seq-row-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
+}
+.seq-menu .ctx-item kbd { font-variant-numeric: tabular-nums; }
+.seq-new { min-width: 300px; }
+.seq-new select.bin-pop-input { width: 100%; }
+.seq-new .seq-new-copy {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 2px;
+  font-size: 12px;
+}

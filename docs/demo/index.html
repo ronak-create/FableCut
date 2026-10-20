@@ -210,6 +210,7 @@
   <!-- ══════════ TIMELINE ══════════ -->
   <section class="panel timeline-panel" id="timelinePanel">
     <div class="timeline-toolbar">
+      <button type="button" class="btn tiny seq-btn" id="btnSequences" aria-haspopup="menu" title="Sequences"><svg class="ico" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.5" d="M1.75 3.25h12.5M1.75 8h8.5M1.75 12.75h10.5"/></svg> <span class="seq-name">Main</span><span class="seq-count"></span> ▾</button>
       <span class="comp-crumb hidden" id="compCrumb" aria-label="Open composition"></span>
       <button class="btn tiny hidden" id="btnTrimIO" title="Trim clips to IN/OUT (⇧T)"><svg class="ico" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="square" d="M1.25 4.5H12M4.5 1.25V12M4.5 12H14.75M12 4.5V14.75"/></svg> Trim</button>
       <button class="btn tiny toggle hidden" id="btnWorkAreaPlay" title="Limit playback to IN/OUT (Home/End jump to markers; playhead outside = override)"><svg class="ico" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="square" stroke-linejoin="miter" d="M1.5 2.5V13.5M14.5 2.5V13.5M4.25 8H11.75M9.35 5.6L12 8L9.35 10.4"/></svg> Limit</button>
@@ -614,6 +615,7 @@
           <tr><td><kbd>Ctrl/Cmd</kbd>+<kbd>O</kbd></td><td>Open the Projects dashboard (or click the project name)</td></tr>
           <tr><td><kbd>Ctrl/Cmd</kbd>+<kbd>S</kbd></td><td>Save a version of the open project (every edit is saved anyway; a version is a point to come back to)</td></tr>
           <tr><td>Project → <b>Versions…</b></td><td>Compare a version with now · <b>Restore…</b> (click twice; what is there is saved as a version first) · mark the final cut</td></tr>
+          <tr><td>Timeline toolbar → <b>sequence menu</b></td><td>Open another sequence of this project · <b>New sequence…</b> (any canvas, empty or a copy) · <b>Duplicate</b> · <b>Rename…</b> · <b>Delete…</b> (click twice; kept as a version first)</td></tr>
           <tr><td>Project card</td><td>Click to see its details, notes and tags · double-click to open it</td></tr>
           <tr><td><kbd>Enter</kbd> on a card</td><td>Open that project</td></tr>
           <tr><td><kbd>Esc</kbd></td><td>Back out of <b>New project</b>, then close the dashboard</td></tr>
@@ -669,6 +671,7 @@
 <script src="color.js"></script>
 <script src="edit-ops.js"></script>
 <script src="comp.js"></script>
+<script src="sequences.js"></script>
 <script src="templates.js"></script>
 <script src="media-lib.js"></script>
 <script src="delivery.js"></script>

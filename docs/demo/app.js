@@ -743,6 +743,8 @@ const runtime = {
   googleLoaded: new Set(),   // loaded from Google Fonts (the font picker lists them)
   fontReq: new Map(),   // font name -> Promise<boolean> (ensureFont)
   undo: [], redo: [],
+  seqUndo: new Map(),   // sequence id -> {undo, redo, time, sel}: each sequence keeps its own undo history this session
+  seqOpen: null,        // the open sequence's id, to notice another one being opened
   audio: null,          // {ctx, master (sum), masterOut (fader), trackBus, recDest, meter?, meterReady?}
   saveTimer: null, pendingSync: false,
   sfxPreview: null,     // <audio> element for library sound previews
@@ -1206,6 +1208,7 @@ async function connectServer() {
     state.connected = false;
     els.projectName.textContent = project.name + "  ·  ⚪ local session";
   }
+  initSequencesUi();
   await probeMissingMeta();
 }
 /* Main-profile AVC level by canvas height; Annex-B is required so ffmpeg
@@ -1448,6 +1451,14 @@ function syncExportFrameSel() {
   els.exportFrameSel.innerHTML = html;
 }
 function applyProject(data, opts = {}) {
+  if (state.compCtx && !opts.ctx && SeqLib.activeId(data) !== SeqLib.activeId(state.compCtx.root)) {
+    // another sequence was opened (an agent, another tab): the comp was opened from the old one
+    state.compCtx = null;
+    runtime.undo.length = 0; runtime.redo.length = 0;
+    applyProject(data, { ctx: true });
+    syncCompCrumb();
+    return;
+  }
   if (state.compCtx && !opts.ctx) {   // the root changed on disk (an agent, another tab): keep the open comp open
     const x = state.compCtx;
     x.root = data;
@@ -1460,6 +1471,7 @@ function applyProject(data, opts = {}) {
     syncCompCrumb();
     return;
   }
+  if (!state.compCtx) noteOpenSequence(data);
   const wa = normalizeWorkArea(data.inPoint, data.outPoint);
   Object.assign(project, {
     name: data.name || "Untitled Project",
@@ -1480,6 +1492,9 @@ function applyProject(data, opts = {}) {
     outputs: Array.isArray(data.outputs) ? data.outputs.filter((o) => o && typeof o === "object") : null,
     master: normalizeMaster(data.master),
     buses: normalizeBuses(data.buses),
+    // the sequences that aren't open, kept as they are (see sequences.js); the open one is this document
+    sequences: Array.isArray(data.sequences) && data.sequences.length ? data.sequences : null,
+    sequence: Array.isArray(data.sequences) && data.sequences.length ? SeqLib.activeId(data) : null,
     comps: (Array.isArray(data.comps) ? data.comps : []).filter((cp) => cp && cp.id).map((cp) => ({
       ...cp, clips: (cp.clips || []).map((x) => {
         if (x.keyframes) for (const arr of Object.values(x.keyframes)) if (Array.isArray(arr)) arr.sort((a, b) => a.t - b.t);
@@ -1651,6 +1666,10 @@ function projectJSONHere() {
   const buses = normalizeBuses(project.buses);
   if (buses.length) out.buses = buses;
   if (project.comps && project.comps.length) out.comps = project.comps.map((cp) => ({ ...cp, clips: (cp.clips || []).map(serializeClip) }));
+  if (project.sequences) {
+    out.sequences = project.sequences.map((sq) => (sq.id === project.sequence ? { id: sq.id, name: sq.name } : sq));
+    out.sequence = project.sequence;
+  }
   return out;
 }
 function listenSSE() {
@@ -2276,6 +2295,7 @@ function usageDoc() {
   return {
     media: project.media,
     clips: state.compCtx.root.clips || [],
+    sequences: state.compCtx.root.sequences, sequence: state.compCtx.root.sequence,
     comps: (project.comps || []).map((c) => (c.id === id ? { ...c, clips: project.clips } : c)),
   };
 }
@@ -2428,7 +2448,9 @@ function newCollection(name, mediaIds) {
   return col;
 }
 function removeMediaFromBin(m) {
-  if (state.compCtx && (state.compCtx.root.clips || []).some((c) => c.mediaId === m.id)) { toast("It's used on the main timeline — go back to Main to delete it"); return; }
+  if (state.compCtx && (state.compCtx.root.clips || []).some((c) => c.mediaId === m.id)) { toast(`It's used on the timeline of “${openSequenceName()}” — go back to it to delete it`); return; }
+  const elsewhere = SeqLib.others(seqRoot()).find((sq) => (sq.clips || []).some((c) => c.mediaId === m.id));
+  if (elsewhere) { toast(`It's used in the sequence “${elsewhere.name}” — remove its clips there first`); return; }
   pushUndo(JSON.stringify({ clips: project.clips, markers: project.markers || [], comps: project.comps || [], media: project.media }));   // undo brings the media back too
   project.media = project.media.filter((x) => x.id !== m.id);
   project.clips = project.clips.filter((c) => c.mediaId !== m.id);
@@ -2582,13 +2604,14 @@ function showMediaInstances(m, x, y) {
   for (const p of list) {
     const b = document.createElement("button");
     b.type = "button"; b.className = "ctx-item";
-    b.innerHTML = `<span>${escapeHtml(p.comp ? `▣ ${p.compName}` : "Main")} · ${escapeHtml(p.track)}</span><kbd>${fmt(p.start)} → ${fmt(p.start + p.duration)}</kbd>`;
+    b.innerHTML = `<span>${escapeHtml(p.sequence ? `▤ ${p.sequenceName}` : p.comp ? `▣ ${p.compName}` : openSequenceName())} · ${escapeHtml(p.track)}</span><kbd>${fmt(p.start)} → ${fmt(p.start + p.duration)}</kbd>`;
     b.addEventListener("click", () => { goToPlacement(p); });
     pop.appendChild(b);
   }
   showPopover(pop, x, y);
 }
 function goToPlacement(p) {
+  if (p.sequence && !openSequence(p.sequence)) return;
   const here = compCtxId();
   if (p.comp !== here) {
     if (state.compCtx) exitComp(state.compCtx.path.length);
@@ -2716,6 +2739,7 @@ async function setMediaSource(m, src, mode, name) {
     fit(project.clips);
     for (const comp of project.comps || []) fit(comp.clips);
     if (state.compCtx) fit(state.compCtx.root.clips);
+    for (const sq of SeqLib.others(seqRoot())) fit(sq.clips);
     runtime.compGen = (runtime.compGen || 0) + 1;
     if (trimmed) msg += ` — ${trimmed} clip edge${trimmed === 1 ? "" : "s"} trimmed to fit`;
     if (m.kind === "video") for (const c of project.clips) if (c.mediaId === m.id && c.kind === "video") reconcileAudioChannels(c);
@@ -3659,6 +3683,7 @@ function onProjectSwitched() {
   if (runtime.saveTimer) { clearTimeout(runtime.saveTimer); runtime.saveTimer = null; }  // an edit of the old project
   runtime.saveFailed = false;
   runtime.undo.length = 0; runtime.redo.length = 0;
+  runtime.seqUndo.clear(); runtime.seqOpen = null;
   state.compCtx = null;
   clearSource();
   setSelection([]);
@@ -10892,6 +10917,7 @@ function exitComp(levels = 1) {
   scheduleSave();
 }
 function syncCompCrumb() {
+  syncSequenceButton();
   if (els.projectName) els.projectName.textContent = project.name + (state.connected ? "  ·  🟢 connected" : "  ·  ⚪ local session");
   const el = document.getElementById("compCrumb");
   if (!el) return;
@@ -10899,11 +10925,183 @@ function syncCompCrumb() {
   el.classList.toggle("hidden", !x);
   if (!x) { el.innerHTML = ""; return; }
   const names = x.path.map((id) => (CompLib.getComp(x.root, id) || { name: id }).name);
-  el.innerHTML = `<button type="button" class="btn tiny" data-crumb="${x.path.length}" title="Back to the main timeline">◀ Main</button>` +
+  el.innerHTML = `<button type="button" class="btn tiny" data-crumb="${x.path.length}" title="Back to the timeline">◀ ${escapeHtml(openSequenceName())}</button>` +
     names.map((n, i) => `<span class="crumb-sep">›</span>` + (i < names.length - 1
       ? `<button type="button" class="btn tiny" data-crumb="${x.path.length - 1 - i}">${escapeHtml(n)}</button>`
-      : `<b title="You are editing this composition — Esc or ◀ Main goes back">${escapeHtml(n)}</b>`)).join("");
+      : `<b title="You are editing this composition — Esc or ◀ goes back">${escapeHtml(n)}</b>`)).join("");
   for (const b of el.querySelectorAll("[data-crumb]")) b.addEventListener("click", () => exitComp(+b.dataset.crumb));
+}
+
+/* ═══════════════════════════ SEQUENCES ═══════════════════════════
+   Several timelines in one project (sequences.js). The open one is `project`
+   itself — clips, tracks, canvas, frame rate, mix, delivery — and the others
+   wait in project.sequences. Opening one parks this timeline in its entry and
+   loads the other, like a reload. For the session each sequence keeps its own
+   undo history, playhead and selection. */
+const SeqLib = self.FableCutSeq;
+/** The document that holds the sequences (the root while a comp is open). */
+function seqRoot() { return state.compCtx ? state.compCtx.root : project; }
+function openSequenceName() { const r = seqRoot(); return (SeqLib.find(r, SeqLib.activeId(r)) || SeqLib.MAIN).name; }
+/** A document is about to be shown: when it opens another sequence, the undo steps,
+ *  playhead and selection go with the one that was open, and the other's come back. */
+function noteOpenSequence(data) {
+  const next = SeqLib.activeId(data), prev = runtime.seqOpen;
+  runtime.seqOpen = next;
+  runtime.seqBack = null;
+  if (!prev || prev === next) return;
+  runtime.seqUndo.set(prev, { undo: runtime.undo.slice(), redo: runtime.redo.slice(), time: state.time, sel: state.selId,
+    // the steps only fit the timeline they were taken on: an agent may edit it while it waits
+    fp: JSON.stringify(project.clips.map(serializeClip)) });
+  const back = runtime.seqUndo.get(next);
+  const fits = back && back.fp === JSON.stringify(data.clips || []);
+  runtime.undo.splice(0, runtime.undo.length, ...(fits ? back.undo : []));
+  runtime.redo.splice(0, runtime.redo.length, ...(fits ? back.redo : []));
+  runtime.seqBack = back || null;
+}
+/** Open sequence `id` in the editor. False when it can't be opened now. */
+function openSequence(id) {
+  if (state.exporting) { toast("Wait for the export to finish before opening another sequence"); return false; }
+  if (state.gesture) return false;
+  if (state.compCtx) exitComp(state.compCtx.path.length);
+  if (SeqLib.activeId(project) === id) return true;
+  if (state.playing) pause();
+  const doc = projectJSONHere();
+  try { SeqLib.open(doc, id); } catch (e) { toast(e.message); return false; }
+  applyProject(doc);
+  const back = runtime.seqBack;
+  runtime.seqBack = null;
+  const sel = back && back.sel && getClip(back.sel);
+  setSelection(sel ? [...withLinked([sel])].map((c) => c.id) : []);
+  setTime(back ? back.time : 0);
+  syncCompCrumb();
+  scheduleSave();
+  return true;
+}
+/** Add a sequence ({name?, from?, width?, height?}) and open it. */
+function newSequence(opts) {
+  if (state.exporting) { toast("Wait for the export to finish"); return; }
+  if (state.compCtx) exitComp(state.compCtx.path.length);
+  const doc = projectJSONHere();
+  let s;
+  try { s = SeqLib.add(doc, opts); } catch (e) { toast(e.message); return; }
+  project.sequences = doc.sequences; project.sequence = doc.sequence;
+  if (openSequence(s.id)) toast(`New sequence “${s.name}” · ${s.width}×${s.height}`);
+}
+function renameSequence(id, name) {
+  const r = seqRoot();
+  try { SeqLib.rename(r, id, name); } catch (e) { toast(e.message); return; }
+  if (!r.sequences) { r.sequences = null; r.sequence = null; }
+  syncCompCrumb(); scheduleSave();
+}
+/** Delete a sequence — after keeping the project as it is now as a version, when the server is there. */
+async function deleteSequence(id) {
+  const r = seqRoot(), s = SeqLib.find(r, id);
+  if (!s || SeqLib.entries(r).length < 2) return;
+  if (state.exporting) { toast("Wait for the export to finish"); return; }
+  if (state.compCtx) exitComp(state.compCtx.path.length);
+  let kept = null;
+  if (state.connected) {
+    if (!(await flushSaveBeforeSwitch())) return;
+    try {
+      const res = await fetch("/api/versions", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "save", name: `Before deleting the sequence “${s.name}”`.slice(0, 120) }) });
+      if (res.ok) kept = (await res.json()).version;
+    } catch { }
+  }
+  const wasOpen = SeqLib.activeId(project) === id;
+  const doc = projectJSONHere();
+  try { SeqLib.remove(doc, id); } catch (e) { toast(e.message); return; }
+  if (wasOpen) {
+    applyProject(doc);
+    const back = runtime.seqBack;
+    runtime.seqBack = null;
+    setSelection([]);
+    setTime(back ? back.time : 0);
+  } else { project.sequences = doc.sequences || null; project.sequence = doc.sequence || null; }
+  runtime.seqUndo.delete(id);
+  syncCompCrumb(); scheduleSave();
+  toast(`Deleted the sequence “${s.name}”` + (kept ? ` · it is kept in version v${kept.v} (Projects → Versions)` : ""));
+}
+function syncSequenceButton() {
+  const b = $("btnSequences");
+  if (!b) return;
+  const n = SeqLib.entries(seqRoot()).length;
+  b.querySelector(".seq-name").textContent = openSequenceName();
+  b.querySelector(".seq-count").textContent = n > 1 ? String(n) : "";
+  b.title = `Sequence: ${openSequenceName()}${n > 1 ? ` (one of ${n})` : ""} — open another one, or add, duplicate, rename`;
+}
+/** The sequence menu: the project's sequences (click one to open it), then what to do with them. */
+function showSequenceMenu(x, y) {
+  hideTrackCtxMenu();
+  const menu = document.createElement("div");
+  menu.className = "ctx-menu seq-menu";
+  const r = seqRoot(), openId = SeqLib.activeId(r);
+  const rows = SeqLib.list(r), open = rows.find((row) => row.active);
+  const item = (html, run, why, keepOpen) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "ctx-item"; b.innerHTML = html;
+    if (why) { b.disabled = true; b.title = why; } else b.addEventListener("click", () => { if (!keepOpen) hideTrackCtxMenu(); run(b); });
+    menu.appendChild(b);
+    return b;
+  };
+  const sep = () => { const d = document.createElement("div"); d.className = "ctx-sep"; menu.appendChild(d); };
+  for (const row of rows) {
+    // the open one's live numbers are on the timeline (or the root, while a comp is open)
+    const w = row.active ? r.width : row.width, h = row.active ? r.height : row.height;
+    const len = row.active ? (state.compCtx ? row.duration : projDur()) : row.duration;
+    const b = item(`<span class="seq-check">${row.active ? "✓" : ""}</span><span class="seq-row-name">${escapeHtml(row.name)}</span><kbd>${w}×${h} · ${fmt(len)}</kbd>`,
+      () => openSequence(row.id));
+    if (row.active) b.classList.add("on");
+  }
+  sep();
+  item(`<span>New sequence…</span>`, () => promptNewSequence(x, y));
+  item(`<span>Duplicate “${escapeHtml(open.name)}”</span>`, () => newSequence({ from: "open" }));
+  item(`<span>Rename “${escapeHtml(open.name)}”…</span>`, () => promptBinText(x, y, "Sequence name", open.name, (v) => renameSequence(openId, v), { max: 120, ok: "Rename" }));
+  item(`<span>Delete “${escapeHtml(open.name)}”…</span>`, (b) => {
+    if (b.dataset.armed !== "1") { b.dataset.armed = "1"; b.querySelector("span").textContent = "Click again to delete it"; return; }
+    hideTrackCtxMenu();
+    deleteSequence(openId);
+  }, rows.length < 2 ? "A project keeps at least one sequence" : null, true);
+  showPopover(menu, x, y);
+}
+/** New sequence: a name, a canvas, and whether it starts empty or as a copy of the open one. */
+function promptNewSequence(x, y) {
+  const pop = document.createElement("div");
+  pop.className = "ctx-menu bin-pop seq-new";
+  const n = SeqLib.entries(seqRoot()).length + 1;
+  const sizes = [{ label: `Same as “${openSequenceName()}” · ${project.width}×${project.height}`, w: 0, h: 0 }, ...ASPECT_PRESETS];
+  pop.innerHTML = `<label class="bin-pop-label" for="seqNewName">New sequence</label>
+    <input type="text" class="bin-pop-input" id="seqNewName" maxlength="120" spellcheck="false">
+    <label class="bin-pop-label" for="seqNewSize">Canvas</label>
+    <select id="seqNewSize" class="bin-pop-input">${sizes.map((s, i) => `<option value="${i}">${escapeHtml(s.label)}</option>`).join("")}</select>
+    <label class="seq-new-copy"><input type="checkbox" id="seqNewCopy"> Start from a copy of “${escapeHtml(openSequenceName())}”</label>
+    <div class="bin-pop-hint">Media and compositions are shared by every sequence. Each has its own timeline, canvas, frame rate, mix and delivery settings.</div>
+    <div class="bin-pop-btns"><button type="button" class="btn tiny" data-cancel>Cancel</button><button type="button" class="btn tiny accent" data-ok>Create</button></div>`;
+  pop.querySelector("#seqNewName").value = `Sequence ${n}`;
+  const ok = () => {
+    const name = pop.querySelector("#seqNewName").value.trim();
+    const size = sizes[+pop.querySelector("#seqNewSize").value] || sizes[0];
+    const copy = pop.querySelector("#seqNewCopy").checked;
+    hideTrackCtxMenu();
+    newSequence({ name: name || undefined, from: copy ? "open" : "empty", ...(size.w ? { width: size.w, height: size.h } : {}) });
+  };
+  pop.querySelector("[data-ok]").addEventListener("click", ok);
+  pop.querySelector("[data-cancel]").addEventListener("click", () => hideTrackCtxMenu());
+  pop.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && e.target.tagName !== "SELECT") { e.preventDefault(); ok(); }
+    else if (e.key === "Escape") { e.preventDefault(); hideTrackCtxMenu(); }
+    e.stopPropagation();
+  });
+  showPopover(pop, x, y);
+  const input = pop.querySelector("#seqNewName");
+  input.focus(); input.select();
+}
+function initSequencesUi() {
+  const b = $("btnSequences");
+  if (!b || b.dataset.wired) return;
+  b.dataset.wired = "1";
+  b.addEventListener("click", () => { const rc = b.getBoundingClientRect(); showSequenceMenu(rc.left, rc.bottom + 4); });
+  syncSequenceButton();
 }
 
 /* ── Making comps ── */

@@ -18,6 +18,7 @@
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
+const SeqLib = require("./sequences");
 
 const KINDS = ["manual", "auto", "agent", "restore"];
 const MAX_NAME = 120, MAX_NOTE = 2000;
@@ -32,8 +33,12 @@ const timelineEnd = (doc) => (Array.isArray(doc.clips) ? doc.clips : [])
   .reduce((m, c) => Math.max(m, (+c.start || 0) + (+c.duration || 0)), 0);
 const fmtDur = (s) => { const t = Math.round(s); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`; };
 
-/* What changed from document a (older) to b (newer), for people and agents. */
-function diffDocs(a, b) {
+/* What changed from document a (older) to b (newer), for people and agents.
+   With several sequences, each one's timeline is compared with the same
+   sequence in the other document, whichever was open in either. */
+const TIMELINE_SETTINGS = ["width", "height", "fps", "background", "inPoint", "outPoint"];
+const TIMELINE_LISTS = ["tracks", "markers", "master", "buses", "delivery", "outputs", "exportFrame"];
+function timelineDiff(a, b) {
   const byId = (arr) => new Map((Array.isArray(arr) ? arr : []).filter((x) => x && x.id).map((x) => [x.id, x]));
   const label = (c) => `${c.name ? `"${c.name}"` : c.kind || "clip"} (${c.id})`;
   const ca = byId(a.clips), cb = byId(b.clips);
@@ -58,28 +63,68 @@ function diffDocs(a, b) {
     if (!what.length) what.push("other fields");
     changed.push({ id, name: cn.name || null, kind: cn.kind, what });
   }
-  const ma = byId(a.media), mb = byId(b.media);
-  const mediaAdded = [...mb.values()].filter((m) => !ma.has(m.id)), mediaRemoved = [...ma.values()].filter((m) => !mb.has(m.id));
   const settings = [];
-  for (const k of ["name", "width", "height", "fps", "background", "inPoint", "outPoint"])
+  for (const k of TIMELINE_SETTINGS)
     if ((a[k] ?? null) !== (b[k] ?? null)) settings.push(`${k} ${JSON.stringify(a[k] ?? null)}→${JSON.stringify(b[k] ?? null)}`);
-  for (const k of ["tracks", "markers", "comps", "master", "buses", "delivery", "outputs", "exportFrame", "collections", "folders"])
+  for (const k of TIMELINE_LISTS)
     if (JSON.stringify(a[k] ?? null) !== JSON.stringify(b[k] ?? null)) settings.push(k);
   const lenA = timelineEnd(a), lenB = timelineEnd(b);
   const lines = [];
   if (added.length) lines.push(`${added.length} clip(s) added: ${added.slice(0, 8).map(label).join(", ")}${added.length > 8 ? ", …" : ""}`);
   if (removed.length) lines.push(`${removed.length} clip(s) removed: ${removed.slice(0, 8).map(label).join(", ")}${removed.length > 8 ? ", …" : ""}`);
   if (changed.length) lines.push(`${changed.length} clip(s) changed: ${changed.slice(0, 8).map((c) => `${label(c)} ${c.what.join("/")}`).join("; ")}${changed.length > 8 ? "; …" : ""}`);
-  if (mediaAdded.length || mediaRemoved.length) lines.push(`media ${mediaAdded.length ? "+" + mediaAdded.length : ""}${mediaAdded.length && mediaRemoved.length ? " " : ""}${mediaRemoved.length ? "−" + mediaRemoved.length : ""}`);
   if (Math.abs(lenA - lenB) > 0.005) lines.push(`length ${fmtDur(lenA)} → ${fmtDur(lenB)}`);
-  if (settings.length) lines.push(`project: ${settings.join(", ")}`);
+  return { added, removed, changed, settings, lines };
+}
+function diffDocs(a, b) {
+  const brief = (c) => ({ id: c.id, name: c.name || null, kind: c.kind });
+  const byId = (arr) => new Map((Array.isArray(arr) ? arr : []).filter((x) => x && x.id).map((x) => [x.id, x]));
+  const ma = byId(a.media), mb = byId(b.media);
+  const mediaAdded = [...mb.values()].filter((m) => !ma.has(m.id)), mediaRemoved = [...ma.values()].filter((m) => !mb.has(m.id));
+  // the project's own settings; the canvas, IN / OUT, tracks, mix and delivery belong to a sequence
+  const renamed = (a.name ?? null) !== (b.name ?? null) ? [`name ${JSON.stringify(a.name ?? null)}→${JSON.stringify(b.name ?? null)}`] : [];
+  const shared = ["comps", "collections", "folders"].filter((k) => JSON.stringify(a[k] ?? null) !== JSON.stringify(b[k] ?? null));
+  const project = [...renamed, ...shared];
+  const several = SeqLib.entries(a).length > 1 || SeqLib.entries(b).length > 1;
+  const lines = [];
+  let main, settings;
+  const sequences = [];
+  if (!several) {
+    main = timelineDiff(a, b);
+    settings = [...renamed, ...main.settings, ...shared];
+    lines.push(...main.lines.filter((l) => !l.startsWith("length ")));
+    if (mediaAdded.length || mediaRemoved.length) lines.push(mediaLine(mediaAdded, mediaRemoved));
+    lines.push(...main.lines.filter((l) => l.startsWith("length ")));
+    if (settings.length) lines.push(`project: ${settings.join(", ")}`);
+  } else {
+    // each sequence against itself; the clip lists returned are the newer document's open sequence
+    const view = (doc, id) => SeqLib.open(JSON.parse(JSON.stringify(doc)), id);
+    const ea = new Map(SeqLib.entries(a).map((x) => [x.id, x])), eb = new Map(SeqLib.entries(b).map((x) => [x.id, x]));
+    const openB = SeqLib.activeId(b);
+    settings = project.slice();
+    for (const [id, s] of eb) {
+      if (!ea.has(id)) { lines.push(`sequence "${s.name}" added`); sequences.push({ id, name: s.name, added: true }); continue; }
+      const d = timelineDiff(view(a, id), view(b, id));
+      const nameOld = ea.get(id).name;
+      if (nameOld !== s.name) d.lines.unshift(`renamed from "${nameOld}"`);
+      if (d.settings.length) d.lines.push(`settings: ${d.settings.join(", ")}`);
+      if (id === openB) { main = d; settings.push(...d.settings); }
+      if (d.lines.length) { lines.push(...d.lines.map((l) => `"${s.name}": ${l}`)); sequences.push({ id, name: s.name, lines: d.lines }); }
+    }
+    for (const [id, s] of ea) if (!eb.has(id)) { lines.push(`sequence "${s.name}" removed`); sequences.push({ id, name: s.name, removed: true }); }
+    if (SeqLib.activeId(a) !== openB && ea.has(openB)) lines.push(`open sequence "${ea.get(SeqLib.activeId(a))?.name || SeqLib.activeId(a)}" → "${eb.get(openB).name}"`);
+    if (!main) main = timelineDiff({ clips: [] }, view(b, openB));
+    if (mediaAdded.length || mediaRemoved.length) lines.push(mediaLine(mediaAdded, mediaRemoved));
+    if (project.length) lines.push(`project: ${project.join(", ")}`);
+  }
   return {
     same: !lines.length, lines,
-    added: added.map((c) => ({ id: c.id, name: c.name || null, kind: c.kind })),
-    removed: removed.map((c) => ({ id: c.id, name: c.name || null, kind: c.kind })),
-    changed, mediaAdded: mediaAdded.map((m) => m.id), mediaRemoved: mediaRemoved.map((m) => m.id), settings,
+    added: main.added.map(brief), removed: main.removed.map(brief),
+    changed: main.changed, mediaAdded: mediaAdded.map((m) => m.id), mediaRemoved: mediaRemoved.map((m) => m.id), settings,
+    ...(several ? { sequences } : {}),
   };
 }
+const mediaLine = (added, removed) => `media ${added.length ? "+" + added.length : ""}${added.length && removed.length ? " " : ""}${removed.length ? "−" + removed.length : ""}`;
 
 function createHistory({ projects, autoMinutes = 10, keepAuto = 30 }) {
   const dir = (pid) => path.join(projects.DIR, pid, "history");

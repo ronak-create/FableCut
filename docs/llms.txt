@@ -79,6 +79,10 @@ about 150 ms. A human and an agent can work the same timeline at once.
   changes, and before an agent edits); compare one with now, restore it (the
   current state is kept as a version first), mark the final cut; backups carry
   every version. Agents use `fablecut_versions`.
+- Sequences: several timelines in one project (a 16:9 and a 9:16 cut,
+  cut-downs, alternatives) sharing its media and compositions, each with its
+  own canvas, frame rate, mix and delivery. Agents add, open and edit them with
+  patch ops (`addSequence`, `inSequence`, `openSequence`).
 - Compositions (nested sequences): a timeline of its own, placed as one clip
   that transforms, masks, grades and blends like a picture while its media
   plays and exports; nests 4 deep, opens on the timeline, precompose a

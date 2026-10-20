@@ -29,10 +29,10 @@
   const api = factory(dep("./audio-fx", "FableCutFx"), dep("./edit-ops", "FableCutEdit"), dep("./color", "FableCutColor"),
     dep("./mask", "FableCutMask"), dep("./tracker", "FableCutTracker"), dep("./motion", "FableCutMotion"),
     dep("./comp", "FableCutComp"), dep("./templates", "FableCutTemplates"), dep("./media-lib", "FableCutMedia"),
-    dep("./delivery", "FableCutDelivery"));
+    dep("./delivery", "FableCutDelivery"), dep("./sequences", "FableCutSeq"));
   if (node) module.exports = api;
   else root.FableCutProjectOps = api;
-})(typeof self !== "undefined" ? self : this, function (FX, EditOps, Color, Mask, Tracker, Motion, CompLib, Templates, MediaLib, Delivery) {
+})(typeof self !== "undefined" ? self : this, function (FX, EditOps, Color, Mask, Tracker, Motion, CompLib, Templates, MediaLib, Delivery, SeqLib) {
   "use strict";
 
   const DEFAULT_TRACKS = EditOps.DEFAULT_TRACKS;
@@ -253,6 +253,7 @@
     // props.shapes (shape layers) and clip.parent: validated like setShape / setParent
     const NO_MEDIA = ["text", "adjust", "shape", "null", "comp"];
     let inCompId = null;   // set while an inComp op runs its ops inside a comp
+    let inSeqId = null;    // set while an inSequence op runs its ops on a sequence that isn't open
     // a comp clip names a comp that exists, and placing it here makes no loop
     const checkCompClip = (c, label) => {
       if (c.kind !== "comp") { if (c.compId != null) throw new Error(`${label}: compId is for kind:"comp" clips`); return; }
@@ -478,6 +479,7 @@
             };
             fit(proj.clips);
             for (const comp of proj.comps || []) fit(comp.clips);
+            for (const seq of SeqLib.others(proj)) fit(seq.clips);
             if (trimmed) note += ` (${trimmed} clip edge${trimmed === 1 ? "" : "s"} trimmed to the new file's ${m.duration}s)`;
           }
           notes.push(note);
@@ -489,6 +491,10 @@
           for (const comp of proj.comps || []) {
             const inner = (comp.clips || []).find((c) => c.mediaId === op.id);
             if (inner) throw new Error(`removeMedia: media ${op.id} is used by clip ${inner.id} in comp ${comp.id}`);
+          }
+          for (const seq of SeqLib.others(proj)) {
+            const inner = (seq.clips || []).find((c) => c.mediaId === op.id);
+            if (inner) throw new Error(`removeMedia: media ${op.id} is used by clip ${inner.id} in sequence ${seq.id}`);
           }
           const n = proj.media.length;
           proj.media = proj.media.filter((x) => x.id !== op.id);
@@ -791,7 +797,7 @@
           const comp = CompLib.getComp(proj, op.id);
           if (!comp) throw new Error("removeComp: no comp " + op.id);
           const used = CompLib.usages(proj, comp.id);
-          if (used.length) throw new Error(`removeComp: ${comp.id} is used by ${used.map((u) => u.clip.id + (u.in ? ` (in ${u.in})` : "")).join(", ")} — remove those clips first`);
+          if (used.length) throw new Error(`removeComp: ${comp.id} is used by ${used.map((u) => u.clip.id + (u.in ? ` (in ${u.in})` : u.sequence ? ` (in sequence ${u.sequence})` : "")).join(", ")} — remove those clips first`);
           proj.comps = proj.comps.filter((c) => c.id !== comp.id);
           notes.push(`-comp ${comp.id}`);
           break;
@@ -1027,8 +1033,55 @@
           notes.push("-" + op.id);
           break;
         }
+        case "addSequence": case "openSequence": case "updateSequence": case "removeSequence": case "inSequence": {
+          // sequences: several timelines in one project; the open one is the top level (see sequences.js)
+          const name = op.op;
+          if (inSeqId && name !== "updateSequence") throw new Error(`${name} can't run inside inSequence — run it on its own`);
+          if (name === "addSequence") {
+            // {op:"addSequence", name?, id?, from?: "empty" | "open" | <id>, width?, height?, fps?, open?} (or those in sequence:{…})
+            const src = op.sequence && typeof op.sequence === "object" ? op.sequence : {};
+            const { op: _op, sequence: _s, open: _o, ...flat } = op;
+            let s;
+            try { s = SeqLib.add(proj, { ...flat, ...src }); } catch (err) { throw new Error(err.message); }
+            notes.push(`+sequence ${s.id} "${s.name}" ${s.width}x${s.height}@${s.fps}${s.clips.length ? ` (${s.clips.length} clips)` : ""}`);
+            if (op.open) { SeqLib.open(proj, s.id); notes.push(`opened ${s.id}`); }
+            break;
+          }
+          const seq = SeqLib.find(proj, op.id || op.sequence);
+          if (!seq) throw new Error(`${name}: no sequence ${op.id || op.sequence} (${SeqLib.entries(proj).map((x) => x.id).join(", ")})`);
+          if (name === "openSequence") {
+            SeqLib.open(proj, seq.id);
+            notes.push(`opened ${seq.id} "${seq.name}"`);
+          } else if (name === "updateSequence") {
+            const set = op.set || {};
+            for (const k of Object.keys(set)) if (!["name", "index"].includes(k))
+              throw new Error(`updateSequence: ${k} can't be set here (name, index) — set the canvas, frame rate and the rest with setProject, inside {op:"inSequence"} for one that isn't open`);
+            try {
+              if (set.name != null) SeqLib.rename(proj, seq.id, set.name);
+              if (set.index != null) SeqLib.move(proj, seq.id, set.index);
+            } catch (err) { throw new Error(`updateSequence: ${err.message}`); }
+            notes.push(`~sequence ${seq.id}`);
+          } else if (name === "removeSequence") {
+            const wasOpen = SeqLib.activeId(proj) === seq.id;
+            try { SeqLib.remove(proj, seq.id); } catch (err) { throw new Error(`removeSequence: ${err.message}`); }
+            notes.push(`-sequence ${seq.id}` + (wasOpen ? ` (opened ${SeqLib.activeId(proj)})` : ""));
+          } else {
+            // {op:"inSequence", sequence, ops:[…]} — run ops on a sequence without opening it
+            if (!Array.isArray(op.ops)) throw new Error("inSequence needs ops:[…]");
+            if (inCompId) throw new Error("inSequence can't run inside inComp");
+            const back = SeqLib.activeId(proj);
+            SeqLib.open(proj, seq.id);
+            inSeqId = seq.id;
+            const n0 = notes.length;
+            try { applyOps(op.ops); }
+            finally { inSeqId = null; SeqLib.open(proj, back); }
+            const inner = notes.splice(n0);
+            notes.push(`${seq.id}{${inner.join(" ")}}`);
+          }
+          break;
+        }
         case "setProject": {
-          const allowed = ["name", "width", "height", "fps", "background", "markers", "disabledTracks", "lockedTracks", "untargetedTracks", "exportFrame", "encodeProfile", "delivery", "outputs", "master", "inPoint", "outPoint"];
+          const allowed =["name", "width", "height", "fps", "background", "markers", "disabledTracks", "lockedTracks", "untargetedTracks", "exportFrame", "encodeProfile", "delivery", "outputs", "master", "inPoint", "outPoint"];
           for (const [k, v] of Object.entries(op.set || {})) {
             if (!allowed.includes(k)) throw new Error(`setProject: '${k}' not settable (allowed: ${allowed.join(", ")})`);
             if ((k === "inPoint" || k === "outPoint") && v != null && (typeof v !== "number" || !Number.isFinite(v) || v < 0))
@@ -1083,7 +1136,8 @@
         default:
           throw new Error("Unknown op: " + op.op + " (addClip|updateClip|removeClip|addMedia|updateMedia|removeMedia|relinkMedia|replaceMedia|setCollection|removeCollection|setProject|setTrack|setBus|removeBus|setFx|setFxKeys|setGrade|setGradeLayer|setMask|removeMask|setMaskKeys|setMatte|removeTrack|setShape|removeShape|setParent|setMotionPath|setTextPath|" +
             "split|rippleDelete|closeGap|lift|extract|rippleTrim|roll|slip|slide|insert|overwrite|crossfade|" +
-            "addComp|updateComp|removeComp|precompose|inComp|applyPreset|addTemplate|setTemplate|savePreset|saveTemplate)");
+            "addComp|updateComp|removeComp|precompose|inComp|applyPreset|addTemplate|setTemplate|savePreset|saveTemplate|" +
+            "addSequence|openSequence|updateSequence|removeSequence|inSequence)");
       }
     } };
     applyOps(ops);
@@ -1140,6 +1194,8 @@
       (doc.untargetedTracks?.length ? ` untargetedTracks:[${doc.untargetedTracks.join(",")}]` : "") +
       (doc.disabledTracks?.length ? ` disabledTracks:[${doc.disabledTracks.join(",")}]` : ""),
       ...mixLine(doc),
+      ...(SeqLib.entries(doc).length > 1 ? [`SEQUENCES (${SeqLib.entries(doc).length}) — this view is the open one; edit another with {op:"inSequence", sequence, ops:[…]} or open it with openSequence:`,
+        ...SeqLib.list(doc).map((r) => "  " + SeqLib.describe(r))] : []),
       `MEDIA (${doc.media.length}):`,
       ...(() => {
         const uses = MediaLib.usageCounts(doc);
@@ -1209,9 +1265,12 @@
         seen.add(comp.id);
       }
     }
-    // the same checks for clips on the timeline and clips inside comps
-    const checkClip = (c, where) => {
-      const at = where ? `comp ${where}: ` : "";
+    if (doc.sequences != null || doc.sequence != null) {
+      try { SeqLib.normalize(doc); } catch (err) { throw new Error(err.message); }
+    }
+    // the same checks for clips on the timeline, inside comps and in the sequences that aren't open
+    const checkClip = (c, where, seq) => {
+      const at = where ? `comp ${where}: ` : seq ? `sequence ${seq}: ` : "";
       if (!c.id || !c.track || typeof c.start !== "number" || typeof c.duration !== "number")
         throw new Error(`${at}clip ${c.id || "?"} needs id, track, numeric start and duration`);
       if (!["text", "adjust", "shape", "null", "comp"].includes(c.kind) && !doc.media.some((m) => m.id === c.mediaId))
@@ -1227,6 +1286,7 @@
     };
     for (const c of doc.clips) checkClip(c, null);
     for (const comp of doc.comps || []) for (const c of comp.clips) checkClip(c, comp.id);
+    for (const seq of SeqLib.others(doc)) for (const c of seq.clips || []) checkClip(c, null, seq.id);
   }
 
   const TEXT_ONLY_NOTE = [

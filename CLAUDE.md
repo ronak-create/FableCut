@@ -21,7 +21,7 @@ Every Claude Code session then has these tools:
 - `fablecut_get_project` / `fablecut_set_project` — read / replace the timeline JSON.
   `fablecut_get_project {compact:true}` returns a one-line-per-clip summary instead.
 - `fablecut_patch_project` — apply targeted ops (add/update/remove clip/media,
-  set project fields) without round-tripping the document. **Prefer this for edits.**
+  set project fields, add and open sequences) without round-tripping the document. **Prefer this for edits.**
 - `fablecut_import_media` — copy a local file (or download an `https://` URL)
   into `./media/` and register it. The stored `src` is always `/media/…`.
 - `fablecut_analyze_reference` — turn a reference video into an edit blueprint
@@ -301,6 +301,8 @@ Examples in `library/svg/`: `sparkles.svg` (loop), `lower-third.svg`,
   // ^ optional — Project-bin collections: media grouped across folders; see "Media management"
   "comps": [ { "id": "lt", "name": "Lower third", "width": 1280, "height": 720, "duration": 5, "clips": [ /* … */ ] } ],
   // ^ optional — compositions (nested sequences), placed with kind:"comp" clips; see "Compositions (nested sequences)"
+  "sequence": "main", "sequences": [ { "id": "main", "name": "Main" }, { "id": "seq_v9", "name": "Reel 9:16", "width": 1080, "height": 1920, "clips": [ /* … */ ] } ],
+  // ^ optional — several timelines in one project; the open one is this top level; see "Sequences"
   // ^ optional — submix buses B1…B8: name, gain (dB), pan, mute, fx; tracks route in with `out`
   "media": [
     { "id": "m_abc", "name": "intro.mp4", "kind": "video",  // video|audio|image|svg
@@ -1640,6 +1642,80 @@ Recipes: **try a bold alternative** — save a version, make the change, compare
 and restore if the user prefers the old one; **client rounds** — save "Round 1",
 "Round 2", … with the feedback in the note, mark the approved one final;
 **what did the agent do?** — `diff` against the "Before agent edits" version.
+
+### Sequences
+
+A project can hold several **sequences**: timelines of their own that share
+the project's media, folders, collections and compositions. Typical uses: a
+16:9 cut and a 9:16 cut of the same edit, a 30 s and a 15 s version, a client
+cut beside an alternative, or a stringout of selects next to the edit. A
+project with one sequence (every project, until you add one) is exactly the
+document described above.
+
+**The open sequence is the document's top level.** `clips`, `tracks`,
+`markers`, `inPoint` / `outPoint`, the canvas (`width`, `height`, `fps`,
+`background`, `exportFrame`), the mix (`master`, `buses`), the track switches
+and the delivery settings (`delivery`, `outputs`, `encodeProfile`) are the open
+sequence's. Every tool, op, export and the compact view work on them, as
+always. The others wait in `sequences`, each with its own copy of those keys:
+
+```jsonc
+"sequence": "main",                          // the open one
+"sequences": [
+  { "id": "main", "name": "Main" },          // the open one: its timeline is the top level
+  { "id": "seq_v9", "name": "Reel 9:16", "width": 1080, "height": 1920, "fps": 30,
+    "clips": [ /* … */ ], "tracks": [ /* … */ ], "markers": [ /* … */ ], "delivery": { "preset": "instagram-reels" } }
+]
+```
+
+Opening another sequence parks the top-level keys in the open one's entry and
+brings the other's up, with a new `revision` — like any edit. A clip in a
+sequence that isn't open still counts: its media shows "used" in the bin,
+can't be removed while it is there (`removeMedia` and **Remove from project**
+refuse and name the sequence), and **Replace file…** trims it too; a comp it
+places can't be removed either. A project with one sequence named Main has
+neither key.
+
+In the editor: the **sequence menu** at the left of the timeline toolbar (it
+shows the open sequence's name, and how many there are) lists them — click one
+to open it — and has **New sequence…** (a name, a canvas — the same as the open
+one, or 16:9, 9:16, 4:5, 1:1 — and, optionally, a copy of the open sequence's
+timeline to start from), **Duplicate**, **Rename…** and **Delete…** (click
+twice; the project is first kept as a version, so a deleted sequence can be
+restored from **Projects → Versions**). For the session each sequence keeps its
+own undo history, playhead and selection. The Export dialog, the Mixer, IN /
+OUT and the canvas settings all belong to the open sequence. **Find timeline
+instances** lists placements in other sequences too; clicking one opens its
+sequence.
+
+**Agents** (`fablecut_patch_project`):
+
+- `{op:"addSequence", name?, id?, from?, width?, height?, fps?, open?:true}` —
+  `from:"empty"` (default; the open sequence's canvas and frame rate, no clips),
+  `"open"` (a copy of the open sequence's timeline) or a sequence id (a copy of
+  that one). `width` / `height` / `fps` change the copy's canvas: the clips keep
+  their positions relative to the centre, and an `exportFrame` is dropped.
+- `{op:"inSequence", sequence, ops:[…]}` runs ops on a sequence **without
+  opening it**: clip and timeline ops, `setProject` (its canvas, markers, IN /
+  OUT, delivery), `setTrack`, `setBus`, `setFx` on its tracks — anything but the
+  other sequence ops. The user's editor stays where it is.
+- `{op:"openSequence", id}` changes what the user's editor shows, and what
+  `fablecut_export`, `fablecut_frame {time}` and `fablecut_scopes` render: do it
+  when the user asked, or to export that sequence.
+- `{op:"updateSequence", id, set:{name?, index?}}` renames or reorders one;
+  `{op:"removeSequence", id}` deletes one (only when asked; the last one stays,
+  and deleting the open one opens its neighbour).
+- The compact view and `fablecut_status` list every sequence (id, name,
+  canvas, clips, length, which is open). A version's **Compare** reports each
+  sequence's changes on its own, sequences added and removed, and which one
+  was open.
+
+Recipes: **vertical cut of a finished edit** — `addSequence {name:"Reel 9:16",
+from:"open", width:1080, height:1920}`, then `inSequence` ops to re-position
+or re-scale the shots and `setProject {delivery:"instagram-reels"}` in it;
+**cut-downs** — duplicate the edit as "30 s" and "15 s" and tighten each with
+the trim ops inside `inSequence`; **selects reel** — an empty sequence the
+user drops favourite takes on, cut into the edit from the Source monitor.
 
 ### Semantics
 

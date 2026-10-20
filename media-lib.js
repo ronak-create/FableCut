@@ -140,7 +140,7 @@
    *  inside every composition. Sorted main timeline first, then by time. */
   function placements(doc, mediaId) {
     const out = [];
-    const scan = (clips, comp) => {
+    const scan = (clips, comp, seq) => {
       const groups = new Map();
       for (const c of clips || []) {
         if (c.mediaId !== mediaId) continue;
@@ -150,11 +150,21 @@
         if (!prev || (prev.kind !== "video" && c.kind === "video")) groups.set(key, c);
       }
       for (const c of groups.values())
-        out.push({ clipId: c.id, comp: comp ? comp.id : null, compName: comp ? comp.name : null, track: c.track, start: +c.start || 0, duration: +c.duration || 0, kind: c.kind });
+        out.push({ clipId: c.id, comp: comp ? comp.id : null, compName: comp ? comp.name : null, track: c.track, start: +c.start || 0, duration: +c.duration || 0, kind: c.kind,
+          ...(seq ? { sequence: seq.id, sequenceName: seq.name || seq.id } : {}) });
     };
     scan(doc && doc.clips, null);
     for (const comp of (doc && doc.comps) || []) scan(comp.clips, comp);
-    return out.sort((a, b) => (a.comp ? 1 : 0) - (b.comp ? 1 : 0) || String(a.comp || "").localeCompare(String(b.comp || "")) || a.start - b.start);
+    for (const seq of otherSequences(doc)) scan(seq.clips, null, seq);
+    const rank = (p) => (p.sequence ? 2 : p.comp ? 1 : 0);
+    return out.sort((a, b) => rank(a) - rank(b) || String(a.sequence || "").localeCompare(String(b.sequence || "")) ||
+      String(a.comp || "").localeCompare(String(b.comp || "")) || a.start - b.start);
+  }
+  /** The sequences that aren't open (see sequences.js): their clips use media too. */
+  function otherSequences(doc) {
+    const list = doc && Array.isArray(doc.sequences) ? doc.sequences : [];
+    const act = list.some((x) => x.id === doc.sequence) ? doc.sequence : list[0] && list[0].id;
+    return list.filter((x) => x && x.id !== act && Array.isArray(x.clips));
   }
   /** mediaId → number of placements (see placements()). */
   function usageCounts(doc) {
@@ -173,6 +183,7 @@
     };
     scan(doc && doc.clips);
     for (const comp of (doc && doc.comps) || []) scan(comp.clips);
+    for (const seq of otherSequences(doc)) scan(seq.clips);
     return n;
   }
 

@@ -109,6 +109,11 @@ const PAGES = [
     parts: [["project.json schema", "Versions"]],
   },
   {
+    slug: "sequences", nav: "Sequences", title: "Sequences", group: "The timeline",
+    lede: "Several timelines in one project — a 16:9 and a 9:16 cut, cut-downs, alternatives — sharing its media and compositions, each with its own canvas, mix and delivery settings.",
+    parts: [["project.json schema", "Sequences"]],
+  },
+  {
     slug: "editing", nav: "Editing rules", title: "Editing rules", group: "The timeline",
     lede: "How tracks, links, locks, targeting and the trim tools behave, for people and agents alike.",
     parts: [["project.json schema", "Semantics"]],

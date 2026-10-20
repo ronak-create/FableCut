@@ -76,11 +76,15 @@
     if (parentId === childId) return true;
     return usedComps(doc, childId).has(parentId);
   }
-  /** Where comp `id` is used: [{in: compId | null (main), clip}] */
+  /** Where comp `id` is used: [{in: compId | null (a timeline), clip, sequence?}] — the open
+   *  timeline, other comps, and the sequences that aren't open (see sequences.js). */
   function usages(doc, id) {
     const out = [];
     for (const c of doc.clips || []) if (c.kind === "comp" && c.compId === id) out.push({ in: null, clip: c });
     for (const comp of doc.comps || []) for (const c of comp.clips || []) if (c.kind === "comp" && c.compId === id) out.push({ in: comp.id, clip: c });
+    const seqs = Array.isArray(doc.sequences) ? doc.sequences : [];
+    const act = seqs.some((s) => s.id === doc.sequence) ? doc.sequence : seqs[0] && seqs[0].id;
+    for (const s of seqs) if (s && s.id !== act) for (const c of s.clips || []) if (c.kind === "comp" && c.compId === id) out.push({ in: null, sequence: s.id, clip: c });
     return out;
   }
 
