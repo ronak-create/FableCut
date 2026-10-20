@@ -317,7 +317,7 @@ function createProjects({ dataDir, projectFile, libraryDir }) {
     }
   }
 
-  return { DIR, INDEX, TEMPLATES, activeId, peekActive, list, open, create, duplicate, update, archive, remove, importDoc,
+  return { DIR, INDEX, TEMPLATES, activeId, peekActive, mustExist, readRoot, readDoc, writeDoc, list, open, create, duplicate, update, archive, remove, importDoc,
     templates, saveTemplate, deleteTemplate, setThumb, thumbPath, act };
 }
 

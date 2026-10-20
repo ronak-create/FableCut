@@ -104,6 +104,11 @@ const PAGES = [
     parts: [["project.json schema", "Projects"]],
   },
   {
+    slug: "versions", nav: "Versions", title: "Versions", group: "The timeline",
+    lede: "Saved copies of a project you can compare and go back to, made by you, every few minutes, and before an agent edits; restoring is never destructive, and a backup carries them all.",
+    parts: [["project.json schema", "Versions"]],
+  },
+  {
     slug: "editing", nav: "Editing rules", title: "Editing rules", group: "The timeline",
     lede: "How tracks, links, locks, targeting and the trim tools behave, for people and agents alike.",
     parts: [["project.json schema", "Semantics"]],

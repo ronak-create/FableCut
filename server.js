@@ -48,6 +48,7 @@ const MediaLib = require("./media-lib");
 const { createProxies } = require("./proxy");
 const Delivery = require("./delivery");
 const { createProjects } = require("./projects");
+const { createHistory } = require("./history");
 
 /* Static app files are served from the install dir; everything the user creates
    lives under DATA_DIR. The two are the same unless FABLECUT_DATA_DIR is set. */
@@ -97,14 +98,24 @@ const MIME = {
 };
 
 ensureDirs();
+const projects = createProjects({ dataDir: DATA_DIR, projectFile: PROJECT_FILE, libraryDir: LIBRARY_DIR });
+const history = createHistory({ projects, autoMinutes: Number(process.env.FABLECUT_AUTO_VERSION_MIN) || 10 });
+/* project.json that can't be read at startup (a crash mid-write by another tool, a
+   bad hand edit): keep it aside and put back the newest good copy. */
+if (fs.existsSync(PROJECT_FILE)) {
+  try { JSON.parse(fs.readFileSync(PROJECT_FILE, "utf8").replace(/^﻿/, "")); }
+  catch (e) {
+    const r = history.recover(PROJECT_FILE);
+    console.warn(`  ⚠ project.json could not be read (${e.message}); kept as ${path.basename(r.aside)}` +
+      (r.recovered ? ` and restored from ${r.from}` : " — starting a new project"));
+  }
+}
 if (!fs.existsSync(PROJECT_FILE)) {
   fs.writeFileSync(PROJECT_FILE, JSON.stringify({
     name: "Untitled Project", width: 1280, height: 720, fps: 30,
     revision: 0, media: [], clips: [],
   }, null, 2));
 }
-
-const projects = createProjects({ dataDir: DATA_DIR, projectFile: PROJECT_FILE, libraryDir: LIBRARY_DIR });
 
 /* ── SSE clients + file watching ── */
 const sseClients = new Set();
@@ -612,12 +623,52 @@ const server = http.createServer(async (req, res) => {
     try { a = JSON.parse((await readBody(req)).toString("utf8") || "{}"); }
     catch { sendJSON(res, 400, { error: "body must be JSON {action, …}" }); return; }
     try {
-      const out = projects.act(a);
+      // a backup file (a project with its versions) imports through history.js
+      const out = a.action === "import" && a.project?.fablecut === "backup" ? history.importBackup(a.project, a) : projects.act(a);
       broadcast("projects", JSON.stringify({ action: a.action, id: out.id || a.id || null, active: projects.activeId() }));
       // opening, or renaming the open project, rewrites ./project.json: reload the tabs now, watcher or not
       if (out.from || ((a.action === "update" || a.action === "rename") && out.project?.active)) onFsChange();
       sendJSON(res, 200, out);
     } catch (e) { sendJSON(res, /^no (project|saved template)/.test(e.message) ? 404 : 400, { error: e.message }); }
+    return;
+  }
+  /* API: versions (history.js) — GET ?project= lists them (default: the open project);
+     POST {action, project?, version?, …} saves, restores, compares, renames / marks
+     final, deletes; GET /api/versions/file?project=&version= is one version's document.
+     GET /api/projects/backup?id= is a project with all its versions, as one file. */
+  if (p === "/api/versions" && req.method === "GET") {
+    try { sendJSON(res, 200, history.list(url.searchParams.get("project") || null)); }
+    catch (e) { sendJSON(res, /^no project/.test(e.message) ? 404 : 400, { error: e.message }); }
+    return;
+  }
+  if (p === "/api/versions" && req.method === "POST") {
+    let a;
+    try { a = JSON.parse((await readBody(req)).toString("utf8") || "{}"); }
+    catch { sendJSON(res, 400, { error: "body must be JSON {action, …}" }); return; }
+    try {
+      const out = history.act(a);
+      if (a.action && a.action !== "list" && a.action !== "diff") broadcast("versions", JSON.stringify({ project: out.project, action: a.action }));
+      if (a.action === "restore" && out.project === projects.peekActive()) onFsChange();   // the tabs load the restored document
+      sendJSON(res, 200, out);
+    } catch (e) { sendJSON(res, /^no (project|version)/.test(e.message) ? 404 : 400, { error: e.message }); }
+    return;
+  }
+  if (p === "/api/versions/file" && req.method === "GET") {
+    try {
+      const doc = history.get(url.searchParams.get("project") || null, url.searchParams.get("version"));
+      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store",
+        "Content-Disposition": `attachment; filename="${safeName(doc.name || "project")}-v${String(url.searchParams.get("version")).replace(/\D/g, "")}.json"` });
+      res.end(JSON.stringify(doc, null, 2));
+    } catch (e) { sendJSON(res, /^no (project|version)/.test(e.message) ? 404 : 400, { error: e.message }); }
+    return;
+  }
+  if (p === "/api/projects/backup" && req.method === "GET") {
+    try {
+      const b = history.backup(url.searchParams.get("id") || null);
+      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store",
+        "Content-Disposition": `attachment; filename="${safeName(b.name || "project")}.fablecut-backup.json"` });
+      res.end(JSON.stringify(b));
+    } catch (e) { sendJSON(res, /^no project/.test(e.message) ? 404 : 400, { error: e.message }); }
     return;
   }
   if (p === "/api/projects/thumb" && (req.method === "GET" || req.method === "PUT")) {
@@ -1321,6 +1372,15 @@ const server = http.createServer(async (req, res) => {
   if (!file.startsWith(ROOT + path.sep)) { res.writeHead(403); res.end(); return; }
   serveFile(req, res, file);
 });
+
+/* Auto-save versions of the open project while it changes (every FABLECUT_AUTO_VERSION_MIN
+   minutes at most, default 10), whoever edits it: the editor, an agent, a script. */
+setInterval(() => {
+  try {
+    const v = history.maybeAuto();
+    if (v) broadcast("versions", JSON.stringify({ project: projects.peekActive(), action: "auto" }));
+  } catch { }
+}, 60_000).unref();
 
 server.listen(PORT, HOST, () => {
   console.log(`\n  FableCut running →  http://localhost:${PORT}\n`);

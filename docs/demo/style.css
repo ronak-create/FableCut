@@ -4261,3 +4261,40 @@ input[type="range"].cq-hue {
   .pj-body { flex-direction: column; }
   .pj-side { width: auto; border-left: 0; border-top: 1px solid var(--border); max-height: 50%; }
 }
+
+/* ── Versions (in the Projects dashboard) ── */
+.pj-grid.versions { display: block; }
+.ver-view { display: flex; flex-direction: column; gap: 10px; max-width: 860px; }
+.ver-head { display: flex; align-items: center; gap: 12px; }
+.ver-head h3 { font-size: 14px; color: #fff; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ver-save { display: flex; gap: 6px; flex-wrap: wrap; }
+.ver-save input {
+  background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+  border-radius: 6px; padding: 6px 9px; font: inherit; font-size: 12px; user-select: text;
+}
+.ver-save input:focus, .ver-rename:focus { outline: none; border-color: var(--accent); }
+.ver-save #verName { flex: 1 1 200px; min-width: 0; }
+.ver-save #verNote { flex: 2 1 260px; min-width: 0; }
+.ver-hint { font-size: 11px; margin: 0; }
+.ver-row {
+  border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2);
+  padding: 9px 11px; display: flex; flex-direction: column; gap: 6px;
+}
+.ver-row.final { border-color: #8a6d1f; }
+.ver-main { display: flex; align-items: baseline; gap: 8px; min-width: 0; flex-wrap: wrap; }
+.ver-num { font: 700 11px/1.6 "Segoe UI", sans-serif; color: #cfc8ff; font-variant-numeric: tabular-nums; }
+.ver-name { color: #ececf1; font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 46ch; }
+.ver-rename {
+  background: var(--panel); border: 1px solid var(--border); color: var(--text);
+  border-radius: 5px; padding: 2px 6px; font: inherit; font-size: 12px; width: 32ch; user-select: text;
+}
+.ver-badge { font: 700 10px/1.6 "Segoe UI", sans-serif; padding: 0 6px; border-radius: 4px; background: #2a2a33; color: var(--dim); }
+.ver-badge.final { background: #4a3a10; color: #ffd98a; }
+.ver-meta { font-size: 11px; font-variant-numeric: tabular-nums; margin-left: auto; }
+.ver-note { font-size: 12px; color: #b9b9c2; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ver-diff { margin: 0; padding: 6px 10px 6px 24px; background: #17171b; border-radius: 6px; font-size: 12px; color: #c9c9d1; }
+.ver-diff li { margin: 2px 0; overflow-wrap: anywhere; }
+.ver-actions { display: flex; gap: 5px; flex-wrap: wrap; }
+.ver-actions .btn.tiny { font-size: 11px; }
+.ver-actions .btn:disabled { opacity: .45; cursor: default; }
+a.btn { text-decoration: none; }

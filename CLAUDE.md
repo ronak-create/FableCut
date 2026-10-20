@@ -57,6 +57,8 @@ Every Claude Code session then has these tools:
 - `fablecut_projects` — list, open, create (from a canvas or a saved template),
   duplicate, rename, annotate, archive and delete projects. `./project.json` is
   always the open one. See "Projects" below.
+- `fablecut_versions` — a project's saved versions: save one before big edits, compare
+  a version with now, restore one (never destructive), mark the final cut. See "Versions" below.
 
 ### Token-efficient editing (important for agents)
 
@@ -1566,6 +1568,7 @@ and Relink finds files that moved.
   unless `open:false`.
 - `{action:"duplicate", id, name?, open?}` · `{action:"update", id, name?, notes?, tags?}` ·
   `{action:"archive" | "unarchive" | "delete", id}`.
+- `fablecut_status` also counts the open project's versions; see "Versions" for them.
 - `{action:"templates"}` · `{action:"save_template", id, name}` (the project's
   canvas, tracks, clips and media references) · `{action:"delete_template", template}`.
 - Opening, archiving or deleting changes what the user sees: do it only when
@@ -1576,6 +1579,67 @@ cut, put the brief in `notes`; **house canvas** — build an empty project with
 your tracks, intro and outro, `save_template`, then `new` from it for every
 episode; **park finished work** — `archive` delivered projects to keep the
 list short without deleting anything.
+
+### Versions
+
+Every edit is saved as it happens, and undo covers the session. **Versions** are
+what you come back to later: full copies of a project, kept beside it, that are
+never overwritten. Restoring one is not destructive either — what is there is
+saved as a version first, so a restore can be undone by restoring that.
+
+| path | holds |
+|---|---|
+| `projects/<id>/history/v0007.json` | the project as it was |
+| `projects/<id>/history/v0007.meta.json` | `{v, name, note, kind, created, revision, clips, duration, final}` |
+
+A version's `kind` says where it came from:
+
+| kind | made |
+|---|---|
+| `manual` | by you (**Save version**, **Ctrl/Cmd+S**) or an agent (`fablecut_versions {action:"save"}`) |
+| `auto` | every 10 minutes while the open project changes, whoever changes it (`FABLECUT_AUTO_VERSION_MIN` sets the minutes); the newest 30 are kept |
+| `agent` | before an agent's first edit of a session (again after 10 quiet minutes), and before every `fablecut_set_project` rewrite |
+| `restore` | what was there just before a restore |
+
+One version per project can be marked **final** (the cut that went out); a final
+version can't be deleted until it is unmarked. Manual, agent and restore
+versions are never pruned.
+
+**Compare** tells what changed between a version and now (or two versions):
+clips added, removed and changed (timing, which props, keyframes, effects,
+transitions, source, track), media added and removed, the length, and project
+settings (name, canvas, frame rate, IN / OUT, tracks, markers, comps, mix,
+delivery, …).
+
+**Backup and recovery.** **Download backup** saves a project with all its
+versions as one `.fablecut-backup.json` file; **Import…** in the dashboard brings
+it back, versions included. When `project.json` can't be read as the server
+starts (another tool crashed mid-write, a bad hand edit), the server keeps the
+broken file as `project.corrupt-<time>.json` and puts back the newest good copy:
+the latest version, or the project's last parked copy.
+
+In the editor: **Ctrl/Cmd+S** saves a version of the open project. In the
+Projects dashboard, a project's **Versions…** lists its versions, newest first,
+with **Save version** (name and note), and per version **Compare with now**,
+**Restore…** (click twice), **Mark final**, **Rename**, **Download** and
+**Delete…** (click twice). Esc goes back to the projects.
+
+**Agents** use `fablecut_versions` (or `GET` / `POST /api/versions`):
+
+- `{}` lists the open project's versions (`project` picks another one).
+- `{action:"save", name?, note?, final?}` — **save one before a big or risky
+  change** (a restructure, a remake, a new grade on every shot) and when the user
+  is happy with a cut, so there is a named point to go back to.
+- `{action:"diff", version, to?}` — what changed since that version (to now, or
+  to version `to`). Use it to tell the user what an edit session changed.
+- `{action:"restore", version}` — only when the user asked; then re-read the
+  project. `{action:"update", version, name?, note?, final?}` ·
+  `{action:"delete", version}`.
+
+Recipes: **try a bold alternative** — save a version, make the change, compare,
+and restore if the user prefers the old one; **client rounds** — save "Round 1",
+"Round 2", … with the feedback in the note, mark the approved one final;
+**what did the agent do?** — `diff` against the "Before agent edits" version.
 
 ### Semantics
 
@@ -1794,6 +1858,13 @@ obvious cuts were missed, raise it if motion is being misread as cuts.
   `{template, deleted}` for delete_template · `GET` / `PUT /api/projects/thumb?id=`
   — a project's JPEG thumbnail (1 MB max). SSE event `projects` (`{action, id, active}`) after each
   change. See "Projects".
+- `GET  /api/versions[?project=]` → `{project, versions:[{v, name, note, kind, created, revision, clips, duration,
+  final}]}` (newest first; default the open project) · `POST /api/versions {action, project?, version?, …}` —
+  `save {name?, note?, final?}` → `{project, version}` · `diff {version, to?}` → `{same, lines, added, removed,
+  changed, mediaAdded, mediaRemoved, settings}` · `restore {version}` → `{restored, saved}` · `update {version,
+  name?, note?, final?}` → `{version}` · `delete {version}` → `{deleted}`. `GET /api/versions/file?project=&version=`
+  is that version's document; `GET /api/projects/backup?id=` a project with all its versions (import it with
+  `POST /api/projects {action:"import", project:<the backup>}`). SSE event `versions` (`{project, action}`). See "Versions".
 - `GET  /api/library?dir=sfx|elements|svg|fonts|presets|templates` — list library assets
 - `GET  /api/presets` · `GET /api/templates` — the saved presets / templates, validated (bad files skipped);
   `POST /api/presets {preset}` · `POST /api/templates {template}` — validate one and save it as

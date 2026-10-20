@@ -29,6 +29,7 @@ const EditOps = require("./edit-ops");
 const ProjectOps = require("./project-ops");
 const Denoise = require("./denoise");
 const { createProjects } = require("./projects");
+const { createHistory } = require("./history");
 const Color = require("./color");
 const FrameStats = require("./frame-stats");
 const Mask = require("./mask");
@@ -302,6 +303,22 @@ const TOOLS = [
         tags: { type: "array", items: { type: "string" }, description: "new / update: labels (replaces the list)" },
         open: { type: "boolean", description: "new (default true) / duplicate (default false): open it afterwards" },
         archived: { type: "string", enum: ["exclude", "only", "all"], description: "list: archived projects too, or only them" },
+      },
+    },
+  },
+  {
+    name: "fablecut_versions",
+    description: "A project's version history: saved copies you can go back to, never destructive. Actions: list (default) · save {name?, note?, final?} — keep the project as it is now (do this before big or risky edits, and when the user is happy with a cut) · diff {version, to?} — what changed from that version to now (or to another version): clips added / removed / changed, length, media, settings · restore {version} — put that version back; the current state is saved as a version first, so a restore can itself be undone · update {version, name?, note?, final?} — rename, annotate, or mark the one final cut · delete {version}. project defaults to the open one (fablecut_projects lists ids). Versions are also made on their own: every 10 minutes while the project changes, and before an agent's first edit of a session or a fablecut_set_project rewrite. Restoring changes what the user sees: only when they asked.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["list", "save", "diff", "restore", "update", "delete"], description: "What to do (default list)" },
+        project: { type: "string", description: "The project (p_…); default the open one" },
+        version: { description: "The version: its number (3) or \"v3\"", anyOf: [{ type: "integer" }, { type: "string" }] },
+        to: { description: "diff: compare to this version instead of the current project", anyOf: [{ type: "integer" }, { type: "string" }] },
+        name: { type: "string", description: "save / update: the version's name (default \"Version NN\")" },
+        note: { type: "string", description: "save / update: what this version is (\"client cut, shorter intro\")" },
+        final: { type: "boolean", description: "save / update: mark it the final cut (one per project)" },
       },
     },
   },
@@ -620,6 +637,46 @@ async function projectsTool(args) {
   if (out.from) return `Opened ${describeProject(out.project)}\nThe editor switched to it (${out.from} was saved first). Read it with fablecut_get_project {compact:true} before editing.`;
   return describeProject(out.project);
 }
+/* fablecut_versions: through the editor server, like fablecut_projects. */
+const KIND_LABEL = { manual: "", auto: " (auto)", agent: " (before agent edits)", restore: " (before a restore)" };
+function describeVersion(e) {
+  const when = e.created ? e.created.slice(0, 16).replace("T", " ") : "?";
+  return `v${e.v}${e.final ? " FINAL" : ""} "${e.name}"${KIND_LABEL[e.kind] || ""} — ${when}, ${e.clips} clip(s), ` +
+    `${Math.floor(e.duration / 60)}:${String(Math.round(e.duration % 60)).padStart(2, "0")}, revision ${e.revision}` +
+    (e.note ? `\n    note: ${e.note.length > 300 ? e.note.slice(0, 300) + "…" : e.note}` : "");
+}
+async function versionsTool(args) {
+  if (!(await ensureUIServer())) throw new Error(`the editor server is not running and could not be started on port ${PORT}`);
+  const action = args.action || "list";
+  const r = action === "list"
+    ? await apiJSON("GET", "/api/versions" + (args.project ? "?project=" + encodeURIComponent(args.project) : ""))
+    : await apiJSON("POST", "/api/versions", { ...args, action });
+  if (r.status !== 200) throw new Error(r.body?.error || `versions request failed (${r.status})`);
+  const out = r.body;
+  if (action === "list") return out.versions.length
+    ? [`${out.versions.length} version(s) of ${out.project}, newest first:`, ...out.versions.map(describeVersion)].join("\n")
+    : `No versions of ${out.project} yet. {action:"save", name, note} keeps one.`;
+  if (action === "save") return `Saved ${describeVersion(out.version)}`;
+  if (action === "update") return describeVersion(out.version);
+  if (action === "delete") return `Deleted v${out.deleted}.`;
+  if (action === "restore") return `Restored v${out.restored.v} "${out.restored.name}". What was there is kept as v${out.saved.v} "${out.saved.name}" (restore it to undo). ` +
+    `The editor reloaded; re-read the project (fablecut_get_project {compact:true}) before editing.`;
+  if (action === "diff") return out.same
+    ? `No difference between ${out.from === "current" ? "now" : "v" + String(out.from).replace(/^v/, "")} and ${out.to === "current" ? "now" : "v" + String(out.to).replace(/^v/, "")}.`
+    : [`From v${String(out.from).replace(/^v/, "")} to ${out.to === "current" ? "now" : "v" + String(out.to).replace(/^v/, "")}:`, ...out.lines.map((l) => "- " + l)].join("\n");
+  return JSON.stringify(out);
+}
+/* Before an agent changes the project: a version to go back to. Once per session start
+   (or after 10 quiet minutes), and before every whole-document rewrite. */
+let lastAgentVersion = 0;
+function versionBeforeAgent(rewrite) {
+  if (!rewrite && Date.now() - lastAgentVersion < 10 * 60_000) return;
+  try {
+    const pj = createProjects({ dataDir: DATA_DIR, projectFile: PROJECT_FILE, libraryDir: LIBRARY_DIR });
+    createHistory({ projects: pj }).beforeAgent(rewrite ? "Before an agent rewrote the project" : "Before agent edits");
+    lastAgentVersion = Date.now();
+  } catch { }   // a version is a safety net: never block the edit itself
+}
 async function proxyTool(args) {
   if (!(await ensureUIServer())) throw new Error(`the editor server is not running and could not be started on port ${PORT}`);
   const proj = readProject();
@@ -900,6 +957,8 @@ async function callTool(name, args, attempt = 0) {
       return proxyTool(args);
     case "fablecut_projects":
       return projectsTool(args);
+    case "fablecut_versions":
+      return versionsTool(args);
     case "fablecut_status": {
       const up = await ensureUIServer();
       const proj = readProject();
@@ -957,7 +1016,8 @@ async function callTool(name, args, attempt = 0) {
             const pj = createProjects({ dataDir: DATA_DIR, projectFile: PROJECT_FILE, libraryDir: LIBRARY_DIR });
             if (!pj.peekActive()) return [];
             const { projects: all } = pj.list();
-            return [`Projects: ${all.length} (fablecut_projects lists, opens and creates them; this one is ${pj.peekActive()})`];
+            const nv = createHistory({ projects: pj }).list(pj.peekActive()).versions.length;
+            return [`Projects: ${all.length} (fablecut_projects lists, opens and creates them; this one is ${pj.peekActive()}, with ${nv} saved version(s): fablecut_versions)`];
           } catch { return []; }
         })(),
         `Project file: ${PROJECT_FILE}`,
@@ -1013,6 +1073,7 @@ async function callTool(name, args, attempt = 0) {
         if (base == null && attempt < 3) return callTool(name, args, attempt + 1);
         throw conflict(diskRev);
       }
+      versionBeforeAgent(false);
       proj.revision = readRev + 1;
       writeProject(proj);
       lastReadRevision = proj.revision;
@@ -1045,6 +1106,7 @@ async function callTool(name, args, attempt = 0) {
       // Agents often omit top-level flags they don't know about. Keep panSchema
       // once established so a rewrite that drops pan:0 cannot re-trigger L/R migration.
       if (!(doc.panSchema >= 1) && (cur.panSchema >= 1)) doc.panSchema = 1;
+      versionBeforeAgent(true);
       writeProject(doc);
       lastReadRevision = doc.revision;
       return `Saved (revision ${doc.revision}). ${doc.clips.length} clip(s). The editor UI (if open at ${BASE}) has hot-reloaded.`;

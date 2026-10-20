@@ -115,6 +115,12 @@
     <priority>0.6</priority>
   </url>
   <url>
+    <loc>https://fablecut.space/docs/versions/</loc>
+    <lastmod>2026-10-20</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
     <loc>https://fablecut.space/docs/editing/</loc>
     <lastmod>2026-10-10</lastmod>
     <changefreq>monthly</changefreq>

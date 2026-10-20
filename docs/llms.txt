@@ -75,6 +75,10 @@ about 150 ms. A human and an agent can work the same timeline at once.
   dashboard opens, creates from canvas presets or saved templates, duplicates,
   renames, tags, annotates, archives and deletes them. Agents use
   `fablecut_projects`.
+- Versions: saved copies of a project (by hand, every 10 minutes while it
+  changes, and before an agent edits); compare one with now, restore it (the
+  current state is kept as a version first), mark the final cut; backups carry
+  every version. Agents use `fablecut_versions`.
 - Compositions (nested sequences): a timeline of its own, placed as one clip
   that transforms, masks, grades and blends like a picture while its media
   plays and exports; nests 4 deep, opens on the timeline, precompose a

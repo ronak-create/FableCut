@@ -16,6 +16,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   notes on, archives and deletes them, and imports a project file from
   elsewhere. Media, exports and the library are shared. Agents use the new
   `fablecut_projects` tool; REST `GET` / `POST /api/projects`.
+- **Versions.** Saved copies of a project, never overwritten: **Ctrl/Cmd+S**
+  or **Save version** with a name and note, automatically every 10 minutes
+  while the project changes, and before an agent's first edit or a whole-project
+  rewrite. Compare a version with now (clips added / removed / changed, length,
+  media, settings), restore one (what was there is saved as a version first),
+  mark the final cut. **Download backup** carries every version and imports
+  back; an unreadable `project.json` at startup is kept aside and the newest
+  good copy restored. Agents use the new `fablecut_versions` tool; REST
+  `/api/versions`.
 - **NVIDIA GPU export profiles** `nvenc-h264` and `nvenc-hevc`. They need an
   NVIDIA card and an ffmpeg built with NVENC.
 
@@ -25,6 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   can't decode, and background-removal clips, keep the `<video>` path.
 
 ### Fixed
+- **Ctrl/Cmd+S** no longer also splits at the playhead and opens the browser's
+  Save dialog (it saves a version now).
+- **A relinked or replaced file mixes its new audio** in preview and export
+  (decoded audio was kept per media entry, not per file).
 - **Hardware-encoder profiles pass the export dry run.** It probed a 64×64
   frame, which NVENC refuses; it now uses 256×144 and reports ffmpeg's reason.
 

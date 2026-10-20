@@ -62,6 +62,12 @@ them; every other tool works on the open one (`./project.json`). Switch, archive
 or delete only when the user asks — opening another project changes what they
 see — and re-read the project after a switch.
 
+Before a big or risky change (restructuring the edit, a remake, a new look on
+every shot), save a version with `fablecut_versions {action:"save", name, note}`
+so the user has a named point to go back to; when they are happy with a cut,
+save one too. `{action:"diff", version}` tells you (and them) what changed since.
+Restore a version only when the user asks.
+
 ## Things that trip people up
 
 - Cut, ripple, trim and insert with the `fablecut_patch_project` edit ops
