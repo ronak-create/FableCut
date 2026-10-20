@@ -204,7 +204,7 @@
 
   /** One line per sequence, for status readouts. */
   function describe(row) {
-    const m = Math.floor(row.duration / 60), s = Math.round(row.duration % 60);
+    const t = Math.round(row.duration), m = Math.floor(t / 60), s = t % 60;
     return `${row.id} "${row.name}"${row.active ? " (open)" : ""} ${row.width}x${row.height}@${row.fps}, ${row.clips} clip(s), ${m}:${String(s).padStart(2, "0")}`;
   }
 
