@@ -1663,6 +1663,7 @@ function listenSSE() {
     try { d = JSON.parse(e.data); } catch { }
     if (!(projectsOpen() && pj.verOf && d.project === pj.verOf)) return;
     if (pj.busy) { pj.verPending = true; return; }   // pjVersionAction refreshes when it is done
+    if (document.querySelector(".ver-rename")) return;   // a rename is being typed: it refreshes the list when it ends
     pjDropDiffs();   // a comparison made before this change no longer holds
     pjLoadVersions();
   });
@@ -1744,7 +1745,8 @@ async function syncFromServer(force) {
     applyProject(data);
     syncCompCrumb();   // the top bar shows the project's name
     // "Compare with now" was against the document before this change
-    if (pj.verDiff.size && pj.verOf === runtime.projectId) { pjDropDiffs(); if (projectsOpen()) renderProjectGrid(); }
+    // (always: a comparison still on its way was made against the old document too)
+    if (pj.verOf === runtime.projectId) { const had = pj.verDiff.size; pjDropDiffs(); if (had && projectsOpen()) renderProjectGrid(); }
     await probeMissingMeta();
     return true;
   } catch { }
@@ -3490,7 +3492,12 @@ async function pjLoadVersions() {
     if (!current()) return;
     pj.versions = []; toast("Versions: " + (e.message || "couldn't read them"));
   }
+  // what is being typed in Save version survives the repaint
+  const draft = { name: $("verName")?.value, note: $("verNote")?.value, focus: document.activeElement?.id };
   renderProjectGrid();
+  if (draft.name != null && $("verName")) $("verName").value = draft.name;
+  if (draft.note != null && $("verNote")) $("verNote").value = draft.note;
+  if ((draft.focus === "verName" || draft.focus === "verNote") && $(draft.focus)) $(draft.focus).focus();
 }
 function pjVersionsHtml() {
   const p = pj.list.find((x) => x.id === pj.verOf) || { name: "Project" };
@@ -3549,7 +3556,11 @@ async function pjVersionRun(act, btn) {
   if (act === "save") {
     if (p.active && !(await flushSaveForVersion("no version was made"))) return;
     const out = await post({ action: "save", name: $("verName")?.value, note: $("verNote")?.value });
-    if (out) { toast(`Saved v${out.version.v} “${out.version.name}”`); await pjLoadVersions(); }
+    if (out) {
+      toast(`Saved v${out.version.v} “${out.version.name}”`);
+      for (const id of ["verName", "verNote"]) if ($(id)) $(id).value = "";   // saved: not a draft any more
+      await pjLoadVersions();
+    }
     return;
   }
   if (act === "diff") {
@@ -3622,8 +3633,9 @@ async function saveVersionNow() {
   if (versionSaving) return;   // one at a time
   versionSaving = true;
   try {
+    const project = runtime.projectId;   // another tab may open another project meanwhile
     if (!(await flushSaveForVersion("no version was made"))) return;
-    const res = await fetch("/api/versions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "save" }) });
+    const res = await fetch("/api/versions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "save", ...(project && project !== "?" ? { project } : {}) }) });
     const out = await res.json().catch(() => ({}));
     if (!res.ok) { toast(out.error || "Couldn't save a version"); return; }
     toast(`Saved v${out.version.v} “${out.version.name}” · Projects → Versions to go back to it`);
