@@ -126,6 +126,22 @@ test("a project that can't be read is never switched over", (t) => {
   assert.equal(fs.readFileSync(path.join(dir, "project.json"), "utf8"), "{ broken", "nothing was overwritten");
 });
 
+test("a switch that fails halfway puts the open project back", (t) => {
+  const { dir, P } = make(t, seedProject({ revision: 9 }));
+  const first = P.activeId();
+  const other = P.create({ name: "Other", open: false });
+  const rename = fs.renameSync;
+  // the index write fails (Windows: EPERM while something holds the file)
+  fs.renameSync = (from, to) => { if (to === P.INDEX) throw Object.assign(new Error("EPERM: busy"), { code: "EPERM" }); return rename(from, to); };
+  try {
+    assert.throws(() => P.open(other.id), new RegExp(`switching to ${other.id} failed .*${first} is still open`));
+  } finally { fs.renameSync = rename; }
+  const doc = readProject(dir);
+  assert.equal(doc.name, "Test Project", "./project.json is the open project again");
+  assert.ok(doc.revision > 10, "with a revision above the one the failed switch wrote, so tabs reload it");
+  assert.equal(P.activeId(), first);
+});
+
 test("REST: list, create and open; GET /api/project names the open project", async (t) => {
   const dir = makeDataDir(t);
   const { base } = await startServer(t, dir, NO_WATCH);
@@ -155,6 +171,20 @@ test("REST: list, create and open; GET /api/project names the open project", asy
   });
   assert.equal(res.status, 409);
   assert.equal(readProject(dir).name, "Reel");
+
+  // even a newer revision is refused when the editor says it was made for another project
+  res = await fetch(base + "/api/project", {
+    method: "PUT", headers: { "Content-Type": "application/json", "X-FableCut-Project": list.active },
+    body: JSON.stringify({ ...seedProject(), revision: 999 }),
+  });
+  assert.equal(res.status, 409);
+  assert.match((await res.json()).error, /another project is open/);
+  assert.equal(readProject(dir).name, "Reel");
+  res = await fetch(base + "/api/project", {
+    method: "PUT", headers: { "Content-Type": "application/json", "X-FableCut-Project": made.id },
+    body: JSON.stringify({ ...readProject(dir), revision: 999 }),
+  });
+  assert.equal(res.status, 200, "a save for the open project goes through");
 
   res = await post(base, { action: "open", id: "p_nope" });
   assert.equal(res.status, 404);

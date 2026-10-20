@@ -643,6 +643,12 @@ const server = http.createServer(async (req, res) => {
          ?force=1 skips the check for deliberate overwrites. */
       let cur = {};
       try { cur = JSON.parse(fs.readFileSync(PROJECT_FILE, "utf8").replace(new RegExp("^\\uFEFF"), "")); } catch {}
+      // a save the editor made for another project (it sends the id it loaded) never lands here
+      const meant = req.headers["x-fablecut-project"], open = projects.peekActive();
+      if (meant && open && meant !== open) {
+        sendJSON(res, 409, { error: "another project is open now", revision: cur.revision || 0, project: open });
+        return;
+      }
       if ((data.revision || 0) <= (cur.revision || 0) && url.searchParams.get("force") !== "1") {
         sendJSON(res, 409, { error: "stale revision — project changed since it was read", revision: cur.revision || 0 });
         return;

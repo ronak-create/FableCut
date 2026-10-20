@@ -148,8 +148,14 @@ function createProjects({ dataDir, projectFile, libraryDir }) {
     catch (e) { throw new Error(`project ${id} can't be read (${e.message})`); }
     writeJSON(docFile(cur), root);
     next.revision = Math.max(root.revision || 0, next.revision || 0) + 1;
-    writeJSON(projectFile, next);
-    writeJSON(INDEX, { active: id });
+    try {
+      writeJSON(projectFile, next);
+      writeJSON(INDEX, { active: id });
+    } catch (e) {
+      // ./project.json and index.json must agree: put the open project back
+      try { writeJSON(projectFile, { ...root, revision: next.revision + 1 }); } catch { }
+      throw new Error(`switching to ${id} failed (${e.message}) — ${cur} is still open`);
+    }
     const meta = readMeta(id) || { id };
     writeMeta(id, { ...meta, opened: new Date().toISOString(), archived: false });
     return { id, from: cur, project: summary(id, id) };

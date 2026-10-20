@@ -1538,7 +1538,8 @@ the project that was open before (an editor tab, an agent's
 `fablecut_set_project`, a `baseRevision` patch) is therefore refused as a
 CONFLICT instead of landing in the wrong project. Editor tabs reload, clear
 their undo history and close an open composition. `GET /api/project` names the
-open project in the `X-FableCut-Project` header.
+open project in the `X-FableCut-Project` header, and the editor sends it back on
+every save, so an edit made for one project can never be written into another.
 
 In the editor: **Projects** in the top bar (**Ctrl/Cmd+O**, or a click on the
 project name) opens the dashboard: cards with a picture, size, frame rate and length; search
@@ -1762,7 +1763,9 @@ obvious cuts were missed, raise it if motion is being misread as cuts.
 - `PUT  /api/project` — replace project JSON (body = full document).
   **Conflict-safe**: if the body's `revision` ≤ the revision currently on disk,
   the server rejects with **409** and returns `{"error":"…","revision":<current>}`.
-  Append `?force=1` to overwrite unconditionally. Writes are atomic (tmp file +
+  Append `?force=1` to overwrite unconditionally. A request with an `X-FableCut-Project`
+  header (the editor sends the id of the project it loaded) is also refused with 409 when
+  another project is open (see "Projects"). Writes are atomic (tmp file +
   rename), so a crashed write never corrupts the file.
 - `GET  /api/media`   — list files in ./media (name, src, size)
 - `GET  /api/media-info?src=/media/x.mp4` → `{src, info}` · `POST /api/media-info {srcs:[…], stat?}` →

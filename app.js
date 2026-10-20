@@ -1564,7 +1564,9 @@ async function saveNow() {
   project.revision++;
   const body = JSON.stringify(projectJSON(), null, 2);
   try {
-    const res = await fetch("/api/project", { method: "PUT", headers: { "Content-Type": "application/json" }, body });
+    const headers = { "Content-Type": "application/json" };
+    if (runtime.projectId) headers["X-FableCut-Project"] = runtime.projectId;   // the project this edit belongs to
+    const res = await fetch("/api/project", { method: "PUT", headers, body });
     if (res.status === 409) {
       // an external tool saved a newer revision while this change was pending
       await syncFromServer(true);
@@ -3188,7 +3190,8 @@ async function pjLoad() {
     const data = await res.json();
     pj.list = data.projects || [];
     pj.templates = data.templates || [];
-    if (data.active) runtime.projectId = data.active;
+    // syncFromServer owns runtime.projectId: it resets undo, comp and Source on a switch
+    if (data.active && runtime.projectId && data.active !== runtime.projectId) syncFromServer(true);
     if (!pj.list.some((p) => p.id === pj.sel)) pj.sel = (pj.list.find((p) => p.active) || pj.list[0] || {}).id || null;
   } catch { pj.list = []; toast("Projects: couldn't read the project list"); }
   renderProjects();
@@ -3326,6 +3329,10 @@ async function pjOpenProject(id) {
     toast(`Opened “${out.project?.name || p.name}”`);
   } finally { pj.busy = false; pj.selfSwitch = false; }
 }
+async function pjBusy(fn) {
+  pj.busy = true;
+  try { return await fn(); } finally { pj.busy = false; }
+}
 async function pjAction(act, btn) {
   const p = pj.list.find((x) => x.id === pj.sel);
   if (act === "new-cancel") { pj.mode = "detail"; renderProjects(); return; }
@@ -3350,8 +3357,9 @@ async function pjAction(act, btn) {
   if (!p) return;
   if (act === "open") { pjOpenProject(p.id); return; }
   if (act === "template") { $("pjTplRow")?.classList.toggle("hidden"); $("pjTplName")?.select(); return; }
+  if (pj.busy) return;   // one request at a time: a second click must not duplicate twice
   if (act === "template-save") {
-    const out = await pjPost({ action: "save_template", id: p.id, name: $("pjTplName")?.value || p.name });
+    const out = await pjBusy(() => pjPost({ action: "save_template", id: p.id, name: $("pjTplName")?.value || p.name }));
     if (out) { toast(`Saved template “${out.template.name}” — pick it under + New project`); await pjLoad(); }
     return;
   }
@@ -3361,11 +3369,11 @@ async function pjAction(act, btn) {
       setTimeout(() => { if (btn.isConnected) { btn.dataset.armed = ""; btn.textContent = "Delete…"; } }, 3000);
       return;
     }
-    const out = await pjPost({ action: "delete", id: p.id });
+    const out = await pjBusy(() => pjPost({ action: "delete", id: p.id }));
     if (out) { toast(`Deleted “${p.name}”`); pj.sel = null; await pjLoad(); }
     return;
   }
-  const out = await pjPost({ action: act, id: p.id });
+  const out = await pjBusy(() => pjPost({ action: act, id: p.id }));
   if (!out) return;
   if (act === "duplicate") { pj.sel = out.id; toast(`Duplicated as “${out.project.name}”`); }
   if (act === "archive") toast(`Archived “${p.name}” — it's under Archived`);
@@ -3421,7 +3429,9 @@ function initProjectsUi() {
   window.addEventListener("keydown", (e) => {
     if (!projectsOpen()) return;
     e.stopPropagation();
-    if (e.key === "Escape") {
+    if ((e.ctrlKey || e.metaKey) && (e.key === "o" || e.key === "O")) {
+      e.preventDefault(); closeProjects();   // not the browser's Open File dialog
+    } else if (e.key === "Escape") {
       e.preventDefault();
       if (pj.mode === "new") { pj.mode = "detail"; renderProjects(); } else closeProjects();
     } else if (e.key === "Enter" && e.target.dataset?.pj) {
