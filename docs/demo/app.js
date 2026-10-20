@@ -1569,10 +1569,11 @@ async function saveNow() {
     const res = await fetch("/api/project", { method: "PUT", headers, body });
     if (res.status === 409) {
       // an external tool saved a newer revision while this change was pending
-      await syncFromServer(true);
+      const loaded = await syncFromServer(true);
       toast("Project was updated externally — your last change may need redoing.");
+      return loaded === true;   // the newer document on disk is now what this tab shows
     }
-    return res.ok || res.status === 409;   // 409: the newer document on disk is now loaded, nothing to lose by switching
+    return res.ok;
   } catch { return false; }
 }
 /** Write a pending edit now (and wait for one in flight), e.g. before switching projects.
@@ -1687,8 +1688,9 @@ function listenSSE() {
    e.g. Claude — wrote it). Our own saves land at our exact local revision, so
    they compare equal and are skipped without any timing heuristics. Deferred
    during gestures/exports and re-run when they end (runtime.pendingSync). */
+/** True when the server's document was loaded (a later caller may rely on it). */
 async function syncFromServer(force) {
-  if (state.gesture || state.exporting) { runtime.pendingSync = true; return; }
+  if (state.gesture || state.exporting) { runtime.pendingSync = true; return false; }
   runtime.pendingSync = false;
   if (state.binTab === "templates") fetchSaved("templates").then(() => { if (state.binTab === "templates") renderTemplatesTab(); });
   else if (state.binTab !== "project" && state.binTab !== "shapes") fetchLibrary(state.binTab).then(renderLibrary);
@@ -1718,7 +1720,7 @@ async function syncFromServer(force) {
       if (!pj.selfSwitch) toast(`Switched to “${project.name}”`);
       if (projectsOpen()) pjLoad();
       await probeMissingMeta();
-      return;
+      return true;
     }
     if (!force && (data.revision || 0) === (project.revision || 0)) return; // our own save
     if (runtime.saveTimer) { // unsaved local edit vs. external write: external wins, tell the user
@@ -1730,7 +1732,9 @@ async function syncFromServer(force) {
     applyProject(data);
     syncCompCrumb();   // the top bar shows the project's name
     await probeMissingMeta();
+    return true;
   } catch { }
+  return false;
 }
 /** Populate a media entry's duration/dimensions (and cache preview assets) by
  * dispatching on kind: svg loads its markup, image loads for width/height,
@@ -1968,6 +1972,7 @@ async function importFromUrl(url) {
   if (!state.connected) { toast("Import from URL needs the editor server"); return; }
   runtime.importUrlAbort = new AbortController();
   setImportUrlBusy(true);
+  const gen = runtime.projectGen;
   try {
     const res = await fetch("/api/import-url", {
       method: "POST",
@@ -1988,6 +1993,7 @@ async function importFromUrl(url) {
       if (kind === "video") grabThumb(m).catch(() => { });
       ensureWave(m);
     } catch { /* browser will retry via probeMissingMeta */ }
+    if (gen !== runtime.projectGen) throw new Error("another project was opened — the file is in media/");
     project.media.push(m);
     renderBin(); scheduleSave();
     closeImportUrl();
@@ -3065,7 +3071,7 @@ function mediaForLibraryItem(f) {
   return m;
 }
 async function addLibraryItem(f, trackId, at) {
-  const m = mediaForLibraryItem(f);
+  const m = mediaForLibraryItem(f), gen = runtime.projectGen;
   if (!m) { toast("Unsupported file type: " + f.name); return; }
   if ((m.kind === "audio" || m.kind === "video") && (m.duration == null || isNaN(m.duration))) {
     try { await loadMediaMetadata(m); } catch { }
@@ -3078,6 +3084,7 @@ async function addLibraryItem(f, trackId, at) {
   if (m.kind === "image" && !runtime.mediaAux.get(m.id)?.img) {
     try { await loadMediaMetadata(m); } catch { }
   }
+  if (gen !== runtime.projectGen) return;   // another project was opened meanwhile
   addClipFromMedia(m, trackId, at);
 }
 function toggleSfxPreview(f, btn) {
@@ -3212,8 +3219,15 @@ async function pjLoad() {
     const data = await res.json();
     pj.list = data.projects || [];
     pj.templates = data.templates || [];
-    // syncFromServer owns runtime.projectId: it resets undo, comp and Source on a switch
-    if (data.active && runtime.projectId && data.active !== runtime.projectId) syncFromServer(true);
+    // syncFromServer owns runtime.projectId: it resets undo, comp and Source on a switch.
+    // On first use the list has just given the shown project.json its id: adopt it, if
+    // project.json is still the document this tab shows.
+    if (data.active && !runtime.projectId) {
+      const r = await fetch("/api/project", { cache: "no-store" }).catch(() => null);
+      const doc = r && r.ok ? await r.json().catch(() => null) : null;
+      if (doc && r.headers.get("X-FableCut-Project") === data.active && (doc.revision || 0) === (project.revision || 0)) runtime.projectId = data.active;
+      else syncFromServer(true);
+    } else if (data.active && data.active !== runtime.projectId) syncFromServer(true);
     if (!pj.list.some((p) => p.id === pj.sel)) pj.sel = (pj.list.find((p) => p.active) || pj.list[0] || {}).id || null;
   } catch { pj.list = []; toast("Projects: couldn't read the project list"); }
   renderProjects();
@@ -3431,6 +3445,10 @@ async function pjImport(file) {
 /* Called by syncFromServer when ./project.json is now another project. */
 function onProjectSwitched() {
   runtime.projectGen = (runtime.projectGen || 0) + 1;   // loads started before now no longer write the caches
+  // queued exports carry the old project's settings and names: they don't render this one
+  const queued = exportQueue.length;
+  for (let i = exportQueue.length - 1; i >= 0; i--) if (exportQueue[i].status === "pending") exportQueue.splice(i, 1);
+  if (exportQueue.length !== queued) { renderQueue(); toast("Queued exports of the previous project were removed"); }
   if (runtime.saveTimer) { clearTimeout(runtime.saveTimer); runtime.saveTimer = null; }  // an edit of the old project
   runtime.undo.length = 0; runtime.redo.length = 0;
   state.compCtx = null;
