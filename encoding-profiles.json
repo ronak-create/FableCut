@@ -89,6 +89,32 @@
         "-c:a", "aac", "-b:a", "192k",
         "-movflags", "+faststart", "-shortest"
       ]
+    },
+    "videotoolbox-h264": {
+      "label": "Apple Silicon · H.264 (VideoToolbox)",
+      "description": "Encodes on Apple Silicon hardware (VideoToolbox): frees the CPU for rendering. Needs macOS on Apple Silicon and an ffmpeg built with videotoolbox.",
+      "jpegQuality": 0.95,
+      "extension": ".mp4",
+      "color": { "matrix": "bt709", "primaries": "bt709", "trc": "bt709", "range": "tv" },
+      "args": [
+        "-c:v", "h264_videotoolbox", "-q:v", "65",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-b:a", "192k",
+        "-movflags", "+faststart", "-shortest"
+      ]
+    },
+    "videotoolbox-hevc": {
+      "label": "Apple Silicon · HEVC (VideoToolbox)",
+      "description": "HEVC on Apple Silicon hardware (VideoToolbox): smaller files than H.264 at similar quality. Needs macOS on Apple Silicon and an ffmpeg built with videotoolbox.",
+      "jpegQuality": 0.95,
+      "extension": ".mp4",
+      "color": { "matrix": "bt709", "primaries": "bt709", "trc": "bt709", "range": "tv" },
+      "args": [
+        "-c:v", "hevc_videotoolbox", "-q:v", "58",
+        "-pix_fmt", "yuv420p", "-tag:v", "hvc1",
+        "-c:a", "aac", "-b:a", "192k",
+        "-movflags", "+faststart", "-shortest"
+      ]
     }
   }
 }

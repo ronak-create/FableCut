@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Apple Silicon VideoToolbox export profiles** `videotoolbox-h264` and
+  `videotoolbox-hevc`. Enables hardware-accelerated H.264 and HEVC encode on
+  Apple Silicon. Also registers `h264_videotoolbox` and `hevc_videotoolbox` in
+  the delivery presets encoder list. Needs macOS on Apple Silicon and an ffmpeg
+  built with videotoolbox.
+
 ## [1.16.0] - 2026-10-21
 
 ### Added

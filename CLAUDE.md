@@ -2401,8 +2401,9 @@ ffmpeg -y -f image2pipe -framerate <fps> -i - [-i audio.wav] <jpeg-color> <argsâ
 
 - **There is no allow-list.** Any codec, filter, container or flag your local ffmpeg
   supports works â€” ProRes, DNxHD, NVENC/QSV/VideoToolbox, VP9/AV1, 10-bit, HDR tags.
-  See the shipped `prores422`, `broadcast1080i50`, `nvenc-h264` and `nvenc-hevc`
-  profiles (the NVENC ones need an NVIDIA GPU and an ffmpeg built with NVENC).
+  See the shipped `prores422`, `broadcast1080i50`, `nvenc-h264`, `nvenc-hevc`,
+  `videotoolbox-h264` and `videotoolbox-hevc` profiles (the NVENC ones need an
+  NVIDIA GPU; VideoToolbox requires macOS / Apple Silicon).
 - **Args are validated by ffmpeg itself**, not by a schema: when an export starts the
   server dry-runs the profile against a 0.1 s synthetic input (`lavfi`). A typo or an
   encoder your build lacks is rejected up front with ffmpeg's own message, instead of
