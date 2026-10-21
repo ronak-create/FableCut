@@ -515,6 +515,7 @@ ${main}
         <a href="${REPO}" rel="noopener" target="_blank">GitHub</a>
         <a href="${docsHome}">Docs</a>
         <a href="https://discord.gg/EFMQH7d6Tv" rel="noopener" target="_blank">Discord</a>
+        <a href="mailto:hello@fablecut.space">Email</a>
         <a href="${REPO}/releases" rel="noopener" target="_blank">Releases</a>
         <a href="https://status.fablecut.space" rel="noopener" target="_blank">Status</a>
         <a href="${REPO}/blob/main/SECURITY.md" rel="noopener" target="_blank">Security</a>

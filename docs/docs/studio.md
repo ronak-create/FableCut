@@ -61,4 +61,4 @@ Chrome can pause a site's access to a folder when its tab sits in the background
 
 If Studio won't load, or the agent panel says **Relay offline** for more than a minute, check [status.fablecut.space](https://status.fablecut.space). It checks the editor and the agent connection every 30 minutes and lists any recent outages.
 
-Something else wrong, or a question? Ask on the **[FableCut Discord](https://discord.gg/EFMQH7d6Tv)**. Say which browser and version you use, and what you did just before it went wrong.
+Something else wrong, or a question? Ask on the **[FableCut Discord](https://discord.gg/EFMQH7d6Tv)**, or email **[support@fablecut.space](mailto:support@fablecut.space)**. Say which browser and version you use, and what you did just before it went wrong.

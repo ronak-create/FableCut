@@ -647,6 +647,8 @@ examples in [`library/svg/`](library/svg/).
 Questions, ideas, showing off an edit, or want to help shape what's next? Join
 the **[FableCut Discord](https://discord.gg/EFMQH7d6Tv)**. Bugs and feature
 requests are still best filed as [GitHub issues](https://github.com/ronak-create/FableCut/issues).
+Rather email? Write to [hello@fablecut.space](mailto:hello@fablecut.space), or
+[support@fablecut.space](mailto:support@fablecut.space) for help.
 
 ## License
 
