@@ -1,6 +1,6 @@
 ### Open Studio
 
-1. Go to [studio.fablecut.space](https://studio.fablecut.space) in Chrome, Edge, Brave or Arc (Firefox and Safari work too, with projects kept in the browser; see below).
+1. Go to [studio.fablecut.space](https://studio.fablecut.space) in Chrome, Edge, Brave or Arc. (In Firefox or Safari, see [Firefox and Safari](#firefox-and-safari) instead.)
 2. Click **New project** and pick where to save it, or **Open a folder** that already has your footage.
 3. When the browser asks to let Studio read and save in that folder, choose **Allow on every visit**.
 
@@ -51,7 +51,7 @@ For usage numbers, the relay logs each call: which tool, whether it worked and h
 
 ### Exports
 
-Studio renders in the browser and encodes an `.mp4` with H.264 video and AAC audio (Opus in Firefox, which has no AAC encoder), saved to the project's `exports/` folder. Encoding profiles set the bitrate. Delivery presets and batch outputs work too, with the browser's encoders: H.264, HEVC, VP9 and AV1 where the browser has them. ProRes, DNxHR, FFV1, PCM and 10-bit need ffmpeg, so Studio swaps in the closest browser format and says so. Exports match the local editor's output frame for frame and in loudness.
+Studio renders in the browser and encodes an `.mp4` with H.264 video and AAC audio (Opus in Firefox, which has no AAC encoder). In Chrome, Edge, Brave and Arc it is saved to the project's `exports/` folder; in Firefox and Safari it downloads. Encoding profiles set the bitrate. Delivery presets and batch outputs work too, with the browser's encoders: H.264, HEVC, VP9 and AV1 where the browser has them. ProRes, DNxHR, FFV1, PCM and 10-bit need ffmpeg, so Studio swaps in the closest browser format and says so. Exports match the local editor's output frame for frame and in loudness.
 
 ### Studio or the local install
 
@@ -59,7 +59,7 @@ Studio renders in the browser and encodes an `.mp4` with H.264 video and AAC aud
 |---|---|---|
 | Install | None | Node 18+, optional ffmpeg |
 | Browser | Chrome, Edge, Brave, Arc; Firefox and Safari keep projects in the browser | Any Chromium browser |
-| Your media | Stays in the folder you pick | Stays in `~/FableCut` |
+| Your media | Stays in the folder you pick (Firefox and Safari: copied into browser storage) | Stays in `~/FableCut` |
 | Agents | Claude Code, claude.ai, ChatGPT and any MCP client, by link | Any MCP client on the same machine |
 | Export | `.mp4` in the browser (H.264, HEVC, VP9, AV1) | Adds ProRes, DNxHR, FFV1 and other ffmpeg profiles |
 | Not in Studio yet | Import from a path or URL, reference analysis, noise reduction | |
