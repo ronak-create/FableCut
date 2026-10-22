@@ -100,7 +100,7 @@
 </script>
 <script>document.documentElement.classList.add("js");try{var t=localStorage.getItem("fc-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
 <link rel="preload" href="./fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="./styles.css?v=41">
+<link rel="stylesheet" href="./styles.css?v=44">
 </head>
 <body>
 
@@ -238,38 +238,38 @@
   </div>
 </section>
 
-<section class="section" id="made" aria-labelledby="madeTitle">
+<section class="section lit" id="made" aria-labelledby="madeTitle">
   <div class="wrap">
     <div class="head reveal">
       <h2 id="madeTitle">Cut by an agent. No hand edits.</h2>
       <p>Claude made these from stock clips by writing <code class="ic">project.json</code>: beat-synced cuts, a speed ramp, track mattes, masks, text on a path, shape layers that draw themselves on. Every frame is the editor's own export.</p>
     </div>
   </div>
-  <div class="wall-clip">
-    <div class="wall reveal" aria-label="Edits made by an agent">
-      <div class="tile t-tall" style="--ar:9/16">
+  <div class="sc-clip">
+    <div class="sc-wall reveal" aria-label="Edits made by an agent">
+      <div class="sc-tile" style="--ar:9/16">
         <video muted loop playsinline preload="none" poster="./showcase/night-market.jpg" data-src="./showcase/night-market.mp4" aria-label="Night Market: a vertical street-food reel with punch-ins on the beat"></video>
         <button class="reel-snd" type="button" aria-pressed="false" aria-label="Turn sound on">Sound</button>
       </div>
-      <div class="tile t-tall" style="--ar:9/16">
+      <div class="sc-tile" style="--ar:9/16">
         <video muted loop playsinline preload="none" poster="./showcase/after-hours.jpg" data-src="./showcase/after-hours.mp4" aria-label="After Hours: a vertical night-city reel cut to a synthwave track"></video>
         <button class="reel-snd" type="button" aria-pressed="false" aria-label="Turn sound on">Sound</button>
       </div>
-      <div class="wall-block">
-        <div class="tile t-wide" style="--ar:12/5">
+      <div class="sc-block">
+        <div class="sc-tile sc-wide" style="--ar:12/5">
           <video muted loop playsinline preload="none" poster="./showcase/salt.jpg" data-src="./showcase/salt.mp4" aria-label="Salt: a widescreen surf trailer with a warm film grade"></video>
           <button class="reel-snd" type="button" aria-pressed="false" aria-label="Turn sound on">Sound</button>
         </div>
-        <div class="tile t-sq" style="--ar:1/1">
+        <div class="sc-tile" style="--ar:1/1">
           <video muted loop playsinline preload="none" poster="./showcase/slow-mornings.jpg" data-src="./showcase/slow-mornings.mp4" aria-label="Slow Mornings: a square coffee promo with animated shapes and a lower third"></video>
           <button class="reel-snd" type="button" aria-pressed="false" aria-label="Turn sound on">Sound</button>
         </div>
-        <div class="tile t-sq" style="--ar:1/1">
+        <div class="sc-tile" style="--ar:1/1">
           <video muted loop playsinline preload="none" poster="./showcase/summit.jpg" data-src="./showcase/summit.mp4" aria-label="Summit: a square mountain film with footage inside the title and a split screen"></video>
           <button class="reel-snd" type="button" aria-pressed="false" aria-label="Turn sound on">Sound</button>
         </div>
       </div>
-      <div class="tile t-tall" style="--ar:9/16">
+      <div class="sc-tile" style="--ar:9/16">
         <video muted loop playsinline preload="none" poster="./showcase/open-road.jpg" data-src="./showcase/open-road.mp4" aria-label="Open Road: a vertical motorcycle reel with letterbox bars and whip cuts"></video>
         <button class="reel-snd" type="button" aria-pressed="false" aria-label="Turn sound on">Sound</button>
       </div>
@@ -280,7 +280,7 @@
   </div>
 </section>
 
-<section class="section" id="studio">
+<section class="section lit" id="studio">
   <div class="wrap split">
     <div class="head reveal">
       <h2>Your agent connects with one link.</h2>
@@ -305,7 +305,7 @@
   </div>
 </section>
 
-<section class="section" id="playground">
+<section class="section lit" id="playground">
   <div class="wrap">
     <div class="head reveal">
       <h2>Edit the file. Watch the cut change.</h2>
@@ -641,6 +641,6 @@
   </div>
 </dialog>
 
-<script src="./main.js?v=26"></script>
+<script src="./main.js?v=28"></script>
 </body>
 </html>
