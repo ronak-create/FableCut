@@ -275,6 +275,23 @@ const TOOLS = [
     },
   },
   {
+    name: "fablecut_silence",
+    description: "Find the silences in speech and, with cut:true, cut them out. Listens to the given clips (a video's linked audio stems, after channel routing, gain and volume) and reports every stretch where none of them is above `threshold` for at least `minSilence` seconds, keeping `padding` seconds of quiet beside each phrase so words aren't clipped. Gaps between clips are left alone. With cut:true each silence is removed with an `extract` on the targeted tracks (or `tracks`), last first, in one revision: later material moves up, linked stems stay in sync, locked tracks and clips stay put — lock the music bed first if it should keep running. A version is saved before the cut. Without cut it only reports, so check the spans (and fablecut_frame them) first. The same as the inspector's Silence section. Needs ffmpeg + ffprobe on PATH.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        clipIds: { type: "array", items: { type: "string" }, description: "The speech clips to listen to (a video clip brings its linked stems)" },
+        threshold: { type: "number", description: "Below this level (dBFS) counts as silence, -80…-10 (default -40; raise it toward -30 for a noisy room)" },
+        minSilence: { type: "number", description: "Shortest silence to report or cut, seconds 0.1…10 (default 0.5)" },
+        padding: { type: "number", description: "Quiet kept beside each phrase, seconds 0…2 (default 0.15)" },
+        cut: { type: "boolean", description: "Cut the silences out (default false: only report them)" },
+        tracks: { type: "array", items: { type: "string" }, description: "cut: the lanes to cut on (default: the targeted tracks)" },
+        force: { type: "boolean", description: "cut: also cut through locked clips (only when the user asked)" },
+      },
+      required: ["clipIds"],
+    },
+  },
+  {
     name: "fablecut_denoise",
     description: "Reduce background noise (hiss, hum, room tone) on audio clips: ffmpeg's FFT denoiser renders a cleaned FLAC of each clip's whole source file into media/, and the clip — with its linked stems — switches to it (the picture keeps its own file, so links and timing stay intact). The same as the inspector's Noise control. amount 'off' switches back to the original. Re-running reuses a file already rendered. Needs ffmpeg + ffprobe on PATH. Refuses locked clips unless force:true.",
     inputSchema: {
@@ -493,7 +510,7 @@ async function measureClipGroup(proj, clips) {
   return meter ? meter.result() : null;
 }
 /** Timeline spans with sound on these voice clips (ducking.js pipeline). */
-async function voiceRegions(proj, voices, threshold) {
+async function voiceRegions(proj, voices, threshold, minLen) {
   const L = require("./loudness.js"), D = require("./ducking.js");
   const lists = [];
   for (const v of voices) {
@@ -503,9 +520,70 @@ async function voiceRegions(proj, voices, threshold) {
     if (!env) continue;
     const sp = Math.min(8, Math.max(0.1, +v.props?.speed || 1));
     const gain = Math.pow(10, (+v.props?.gain || 0) / 20) * Math.min(2, Math.max(0, +(v.props?.volume ?? 1)));
-    lists.push(D.activeRegions(env.result(), { t0: v.start, speed: sp, gain, threshold }));
+    lists.push(D.activeRegions(env.result(), { t0: v.start, speed: sp, gain, threshold, ...(minLen != null ? { minLen } : {}) }));
   }
-  return D.mergeRegions(lists);
+  return D.mergeRegions(lists, minLen != null ? 0 : undefined);
+}
+/** The clips that carry a selection's sound, one list per linked group: its
+ *  audio stems, else the clip itself (audio, or a video without stems). */
+function speechGroups(proj, ids) {
+  const groups = new Map();
+  for (const id of ids) {
+    const c = proj.clips.find((x) => x.id === id);
+    if (!c) throw new Error("no clip " + id);
+    if (c.kind !== "audio" && c.kind !== "video") throw new Error(`clip ${id} is ${c.kind} — no sound to listen to`);
+    const key = c.linkGroup || c.id;
+    if (groups.has(key)) continue;
+    const members = c.linkGroup ? proj.clips.filter((x) => x.linkGroup === c.linkGroup) : [c];
+    const stems = members.filter((x) => x.kind === "audio");
+    groups.set(key, stems.length ? stems : [c]);
+  }
+  return [...groups.values()];
+}
+const fmtClock = (s) => `${Math.floor(s / 60)}:${(s % 60).toFixed(2).padStart(5, "0")}`;
+const fmtDur = (s) => { const t = Math.round(s); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`; };
+/* fablecut_silence: silence.js on the clips' sound, then (cut:true) its extract ops. */
+async function silenceTool(args) {
+  const S = require("./silence.js");
+  const ids = Array.isArray(args.clipIds) ? args.clipIds.map(String) : [];
+  if (!ids.length) throw new Error("`clipIds` must list the speech clip(s) to listen to");
+  const opts = S.options(args);
+  const doc = readProject();
+  const readRev = doc.revision || 0;
+  const groups = speechGroups(doc, ids);
+  const disabled = new Set(Array.isArray(doc.disabledTracks) ? doc.disabledTracks : []);
+  const voices = groups.flat().filter((x) => !disabled.has(x.track) && x.disabled !== true);
+  if (!voices.length) throw new Error("those clips are disabled (or on disabled tracks) — nothing to listen to");
+  const sound = await voiceRegions(doc, voices, opts.threshold, S.MIN_SOUND);
+  const ranges = groups.map((g) => [Math.min(...g.map((x) => x.start)), Math.max(...g.map((x) => x.start + x.duration))]);
+  const spans = S.silentSpans(sound, ranges, { ...opts, fps: doc.fps });
+  const listen = S.union(ranges).reduce((n, [a, b]) => n + b - a, 0);
+  const head = `${spans.length} silence${spans.length === 1 ? "" : "s"}, ${S.total(spans).toFixed(1)} s of ${fmtDur(listen)} ` +
+    `(threshold ${opts.threshold} dBFS, at least ${opts.minSilence} s, ${opts.padding} s kept beside speech)`;
+  const list = spans.slice(0, 60).map((s) => `  ${fmtClock(s.from)} → ${fmtClock(s.to)}  (${(s.to - s.from).toFixed(2)} s)`)
+    .concat(spans.length > 60 ? [`  … +${spans.length - 60} more`] : []);
+  if (!args.cut) return [head + (spans.length ? ":" : "."), ...list,
+    ...(spans.length ? ["Nothing cut yet: call again with cut:true to remove them (lock the music bed first if it should keep running)."] : [])].join("\n");
+  if (!spans.length) return head + " — nothing to cut.";
+  // the timeline must be the one that was listened to
+  const proj = readProject();
+  if ((proj.revision || 0) !== readRev)
+    throw new Error(`the project changed while listening (revision ${readRev} → ${proj.revision}) — nothing cut; run fablecut_silence again`);
+  const end = (p) => p.clips.reduce((m, c) => Math.max(m, c.start + c.duration), 0);
+  const before = end(proj);
+  ProjectOps.applyPatch(proj, S.cutOps(spans, { tracks: args.tracks, force: args.force === true }), { savedItems });
+  // a cut this size always keeps the project as it was, not once per session like other edits
+  let verWarn = "";
+  try { createHistory({ projects: createProjects({ dataDir: DATA_DIR, projectFile: PROJECT_FILE, libraryDir: LIBRARY_DIR }) }).beforeAgent("Before cutting silences"); }
+  catch (e) { verWarn = ` Warning: no version was saved before the cut (${e.message}).`; }
+  let diskRev = readRev;
+  try { diskRev = readProject().revision || 0; } catch {}
+  if (diskRev !== readRev) throw new Error(`the project changed while cutting (revision ${readRev} → ${diskRev}) — nothing cut; run fablecut_silence again`);
+  proj.revision = readRev + 1;
+  writeProject(proj);
+  lastReadRevision = proj.revision;
+  return `Cut ${head} — timeline ${fmtDur(before)} → ${fmtDur(end(proj))} (revision ${proj.revision}). UI hot-reloaded.` +
+    (verWarn || ` The project as it was is kept as a version (fablecut_versions lists it; restore undoes the cut).`);
 }
 /** The clips that sound for a selection: a linked group's audio stems, else the clip. */
 function normalizeGroups(proj, ids) {
@@ -959,6 +1037,8 @@ async function callTool(name, args, attempt = 0) {
       return scopesTool(args);
     case "fablecut_frame":
       return frameTool(args);
+    case "fablecut_silence":
+      return silenceTool(args);
     case "fablecut_denoise":
       return denoiseTool(args);
     case "fablecut_proxy":

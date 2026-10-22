@@ -2377,6 +2377,22 @@ input[type=range] {
   box-shadow: inset 0 0 0 1px #ff6b6bcc;
 }
 
+/* Silences Find marked (Inspector → Silence) — a band over the span, above the clips */
+.silence-span {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  z-index: 3;
+  pointer-events: none;
+  border-radius: 3px;
+  background: repeating-linear-gradient(
+    45deg,
+    #f5b94233 0 4px,
+    #f5b94214 4px 8px
+  );
+  box-shadow: inset 0 0 0 1px #f5b942aa;
+}
+
 /* ── Clips ── */
 .clip {
   position: absolute;

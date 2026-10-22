@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Silence removal.** The inspector's **Silence** section on an audio or
+  video clip (or right-click → **Find silences**) listens to the take and
+  marks every pause on the timeline; **Cut** extracts them on the targeted
+  tracks in one undo step. Set how quiet counts as silence, the shortest
+  pause to cut, and how much quiet to keep beside each phrase so words
+  aren't clipped. Cuts land on whole frames, linked stems stay in step and
+  locked tracks (a music bed) keep running. Agents use the new
+  `fablecut_silence` tool: it reports the pauses, and with `cut:true` cuts
+  them in one revision after keeping a version of the project.
 - **Apple Silicon VideoToolbox export profiles** `videotoolbox-h264` and
   `videotoolbox-hevc`. Enables hardware-accelerated H.264 and HEVC encode on
   Apple Silicon. Also registers `h264_videotoolbox` and `hevc_videotoolbox` in
