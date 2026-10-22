@@ -555,6 +555,16 @@ h1, h2, h3 { font-weight: 600; margin: 0; }
   border: 1px solid var(--line-2); border-radius: var(--radius); background: #000; box-shadow: var(--shadow);
 }
 .sc-tile video { display: block; width: 100%; height: 100%; object-fit: cover; }
+/* the prompt behind each edit: a strip along the bottom, on hover */
+.sc-prompt {
+  position: absolute; left: 0; right: 0; bottom: 0; margin: 0; padding: 28px 14px 12px;
+  font-size: 13px; line-height: 1.45; color: #fff; text-wrap: pretty;
+  background: linear-gradient(transparent, rgb(0 0 0 / .78) 45%);
+  opacity: 0; transform: translateY(8px); transition: opacity .25s ease, transform .35s var(--ease);
+  pointer-events: none;
+}
+.sc-prompt span { display: block; margin-bottom: 3px; font: 500 10.5px/1 var(--mono); letter-spacing: .04em; color: rgb(255 255 255 / .6); }
+.sc-tile:hover .sc-prompt, .sc-tile:focus-within .sc-prompt { opacity: 1; transform: none; }
 /* phones: the same wall, swiped sideways, starting from the middle */
 @media (max-width: 760px) {
   .sc-clip { overflow-x: auto; scrollbar-width: none; }
@@ -563,7 +573,7 @@ h1, h2, h3 { font-weight: 600; margin: 0; }
   .js .sc-wall.reveal, .js .sc-wall.reveal.in { transform: none; }
 }
 .reel-snd {
-  position: absolute; right: 10px; bottom: 10px; height: 28px; padding: 0 11px; border-radius: 999px;
+  position: absolute; right: 10px; top: 10px; height: 28px; padding: 0 11px; border-radius: 999px;
   border: 1px solid rgb(255 255 255 / .2); background: rgb(0 0 0 / .5); color: #fff;
   font: 500 12px/1 var(--font); cursor: pointer; backdrop-filter: blur(6px);
   opacity: 0; transition: opacity .2s, background-color .2s;
