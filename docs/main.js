@@ -140,6 +140,38 @@
     dlg.addEventListener("close", function () { video.pause(); });
   }
 
+  /* ── Showcase reels: load when near, play while on screen, sound on ask ── */
+  (function () {
+    var vids = document.querySelectorAll(".reel video[data-src]");
+    if (!vids.length) return;
+    function load(v) { if (!v.getAttribute("src")) v.src = v.getAttribute("data-src"); }
+    function play(v) { load(v); var p = v.play(); if (p && p.catch) p.catch(function () { }); }
+    vids.forEach(function (v) {
+      var snd = v.parentNode.querySelector(".reel-snd");
+      v.addEventListener("click", function () { if (v.paused) play(v); else v.pause(); });
+      if (snd) snd.addEventListener("click", function () {
+        var on = v.muted;
+        vids.forEach(function (o) {
+          o.muted = true;
+          var b = o.parentNode.querySelector(".reel-snd");
+          if (b) { b.setAttribute("aria-pressed", "false"); b.setAttribute("aria-label", "Turn sound on"); }
+        });
+        v.muted = !on;
+        snd.setAttribute("aria-pressed", String(on));
+        snd.setAttribute("aria-label", on ? "Turn sound off" : "Turn sound on");
+        if (on) { v.currentTime = 0; play(v); }
+      });
+    });
+    if (reduced || !("IntersectionObserver" in window)) return;
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) play(e.target);
+        else if (e.target.getAttribute("src")) e.target.pause();
+      });
+    }, { rootMargin: "200px 0px", threshold: 0.15 });
+    vids.forEach(function (v) { io.observe(v); });
+  })();
+
   /* ── Live numbers from GitHub (stars, latest release), cached per tab ── */
   (function () {
     var starEls = document.querySelectorAll("[data-stars]");

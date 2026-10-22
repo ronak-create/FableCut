@@ -255,6 +255,7 @@ h1, h2, h3 { font-weight: 600; margin: 0; }
   color: var(--text-2); text-wrap: pretty;
 }
 .hero-cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 34px; }
+.hero-note { margin: 18px 2px 0; font-size: 14px; color: var(--text-3); }
 @media (min-width: 760px) { .br-lg::after { content: "\A"; white-space: pre; } }
 
 .shot { margin-top: clamp(40px, 5.5vw, 64px); perspective: 2200px; }
@@ -488,6 +489,43 @@ h1, h2, h3 { font-weight: 600; margin: 0; }
   .pg-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: 500px 300px; height: auto; }
   .pg-view { order: -1; }
   .pg-code { border-right: 0; border-top: 1px solid var(--line); }
+}
+
+/* ── Showcase: finished exports, three shapes ───────────── */
+.made {
+  display: grid; margin-top: 48px; gap: 20px; align-items: start;
+  grid-template-columns: minmax(0, 4fr) minmax(0, 8fr);
+  grid-template-areas: "tall wide" "tall sq";
+}
+.reel { margin: 0; }
+.reel-tall { grid-area: tall; }
+.reel-wide { grid-area: wide; }
+.reel-sq { grid-area: sq; display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 20px; align-items: end; }
+.reel-media {
+  position: relative; aspect-ratio: var(--ar); overflow: hidden;
+  border: 1px solid var(--line-2); border-radius: var(--radius);
+  background: #000; box-shadow: var(--shadow);
+}
+.reel-media video { display: block; width: 100%; height: 100%; object-fit: cover; }
+.reel figcaption { display: grid; gap: 4px; padding: 14px 2px 0; }
+.reel-sq figcaption { padding: 0 0 4px; }
+.reel figcaption b { font-size: 15px; font-weight: 600; letter-spacing: -.01em; }
+.reel figcaption span { font-size: 14px; line-height: 1.55; color: var(--text-2); text-wrap: pretty; }
+.reel-snd {
+  position: absolute; right: 10px; bottom: 10px; height: 28px; padding: 0 11px; border-radius: 999px;
+  border: 1px solid rgb(255 255 255 / .2); background: rgb(0 0 0 / .5); color: #fff;
+  font: 500 12px/1 var(--font); cursor: pointer; backdrop-filter: blur(6px);
+  opacity: 0; transition: opacity .2s, background-color .2s;
+}
+.reel-media:hover .reel-snd, .reel-snd:focus-visible, .reel-snd[aria-pressed="true"] { opacity: 1; }
+.reel-snd[aria-pressed="true"] { background: rgb(255 255 255 / .9); color: #000; }
+@media (hover: none) { .reel-snd { opacity: 1; } }
+.made-foot { margin: 22px 2px 0; font-size: 13px; color: var(--text-3); }
+@media (max-width: 900px) {
+  .made { grid-template-columns: minmax(0, 1fr); grid-template-areas: "wide" "tall" "sq"; }
+  .reel-tall { max-width: 380px; }
+  .reel-sq { grid-template-columns: minmax(0, 1fr); }
+  .reel-sq figcaption { padding: 14px 2px 0; }
 }
 
 /* ── Agents ─────────────────────────────────────────────── */

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>FableCut - the browser video editor AI agents can drive</title>
-<meta name="description" content="A Premiere-style video editor that runs in your browser and exposes its whole timeline as one JSON file. Edit it yourself, or let an AI agent cut your video while you watch.">
+<meta name="description" content="A Premiere-style video editor that runs in your browser and exposes its whole timeline as one JSON file. Open FableCut Studio with no install, or run it locally, and let an AI agent cut your video while you watch.">
 <link rel="icon" type="image/svg+xml" href="./favicon.svg">
 <meta name="color-scheme" content="dark light">
 <meta name="theme-color" content="#0a0a0b" media="(prefers-color-scheme: dark)">
@@ -100,7 +100,7 @@
 </script>
 <script>document.documentElement.classList.add("js");try{var t=localStorage.getItem("fc-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
 <link rel="preload" href="./fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="./styles.css?v=33">
+<link rel="stylesheet" href="./styles.css?v=34">
 </head>
 <body>
 
@@ -132,9 +132,10 @@
   <div class="wrap nav-inner">
     <a class="brand" href="./" aria-label="FableCut home"><svg aria-hidden="true"><use href="#i-logo"/></svg><span>FableCut</span></a>
     <nav class="nav-links" id="navLinks" aria-label="Primary">
+      <a href="https://studio.fablecut.space">Studio</a>
+      <a href="#made">Showcase</a>
       <a href="#playground">Playground</a>
       <a href="./start/">Get started</a>
-      <a href="https://studio.fablecut.space">Studio</a>
       <a href="./community/">Community</a>
       <a href="./docs/">Docs</a>
     </nav>
@@ -154,18 +155,19 @@
 
 <section class="hero">
   <div class="wrap">
-    <a class="pill" id="relPill" href="https://github.com/ronak-create/FableCut/releases/latest" rel="noopener" target="_blank">
-      <span class="pill-tag" data-rel-tag>v1.9.0</span>
-      <span class="pill-txt" data-rel-name>Targeting &amp; locks, trim tools, markers &amp; full JKL</span>
+    <a class="pill" href="https://studio.fablecut.space">
+      <span class="pill-tag">New</span>
+      <span class="pill-txt">FableCut Studio: the whole editor in your browser</span>
       <svg class="i" aria-hidden="true"><use href="#i-arrow"/></svg>
     </a>
     <h1 class="hero-title"><span class="wipe">The browser video editor <span class="br-lg"></span>agents can drive.</span><span class="ph" aria-hidden="true"></span></h1>
-    <p class="hero-sub">A Premiere-style editor whose whole timeline is one JSON file. Any agent that writes JSON can edit video.</p>
+    <p class="hero-sub">Open FableCut Studio, pick a folder of clips, and let Claude or ChatGPT cut your video while you watch. Nothing to install, and your footage never leaves your disk.</p>
     <div class="hero-cta">
-      <a class="btn btn-primary" href="./start/">Get started</a>
-      <a class="btn btn-ghost" href="https://studio.fablecut.space">Try it in your browser</a>
+      <a class="btn btn-primary" href="https://studio.fablecut.space">Open Studio<svg class="i" aria-hidden="true"><use href="#i-arrow"/></svg></a>
       <button class="btn btn-ghost" type="button" data-demo><svg class="i" aria-hidden="true"><use href="#i-play"/></svg>Watch the demo</button>
+      <a class="btn btn-ghost" href="./start/">Run it locally</a>
     </div>
+    <p class="hero-note">Free and open source. Works with Claude Code, claude.ai, ChatGPT and any MCP client.</p>
     <!-- An agent cutting a teaser, on a loop. Drawn in HTML/CSS and driven by
          one clock in main.js; without JS (or with reduced motion) it holds a
          single finished frame. -->
@@ -229,6 +231,64 @@
       <h3 id="sponsorTitle">Sidrune AI</h3>
       <p>One API for GPT, Claude, and other leading AI models. Sign up and get $3 in API credit.</p>
       <a class="more" href="https://fluxionai.space/register?source=github&amp;campaign=github-sidrune-fablecut&amp;promo=SDRFABLECUT" rel="noopener sponsored" target="_blank">sidrune.ai <svg class="i i-ne" aria-hidden="true"><use href="#i-ne"/></svg></a>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="made" aria-labelledby="madeTitle">
+  <div class="wrap">
+    <div class="head reveal">
+      <h2 id="madeTitle">Cut by an agent. No hand edits.</h2>
+      <p>Claude made these from stock clips by writing <code class="ic">project.json</code>: beat-synced cuts, a speed ramp, kinetic titles, shape layers that draw themselves on. Every frame is the editor's own export.</p>
+    </div>
+    <div class="made">
+      <figure class="reel reel-tall reveal">
+        <div class="reel-media" style="--ar:9/16">
+          <video muted loop playsinline preload="none" poster="./showcase/after-hours.jpg" data-src="./showcase/after-hours.mp4" aria-label="After Hours: a vertical night-city reel cut to a synthwave track"></video>
+          <button class="reel-snd" type="button" aria-pressed="false" aria-label="Turn sound on">Sound</button>
+        </div>
+        <figcaption><b>After Hours</b><span>9:16 reel. Cuts on every second beat from the track's BPM, a font-cut title, a shake hit on the drop, one adjustment layer for the night look.</span></figcaption>
+      </figure>
+      <figure class="reel reel-wide reveal">
+        <div class="reel-media" style="--ar:12/5">
+          <video muted loop playsinline preload="none" poster="./showcase/salt.jpg" data-src="./showcase/salt.mp4" aria-label="Salt: a widescreen surf trailer with a warm film grade"></video>
+          <button class="reel-snd" type="button" aria-pressed="false" aria-label="Turn sound on">Sound</button>
+        </div>
+        <figcaption><b>Salt</b><span>2.4:1 trailer. A cut every bar, a speed ramp into the turn, teal and orange film grade with grain.</span></figcaption>
+      </figure>
+      <figure class="reel reel-sq reveal">
+        <div class="reel-media" style="--ar:1/1">
+          <video muted loop playsinline preload="none" poster="./showcase/slow-mornings.jpg" data-src="./showcase/slow-mornings.mp4" aria-label="Slow Mornings: a square coffee promo with animated shapes and a lower third"></video>
+          <button class="reel-snd" type="button" aria-pressed="false" aria-label="Turn sound on">Sound</button>
+        </div>
+        <figcaption><b>Slow Mornings</b><span>1:1 promo. Rings that draw on, beat captions, a lower third with a rule that draws itself.</span></figcaption>
+      </figure>
+    </div>
+    <p class="made-foot reveal">Footage from Pexels, music from Pixabay.</p>
+  </div>
+</section>
+
+<section class="section" id="studio">
+  <div class="wrap split">
+    <div class="head reveal">
+      <h2>Your agent connects with one link.</h2>
+      <p>Studio is the same editor at studio.fablecut.space. It works on a folder on your own disk, so your clips are never uploaded. Copy the link from Studio's Agent panel into Claude Code, claude.ai or ChatGPT, and every edit lands live while you watch.</p>
+      <div class="studio-acts">
+        <a class="btn btn-primary" href="https://studio.fablecut.space">Open FableCut Studio</a>
+        <a class="more" href="./docs/studio/">How Studio works <svg class="i" aria-hidden="true"><use href="#i-arrow"/></svg></a>
+      </div>
+    </div>
+    <div class="studio-win reveal">
+      <div class="studio-bar" aria-hidden="true">
+        <span class="studio-dots"><i></i><i></i><i></i></span>
+        <span class="studio-url">studio.fablecut.space</span>
+      </div>
+      <ol class="studio-steps">
+        <li><b>Open a folder</b><span>In Chrome, Edge, Brave or Arc, start a new project or pick a folder that already has your clips. Firefox and Safari keep the project in the browser's own storage instead.</span></li>
+        <li><b>Your clips stay where they are</b><span>Studio reads them straight from the folder and saves <code class="ic">project.json</code> next to them. The files are never uploaded.</span></li>
+        <li><b>Connect your agent</b><span>Paste the link into Claude Code, claude.ai or ChatGPT. Its edits, and the frames it asks to see, go through Studio's relay and show up as it makes them.</span></li>
+        <li><b>Export in the browser</b><span>An <code class="ic">.mp4</code> lands in the folder's <code class="ic">exports/</code>, matching the local editor frame for frame.</span></li>
+      </ol>
     </div>
   </div>
 </section>
@@ -413,8 +473,8 @@
 <section class="section" id="agents">
   <div class="wrap split">
     <div class="head reveal">
-      <h2>Works with the agent you already use.</h2>
-      <p>FableCut ships an MCP server over plain stdio, so any MCP client can read and rewrite your timeline. Claude Code and Claude Desktop install it in one step.</p>
+      <h2>Rather run it on your machine?</h2>
+      <p>The local install ships an MCP server over plain stdio, so any MCP client on your machine can read and rewrite the timeline. Claude Code and Claude Desktop set it up in one step.</p>
       <a class="more" href="./start/#connect">Full setup guide <svg class="i" aria-hidden="true"><use href="#i-arrow"/></svg></a>
     </div>
     <div class="tabs reveal" data-tabs>
@@ -482,31 +542,6 @@
   </div>
 </section>
 
-<section class="section" id="studio">
-  <div class="wrap split">
-    <div class="head reveal">
-      <h2>No install. Open it in your browser.</h2>
-      <p>FableCut Studio is the same editor at studio.fablecut.space. It works on a folder on your own disk, so your clip files are never uploaded, and your agent connects with one link, from Claude Code, claude.ai or ChatGPT.</p>
-      <div class="studio-acts">
-        <a class="btn btn-primary" href="https://studio.fablecut.space">Open FableCut Studio</a>
-        <a class="more" href="./docs/studio/">How Studio works <svg class="i" aria-hidden="true"><use href="#i-arrow"/></svg></a>
-      </div>
-    </div>
-    <div class="studio-win reveal">
-      <div class="studio-bar" aria-hidden="true">
-        <span class="studio-dots"><i></i><i></i><i></i></span>
-        <span class="studio-url">studio.fablecut.space</span>
-      </div>
-      <ol class="studio-steps">
-        <li><b>Open a folder</b><span>Chrome, Edge, Brave or Arc. Start a new project or pick a folder that already has your clips.</span></li>
-        <li><b>Your clips stay where they are</b><span>Studio reads them straight from the folder and saves <code class="ic">project.json</code> next to them. The files are never uploaded.</span></li>
-        <li><b>Connect your agent with a link</b><span>Paste it into Claude Code, claude.ai or ChatGPT. Its edits, and the frames it asks to see, go through Studio's relay and show up live while you watch.</span></li>
-        <li><b>Export in the browser</b><span>An H.264 <code class="ic">.mp4</code> lands in the folder's <code class="ic">exports/</code>, matching the local editor frame for frame.</span></li>
-      </ol>
-    </div>
-  </div>
-</section>
-
 <section class="section" id="mentions" aria-labelledby="mentionsTitle">
   <div class="wrap">
     <h2 class="sr" id="mentionsTitle">What people are saying</h2>
@@ -538,10 +573,11 @@
 <section class="section" id="start">
   <div class="wrap cta">
     <div class="reveal">
-      <h2 class="h2">Up and running in under a minute.</h2>
-      <p class="lead">Node 18 or newer and a Chromium browser. ffmpeg is optional, for fast export. Or skip the install: <a href="https://studio.fablecut.space">FableCut Studio</a> runs the same editor in Chrome, on a folder on your own disk.</p>
+      <h2 class="h2">Cut something in the next minute.</h2>
+      <p class="lead">Open Studio in your browser and point it at a folder of clips. Prefer your own machine? One command runs the same editor locally: Node 18 or newer, ffmpeg optional.</p>
       <div class="btns">
-        <a class="btn btn-primary" href="./start/">Get started</a>
+        <a class="btn btn-primary" href="https://studio.fablecut.space">Open Studio</a>
+        <a class="btn btn-ghost" href="./start/">Install locally</a>
         <a class="more" href="./docs/">Read the docs <svg class="i" aria-hidden="true"><use href="#i-arrow"/></svg></a>
       </div>
     </div>
@@ -593,6 +629,6 @@
   </div>
 </dialog>
 
-<script src="./main.js?v=23"></script>
+<script src="./main.js?v=24"></script>
 </body>
 </html>
