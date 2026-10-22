@@ -553,6 +553,7 @@ const state = {
   selId: null,           // primary selection (drives the inspector)
   selIds: new Set(),     // full multi-selection (includes selId)
   silence: null,         // silences found (Inspector → Silence): {ids, spans, sig}, shown on the timeline until cut or cleared
+  silenceBusy: false,    // a Find is listening (the Inspector offers Cancel)
   trackSize: "l",        // s | m | l — timeline track density preset
   connected: false, exporting: false,
   rendering: false,      // fast (server/ffmpeg) export in progress
@@ -6685,7 +6686,10 @@ function renderInspector(lite) {
       ${row("Below", num("threshold", -80, -10, 1, "dB", "Quieter than this counts as silence (dBFS). Raise it toward −30 in a noisy room"))}
       ${row("At least", num("minSilence", 0.1, 10, 0.1, "s", "Shorter pauses are left alone"))}
       ${row("Keep", num("padding", 0, 2, 0.05, "s beside speech", "Quiet kept before and after each phrase, so words aren't clipped"))}
-      ${row("", `<span class="insp-ctrls"><button type="button" class="btn tiny" data-sil-find title="Listen to the selected clips and mark their silences on the timeline">Find</button>
+      ${row("", state.silenceBusy
+        ? `<span class="insp-ctrls"><span style="opacity:.75">Listening…</span>
+        <button type="button" class="btn tiny" data-sil-clear title="Stop listening">Cancel</button></span>`
+        : `<span class="insp-ctrls"><button type="button" class="btn tiny" data-sil-find title="Listen to the selected clips and mark their silences on the timeline">Find</button>
         ${found ? `<button type="button" class="btn tiny" data-sil-cut title="Extract every marked silence on the targeted tracks (one undo step)">Cut ${found.spans.length}</button>
         <button type="button" class="btn tiny" data-sil-clear title="Remove the marks">Clear</button>` : ""}</span>`)}
       ${found ? `<div class="insp-note">${found.spans.length} silence${found.spans.length === 1 ? "" : "s"}, ${FableCutSilence.total(found.spans).toFixed(1)} s, marked on the timeline. Cut extracts them on the targeted tracks — lock the music bed first to keep it running.</div>` : ""}
@@ -8708,8 +8712,13 @@ async function findSilences(clips, opts = silenceOptions()) {
   if (!groups.length) { toast("Select a clip with sound to find its silences"); return; }
   toast("Listening for silences…");
   const sig = silenceSig(), heard = new Set();
-  const sound = await voiceRegions(groups.flat(), opts.threshold, FableCutSilence.MIN_SOUND, heard);
-  if (gen !== silenceGen) return;   // a newer Find took over
+  state.silenceBusy = true;   // the Inspector shows Listening… with Cancel meanwhile
+  renderInspector();
+  let sound;
+  try { sound = await voiceRegions(groups.flat(), opts.threshold, FableCutSilence.MIN_SOUND, heard); }
+  finally { if (gen === silenceGen) state.silenceBusy = false; }
+  if (gen !== silenceGen) return;   // a newer Find took over, or Cancel
+  renderInspector();   // Listening… → Find again, whatever comes next
   // the timeline moved while it listened: these spans belong to the old one
   if (silenceSig() !== sig) { toast("The timeline changed while listening — find the silences again"); return; }
   // a clip whose audio couldn't be read is not silent: leave its time alone
@@ -8748,6 +8757,7 @@ function cutSilences() {
 function clearSilences() {
   silenceGen++;   // a Find still listening doesn't bring the marks back
   state.silence = null;
+  state.silenceBusy = false;
   state.dirtyTimeline = true;
   renderInspector();
 }
