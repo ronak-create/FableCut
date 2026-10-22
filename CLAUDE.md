@@ -44,6 +44,8 @@ Every Claude Code session then has these tools:
   See "Look at the footage" below.
 - `fablecut_denoise` — reduce background noise on audio clips (renders a cleaned copy of the
   file and switches the clip's stems to it). See "Audio mix" below.
+- `fablecut_silence` — find the pauses in speech and, with `cut:true`, cut them out
+  (extract on the targeted tracks, stems in step). See "Audio mix" below.
 - `fablecut_export` — render the timeline to a file in `exports/` with the editor's own
   Fast export (open tab, or headless Chrome / Edge). See "Export" below.
 - `fablecut_scopes` — measure the graded picture at a moment (levels, clipping, colour
@@ -600,6 +602,30 @@ edits the key under the playhead. Agents:
   on the music: ramp down `attack` s before speech, hold, back up over
   `release` s. It replaces earlier ducking; `amount:0` clears it. Same as the
   inspector's **Auto-duck** section or the clip menu's *Auto-duck under other tracks*.
+- **Silence** — `fablecut_silence {clipIds, threshold?:-40, minSilence?:0.5, padding?:0.15, cut?, tracks?, force?}`
+  listens to the speech clips (a video brings its linked stems; each measured after
+  its channel routing, gain and volume) and finds every stretch where none of them
+  is above `threshold` dBFS for at least `minSilence` seconds. It keeps `padding`
+  seconds of quiet after the phrase before and before the phrase after, so words
+  aren't clipped; a clip's own start and end are cut to the first and last word.
+  Cuts land on whole frames, and the gaps *between* clips are left alone. Without
+  `cut` it only reports the spans (timeline seconds). With `cut:true` each one is
+  removed with an `extract` on the targeted tracks (`tracks` picks others), last
+  first, in one revision: later material moves up, linked stems stay in step, and
+  locked tracks and clips stay where they are — **lock the music bed first** if it
+  should keep running under the tightened edit. `force:true` cuts through locked
+  material too, so pass it only when the user asked. Only time that was actually
+  heard is cut: a clip with no audio stream (or disabled) is left alone, and so is
+  one with a speed ramp (`keyframes.speed`) — its sound doesn't sit on the timeline
+  at one speed. A version
+  of the project as it was is kept before the cut; if that fails the reply says
+  so in a warning, and then there is no version to go back to. Raise `threshold`
+  toward −30 in a noisy room; lower `minSilence` for a tighter, jump-cut feel. In
+  the editor: the Inspector's **Silence** section on an audio or video clip (or
+  right-click → **Find silences**) — **Find** marks the silences on the timeline
+  as amber bands, **Cut N** extracts them (one undo step), **Clear** removes the
+  marks. The marks drop when the timeline, a clip's file, speed or level, or the
+  frame rate changes.
 - In the editor, each audio clip shows its **volume line** (yellow; dashed =
   after ducking): drag it to change the level, Ctrl/Cmd-click to add a keyframe,
   drag a point to move it, Alt-click or double-click to remove one. The corner
@@ -2062,6 +2088,12 @@ To try an alternative without deleting a clip, disable it (⇧E / `disabled:true
 so all takes sit at one loudness, then keep the music on its own lane and pull
 that lane down: `{op:"setTrack", id:"A3", set:{gain:-14}}`. Then dip it under the
 voice: `fablecut_auto_duck {clipIds:[<music clip>], under:["A1"], amount:-10}`.
+
+**Tighten a talking-head take**: lock the music lane (`setProject {lockedTracks:["A3"]}`),
+then `fablecut_silence {clipIds:[<the take>]}` to see the pauses (it does the
+listening; `fablecut_frame` only shows the picture, handy to check a cut won't land
+mid-gesture), and `fablecut_silence {clipIds:[<the take>], cut:true}`. Add
+`{op:"crossfade", ids:[…]}` on the new audio cuts if a breath clicks.
 
 **Center a mono stem**: linked or standalone audio clip with `props.pan: 0` (inspector **Pan** slider, −1…+1). Stereo video stems default to L `−1` / R `+1`; set A1 to `0` to center that channel in the mix.
 

@@ -434,6 +434,8 @@ function showClipCtxMenu(clientX, clientY, c) {
     item("Crossfade with neighbours", "Shift+D", () => crossfadeSelected(), locked ? "Locked — unlock to change" : null);
     item("Auto-duck under other tracks", "", () => autoDuckClips(selectedClips()), locked ? "Locked — unlock to change" : null);
   }
+  if (group.some((x) => x.kind === "audio" || x.kind === "video"))
+    item("Find silences", "", () => findSilences(selectedClips()));
   if (selectedClips().some((x) => isVisualClip(x) && x.kind !== "null"))
     item("Parent to a new null", "", parentSelectionToNull, locked ? "Locked — unlock to change" : null);
   item("Precompose", "", precomposeSelection, locked ? "Locked — unlock to change" : null);
@@ -550,6 +552,8 @@ const state = {
   previewRate: 1,        // playback speed for PREVIEW only — never affects export
   selId: null,           // primary selection (drives the inspector)
   selIds: new Set(),     // full multi-selection (includes selId)
+  silence: null,         // silences found (Inspector → Silence): {ids, spans, sig}, shown on the timeline until cut or cleared
+  silenceBusy: false,    // a Find is listening (the Inspector offers Cancel)
   trackSize: "l",        // s | m | l — timeline track density preset
   connected: false, exporting: false,
   rendering: false,      // fast (server/ffmpeg) export in progress
@@ -4991,8 +4995,28 @@ function rebuildClips() {
     if (hasWave) drawClipWave(div.querySelector(".wave"), c, tr.h);
   }
   paintAudioOverlaps();
+  paintSilences();
   state.dirtyTimeline = false;
   updateWorkArea();
+}
+/* The silences Find marked: a band on each lane of the clips that were listened to. */
+function paintSilences() {
+  const s = state.silence;
+  if (!s) return;
+  if (s.sig !== silenceSig()) { state.silence = null; return; }   // the timeline moved on: they no longer line up
+  const lanes = new Set(withLinked(project.clips.filter((c) => s.ids.includes(c.id))).map((c) => c.track));
+  for (const id of lanes) {
+    const row = els.tracks.querySelector(`[data-track="${id}"]`);
+    if (!row) continue;
+    for (const sp of s.spans) {
+      const el = document.createElement("div");
+      el.className = "silence-span";
+      el.style.left = (sp.from * state.pps) + "px";
+      el.style.width = Math.max(2, (sp.to - sp.from) * state.pps) + "px";
+      el.title = `Silence ${fmt(sp.from)} → ${fmt(sp.to)} (${(sp.to - sp.from).toFixed(2)} s) · Inspector → Silence → Cut`;
+      row.appendChild(el);
+    }
+  }
 }
 /* Hatched bands where two+ audio clips share a track (CSS draw, O(n²) per track). */
 function paintAudioOverlaps() {
@@ -6655,6 +6679,22 @@ function renderInspector(lite) {
       ${slider("speed", 0.25, 4, 0.05, p.speed, "×")}
     </div>`;
   }
+  if ((c.kind === "video" || c.kind === "audio") && typeof FableCutSilence !== "undefined") {
+    const so = silenceOptions(), found = state.silence;
+    const num = (k, lo, hi, step, unit, title) => `<span class="insp-ctrls"><input type="number" data-sil="${k}" min="${lo}" max="${hi}" step="${step}" value="${so[k]}" title="${title}" style="max-width:64px"> ${unit}</span>`;
+    html += `<div class="insp-section"><h3>Silence</h3>
+      ${row("Below", num("threshold", -80, -10, 1, "dB", "Quieter than this counts as silence (dBFS). Raise it toward −30 in a noisy room"))}
+      ${row("At least", num("minSilence", 0.1, 10, 0.1, "s", "Shorter pauses are left alone"))}
+      ${row("Keep", num("padding", 0, 2, 0.05, "s beside speech", "Quiet kept before and after each phrase, so words aren't clipped"))}
+      ${row("", state.silenceBusy
+        ? `<span class="insp-ctrls"><span style="opacity:.75">Listening…</span>
+        <button type="button" class="btn tiny" data-sil-clear title="Stop listening">Cancel</button></span>`
+        : `<span class="insp-ctrls"><button type="button" class="btn tiny" data-sil-find title="Listen to the selected clips and mark their silences on the timeline">Find</button>
+        ${found ? `<button type="button" class="btn tiny" data-sil-cut title="Extract every marked silence on the targeted tracks (one undo step)">Cut ${found.spans.length}</button>
+        <button type="button" class="btn tiny" data-sil-clear title="Remove the marks">Clear</button>` : ""}</span>`)}
+      ${found ? `<div class="insp-note">${found.spans.length} silence${found.spans.length === 1 ? "" : "s"}, ${FableCutSilence.total(found.spans).toFixed(1)} s, marked on the timeline. Cut extracts them on the targeted tracks — lock the music bed first to keep it running.</div>` : ""}
+    </div>`;
+  }
   if (c.kind === "audio" && typeof FableCutFx !== "undefined") {
     html += `<div class="insp-section" data-fx-section><h3>Audio effects</h3>${fxEditorHtml(c.fx, playheadOverClip(c) ? state.time - c.start : null)}</div>`;
   }
@@ -6866,6 +6906,18 @@ function renderInspector(lite) {
     const sel = selectedClips();
     clearDuck(sel.length ? sel : [c]);
   });
+  els.inspector.querySelectorAll("[data-sil]").forEach((inp) => inp.addEventListener("change", () => {
+    const o = silenceOptions(), [lo, hi] = FableCutSilence.LIMITS[inp.dataset.sil];
+    o[inp.dataset.sil] = clamp(+inp.value || 0, lo, hi);
+    inp.value = o[inp.dataset.sil];
+    try { localStorage.setItem(SILENCE_KEY, JSON.stringify(o)); } catch { }
+  }));
+  els.inspector.querySelector("[data-sil-find]")?.addEventListener("click", () => {
+    const sel = selectedClips();
+    findSilences(sel.length ? sel : [c]);
+  });
+  els.inspector.querySelector("[data-sil-cut]")?.addEventListener("click", cutSilences);
+  els.inspector.querySelector("[data-sil-clear]")?.addEventListener("click", clearSilences);
   els.inspector.querySelector("[data-norm-target]")?.addEventListener("change", (e) => {
     try { localStorage.setItem(NORMALIZE_KEY, e.target.value); } catch { }
   });
@@ -8599,13 +8651,14 @@ function setDuckKeys(c, keys) {
 }
 /** Timeline spans with sound on the voice clips (each measured after its
  *  channel routing, scaled by its clip gain and static volume). */
-async function voiceRegions(voices, threshold) {
+async function voiceRegions(voices, threshold, minLen, heard) {
   const lists = [];
   for (const v of voices) {
     const m = getMedia(v.mediaId);
     if (!m) continue;
     let buf;
     try { buf = await getAudioBuffer(m); } catch { continue; }
+    heard?.add(v.id);   // read and measured: its quiet is real quiet, not a file that failed to decode
     const a = clamp(Math.floor(v.in * buf.sampleRate), 0, buf.length);
     const b = clamp(Math.ceil(mediaTimeAt(v, clipEnd(v)) * buf.sampleRate), a, buf.length);
     const src = [];
@@ -8614,9 +8667,103 @@ async function voiceRegions(voices, threshold) {
     lists.push(FableCutDucking.activeRegions(env, {
       t0: v.start, speed: clipSpeed(v), threshold,
       gain: dbToGain(clipGainDb(v)) * clamp(+(v.props?.volume ?? 1), 0, VOL_MAX),
+      ...(minLen != null ? { minLen } : {}),
     }));
   }
-  return FableCutDucking.mergeRegions(lists);
+  // silence wants every pause, so nothing is bridged there; ducking bridges short gaps
+  return FableCutDucking.mergeRegions(lists, minLen != null ? 0 : undefined);
+}
+
+/* ── Silence (silence.js): find the pauses in speech, mark them on the
+   timeline, cut them out with Extract — the same spans and ops as
+   fablecut_silence. ── */
+const SILENCE_KEY = "fablecut-silence";
+function silenceOptions() {
+  try { return FableCutSilence.options(JSON.parse(localStorage.getItem(SILENCE_KEY) || "{}")); }
+  catch { return { ...FableCutSilence.DEFAULTS }; }
+}
+/** Each linked group's audio stems, else the clip itself (audio, or a video without stems). */
+function speechGroups(clips) {
+  const groups = new Map();
+  for (const c of clips) {
+    if (c.kind !== "audio" && c.kind !== "video") continue;
+    const key = c.linkGroup || c.id;
+    if (groups.has(key)) continue;
+    const stems = withLinked([c]).filter((x) => x.kind === "audio");
+    groups.set(key, stems.length ? stems : [c]);
+  }
+  return [...groups.values()];
+}
+/** Everything the marks were found from — where each clip sits, its file, speed, level and switches, the
+ *  frame rate: marked silences only stand while this is unchanged. */
+function silenceSig() {
+  return project.fps + "#" + project.clips.map((c) => JSON.stringify([c.id, c.track, c.start, c.in, c.duration, c.mediaId,
+    getMedia(c.mediaId)?.src ?? null, c.linkGroup ?? null, c.props?.speed ?? 1, c.keyframes?.speed ?? null,
+    c.props?.gain ?? 0, c.props?.volume ?? 1, c.props?.audioChannel ?? null, c.props?.channelMode ?? null,
+    clipRenders(c) ? 1 : 0])).join("|");
+}
+let silenceGen = 0;   // the newest Find: an older one still decoding never replaces its result
+async function findSilences(clips, opts = silenceOptions()) {
+  if (typeof FableCutSilence === "undefined") { toast("Silence module missing — reload the editor"); return; }
+  // a new Find replaces the old marks whatever it finds, so Cut never acts on another clip's result
+  const gen = ++silenceGen;
+  if (state.silence) { state.silence = null; state.dirtyTimeline = true; renderInspector(); }
+  const all = speechGroups(clips).map((g) => g.filter(clipRenders)).filter((g) => g.length);
+  if (!all.length) { toast("Select a clip with sound to find its silences"); return; }
+  // a speed ramp moves the sound along the timeline unevenly: those clips are left alone
+  const groups = all.filter((g) => !g.some(FableCutSilence.ramped));
+  if (!groups.length) { toast("These clips have a speed ramp — silence removal works on clips at a steady speed"); return; }
+  toast("Listening for silences…");
+  const sig = silenceSig(), heard = new Set();
+  state.silenceBusy = true;   // the Inspector shows Listening… with Cancel meanwhile
+  renderInspector();
+  let sound;
+  try { sound = await voiceRegions(groups.flat(), opts.threshold, FableCutSilence.MIN_SOUND, heard); }
+  finally { if (gen === silenceGen) state.silenceBusy = false; }
+  if (gen !== silenceGen) return;   // a newer Find took over, or Cancel
+  renderInspector();   // Listening… → Find again, whatever comes next
+  // the timeline moved while it listened: these spans belong to the old one
+  if (silenceSig() !== sig) { toast("The timeline changed while listening — find the silences again"); return; }
+  // a clip whose audio couldn't be read is not silent: leave its time alone
+  const usable = groups.filter((g) => g.every((x) => heard.has(x.id)));
+  if (!usable.length) { toast("Couldn't read the audio of these clips — nothing marked"); return; }
+  const ranges = usable.map((g) => [Math.min(...g.map((x) => x.start)), Math.max(...g.map(clipEnd))]);
+  const spans = FableCutSilence.silentSpans(sound, ranges, { ...opts, fps: project.fps });
+  state.silence = spans.length ? { ids: usable.flat().map((x) => x.id), spans, sig } : null;
+  state.dirtyTimeline = true;
+  renderInspector();
+  toast((spans.length
+    ? `${spans.length} silence${spans.length === 1 ? "" : "s"}, ${FableCutSilence.total(spans).toFixed(1)} s — marked on the timeline`
+    : "No silences that long — try a higher threshold or a shorter minimum") +
+    (usable.length < groups.length ? " · some clips' audio couldn't be read, so their time is left alone" : "") +
+    (groups.length < all.length ? " · clips with a speed ramp are left alone" : ""));
+}
+/** Extract every marked silence on the targeted tracks, last first: one undo step. */
+function cutSilences() {
+  const s = state.silence;
+  // the marks dropped when the timeline changed (the button can outlive them until the Inspector redraws)
+  if (!s) { renderInspector(); toast("The timeline changed — find the silences again"); return; }
+  if (s.sig !== silenceSig()) { state.silence = null; renderInspector(); toast("The timeline changed — find the silences again"); return; }
+  const snap = undoSnapshot();
+  let cut = 0, secs = 0;
+  for (const sp of s.spans.slice().sort((a, b) => b.from - a.from)) {
+    if (!EDIT.liftRange(sp.from, sp.to, true)) { cut++; secs += sp.to - sp.from; }
+  }
+  state.silence = null;
+  if (!cut) { state.dirtyTimeline = true; renderInspector(); toast("Nothing was cut — target the clip's tracks first"); return; }
+  pushUndo(snap);
+  pruneSelection();
+  state.dirtyTimeline = true;
+  scheduleSave();
+  renderInspector();
+  toast(`Cut ${cut} silence${cut === 1 ? "" : "s"} · ${secs.toFixed(1)} s shorter`);
+}
+function clearSilences() {
+  silenceGen++;   // a Find still listening doesn't bring the marks back
+  state.silence = null;
+  state.silenceBusy = false;
+  state.dirtyTimeline = true;
+  renderInspector();
 }
 async function autoDuckClips(clips, { under = null, amount = duckAmount(), threshold = -40 } = {}) {
   if (typeof FableCutDucking === "undefined") { toast("Ducking module missing — reload the editor"); return; }

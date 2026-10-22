@@ -447,6 +447,82 @@ test("fablecut_auto_duck writes duck keys on the music where the voice speaks, a
   assert.match(none.text, /nothing to duck for/);
 });
 
+test("fablecut_silence reports the pauses in speech, then cuts them with the stems in step", async (t) => {
+  const { spawnSync } = require("node:child_process");
+  const has = (b) => { try { return spawnSync(b, ["-version"], { stdio: "ignore" }).status === 0; } catch { return false; } };
+  if (!has("ffmpeg") || !has("ffprobe")) { t.skip("ffmpeg / ffprobe not installed"); return; }
+  const project = seedProject({
+    fps: 30,
+    media: [
+      { id: "m_s", name: "talk.wav", kind: "audio", src: "/media/talk.wav", duration: 10 },
+      { id: "m_b", name: "bed.wav", kind: "audio", src: "/media/bed.wav", duration: 10 },
+    ],
+    clips: [
+      { id: "c_s", mediaId: "m_s", kind: "audio", track: "A1", start: 0, in: 0, duration: 10, props: {} },
+      { id: "c_b", mediaId: "m_b", kind: "audio", track: "A3", start: 0, in: 0, duration: 10, props: { volume: 0.3 } },
+      { id: "c_t", kind: "text", mediaId: null, track: "V2", start: 0, in: 0, duration: 10, props: { text: "hi" } },
+    ],
+    lockedTracks: ["A3"],
+  });
+  const { dir, mcp } = await boot(t, project);
+  fs.mkdirSync(path.join(dir, "media"), { recursive: true });
+  // speech 1–3 s and 5–6 s, silence around it; a steady bed on A3 that must not count
+  const talk = "if(between(t,1,3)+between(t,5,6),0.2*sin(2*PI*300*t),0)";
+  for (const [name, expr] of [["talk.wav", talk], ["bed.wav", "0.1*sin(2*PI*220*t)"]]) {
+    const r = spawnSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", `aevalsrc='${expr}':s=48000:d=10`,
+      "-c:a", "pcm_f32le", path.join(dir, "media", name)]);
+    assert.equal(r.status, 0, String(r.stderr));
+  }
+
+  const look = await mcp.callTool("fablecut_silence", { clipIds: ["c_s"], padding: 0.2 });
+  assert.equal(look.isError, false, look.text);
+  assert.match(look.text, /^3 silences, /, look.text);
+  assert.match(look.text, /cut:true/);
+  assert.equal(readProject(dir).revision, project.revision, "reporting changes nothing");
+  const loose = await mcp.callTool("fablecut_silence", { clipIds: ["c_s"], padding: 0.2, cut: "true" });
+  assert.equal(loose.isError, false, loose.text);
+  assert.equal(readProject(dir).revision, project.revision, "only cut:true cuts");
+
+  // a picture with no audio stream beside it is not 'silent': its time is left alone
+  const r = spawnSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=160x90:r=30:d=10", "-c:v", "libx264",
+    "-pix_fmt", "yuv420p", path.join(dir, "media", "mute.mp4")]);
+  assert.equal(r.status, 0, String(r.stderr));
+  const withMute = readProject(dir);
+  withMute.media.push({ id: "m_n", name: "mute.mp4", kind: "video", src: "/media/mute.mp4", duration: 10 });
+  withMute.clips.push({ id: "c_n", mediaId: "m_n", kind: "video", track: "V1", start: 12, in: 0, duration: 10, props: {} });
+  withMute.revision++;
+  writeProject(dir, withMute);
+  const mute = await mcp.callTool("fablecut_silence", { clipIds: ["c_s", "c_n"], padding: 0.2 });
+  assert.equal(mute.isError, false, mute.text);
+  assert.match(mute.text, /^3 silences, .*1 clip\(s\) with no audio stream left alone/, mute.text);
+  const muteOnly = await mcp.callTool("fablecut_silence", { clipIds: ["c_n"] });
+  assert.ok(muteOnly.isError);
+  assert.match(muteOnly.text, /no audio stream/);
+  withMute.clips = withMute.clips.filter((c) => c.id !== "c_n");
+  withMute.media = withMute.media.filter((m) => m.id !== "m_n");
+  withMute.revision++;
+  writeProject(dir, withMute);
+
+  const res = await mcp.callTool("fablecut_silence", { clipIds: ["c_s"], padding: 0.2, cut: true });
+  assert.equal(res.isError, false, res.text);
+  assert.match(res.text, /^Cut 3 silences/);
+  assert.match(res.text, /kept as a version/);
+  const doc = readProject(dir);
+  const speech = doc.clips.filter((c) => c.track === "A1").sort((a, b) => a.start - b.start);
+  assert.equal(speech.length, 2, "two phrases left");
+  const len = speech.reduce((n, c) => n + c.duration, 0);
+  // 3 s of speech + 0.2 s padding each side, plus up to one 0.1 s RMS window of tail per phrase
+  assert.ok(len >= 3.75 && len <= 4.35, `about 2 s + 1 s of speech plus padding, got ${len}`);
+  assert.ok(Math.abs(speech[1].start - (speech[0].start + speech[0].duration)) < 1e-3, "no gap between the phrases");
+  assert.ok(speech[0].in > 0.5 && speech[1].in > 4.5, JSON.stringify(speech.map((c) => c.in)));
+  const bed = doc.clips.find((c) => c.id === "c_b");
+  assert.deepEqual([bed.start, bed.duration], [0, 10], "the locked bed keeps running");
+
+  const bad = await mcp.callTool("fablecut_silence", { clipIds: ["c_t"] });
+  assert.ok(bad.isError);
+  assert.match(bad.text, /no sound to listen to/);
+});
+
 test("setFx puts validated chains or presets on clips (with their stems), tracks and the master", async (t) => {
   const project = seedProject({
     media: [{ id: "m_v", name: "v.mp4", kind: "video", src: "/media/v.mp4", duration: 10 }],

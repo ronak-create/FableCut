@@ -15,7 +15,7 @@ about 150 ms. A human and an agent can work the same timeline at once.
   no paid tier.
 - Requirements: Node.js 18+ and a Chromium-based browser. ffmpeg on PATH is
   optional but recommended (fast export, upload remuxing, loudness
-  normalization, auto-duck and noise reduction).
+  normalization, auto-duck, noise reduction and silence removal).
 - Install: `npx -y fablecut`, then open http://localhost:7777 (projects and
   media go to ~/FableCut). Or clone the repo and run `node server.js`.
 - MCP: `claude mcp add -s user fablecut -- npx -y fablecut mcp` (any client:
@@ -35,7 +35,7 @@ about 150 ms. A human and an agent can work the same timeline at once.
   clip gain; effect chains (EQ, filters, compressor, limiter, gate, delay,
   reverb, distortion, stereo width, pitch shift) with presets and keyframed
   parameters; loudness normalization (LUFS); auto-duck; crossfades; noise
-  reduction.
+  reduction; silence removal (find the pauses in a take and cut them out).
 - Color: a Color workspace with GPU grading per clip or adjustment layer
   (lift / gamma / gain / offset wheels, exposure, white balance with a picker,
   blacks / shadows / midtones / highlights / whites, log-style contrast and
