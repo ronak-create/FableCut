@@ -42,6 +42,12 @@ test("only inside the clips: the gap between two clips is left alone", () => {
   assert.deepEqual(spans, [{ from: 2, to: 3 }, { from: 5, to: 6 }]);
 });
 
+test("ramped: a clip with speed keyframes is left out", () => {
+  assert.equal(S.ramped({ keyframes: { speed: [{ t: 0, v: 1 }, { t: 1, v: 2 }] } }), true);
+  assert.equal(S.ramped({ props: { speed: 2 } }), false, "a steady speed is fine");
+  assert.equal(S.ramped({ keyframes: { speed: [] } }), false);
+});
+
 test("cutOps extract last first, with tracks and force passed on", () => {
   const ops = S.cutOps([{ from: 1, to: 2 }, { from: 5, to: 6 }], { tracks: ["V1", "A1"], force: true });
   assert.deepEqual(ops, [

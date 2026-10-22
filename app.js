@@ -8708,8 +8708,11 @@ async function findSilences(clips, opts = silenceOptions()) {
   // a new Find replaces the old marks whatever it finds, so Cut never acts on another clip's result
   const gen = ++silenceGen;
   if (state.silence) { state.silence = null; state.dirtyTimeline = true; renderInspector(); }
-  const groups = speechGroups(clips).map((g) => g.filter(clipRenders)).filter((g) => g.length);
-  if (!groups.length) { toast("Select a clip with sound to find its silences"); return; }
+  const all = speechGroups(clips).map((g) => g.filter(clipRenders)).filter((g) => g.length);
+  if (!all.length) { toast("Select a clip with sound to find its silences"); return; }
+  // a speed ramp moves the sound along the timeline unevenly: those clips are left alone
+  const groups = all.filter((g) => !g.some(FableCutSilence.ramped));
+  if (!groups.length) { toast("These clips have a speed ramp — silence removal works on clips at a steady speed"); return; }
   toast("Listening for silences…");
   const sig = silenceSig(), heard = new Set();
   state.silenceBusy = true;   // the Inspector shows Listening… with Cancel meanwhile
@@ -8732,7 +8735,8 @@ async function findSilences(clips, opts = silenceOptions()) {
   toast((spans.length
     ? `${spans.length} silence${spans.length === 1 ? "" : "s"}, ${FableCutSilence.total(spans).toFixed(1)} s — marked on the timeline`
     : "No silences that long — try a higher threshold or a shorter minimum") +
-    (usable.length < groups.length ? " · some clips' audio couldn't be read, so their time is left alone" : ""));
+    (usable.length < groups.length ? " · some clips' audio couldn't be read, so their time is left alone" : "") +
+    (groups.length < all.length ? " · clips with a speed ramp are left alone" : ""));
 }
 /** Extract every marked silence on the targeted tracks, last first: one undo step. */
 function cutSilences() {

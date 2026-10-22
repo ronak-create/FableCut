@@ -615,7 +615,9 @@ edits the key under the playhead. Agents:
   locked tracks and clips stay where they are — **lock the music bed first** if it
   should keep running under the tightened edit. `force:true` cuts through locked
   material too, so pass it only when the user asked. Only time that was actually
-  heard is cut: a clip with no audio stream (or disabled) is left alone. A version
+  heard is cut: a clip with no audio stream (or disabled) is left alone, and so is
+  one with a speed ramp (`keyframes.speed`) — its sound doesn't sit on the timeline
+  at one speed. A version
   of the project as it was is kept before the cut; if that fails the reply says
   so in a warning, and then there is no version to go back to. Raise `threshold`
   toward −30 in a noisy room; lower `minSilence` for a tighter, jump-cut feel. In

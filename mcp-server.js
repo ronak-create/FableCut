@@ -553,8 +553,12 @@ async function silenceTool(args) {
   const readRev = doc.revision || 0;
   const groups = speechGroups(doc, ids);
   const disabled = new Set(Array.isArray(doc.disabledTracks) ? doc.disabledTracks : []);
-  const live = groups.map((g) => g.filter((x) => !disabled.has(x.track) && x.disabled !== true)).filter((g) => g.length);
-  if (!live.length) throw new Error("those clips are disabled (or on disabled tracks) — nothing to listen to");
+  const enabled = groups.map((g) => g.filter((x) => !disabled.has(x.track) && x.disabled !== true)).filter((g) => g.length);
+  if (!enabled.length) throw new Error("those clips are disabled (or on disabled tracks) — nothing to listen to");
+  // a speed ramp moves the sound along the timeline unevenly: those clips are left alone
+  const live = enabled.filter((g) => !g.some(S.ramped));
+  const rampedN = enabled.length - live.length;
+  if (!live.length) throw new Error("those clips have a speed ramp (speed keyframes) — silence removal works on clips at a steady speed");
   const heard = new Set();
   const sound = await voiceRegions(doc, live.flat(), opts.threshold, S.MIN_SOUND, heard);
   // only time that was actually listened to can be silent: a clip with no audio stream is left alone
@@ -565,7 +569,8 @@ async function silenceTool(args) {
   const listen = S.union(ranges).reduce((n, [a, b]) => n + b - a, 0);
   const head = `${spans.length} silence${spans.length === 1 ? "" : "s"}, ${S.total(spans).toFixed(1)} s of ${fmtDur(listen)} ` +
     `(threshold ${opts.threshold} dBFS, at least ${opts.minSilence} s, ${opts.padding} s kept beside speech` +
-    (usable.length < live.length ? `; ${live.length - usable.length} clip(s) with no audio stream left alone` : "") + ")";
+    (usable.length < live.length ? `; ${live.length - usable.length} clip(s) with no audio stream left alone` : "") +
+    (rampedN ? `; ${rampedN} clip(s) with a speed ramp left alone` : "") + ")";
   const list = spans.slice(0, 60).map((s) => `  ${fmtClock(s.from)} → ${fmtClock(s.to)}  (${(s.to - s.from).toFixed(2)} s)`)
     .concat(spans.length > 60 ? [`  … +${spans.length - 60} more`] : []);
   if (args.cut !== true) return [head + (spans.length ? ":" : "."), ...list,

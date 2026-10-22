@@ -86,8 +86,12 @@
     }));
   }
 
+  /** A clip whose speed follows keyframes (a speed ramp): its sound can't be placed on the timeline
+   *  from one speed, so it is left out of silence detection rather than risk cutting speech. */
+  const ramped = (c) => !!(c && c.keyframes && Array.isArray(c.keyframes.speed) && c.keyframes.speed.length);
+
   /** Seconds the spans add up to. */
   const total = (spans) => r4(spans.reduce((n, s) => n + (s.to - s.from), 0));
 
-  return { DEFAULTS, LIMITS, MIN_SOUND, options, union, silentSpans, cutOps, total };
+  return { DEFAULTS, LIMITS, MIN_SOUND, options, union, silentSpans, cutOps, total, ramped };
 });
