@@ -542,14 +542,13 @@ h1, h2, h3 { font-weight: 600; margin: 0; }
    A 23 × 6 grid of square cells; each clip takes the block of cells nearest its
    own shape (16:9, 12:5, 4:3, 1:1, 2:3, 9:16). The wall is centred and runs
    off both edges; every clip appears once. */
-.sc-clip { margin-top: 52px; overflow: hidden; }
+.sc-clip { margin-top: 52px; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
+.sc-clip::-webkit-scrollbar { display: none; }
 .sc-wall {
   --c: clamp(56px, 5.4vw, 96px); --g: 14px;
-  display: grid; gap: var(--g); width: max-content; margin-left: 50%; transform: translateX(-50%);
+  display: grid; gap: var(--g); width: max-content;
   grid-template-columns: repeat(23, var(--c)); grid-template-rows: repeat(6, var(--c));
 }
-.js .sc-wall.reveal { transform: translateX(-50%) translateY(16px); }
-.js .sc-wall.reveal.in { transform: translateX(-50%); }
 .sc-tile {
   position: relative; overflow: hidden; min-width: 0; min-height: 0;
   border: 1px solid var(--line-2); border-radius: var(--radius); background: #000; box-shadow: var(--shadow);
@@ -565,13 +564,8 @@ h1, h2, h3 { font-weight: 600; margin: 0; }
 }
 .sc-prompt span { display: block; margin-bottom: 3px; font: 500 10.5px/1 var(--mono); letter-spacing: .04em; color: rgb(255 255 255 / .6); }
 .sc-tile:hover .sc-prompt, .sc-tile:focus-within .sc-prompt { opacity: 1; transform: none; }
-/* phones: the same wall, swiped sideways, starting from the middle */
-@media (max-width: 760px) {
-  .sc-clip { overflow-x: auto; scrollbar-width: none; }
-  .sc-clip::-webkit-scrollbar { display: none; }
-  .sc-wall { --c: 52px; --g: 10px; margin: 0 16px; transform: none; }
-  .js .sc-wall.reveal, .js .sc-wall.reveal.in { transform: none; }
-}
+@media (max-width: 760px) { .sc-wall { --c: 52px; --g: 10px; } }
+.sc-tile video:focus-visible { outline: 2px solid #fff; outline-offset: -4px; }
 .reel-snd {
   position: absolute; right: 10px; top: 10px; height: 28px; padding: 0 11px; border-radius: 999px;
   border: 1px solid rgb(255 255 255 / .2); background: rgb(0 0 0 / .5); color: #fff;
@@ -581,6 +575,11 @@ h1, h2, h3 { font-weight: 600; margin: 0; }
 .sc-tile:hover .reel-snd, .reel-snd:focus-visible, .reel-snd[aria-pressed="true"] { opacity: 1; }
 .reel-snd[aria-pressed="true"] { background: rgb(255 255 255 / .9); color: #000; }
 @media (hover: none) { .reel-snd { opacity: 1; } }
+/* touch screens have no hover: show the prompt, and give Sound a full-size target */
+@media (hover: none) {
+  .sc-prompt { opacity: 1; transform: none; }
+  .reel-snd { height: 44px; padding: 0 16px; top: 8px; right: 8px; }
+}
 
 /* ── Agents ─────────────────────────────────────────────── */
 .split {

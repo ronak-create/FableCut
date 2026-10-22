@@ -146,33 +146,45 @@
     if (!vids.length) return;
     function load(v) { if (!v.getAttribute("src")) v.src = v.getAttribute("data-src"); }
     function play(v) { load(v); var p = v.play(); if (p && p.catch) p.catch(function () { }); }
+    function label(b, on) { b.setAttribute("aria-label", (on ? "Turn sound off: " : "Turn sound on: ") + b.getAttribute("data-name")); }
+    function toggle(v) {   // a pause the viewer chose sticks until they play it again
+      if (v.paused) { v.userPaused = false; play(v); } else { v.userPaused = true; v.pause(); }
+    }
     vids.forEach(function (v) {
       var snd = v.parentNode.querySelector(".reel-snd");
-      v.addEventListener("click", function () { if (v.paused) play(v); else v.pause(); });
+      v.addEventListener("click", function () { toggle(v); });
+      v.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(v); }
+      });
       if (snd) snd.addEventListener("click", function () {
         var on = v.muted;
         vids.forEach(function (o) {
           o.muted = true;
           var b = o.parentNode.querySelector(".reel-snd");
-          if (b) { b.setAttribute("aria-pressed", "false"); b.setAttribute("aria-label", "Turn sound on"); }
+          if (b) { b.setAttribute("aria-pressed", "false"); label(b, false); }
         });
         v.muted = !on;
         snd.setAttribute("aria-pressed", String(on));
-        snd.setAttribute("aria-label", on ? "Turn sound off" : "Turn sound on");
-        if (on) { v.currentTime = 0; play(v); }
+        label(snd, on);
+        if (on) { v.currentTime = 0; v.userPaused = false; play(v); }
       });
     });
-    // on a phone the wall scrolls sideways: start it at the middle
+    // the wall is wider than the window: start it at the middle, scroll for the edges
     var clip = document.querySelector(".sc-clip");
-    if (clip && getComputedStyle(clip).overflowX === "auto") clip.scrollLeft = (clip.scrollWidth - clip.clientWidth) / 2;
+    if (clip) clip.scrollLeft = (clip.scrollWidth - clip.clientWidth) / 2;
     if (reduced || !("IntersectionObserver" in window)) return;
-    var io = new IntersectionObserver(function (entries) {
+    // one observer loads clips a little before they arrive; another plays only what is on screen
+    var near = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) { if (e.isIntersecting) { load(e.target); near.unobserve(e.target); } });
+    }, { rootMargin: "300px" });
+    var seen = new IntersectionObserver(function (entries) {
       entries.forEach(function (e) {
-        if (e.isIntersecting) play(e.target);
-        else if (e.target.getAttribute("src")) e.target.pause();
+        var v = e.target;
+        if (e.isIntersecting) { if (!v.userPaused) play(v); }
+        else { v.userPaused = false; if (v.getAttribute("src")) v.pause(); }
       });
-    }, { rootMargin: "200px 0px", threshold: 0.15 });
-    vids.forEach(function (v) { io.observe(v); });
+    }, { threshold: 0.15 });
+    vids.forEach(function (v) { near.observe(v); seen.observe(v); });
   })();
 
   /* ── Live numbers from GitHub (stars, latest release), cached per tab ── */
