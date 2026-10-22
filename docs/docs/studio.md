@@ -1,12 +1,22 @@
 ### Open Studio
 
-1. Go to [studio.fablecut.space](https://studio.fablecut.space) in Chrome, Edge, Brave or Arc.
+1. Go to [studio.fablecut.space](https://studio.fablecut.space) in Chrome, Edge, Brave or Arc. (In Firefox or Safari, see [Firefox and Safari](#firefox-and-safari) instead.)
 2. Click **New project** and pick where to save it, or **Open a folder** that already has your footage.
 3. When the browser asks to let Studio read and save in that folder, choose **Allow on every visit**.
 
 Studio opens the folder in the editor. Clips are read from the folder where they are, and the files are never uploaded. Your edits are saved to `project.json` in the same folder. Projects you have opened before are listed on the home page; opening one again only asks for the browser's permission.
 
-Firefox and Safari can't open folders on your disk, so Studio needs a Chromium browser. On those browsers, run FableCut locally instead with `npx -y fablecut`.
+### Firefox and Safari
+
+Firefox and Safari can't open folders on your disk, so there Studio keeps projects in the browser's own storage instead:
+
+- **New project** starts an empty one; add clips with the editor's Import button or drop them onto the bin. They are copied into the browser's storage.
+- **Import a folder** copies a folder of clips, or a FableCut project folder with its `project.json`, into a new project.
+- Exports download to your computer instead of landing in `exports/`.
+- **Download** on a project's card saves the whole project as a `.zip`: clips, `project.json` and versions. Unzip it and the folder opens in Studio on a Chromium browser, or locally with `FABLECUT_DATA_DIR=<folder> npx -y fablecut`.
+- **Delete** (click twice) removes a project and its clips from the browser. The home page shows how much of the browser's storage the projects use.
+
+The files are still never uploaded, and agents connect the same way. Browser storage holds a copy of each clip, and the browser may clear it when the disk runs low, so download projects you want to keep. Chrome, Edge, Brave and Arc open real folders and need none of this.
 
 ### The project folder
 
@@ -17,6 +27,7 @@ A Studio project is a plain folder with the same layout as a local FableCut data
 | `project.json` | The timeline: canvas, tracks, clips, media list |
 | `media/` | Clips you import from outside the folder |
 | `exports/` | Your renders |
+| `history/` | Saved versions of the project |
 
 Clips already in the folder are used where they are, and new files you drop into it show up in the media bin. The same folder opens in the local editor too: `FABLECUT_DATA_DIR=<folder> npx -y fablecut`.
 
@@ -40,17 +51,17 @@ For usage numbers, the relay logs each call: which tool, whether it worked and h
 
 ### Exports
 
-Studio renders in the browser and encodes H.264 video with AAC audio into an `.mp4`, saved to the project's `exports/` folder. Encoding profiles set the bitrate. Exports match the local editor's output frame for frame and in loudness.
+Studio renders in the browser and encodes an `.mp4` with H.264 video and AAC audio (Opus in Firefox, which has no AAC encoder). In Chrome, Edge, Brave and Arc it is saved to the project's `exports/` folder; in Firefox and Safari it downloads. Encoding profiles set the bitrate. Delivery presets and batch outputs work too, with the browser's encoders: H.264, HEVC, VP9 and AV1 where the browser has them. ProRes, DNxHR, FFV1, PCM and 10-bit need ffmpeg, so Studio swaps in the closest browser format and says so. Exports match the local editor's output frame for frame and in loudness.
 
 ### Studio or the local install
 
 | | Studio | Local (`npx -y fablecut`) |
 |---|---|---|
 | Install | None | Node 18+, optional ffmpeg |
-| Browser | Chrome, Edge, Brave, Arc | Any Chromium browser |
-| Your media | Stays in the folder you pick | Stays in `~/FableCut` |
+| Browser | Chrome, Edge, Brave, Arc; Firefox and Safari keep projects in the browser | Any Chromium browser |
+| Your media | Stays in the folder you pick (Firefox and Safari: copied into browser storage) | Stays in `~/FableCut` |
 | Agents | Claude Code, claude.ai, ChatGPT and any MCP client, by link | Any MCP client on the same machine |
-| Export | H.264 + AAC `.mp4`, in the browser | Adds ProRes and other ffmpeg profiles |
+| Export | `.mp4` in the browser (H.264, HEVC, VP9, AV1) | Adds ProRes, DNxHR, FFV1 and other ffmpeg profiles |
 | Not in Studio yet | Import from a path or URL, reference analysis, noise reduction | |
 
 ### When Chrome pauses access
