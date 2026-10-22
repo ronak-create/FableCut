@@ -162,6 +162,9 @@
         if (on) { v.currentTime = 0; play(v); }
       });
     });
+    // on a phone the wall scrolls sideways: start it at the middle
+    var clip = document.querySelector(".sc-clip");
+    if (clip && getComputedStyle(clip).overflowX === "auto") clip.scrollLeft = (clip.scrollWidth - clip.clientWidth) / 2;
     if (reduced || !("IntersectionObserver" in window)) return;
     var io = new IntersectionObserver(function (entries) {
       entries.forEach(function (e) {

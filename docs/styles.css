@@ -152,11 +152,15 @@ h1, h2, h3 { font-weight: 600; margin: 0; }
   border-bottom: 1px solid transparent;
   transition: background-color .3s, border-color .3s;
 }
-.nav.stuck, .nav.open {
-  background: color-mix(in oklab, var(--bg) 80%, transparent);
-  -webkit-backdrop-filter: saturate(1.5) blur(16px);
-  backdrop-filter: saturate(1.5) blur(16px);
-  border-bottom-color: var(--line);
+.nav.stuck, .nav.open {   /* frosted glass: the page shows through, blurred, with a pale sheen */
+  background: linear-gradient(rgb(255 255 255 / .09), rgb(255 255 255 / .04));
+  -webkit-backdrop-filter: saturate(1.6) blur(20px);
+  backdrop-filter: saturate(1.6) blur(20px);
+  border-bottom-color: rgb(255 255 255 / .12);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / .08), 0 8px 30px -12px rgb(0 0 0 / .5);
+}
+:root[data-theme="light"] .nav.stuck, :root[data-theme="light"] .nav.open {
+  background: rgb(255 255 255 / .62); border-bottom-color: rgb(9 9 11 / .08); box-shadow: none;
 }
 .nav-inner { height: 64px; display: flex; align-items: center; gap: 28px; }
 .brand { display: inline-flex; align-items: center; gap: 10px; font-weight: 600; font-size: 16px; letter-spacing: -.02em; }
@@ -215,8 +219,10 @@ h1, h2, h3 { font-weight: 600; margin: 0; }
   left: 50%; top: -120px; width: min(1400px, 140vw); height: 900px; transform: translateX(-50%);
   background: radial-gradient(50% 50% at 50% 30%, var(--glow), transparent 70%);
 }
-/* the light: a beam raking across the hero, a reflection under the reels.
-   --beam is its colour. */
+/* the light: a violet beam rakes across the hero; below it each section has soft
+   patches of its own colour, so the colour moves as you scroll: cyan (showcase),
+   crimson (Studio), amber (playground). */
+.beam, .lit::before, .lit::after { pointer-events: none; }
 :root { --beam: 139 92 246; }
 .beam { position: absolute; inset: 0 0 auto; height: 1000px; z-index: -1; pointer-events: none; overflow: hidden; }
 .beam::before {   /* a cone of light fanning down-left from the top-right corner, brightest along its upper edge */
@@ -233,47 +239,28 @@ h1, h2, h3 { font-weight: 600; margin: 0; }
   background: radial-gradient(closest-side, rgb(var(--beam) / .45), rgb(var(--beam) / .1) 60%, transparent);
   filter: blur(20px);
 }
-:root[data-theme="light"] .beam, :root[data-theme="light"] .lit::before, :root[data-theme="light"] .lit::after { display: none; }
-
-/* each section below the hero brings its own light, so the colour moves as you scroll:
-   cyan spotlight (showcase), crimson streak (Studio), amber flare (playground) */
 .lit { position: relative; isolation: isolate; overflow-x: clip; }
-.lit::before, .lit::after { content: ""; position: absolute; z-index: -1; pointer-events: none; }
-#made::before {   /* cyan: a spotlight falling from above onto the wall, with haze in the beam */
-  left: 50%; top: -60px; width: 1300px; height: 980px; transform: translateX(-50%);
+.lit::before, .lit::after { content: ""; position: absolute; z-index: -1; border-radius: 50%; filter: blur(70px); }
+#made::before {   /* cyan: a spotlight beam falling from above onto the wall; starts inside the section */
+  left: 50%; top: 40px; width: 1300px; height: 900px; transform: translateX(-50%); border-radius: 0; filter: blur(14px);
   background:
-    radial-gradient(10% 6% at 50% 2%, rgb(220 252 255 / .8), transparent),
-    radial-gradient(45% 60% at 50% 70%, rgb(34 211 238 / .14), transparent 70%),
-    conic-gradient(from 152deg at 50% 0%, transparent 0deg, rgb(34 211 238 / .12) 14deg, rgb(34 211 238 / .3) 28deg, rgb(34 211 238 / .12) 42deg, transparent 56deg);
-  filter: blur(14px);
-  -webkit-mask: linear-gradient(#000 35%, transparent 95%); mask: linear-gradient(#000 35%, transparent 95%);
+    radial-gradient(9% 5% at 50% 0%, rgb(220 252 255 / .55), transparent),
+    radial-gradient(45% 60% at 50% 72%, rgb(34 211 238 / .12), transparent 70%),
+    conic-gradient(from 152deg at 50% 0%, transparent 0deg, rgb(34 211 238 / .1) 14deg, rgb(34 211 238 / .26) 28deg, rgb(34 211 238 / .1) 42deg, transparent 56deg);
+  -webkit-mask: linear-gradient(transparent, #000 12%, #000 40%, transparent 95%); mask: linear-gradient(transparent, #000 12%, #000 40%, transparent 95%);
 }
-#made::after {    /* and its pool on the floor under the wall */
-  left: 50%; bottom: -80px; width: min(1500px, 120vw); height: 360px; transform: translateX(-50%);
-  background: radial-gradient(50% 50% at 50% 50%, rgb(34 211 238 / .13), transparent 70%);
-}
-#studio::before { /* crimson: a light streak curving up behind the Studio window */
-  right: -6%; top: 40px; width: 1100px; height: 640px;
-  background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1100 640'><defs><filter id='b' x='-20%' y='-20%' width='140%' height='140%'><feGaussianBlur stdDeviation='14'/></filter><filter id='s'><feGaussianBlur stdDeviation='2.5'/></filter></defs><path d='M0 600 C 380 590 640 520 800 330 S 1020 60 1100 20' fill='none' stroke='%23ef4444' stroke-opacity='.55' stroke-width='38' filter='url(%23b)'/><path d='M0 600 C 380 590 640 520 800 330 S 1020 60 1100 20' fill='none' stroke='%23ff6b6b' stroke-width='5' filter='url(%23s)'/><path d='M0 600 C 380 590 640 520 800 330 S 1020 60 1100 20' fill='none' stroke='%23ffe4e4' stroke-width='1.6'/><path d='M60 640 C 420 620 700 560 860 380 S 1050 120 1100 90' fill='none' stroke='%23ef4444' stroke-opacity='.35' stroke-width='2' filter='url(%23s)'/></svg>") no-repeat center / contain;
-  -webkit-mask: linear-gradient(90deg, transparent, #000 30%); mask: linear-gradient(90deg, transparent, #000 30%);
-  opacity: .9;
-}
-#studio::after {
-  right: 0; top: 120px; width: 700px; height: 500px;
-  background: radial-gradient(closest-side, rgb(239 68 68 / .12), transparent);
-}
-#playground::before { /* amber: a lens flare, hot core and a horizontal streak */
-  left: -120px; top: 40px; width: 1000px; height: 260px;
-  background:
-    radial-gradient(9% 34% at 22% 50%, rgb(255 244 214 / .9), rgb(245 158 11 / .55) 45%, transparent),
-    radial-gradient(40% 50% at 22% 50%, rgb(245 158 11 / .28), transparent 70%),
-    linear-gradient(90deg, transparent 0%, rgb(245 158 11 / .55) 22%, rgb(255 220 150 / .7) 23%, rgb(245 158 11 / .3) 45%, transparent 85%) center / 100% 3px no-repeat;
-  filter: blur(3px);
-}
-#playground::after {
-  left: 0; top: -40px; width: 900px; height: 600px;
-  background: radial-gradient(closest-side, rgb(245 158 11 / .1), transparent);
-}
+#made::after { left: 50%; bottom: -60px; width: min(1500px, 120vw); height: 360px; transform: translateX(-50%);
+  background: radial-gradient(closest-side, rgb(34 211 238 / .14), transparent); }
+#studio::before { right: -6%; top: 6%; width: 760px; height: 620px; transform: rotate(14deg);
+  background: radial-gradient(closest-side, rgb(239 68 68 / .32), rgb(239 68 68 / .09) 60%, transparent); }
+#studio::after { left: 8%; bottom: -10%; width: 460px; height: 320px;
+  background: radial-gradient(closest-side, rgb(244 63 94 / .12), transparent); }
+#playground::before { left: -8%; top: 4%; width: 700px; height: 560px;
+  background: radial-gradient(closest-side, rgb(245 158 11 / .28), rgb(245 158 11 / .08) 60%, transparent); }
+#playground::after { right: 4%; top: 40%; width: 520px; height: 420px;
+  background: radial-gradient(closest-side, rgb(251 191 36 / .1), transparent); }
+:root[data-theme="light"] .beam { display: none; }
+:root[data-theme="light"] .lit::before, :root[data-theme="light"] .lit::after { opacity: .45; }
 
 .pill {
   display: inline-flex; align-items: center; gap: 10px; max-width: 100%;
@@ -551,29 +538,29 @@ h1, h2, h3 { font-weight: 600; margin: 0; }
   .pg-code { border-right: 0; border-top: 1px solid var(--line); }
 }
 
-/* ── Showcase: a grid of finished exports, wider than the window ──
-   --t is a vertical reel's width; the middle block (a 12:5 over two squares)
-   is sized so it stands exactly as tall as the reels. The wall is centred and
-   runs off both edges; each clip appears once. */
+/* ── Showcase: a bento of finished exports, wider than the window ──
+   A 23 × 6 grid of square cells; each clip takes the block of cells nearest its
+   own shape (16:9, 12:5, 4:3, 1:1, 2:3, 9:16). The wall is centred and runs
+   off both edges; every clip appears once. */
 .sc-clip { margin-top: 52px; overflow: hidden; }
 .sc-wall {
-  --t: clamp(220px, 23vw, 400px); --g: 16px;
-  --h: calc(var(--t) * 16 / 9);
-  --w: calc((var(--h) - var(--g) / 2) * 12 / 11);
+  --c: clamp(56px, 5.4vw, 96px); --g: 14px;
   display: grid; gap: var(--g); width: max-content; margin-left: 50%; transform: translateX(-50%);
-  grid-template-columns: var(--t) var(--t) var(--w) var(--t); height: var(--h);
+  grid-template-columns: repeat(23, var(--c)); grid-template-rows: repeat(6, var(--c));
 }
 .js .sc-wall.reveal { transform: translateX(-50%) translateY(16px); }
 .js .sc-wall.reveal.in { transform: translateX(-50%); }
-.sc-block { display: grid; gap: var(--g); grid-template-columns: 1fr 1fr; grid-template-rows: calc(var(--w) * 5 / 12) 1fr; }
-.sc-wide { grid-column: 1 / -1; }
 .sc-tile {
-  position: relative; overflow: hidden; min-height: 0;
+  position: relative; overflow: hidden; min-width: 0; min-height: 0;
   border: 1px solid var(--line-2); border-radius: var(--radius); background: #000; box-shadow: var(--shadow);
 }
 .sc-tile video { display: block; width: 100%; height: 100%; object-fit: cover; }
+/* phones: the same wall, swiped sideways, starting from the middle */
 @media (max-width: 760px) {
-  .sc-wall { --t: 46vw; grid-template-columns: var(--t) var(--t) var(--w) var(--t); }
+  .sc-clip { overflow-x: auto; scrollbar-width: none; }
+  .sc-clip::-webkit-scrollbar { display: none; }
+  .sc-wall { --c: 52px; --g: 10px; margin: 0 16px; transform: none; }
+  .js .sc-wall.reveal, .js .sc-wall.reveal.in { transform: none; }
 }
 .reel-snd {
   position: absolute; right: 10px; bottom: 10px; height: 28px; padding: 0 11px; border-radius: 999px;
