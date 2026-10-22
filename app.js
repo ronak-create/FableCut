@@ -8693,17 +8693,23 @@ function speechGroups(clips) {
 /** Everything the marks were found from — where each clip sits, its file, speed, level and switches, the
  *  frame rate: marked silences only stand while this is unchanged. */
 function silenceSig() {
-  return project.fps + "#" + project.clips.map((c) => [c.id, c.track, c.start, c.in, c.duration, c.mediaId,
-    c.props?.speed ?? 1, c.props?.gain ?? 0, c.props?.volume ?? 1, c.props?.audioChannel ?? "", c.props?.channelMode ?? "",
-    clipRenders(c) ? 1 : 0].join(":")).join("|");
+  return project.fps + "#" + project.clips.map((c) => JSON.stringify([c.id, c.track, c.start, c.in, c.duration, c.mediaId,
+    getMedia(c.mediaId)?.src ?? null, c.linkGroup ?? null, c.props?.speed ?? 1, c.keyframes?.speed ?? null,
+    c.props?.gain ?? 0, c.props?.volume ?? 1, c.props?.audioChannel ?? null, c.props?.channelMode ?? null,
+    clipRenders(c) ? 1 : 0])).join("|");
 }
+let silenceGen = 0;   // the newest Find: an older one still decoding never replaces its result
 async function findSilences(clips, opts = silenceOptions()) {
   if (typeof FableCutSilence === "undefined") { toast("Silence module missing — reload the editor"); return; }
+  // a new Find replaces the old marks whatever it finds, so Cut never acts on another clip's result
+  const gen = ++silenceGen;
+  if (state.silence) { state.silence = null; state.dirtyTimeline = true; renderInspector(); }
   const groups = speechGroups(clips).map((g) => g.filter(clipRenders)).filter((g) => g.length);
   if (!groups.length) { toast("Select a clip with sound to find its silences"); return; }
   toast("Listening for silences…");
   const sig = silenceSig(), heard = new Set();
   const sound = await voiceRegions(groups.flat(), opts.threshold, FableCutSilence.MIN_SOUND, heard);
+  if (gen !== silenceGen) return;   // a newer Find took over
   // the timeline moved while it listened: these spans belong to the old one
   if (silenceSig() !== sig) { toast("The timeline changed while listening — find the silences again"); return; }
   // a clip whose audio couldn't be read is not silent: leave its time alone
@@ -8740,6 +8746,7 @@ function cutSilences() {
   toast(`Cut ${cut} silence${cut === 1 ? "" : "s"} · ${secs.toFixed(1)} s shorter`);
 }
 function clearSilences() {
+  silenceGen++;   // a Find still listening doesn't bring the marks back
   state.silence = null;
   state.dirtyTimeline = true;
   renderInspector();
