@@ -32,6 +32,14 @@ Zero npm dependencies. One `node server.js`. That's it.
 
 ![FableCut editor](docs/screenshot.png)
 
+## Sponsors
+
+<a href="https://fluxionai.space/register?source=github&amp;campaign=github-sidrune-fablecut&amp;promo=SDRFABLECUT" target="_blank" rel="noopener noreferrer sponsored">
+  <img src="docs/sponsors/sidrune-ai-banner.png" alt="Sidrune AI — one API for GPT, Claude and other leading AI models" width="640">
+</a>
+
+**[Sidrune AI](https://fluxionai.space/register?source=github&campaign=github-sidrune-fablecut&promo=SDRFABLECUT)** — One API for GPT, Claude, and other leading AI models. Sign up and get $3 in API credit.
+
 ## Why it's interesting
 
 Most "AI video" tools hide the edit behind an API. FableCut flips that: the
@@ -633,14 +641,6 @@ examples in [`library/svg/`](library/svg/).
   `library/sfx/README.md` lists good free sources.
 - Export runs in the browser because the compositor *is* the browser; agents
   ask you to click Export (or render directly with ffmpeg from `media/`).
-
-## Sponsors
-
-<a href="https://fluxionai.space/register?source=github&amp;campaign=github-sidrune-fablecut&amp;promo=SDRFABLECUT" target="_blank" rel="noopener noreferrer sponsored">
-  <img src="docs/sponsors/sidrune-ai-banner.png" alt="Sidrune AI — one API for GPT, Claude and other leading AI models" width="640">
-</a>
-
-**[Sidrune AI](https://fluxionai.space/register?source=github&campaign=github-sidrune-fablecut&promo=SDRFABLECUT)** — One API for GPT, Claude, and other leading AI models. Sign up and get $3 in API credit.
 
 ## Community
 
