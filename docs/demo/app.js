@@ -8647,13 +8647,14 @@ function setDuckKeys(c, keys) {
 }
 /** Timeline spans with sound on the voice clips (each measured after its
  *  channel routing, scaled by its clip gain and static volume). */
-async function voiceRegions(voices, threshold, minLen) {
+async function voiceRegions(voices, threshold, minLen, heard) {
   const lists = [];
   for (const v of voices) {
     const m = getMedia(v.mediaId);
     if (!m) continue;
     let buf;
     try { buf = await getAudioBuffer(m); } catch { continue; }
+    heard?.add(v.id);   // read and measured: its quiet is real quiet, not a file that failed to decode
     const a = clamp(Math.floor(v.in * buf.sampleRate), 0, buf.length);
     const b = clamp(Math.ceil(mediaTimeAt(v, clipEnd(v)) * buf.sampleRate), a, buf.length);
     const src = [];
@@ -8689,29 +8690,40 @@ function speechGroups(clips) {
   }
   return [...groups.values()];
 }
-/** Where every clip sits: marked silences only line up while this is unchanged. */
+/** Everything the marks were found from — where each clip sits, its file, speed, level and switches, the
+ *  frame rate: marked silences only stand while this is unchanged. */
 function silenceSig() {
-  return project.clips.map((c) => `${c.id}:${c.track}:${c.start}:${c.in}:${c.duration}`).join("|");
+  return project.fps + "#" + project.clips.map((c) => [c.id, c.track, c.start, c.in, c.duration, c.mediaId,
+    c.props?.speed ?? 1, c.props?.gain ?? 0, c.props?.volume ?? 1, c.props?.audioChannel ?? "", c.props?.channelMode ?? "",
+    clipRenders(c) ? 1 : 0].join(":")).join("|");
 }
 async function findSilences(clips, opts = silenceOptions()) {
   if (typeof FableCutSilence === "undefined") { toast("Silence module missing — reload the editor"); return; }
   const groups = speechGroups(clips).map((g) => g.filter(clipRenders)).filter((g) => g.length);
   if (!groups.length) { toast("Select a clip with sound to find its silences"); return; }
   toast("Listening for silences…");
-  const sound = await voiceRegions(groups.flat(), opts.threshold, FableCutSilence.MIN_SOUND);
-  const ranges = groups.map((g) => [Math.min(...g.map((x) => x.start)), Math.max(...g.map(clipEnd))]);
+  const sig = silenceSig(), heard = new Set();
+  const sound = await voiceRegions(groups.flat(), opts.threshold, FableCutSilence.MIN_SOUND, heard);
+  // the timeline moved while it listened: these spans belong to the old one
+  if (silenceSig() !== sig) { toast("The timeline changed while listening — find the silences again"); return; }
+  // a clip whose audio couldn't be read is not silent: leave its time alone
+  const usable = groups.filter((g) => g.every((x) => heard.has(x.id)));
+  if (!usable.length) { toast("Couldn't read the audio of these clips — nothing marked"); return; }
+  const ranges = usable.map((g) => [Math.min(...g.map((x) => x.start)), Math.max(...g.map(clipEnd))]);
   const spans = FableCutSilence.silentSpans(sound, ranges, { ...opts, fps: project.fps });
-  state.silence = spans.length ? { ids: groups.flat().map((x) => x.id), spans, sig: silenceSig() } : null;
+  state.silence = spans.length ? { ids: usable.flat().map((x) => x.id), spans, sig } : null;
   state.dirtyTimeline = true;
   renderInspector();
-  toast(spans.length
+  toast((spans.length
     ? `${spans.length} silence${spans.length === 1 ? "" : "s"}, ${FableCutSilence.total(spans).toFixed(1)} s — marked on the timeline`
-    : "No silences that long — try a higher threshold or a shorter minimum");
+    : "No silences that long — try a higher threshold or a shorter minimum") +
+    (usable.length < groups.length ? " · some clips' audio couldn't be read, so their time is left alone" : ""));
 }
 /** Extract every marked silence on the targeted tracks, last first: one undo step. */
 function cutSilences() {
   const s = state.silence;
-  if (!s) return;
+  // the marks dropped when the timeline changed (the button can outlive them until the Inspector redraws)
+  if (!s) { renderInspector(); toast("The timeline changed — find the silences again"); return; }
   if (s.sig !== silenceSig()) { state.silence = null; renderInspector(); toast("The timeline changed — find the silences again"); return; }
   const snap = undoSnapshot();
   let cut = 0, secs = 0;

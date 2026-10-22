@@ -479,6 +479,29 @@ test("fablecut_silence reports the pauses in speech, then cuts them with the ste
   assert.match(look.text, /^3 silences, /, look.text);
   assert.match(look.text, /cut:true/);
   assert.equal(readProject(dir).revision, project.revision, "reporting changes nothing");
+  const loose = await mcp.callTool("fablecut_silence", { clipIds: ["c_s"], padding: 0.2, cut: "true" });
+  assert.equal(loose.isError, false, loose.text);
+  assert.equal(readProject(dir).revision, project.revision, "only cut:true cuts");
+
+  // a picture with no audio stream beside it is not 'silent': its time is left alone
+  const r = spawnSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=160x90:r=30:d=10", "-c:v", "libx264",
+    "-pix_fmt", "yuv420p", path.join(dir, "media", "mute.mp4")]);
+  assert.equal(r.status, 0, String(r.stderr));
+  const withMute = readProject(dir);
+  withMute.media.push({ id: "m_n", name: "mute.mp4", kind: "video", src: "/media/mute.mp4", duration: 10 });
+  withMute.clips.push({ id: "c_n", mediaId: "m_n", kind: "video", track: "V1", start: 12, in: 0, duration: 10, props: {} });
+  withMute.revision++;
+  writeProject(dir, withMute);
+  const mute = await mcp.callTool("fablecut_silence", { clipIds: ["c_s", "c_n"], padding: 0.2 });
+  assert.equal(mute.isError, false, mute.text);
+  assert.match(mute.text, /^3 silences, .*1 clip\(s\) with no audio stream left alone/, mute.text);
+  const muteOnly = await mcp.callTool("fablecut_silence", { clipIds: ["c_n"] });
+  assert.ok(muteOnly.isError);
+  assert.match(muteOnly.text, /no audio stream/);
+  withMute.clips = withMute.clips.filter((c) => c.id !== "c_n");
+  withMute.media = withMute.media.filter((m) => m.id !== "m_n");
+  withMute.revision++;
+  writeProject(dir, withMute);
 
   const res = await mcp.callTool("fablecut_silence", { clipIds: ["c_s"], padding: 0.2, cut: true });
   assert.equal(res.isError, false, res.text);

@@ -19,6 +19,8 @@
   const LIMITS = { threshold: [-80, -10], minSilence: [0.1, 10], padding: [0, 2] };
   /** Sound shorter than this still counts (a short word); quieter blips don't. */
   const MIN_SOUND = 0.08;
+  /** edit-ops.js MIN_DUR: extract refuses a range this short or shorter. */
+  const MIN_CUT = 0.05;
 
   /** The settings, defaulted and checked. Throws on a value out of range. */
   function options(o = {}) {
@@ -65,7 +67,9 @@
         if (b - a < minSilence - 1e-9) continue;
         const from = Math.ceil(((a > rs + 1e-6 ? a + padding : a) - 1e-6) / frame) * frame;
         const to = Math.floor(((b < re - 1e-6 ? b - padding : b) + 1e-6) / frame) * frame;
-        if (to - from >= Math.max(frame, 0.05) - 1e-9) out.push({ from: r4(from), to: r4(to) });
+        // compared after rounding, against the strict minimum extract accepts (more than 0.05 s, at least a frame)
+        const span = { from: r4(from), to: r4(to) };
+        if (span.to - span.from > Math.max(frame - 1e-4, MIN_CUT)) out.push(span);
       }
     }
     return out;

@@ -33,6 +33,10 @@ test("cuts land on whole frames, inside the silence", () => {
   assert.ok(s.from >= 1.11 - 1e-9 && s.to <= 2.92 + 1e-9, JSON.stringify(s));
 });
 
+test("a span that rounds to extract's minimum (0.05 s) is dropped, not sent to be refused", () => {
+  assert.deepEqual(S.silentSpans([[0, 0.25], [0.4, 1]], [[0, 1]], { minSilence: 0.1, padding: 0.05, fps: 20 }), []);
+});
+
 test("only inside the clips: the gap between two clips is left alone", () => {
   const spans = S.silentSpans([[0, 2], [6, 8]], [[0, 3], [5, 8]], { minSilence: 0.5, padding: 0, fps: 10 });
   assert.deepEqual(spans, [{ from: 2, to: 3 }, { from: 5, to: 6 }]);

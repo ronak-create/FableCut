@@ -510,14 +510,15 @@ async function measureClipGroup(proj, clips) {
   return meter ? meter.result() : null;
 }
 /** Timeline spans with sound on these voice clips (ducking.js pipeline). */
-async function voiceRegions(proj, voices, threshold, minLen) {
+async function voiceRegions(proj, voices, threshold, minLen, heard) {
   const L = require("./loudness.js"), D = require("./ducking.js");
   const lists = [];
   for (const v of voices) {
     let env = null;
     await streamClipAudio(proj, v, (nCh) => { env = new D.EnvelopeMeter(nCh, NORM_SR); },
       (chs) => env.push(L.routeChannels(chs, v.props || {})));
-    if (!env) continue;
+    if (!env) continue;   // no audio stream
+    if (heard) heard.add(v.id);
     const sp = Math.min(8, Math.max(0.1, +v.props?.speed || 1));
     const gain = Math.pow(10, (+v.props?.gain || 0) / 20) * Math.min(2, Math.max(0, +(v.props?.volume ?? 1)));
     lists.push(D.activeRegions(env.result(), { t0: v.start, speed: sp, gain, threshold, ...(minLen != null ? { minLen } : {}) }));
@@ -552,17 +553,22 @@ async function silenceTool(args) {
   const readRev = doc.revision || 0;
   const groups = speechGroups(doc, ids);
   const disabled = new Set(Array.isArray(doc.disabledTracks) ? doc.disabledTracks : []);
-  const voices = groups.flat().filter((x) => !disabled.has(x.track) && x.disabled !== true);
-  if (!voices.length) throw new Error("those clips are disabled (or on disabled tracks) — nothing to listen to");
-  const sound = await voiceRegions(doc, voices, opts.threshold, S.MIN_SOUND);
-  const ranges = groups.map((g) => [Math.min(...g.map((x) => x.start)), Math.max(...g.map((x) => x.start + x.duration))]);
+  const live = groups.map((g) => g.filter((x) => !disabled.has(x.track) && x.disabled !== true)).filter((g) => g.length);
+  if (!live.length) throw new Error("those clips are disabled (or on disabled tracks) — nothing to listen to");
+  const heard = new Set();
+  const sound = await voiceRegions(doc, live.flat(), opts.threshold, S.MIN_SOUND, heard);
+  // only time that was actually listened to can be silent: a clip with no audio stream is left alone
+  const usable = live.filter((g) => g.every((x) => heard.has(x.id)));
+  if (!usable.length) throw new Error("those clips have no audio stream — nothing to listen to");
+  const ranges = usable.map((g) => [Math.min(...g.map((x) => x.start)), Math.max(...g.map((x) => x.start + x.duration))]);
   const spans = S.silentSpans(sound, ranges, { ...opts, fps: doc.fps });
   const listen = S.union(ranges).reduce((n, [a, b]) => n + b - a, 0);
   const head = `${spans.length} silence${spans.length === 1 ? "" : "s"}, ${S.total(spans).toFixed(1)} s of ${fmtDur(listen)} ` +
-    `(threshold ${opts.threshold} dBFS, at least ${opts.minSilence} s, ${opts.padding} s kept beside speech)`;
+    `(threshold ${opts.threshold} dBFS, at least ${opts.minSilence} s, ${opts.padding} s kept beside speech` +
+    (usable.length < live.length ? `; ${live.length - usable.length} clip(s) with no audio stream left alone` : "") + ")";
   const list = spans.slice(0, 60).map((s) => `  ${fmtClock(s.from)} → ${fmtClock(s.to)}  (${(s.to - s.from).toFixed(2)} s)`)
     .concat(spans.length > 60 ? [`  … +${spans.length - 60} more`] : []);
-  if (!args.cut) return [head + (spans.length ? ":" : "."), ...list,
+  if (args.cut !== true) return [head + (spans.length ? ":" : "."), ...list,
     ...(spans.length ? ["Nothing cut yet: call again with cut:true to remove them (lock the music bed first if it should keep running)."] : [])].join("\n");
   if (!spans.length) return head + " — nothing to cut.";
   // the timeline must be the one that was listened to

@@ -613,12 +613,17 @@ edits the key under the playhead. Agents:
   removed with an `extract` on the targeted tracks (`tracks` picks others), last
   first, in one revision: later material moves up, linked stems stay in step, and
   locked tracks and clips stay where they are — **lock the music bed first** if it
-  should keep running under the tightened edit. A version of the project as it was
-  is kept first. Raise `threshold` toward −30 in a noisy room; lower `minSilence`
-  for a tighter, jump-cut feel. In the editor: the Inspector's **Silence** section
-  on an audio or video clip (or right-click → **Find silences**) — **Find** marks
-  the silences on the timeline as amber bands, **Cut N** extracts them (one undo
-  step), **Clear** removes the marks. The marks drop when the timeline changes.
+  should keep running under the tightened edit. `force:true` cuts through locked
+  material too, so pass it only when the user asked. Only time that was actually
+  heard is cut: a clip with no audio stream (or disabled) is left alone. A version
+  of the project as it was is kept before the cut; if that fails the reply says
+  so in a warning, and then there is no version to go back to. Raise `threshold`
+  toward −30 in a noisy room; lower `minSilence` for a tighter, jump-cut feel. In
+  the editor: the Inspector's **Silence** section on an audio or video clip (or
+  right-click → **Find silences**) — **Find** marks the silences on the timeline
+  as amber bands, **Cut N** extracts them (one undo step), **Clear** removes the
+  marks. The marks drop when the timeline, a clip's file, speed or level, or the
+  frame rate changes.
 - In the editor, each audio clip shows its **volume line** (yellow; dashed =
   after ducking): drag it to change the level, Ctrl/Cmd-click to add a keyframe,
   drag a point to move it, Alt-click or double-click to remove one. The corner
@@ -2083,8 +2088,9 @@ that lane down: `{op:"setTrack", id:"A3", set:{gain:-14}}`. Then dip it under th
 voice: `fablecut_auto_duck {clipIds:[<music clip>], under:["A1"], amount:-10}`.
 
 **Tighten a talking-head take**: lock the music lane (`setProject {lockedTracks:["A3"]}`),
-then `fablecut_silence {clipIds:[<the take>]}` to see the pauses, check a few with
-`fablecut_frame`, and `fablecut_silence {clipIds:[<the take>], cut:true}`. Add
+then `fablecut_silence {clipIds:[<the take>]}` to see the pauses (it does the
+listening; `fablecut_frame` only shows the picture, handy to check a cut won't land
+mid-gesture), and `fablecut_silence {clipIds:[<the take>], cut:true}`. Add
 `{op:"crossfade", ids:[…]}` on the new audio cuts if a breath clicks.
 
 **Center a mono stem**: linked or standalone audio clip with `props.pan: 0` (inspector **Pan** slider, −1…+1). Stereo video stems default to L `−1` / R `+1`; set A1 to `0` to center that channel in the mix.
