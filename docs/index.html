@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>FableCut - the browser video editor AI agents can drive</title>
-<meta name="description" content="A Premiere-style video editor that runs in your browser and exposes its whole timeline as one JSON file. Edit it yourself, or let an AI agent cut your video while you watch.">
+<meta name="description" content="A Premiere-style video editor that runs in your browser and exposes its whole timeline as one JSON file. Open FableCut Studio with no install, or run it locally, and let an AI agent cut your video while you watch.">
 <link rel="icon" type="image/svg+xml" href="./favicon.svg">
 <meta name="color-scheme" content="dark light">
 <meta name="theme-color" content="#0a0a0b" media="(prefers-color-scheme: dark)">
@@ -100,7 +100,7 @@
 </script>
 <script>document.documentElement.classList.add("js");try{var t=localStorage.getItem("fc-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
 <link rel="preload" href="./fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="./styles.css?v=33">
+<link rel="stylesheet" href="./styles.css?v=50">
 </head>
 <body>
 
@@ -132,9 +132,10 @@
   <div class="wrap nav-inner">
     <a class="brand" href="./" aria-label="FableCut home"><svg aria-hidden="true"><use href="#i-logo"/></svg><span>FableCut</span></a>
     <nav class="nav-links" id="navLinks" aria-label="Primary">
+      <a href="https://studio.fablecut.space">Studio</a>
+      <a href="#made">Showcase</a>
       <a href="#playground">Playground</a>
       <a href="./start/">Get started</a>
-      <a href="https://studio.fablecut.space">Studio</a>
       <a href="./community/">Community</a>
       <a href="./docs/">Docs</a>
     </nav>
@@ -153,24 +154,26 @@
 <main id="main">
 
 <section class="hero">
+  <div class="beam" aria-hidden="true"></div>
   <div class="wrap">
-    <a class="pill" id="relPill" href="https://github.com/ronak-create/FableCut/releases/latest" rel="noopener" target="_blank">
-      <span class="pill-tag" data-rel-tag>v1.9.0</span>
-      <span class="pill-txt" data-rel-name>Targeting &amp; locks, trim tools, markers &amp; full JKL</span>
+    <a class="pill" href="https://studio.fablecut.space">
+      <span class="pill-tag">New</span>
+      <span class="pill-txt">FableCut Studio: the whole editor in your browser</span>
       <svg class="i" aria-hidden="true"><use href="#i-arrow"/></svg>
     </a>
     <h1 class="hero-title"><span class="wipe">The browser video editor <span class="br-lg"></span>agents can drive.</span><span class="ph" aria-hidden="true"></span></h1>
-    <p class="hero-sub">A Premiere-style editor whose whole timeline is one JSON file. Any agent that writes JSON can edit video.</p>
+    <p class="hero-sub">Open FableCut Studio, pick a folder of clips, and let Claude or ChatGPT cut your video while you watch. Nothing to install, and your footage never leaves your disk.</p>
     <div class="hero-cta">
-      <a class="btn btn-primary" href="./start/">Get started</a>
-      <a class="btn btn-ghost" href="https://studio.fablecut.space">Try it in your browser</a>
+      <a class="btn btn-primary" href="https://studio.fablecut.space">Open Studio<svg class="i" aria-hidden="true"><use href="#i-arrow"/></svg></a>
       <button class="btn btn-ghost" type="button" data-demo><svg class="i" aria-hidden="true"><use href="#i-play"/></svg>Watch the demo</button>
+      <a class="btn btn-ghost" href="./start/">Run it locally</a>
     </div>
+    <p class="hero-note">Free and open source. Works with Claude Code, claude.ai, ChatGPT and any MCP client.</p>
     <!-- An agent cutting a teaser, on a loop. Drawn in HTML/CSS and driven by
          one clock in main.js; without JS (or with reduced motion) it holds a
          single finished frame. -->
     <div class="shot">
-      <div class="shot-frame cut" id="cut" role="img" aria-label="An agent editing a FableCut timeline: it places three clips, a title and a music bed, gives the clips a noir grade, and the editor plays the cut.">
+      <div class="shot-frame cut" id="cut" role="img" aria-label="An agent editing a FableCut timeline: it places three night-city clips, a title and a synthwave track, gives the clips a noir grade, and the editor plays the cut.">
         <div class="cut-bar" aria-hidden="true">
           <span class="cut-file">project.json</span>
           <span class="cut-tick" data-cut-tick></span>
@@ -182,18 +185,20 @@
             <p class="cut-prompt"><span data-cut-prompt>Cut a teaser from these three clips. Title it CUT BY AN AGENT, then give it a noir finish.</span><i class="cut-caret"></i></p>
             <p class="cut-who">Agent <code>fablecut_patch_project</code></p>
             <ol class="cut-log">
-              <li data-at="2.1"><i>+</i><b>addClip</b><span>violet.mp4</span><em>V1 · 0.0s</em></li>
-              <li data-at="2.55"><i>+</i><b>addClip</b><span>amber.mp4</span><em>V1 · 3.2s</em></li>
-              <li data-at="3"><i>+</i><b>addClip</b><span>teal.mp4</span><em>V1 · 6.4s</em></li>
+              <li data-at="2.1"><i>+</i><b>addClip</b><span>fog-street.mp4</span><em>V1 · 0.0s</em></li>
+              <li data-at="2.55"><i>+</i><b>addClip</b><span>neon-vending.mp4</span><em>V1 · 3.2s</em></li>
+              <li data-at="3"><i>+</i><b>addClip</b><span>skyline.mp4</span><em>V1 · 6.4s</em></li>
               <li data-at="3.6"><i>+</i><b>addClip</b><span>title</span><em>V2 · CUT BY AN AGENT</em></li>
-              <li data-at="4.2"><i>+</i><b>addClip</b><span>pad.mp3</span><em>A1 · 0.0s</em></li>
+              <li data-at="4.2"><i>+</i><b>addClip</b><span>synthwave.mp3</span><em>A1 · 0.0s</em></li>
               <li data-at="6"><i>~</i><b>updateClip</b><span>v1 v2 v3</span><em>filterPreset: noir</em></li>
               <li data-at="12.9" class="cut-done"><i>✓</i><b>Saved</b><span>6 edits</span><em>revision 7</em></li>
             </ol>
           </div>
           <div class="cut-mon">
             <div class="cut-screen" data-cut-screen>
-              <i class="plate p-v1" data-plate="v1"></i><i class="plate p-v2" data-plate="v2"></i><i class="plate p-v3" data-plate="v3"></i>
+              <video class="plate p-v1" data-plate="v1" muted loop playsinline preload="none" poster="./hero/fog.jpg" data-src="./hero/fog.mp4"></video>
+              <video class="plate p-v2" data-plate="v2" muted loop playsinline preload="none" poster="./hero/vending.jpg" data-src="./hero/vending.mp4"></video>
+              <video class="plate p-v3" data-plate="v3" muted loop playsinline preload="none" poster="./hero/skyline.jpg" data-src="./hero/skyline.mp4"></video>
               <p class="cut-title on" data-cut-title><span style="--i:0">CUT</span> <span style="--i:1">BY</span> <span style="--i:2">AN</span> <span style="--i:3">AGENT</span></p>
             </div>
           </div>
@@ -204,12 +209,12 @@
             <div class="clip c-title on" data-clip="t1" data-at="3.6" style="--s:.4;--d:2.8"><i>T</i>CUT BY AN AGENT</div>
           </div></div>
           <div class="cut-lane"><b>V1</b><div class="cut-track">
-            <div class="clip c-video c-v1 on" data-clip="v1" data-at="2.1" style="--s:0;--d:3.4">violet.mp4</div>
-            <div class="clip c-video c-v2 on" data-clip="v2" data-at="2.55" style="--s:3.2;--d:3.4">amber.mp4</div>
-            <div class="clip c-video c-v3 on" data-clip="v3" data-at="3" style="--s:6.4;--d:3.2">teal.mp4</div>
+            <div class="clip c-video c-v1 on" data-clip="v1" data-at="2.1" style="--s:0;--d:3.4"><span>fog-street.mp4</span></div>
+            <div class="clip c-video c-v2 on" data-clip="v2" data-at="2.55" style="--s:3.2;--d:3.4"><span>neon-vending.mp4</span></div>
+            <div class="clip c-video c-v3 on" data-clip="v3" data-at="3" style="--s:6.4;--d:3.2"><span>skyline.mp4</span></div>
           </div></div>
           <div class="cut-lane"><b>A1</b><div class="cut-track">
-            <div class="clip c-audio on" data-clip="a1" data-at="4.2" style="--s:0;--d:9.6"><svg viewBox="0 0 400 24" preserveAspectRatio="none"><path d="M1.3 7.7V16.3M4.0 7.8V16.2M6.6 6.1V17.9M9.3 8.0V16.0M12.0 6.8V17.2M14.6 7.5V16.5M17.3 8.4V15.6M20.0 6.9V17.1M22.6 7.9V16.1M25.3 5.8V18.2M28.0 6.6V17.4M30.6 6.1V17.9M33.3 4.4V19.6M36.0 2.8V21.2M38.6 6.3V17.7M41.3 6.3V17.7M44.0 5.1V18.9M46.6 4.1V19.9M49.3 5.3V18.7M52.0 5.7V18.3M54.6 3.3V20.7M57.3 7.0V17.0M60.0 4.3V19.7M62.6 7.0V17.0M65.3 8.1V15.9M68.0 8.7V15.3M70.6 8.6V15.4M73.3 7.4V16.6M76.0 8.6V15.4M78.6 7.0V17.0M81.3 6.3V17.7M84.0 6.9V17.1M86.6 6.3V17.7M89.3 8.0V16.0M92.0 8.1V15.9M94.6 7.8V16.2M97.3 6.1V17.9M100.0 6.4V17.6M102.6 6.2V17.8M105.3 4.3V19.7M108.0 4.4V19.6M110.6 4.9V19.1M113.3 2.8V21.2M116.0 3.8V20.2M118.6 6.2V17.8M121.3 5.4V18.6M124.0 5.8V18.2M126.6 4.5V19.5M129.3 4.8V19.2M132.0 6.3V17.7M134.6 3.7V20.3M137.3 7.2V16.8M140.0 6.7V17.3M142.6 6.4V17.6M145.3 8.7V15.3M148.0 8.3V15.7M150.6 9.3V14.7M153.3 7.5V16.5M156.0 6.6V17.4M158.6 6.5V17.5M161.3 5.1V18.9M164.0 6.8V17.2M166.6 5.6V18.4M169.3 6.2V17.8M172.0 6.4V17.6M174.6 6.6V17.4M177.3 4.9V19.1M180.0 3.7V20.3M182.6 4.8V19.2M185.3 3.4V20.6M188.0 6.0V18.0M190.6 3.1V20.9M193.3 3.9V20.1M196.0 3.2V20.8M198.6 4.6V19.4M201.3 6.8V17.2M204.0 6.5V17.5M206.6 5.4V18.6M209.3 7.5V16.5M212.0 5.9V18.1M214.6 7.1V16.9M217.3 7.7V16.3M220.0 8.4V15.6M222.6 7.2V16.8M225.3 9.1V14.9M228.0 8.8V15.2M230.6 8.2V15.8M233.3 6.4V17.6M236.0 8.0V16.0M238.6 6.3V17.7M241.3 5.7V18.3M244.0 4.6V19.4M246.6 5.1V18.9M249.3 5.1V18.9M252.0 7.0V17.0M254.6 6.2V17.8M257.3 5.9V18.1M260.0 3.0V21.0M262.6 2.0V22.0M265.3 5.5V18.5M268.0 5.5V18.5M270.6 5.7V18.3M273.3 6.3V17.7M276.0 5.9V18.1M278.6 6.0V18.0M281.3 7.2V16.8M284.0 8.0V16.0M286.6 6.4V17.6M289.3 6.5V17.5M292.0 5.9V18.1M294.6 5.2V18.8M297.3 6.7V17.3M300.0 7.8V16.2M302.6 8.0V16.0M305.3 7.9V16.1M308.0 9.0V15.0M310.6 6.3V17.7M313.3 5.7V18.3M316.0 4.7V19.3M318.6 4.6V19.4M321.3 6.0V18.0M324.0 6.2V17.8M326.6 7.4V16.6M329.3 5.6V18.4M332.0 7.4V16.6M334.6 7.0V17.0M337.3 5.9V18.1M340.0 5.7V18.3M342.6 4.7V19.3M345.3 6.1V17.9M348.0 6.7V17.3M350.6 6.6V17.4M353.3 7.4V16.6M356.0 6.9V17.1M358.6 8.2V15.8M361.3 5.5V18.5M364.0 6.1V17.9M366.6 7.5V16.5M369.3 7.1V16.9M372.0 7.1V16.9M374.6 7.6V16.4M377.3 8.7V15.3M380.0 7.4V16.6M382.6 7.2V16.8M385.3 8.0V16.0M388.0 7.3V16.7M390.6 7.9V16.1M393.3 7.3V16.7M396.0 6.0V18.0M398.6 6.2V17.8"/></svg><span>pad.mp3</span></div>
+            <div class="clip c-audio on" data-clip="a1" data-at="4.2" style="--s:0;--d:9.6"><svg viewBox="0 0 400 24" preserveAspectRatio="none"><path d="M1.3 10.7V13.3M4.0 10.0V14.0M6.6 10.1V13.9M9.3 10.4V13.6M12.0 10.2V13.8M14.7 10.1V13.9M17.3 10.2V13.8M20.0 10.3V13.7M22.7 10.0V14.0M25.3 10.2V13.8M28.0 10.4V13.6M30.7 10.4V13.6M33.4 10.1V13.9M36.0 9.9V14.1M38.7 10.1V13.9M41.4 10.1V13.9M44.0 10.3V13.7M46.7 10.5V13.5M49.4 10.3V13.7M52.1 10.4V13.6M54.7 10.6V13.4M57.4 10.0V14.0M60.1 9.7V14.3M62.7 9.9V14.1M65.4 10.1V13.9M68.1 10.0V14.0M70.7 10.0V14.0M73.4 9.7V14.3M76.1 9.8V14.2M78.8 10.1V13.9M81.4 9.8V14.2M84.1 9.7V14.3M86.8 9.9V14.1M89.4 10.1V13.9M92.1 9.9V14.1M94.8 9.6V14.4M97.5 9.8V14.2M100.1 9.9V14.1M102.8 9.9V14.1M105.5 10.3V13.7M108.1 10.1V13.9M110.8 10.4V13.6M113.5 10.1V13.9M116.2 9.9V14.1M118.8 10.4V13.6M121.5 10.6V13.4M124.2 10.2V13.8M126.8 10.0V14.0M129.5 9.9V14.1M132.2 9.8V14.2M134.9 9.9V14.1M137.5 10.0V14.0M140.2 10.0V14.0M142.9 9.7V14.3M145.5 9.9V14.1M148.2 9.8V14.2M150.9 9.6V14.4M153.6 9.7V14.3M156.2 9.6V14.4M158.9 9.5V14.5M161.6 9.5V14.5M164.2 7.9V16.1M166.9 6.8V17.2M169.6 8.2V15.8M172.3 8.1V15.9M174.9 7.9V16.1M177.6 6.1V17.9M180.3 7.4V16.6M182.9 6.6V17.4M185.6 6.0V18.0M188.3 7.2V16.8M191.0 7.9V16.1M193.6 6.9V17.1M196.3 7.3V16.7M199.0 8.0V16.0M201.6 8.2V15.8M204.3 5.2V18.8M207.0 3.7V20.3M209.6 5.8V18.2M212.3 6.6V17.4M215.0 6.3V17.7M217.7 6.6V17.4M220.3 6.5V17.5M223.0 2.1V21.9M225.7 3.0V21.0M228.3 4.1V19.9M231.0 5.8V18.2M233.7 6.8V17.2M236.4 6.0V18.0M239.0 5.9V18.1M241.7 1.5V22.5M244.4 5.1V18.9M247.0 6.4V17.6M249.7 6.5V17.5M252.4 7.2V16.8M255.1 7.5V16.5M257.7 7.2V16.8M260.4 6.9V17.1M263.1 6.9V17.1M265.7 5.8V18.2M268.4 6.2V17.8M271.1 5.3V18.7M273.8 4.4V19.6M276.4 4.3V19.7M279.1 6.4V17.6M281.8 5.6V18.4M284.4 5.2V18.8M287.1 5.4V18.6M289.8 5.4V18.6M292.5 5.7V18.3M295.1 5.4V18.6M297.8 3.0V21.0M300.5 3.3V20.7M303.1 4.9V19.1M305.8 6.5V17.5M308.5 5.0V19.0M311.2 2.4V21.6M313.8 4.9V19.1M316.5 1.6V22.4M319.2 5.8V18.2M321.8 4.6V19.4M324.5 6.9V17.1M327.2 7.3V16.7M329.9 6.3V17.7M332.5 3.4V20.6M335.2 3.1V20.9M337.9 6.2V17.8M340.5 6.8V17.2M343.2 7.5V16.5M345.9 7.1V16.9M348.5 8.0V16.0M351.2 7.6V16.4M353.9 7.6V16.4M356.6 7.6V16.4M359.2 7.6V16.4M361.9 7.7V16.3M364.6 7.4V16.6M367.2 5.0V19.0M369.9 6.2V17.8M372.6 7.2V16.8M375.3 6.3V17.7M377.9 6.5V17.5M380.6 6.1V17.9M383.3 6.9V17.1M385.9 6.7V17.3M388.6 7.2V16.8M391.3 2.0V22.0M394.0 5.6V18.4M396.6 6.8V17.2M399.3 7.4V16.6"/></svg><span>synthwave.mp3</span></div>
           </div></div>
           <div class="cut-ph" data-cut-ph style="--ph:.14"></div>
         </div>
@@ -233,11 +238,102 @@
   </div>
 </section>
 
-<section class="section" id="playground">
+<section class="section lit" id="made" aria-labelledby="madeTitle">
+  <div class="wrap">
+    <div class="head reveal">
+      <h2 id="madeTitle">Cut by an agent. No hand edits.</h2>
+    </div>
+  </div>
+  <div class="sc-clip">
+    <div class="sc-wall reveal" aria-label="Edits made by an agent">
+      <div class="sc-tile" style="grid-area:1/1/4/6">
+        <video tabindex="0" muted loop playsinline preload="none" poster="./showcase/cut-by-an-agent.jpg" data-src="./showcase/cut-by-an-agent.mp4" aria-label="Cut by an Agent: the hero prompt made for real, three night clips, CUT BY AN AGENT, a noir finish"></video>
+        <button class="reel-snd" type="button" aria-pressed="false" aria-label="Turn sound on: Cut by an Agent" data-name="Cut by an Agent">Sound</button>
+        <p class="sc-prompt"><span>Prompt</span>Cut a teaser from these three clips. Title it CUT BY AN AGENT, then give it a noir finish.</p>
+      </div>
+      <div class="sc-tile" style="grid-area:4/1/7/4">
+        <video tabindex="0" muted loop playsinline preload="none" poster="./showcase/summit.jpg" data-src="./showcase/summit.mp4" aria-label="Summit: footage inside the title, a split screen, words orbiting a climber"></video>
+        <button class="reel-snd" type="button" aria-pressed="false" aria-label="Turn sound on: Summit" data-name="Summit">Sound</button>
+        <p class="sc-prompt"><span>Prompt</span>Put the footage inside the word SUMMIT, open a split screen, and orbit text around the climber.</p>
+      </div>
+      <div class="sc-tile" style="grid-area:4/4/7/6">
+        <video tabindex="0" muted loop playsinline preload="none" poster="./showcase/lights.jpg" data-src="./showcase/lights.mp4" aria-label="Lights: neon city with glitch cuts and a glowing title"></video>
+        <button class="reel-snd" type="button" aria-pressed="false" aria-label="Turn sound on: Lights" data-name="Lights">Sound</button>
+        <p class="sc-prompt"><span>Prompt</span>Neon city in 2:3. Glitch cuts and a glowing title that waves.</p>
+      </div>
+      <div class="sc-tile" style="grid-area:1/6/7/9">
+        <video tabindex="0" muted loop playsinline preload="none" poster="./showcase/night-market.jpg" data-src="./showcase/night-market.mp4" aria-label="Night Market: a vertical street-food reel with punch-ins on the beat"></video>
+        <button class="reel-snd" type="button" aria-pressed="false" aria-label="Turn sound on: Night Market" data-name="Night Market">Sound</button>
+        <p class="sc-prompt"><span>Prompt</span>A 9:16 street-food reel. Punch in on every beat and add pill captions.</p>
+      </div>
+      <div class="sc-tile" style="grid-area:1/9/4/16">
+        <video tabindex="0" muted loop playsinline preload="none" poster="./showcase/salt.jpg" data-src="./showcase/salt.mp4" aria-label="Salt: a widescreen surf trailer with a warm film grade"></video>
+        <button class="reel-snd" type="button" aria-pressed="false" aria-label="Turn sound on: Salt" data-name="Salt">Sound</button>
+        <p class="sc-prompt"><span>Prompt</span>A widescreen surf trailer. Cut every bar, slow down the turn, warm film grade.</p>
+      </div>
+      <div class="sc-tile" style="grid-area:4/9/7/12">
+        <video tabindex="0" muted loop playsinline preload="none" poster="./showcase/slow-mornings.jpg" data-src="./showcase/slow-mornings.mp4" aria-label="Slow Mornings: a coffee promo with animated shapes and a lower third"></video>
+        <button class="reel-snd" type="button" aria-pressed="false" aria-label="Turn sound on: Slow Mornings" data-name="Slow Mornings">Sound</button>
+        <p class="sc-prompt"><span>Prompt</span>Square coffee promo. Draw a ring on, caption the beats, end on a lower third.</p>
+      </div>
+      <div class="sc-tile" style="grid-area:4/12/7/16">
+        <video tabindex="0" muted loop playsinline preload="none" poster="./showcase/snowline.jpg" data-src="./showcase/snowline.mp4" aria-label="Snowline: a black and white mountain piece with slow dissolves"></video>
+        <button class="reel-snd" type="button" aria-pressed="false" aria-label="Turn sound on: Snowline" data-name="Snowline">Sound</button>
+        <p class="sc-prompt"><span>Prompt</span>Black and white, 4:3. Slow dissolves and a quiet title.</p>
+      </div>
+      <div class="sc-tile" style="grid-area:1/16/7/19">
+        <video tabindex="0" muted loop playsinline preload="none" poster="./showcase/after-hours.jpg" data-src="./showcase/after-hours.mp4" aria-label="After Hours: a vertical night-city reel cut to a synthwave track"></video>
+        <button class="reel-snd" type="button" aria-pressed="false" aria-label="Turn sound on: After Hours" data-name="After Hours">Sound</button>
+        <p class="sc-prompt"><span>Prompt</span>A vertical night-city reel cut to the beat, with a title that cycles fonts.</p>
+      </div>
+      <div class="sc-tile" style="grid-area:1/19/4/21">
+        <video tabindex="0" muted loop playsinline preload="none" poster="./showcase/rain.jpg" data-src="./showcase/rain.mp4" aria-label="Rain: city rain with soft crossfades and a karaoke caption"></video>
+        <button class="reel-snd" type="button" aria-pressed="false" aria-label="Turn sound on: Rain" data-name="Rain">Sound</button>
+        <p class="sc-prompt"><span>Prompt</span>Rainy city, soft crossfades, a caption that fills in word by word.</p>
+      </div>
+      <div class="sc-tile" style="grid-area:4/19/7/21">
+        <video tabindex="0" muted loop playsinline preload="none" poster="./showcase/move.jpg" data-src="./showcase/move.mp4" aria-label="Move: dancers cut on the beat with a speed ramp"></video>
+        <button class="reel-snd" type="button" aria-pressed="false" aria-label="Turn sound on: Move" data-name="Move">Sound</button>
+        <p class="sc-prompt"><span>Prompt</span>Cut the dancers on the beat and slow into the last pose.</p>
+      </div>
+      <div class="sc-tile" style="grid-area:1/21/7/24">
+        <video tabindex="0" muted loop playsinline preload="none" poster="./showcase/open-road.jpg" data-src="./showcase/open-road.mp4" aria-label="Open Road: a vertical motorcycle reel with letterbox bars and whip cuts"></video>
+        <button class="reel-snd" type="button" aria-pressed="false" aria-label="Turn sound on: Open Road" data-name="Open Road">Sound</button>
+        <p class="sc-prompt"><span>Prompt</span>Motorcycle reel. Letterbox bars, whip cuts, a speed ramp on the approach.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section lit" id="studio">
+  <div class="wrap split">
+    <div class="head reveal">
+      <h2>Your agent connects with one link.</h2>
+      <p>The same editor, in your browser. Your clips never leave your disk.</p>
+      <div class="studio-acts">
+        <a class="btn btn-primary" href="https://studio.fablecut.space">Open FableCut Studio</a>
+        <a class="more" href="./docs/studio/">How Studio works <svg class="i" aria-hidden="true"><use href="#i-arrow"/></svg></a>
+      </div>
+    </div>
+    <div class="studio-win reveal">
+      <div class="studio-bar" aria-hidden="true">
+        <span class="studio-dots"><i></i><i></i><i></i></span>
+        <span class="studio-url">studio.fablecut.space</span>
+      </div>
+      <ol class="studio-steps">
+        <li><b>Open a folder</b><span>Pick one with your clips, or start fresh.</span></li>
+        <li><b>Nothing uploads</b><span>Clips and <code class="ic">project.json</code> stay in the folder.</span></li>
+        <li><b>Connect your agent</b><span>Paste the link into Claude Code, claude.ai or ChatGPT.</span></li>
+        <li><b>Export</b><span>An <code class="ic">.mp4</code> lands in <code class="ic">exports/</code>.</span></li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<section class="section lit" id="playground">
   <div class="wrap">
     <div class="head reveal">
       <h2>Edit the file. Watch the cut change.</h2>
-      <p>Every clip, title and keyframe lives in <code class="ic">project.json</code>. Try an edit the way an agent would write it, or type into the file yourself.</p>
     </div>
 
     <div class="pg reveal" id="pg">
@@ -413,8 +509,7 @@
 <section class="section" id="agents">
   <div class="wrap split">
     <div class="head reveal">
-      <h2>Works with the agent you already use.</h2>
-      <p>FableCut ships an MCP server over plain stdio, so any MCP client can read and rewrite your timeline. Claude Code and Claude Desktop install it in one step.</p>
+      <h2>Rather run it on your machine?</h2>
       <a class="more" href="./start/#connect">Full setup guide <svg class="i" aria-hidden="true"><use href="#i-arrow"/></svg></a>
     </div>
     <div class="tabs reveal" data-tabs>
@@ -482,31 +577,6 @@
   </div>
 </section>
 
-<section class="section" id="studio">
-  <div class="wrap split">
-    <div class="head reveal">
-      <h2>No install. Open it in your browser.</h2>
-      <p>FableCut Studio is the same editor at studio.fablecut.space. It works on a folder on your own disk, so your clip files are never uploaded, and your agent connects with one link, from Claude Code, claude.ai or ChatGPT.</p>
-      <div class="studio-acts">
-        <a class="btn btn-primary" href="https://studio.fablecut.space">Open FableCut Studio</a>
-        <a class="more" href="./docs/studio/">How Studio works <svg class="i" aria-hidden="true"><use href="#i-arrow"/></svg></a>
-      </div>
-    </div>
-    <div class="studio-win reveal">
-      <div class="studio-bar" aria-hidden="true">
-        <span class="studio-dots"><i></i><i></i><i></i></span>
-        <span class="studio-url">studio.fablecut.space</span>
-      </div>
-      <ol class="studio-steps">
-        <li><b>Open a folder</b><span>Chrome, Edge, Brave or Arc. Start a new project or pick a folder that already has your clips.</span></li>
-        <li><b>Your clips stay where they are</b><span>Studio reads them straight from the folder and saves <code class="ic">project.json</code> next to them. The files are never uploaded.</span></li>
-        <li><b>Connect your agent with a link</b><span>Paste it into Claude Code, claude.ai or ChatGPT. Its edits, and the frames it asks to see, go through Studio's relay and show up live while you watch.</span></li>
-        <li><b>Export in the browser</b><span>An H.264 <code class="ic">.mp4</code> lands in the folder's <code class="ic">exports/</code>, matching the local editor frame for frame.</span></li>
-      </ol>
-    </div>
-  </div>
-</section>
-
 <section class="section" id="mentions" aria-labelledby="mentionsTitle">
   <div class="wrap">
     <h2 class="sr" id="mentionsTitle">What people are saying</h2>
@@ -538,10 +608,11 @@
 <section class="section" id="start">
   <div class="wrap cta">
     <div class="reveal">
-      <h2 class="h2">Up and running in under a minute.</h2>
-      <p class="lead">Node 18 or newer and a Chromium browser. ffmpeg is optional, for fast export. Or skip the install: <a href="https://studio.fablecut.space">FableCut Studio</a> runs the same editor in Chrome, on a folder on your own disk.</p>
+      <h2 class="h2">Cut something in the next minute.</h2>
+      <p class="lead">Open Studio in your browser and point it at a folder of clips. Prefer your own machine? One command runs the same editor locally: Node 18 or newer, ffmpeg optional.</p>
       <div class="btns">
-        <a class="btn btn-primary" href="./start/">Get started</a>
+        <a class="btn btn-primary" href="https://studio.fablecut.space">Open Studio</a>
+        <a class="btn btn-ghost" href="./start/">Install locally</a>
         <a class="more" href="./docs/">Read the docs <svg class="i" aria-hidden="true"><use href="#i-arrow"/></svg></a>
       </div>
     </div>
@@ -593,6 +664,6 @@
   </div>
 </dialog>
 
-<script src="./main.js?v=23"></script>
+<script src="./main.js?v=31"></script>
 </body>
 </html>
