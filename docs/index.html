@@ -100,7 +100,7 @@
 </script>
 <script>document.documentElement.classList.add("js");try{var t=localStorage.getItem("fc-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
 <link rel="preload" href="./fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="./styles.css?v=34">
+<link rel="stylesheet" href="./styles.css?v=35">
 </head>
 <body>
 
@@ -262,6 +262,16 @@
           <button class="reel-snd" type="button" aria-pressed="false" aria-label="Turn sound on">Sound</button>
         </div>
         <figcaption><b>Slow Mornings</b><span>1:1 promo. Rings that draw on, beat captions, a lower third with a rule that draws itself.</span></figcaption>
+        <div class="code reel-code" aria-label="The part of project.json that draws the ring on">
+<pre><code><span class="c">// the ring, as the agent wrote it</span>
+{ "type": "ellipse", "w": 760, "h": 760,
+  "fill": "none", "stroke": "#f6e7d2",
+  "strokeWidth": 5,
+  "keys": [
+    { "t": 0,   "trimEnd": 0 },
+    { "t": 1.6, "trimEnd": 100 }
+  ] }</code></pre>
+        </div>
       </figure>
     </div>
     <p class="made-foot reveal">Footage from Pexels, music from Pixabay.</p>

@@ -500,7 +500,16 @@ h1, h2, h3 { font-weight: 600; margin: 0; }
 .reel { margin: 0; }
 .reel-tall { grid-area: tall; }
 .reel-wide { grid-area: wide; }
-.reel-sq { grid-area: sq; display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 20px; align-items: end; }
+.reel-sq {
+  grid-area: sq; display: grid; gap: 16px 20px;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); grid-template-rows: auto 1fr;
+}
+.reel-sq .reel-media { grid-row: 1 / 3; }
+.reel-code {
+  align-self: stretch; display: flex; align-items: center; overflow: hidden;
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-2);
+}
+.reel-code pre { padding: 16px 18px; overflow: hidden; font-size: 12px; line-height: 1.65; }
 .reel-media {
   position: relative; aspect-ratio: var(--ar); overflow: hidden;
   border: 1px solid var(--line-2); border-radius: var(--radius);
@@ -524,8 +533,9 @@ h1, h2, h3 { font-weight: 600; margin: 0; }
 @media (max-width: 900px) {
   .made { grid-template-columns: minmax(0, 1fr); grid-template-areas: "wide" "tall" "sq"; }
   .reel-tall { max-width: 380px; }
-  .reel-sq { grid-template-columns: minmax(0, 1fr); }
-  .reel-sq figcaption { padding: 14px 2px 0; }
+  .reel-sq { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; }
+  .reel-sq .reel-media { grid-row: auto; }
+  .reel-sq figcaption { padding: 0 2px; }
 }
 
 /* ── Agents ─────────────────────────────────────────────── */
