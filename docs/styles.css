@@ -581,7 +581,6 @@ h1, h2, h3 { font-weight: 600; margin: 0; }
 .sc-tile:hover .reel-snd, .reel-snd:focus-visible, .reel-snd[aria-pressed="true"] { opacity: 1; }
 .reel-snd[aria-pressed="true"] { background: rgb(255 255 255 / .9); color: #000; }
 @media (hover: none) { .reel-snd { opacity: 1; } }
-.made-foot { margin: 22px 2px 0; font-size: 13px; color: var(--text-3); }
 
 /* ── Agents ─────────────────────────────────────────────── */
 .split {
