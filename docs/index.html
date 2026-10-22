@@ -100,7 +100,7 @@
 </script>
 <script>document.documentElement.classList.add("js");try{var t=localStorage.getItem("fc-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
 <link rel="preload" href="./fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="./styles.css?v=35">
+<link rel="stylesheet" href="./styles.css?v=41">
 </head>
 <body>
 
@@ -154,6 +154,7 @@
 <main id="main">
 
 <section class="hero">
+  <div class="beam" aria-hidden="true"></div>
   <div class="wrap">
     <a class="pill" href="https://studio.fablecut.space">
       <span class="pill-tag">New</span>
@@ -172,7 +173,7 @@
          one clock in main.js; without JS (or with reduced motion) it holds a
          single finished frame. -->
     <div class="shot">
-      <div class="shot-frame cut" id="cut" role="img" aria-label="An agent editing a FableCut timeline: it places three clips, a title and a music bed, gives the clips a noir grade, and the editor plays the cut.">
+      <div class="shot-frame cut" id="cut" role="img" aria-label="An agent editing a FableCut timeline: it places three night-city clips, a title and a synthwave track, gives the clips a noir grade, and the editor plays the cut.">
         <div class="cut-bar" aria-hidden="true">
           <span class="cut-file">project.json</span>
           <span class="cut-tick" data-cut-tick></span>
@@ -184,18 +185,20 @@
             <p class="cut-prompt"><span data-cut-prompt>Cut a teaser from these three clips. Title it CUT BY AN AGENT, then give it a noir finish.</span><i class="cut-caret"></i></p>
             <p class="cut-who">Agent <code>fablecut_patch_project</code></p>
             <ol class="cut-log">
-              <li data-at="2.1"><i>+</i><b>addClip</b><span>violet.mp4</span><em>V1 · 0.0s</em></li>
-              <li data-at="2.55"><i>+</i><b>addClip</b><span>amber.mp4</span><em>V1 · 3.2s</em></li>
-              <li data-at="3"><i>+</i><b>addClip</b><span>teal.mp4</span><em>V1 · 6.4s</em></li>
+              <li data-at="2.1"><i>+</i><b>addClip</b><span>fog-street.mp4</span><em>V1 · 0.0s</em></li>
+              <li data-at="2.55"><i>+</i><b>addClip</b><span>neon-vending.mp4</span><em>V1 · 3.2s</em></li>
+              <li data-at="3"><i>+</i><b>addClip</b><span>skyline.mp4</span><em>V1 · 6.4s</em></li>
               <li data-at="3.6"><i>+</i><b>addClip</b><span>title</span><em>V2 · CUT BY AN AGENT</em></li>
-              <li data-at="4.2"><i>+</i><b>addClip</b><span>pad.mp3</span><em>A1 · 0.0s</em></li>
+              <li data-at="4.2"><i>+</i><b>addClip</b><span>synthwave.mp3</span><em>A1 · 0.0s</em></li>
               <li data-at="6"><i>~</i><b>updateClip</b><span>v1 v2 v3</span><em>filterPreset: noir</em></li>
               <li data-at="12.9" class="cut-done"><i>✓</i><b>Saved</b><span>6 edits</span><em>revision 7</em></li>
             </ol>
           </div>
           <div class="cut-mon">
             <div class="cut-screen" data-cut-screen>
-              <i class="plate p-v1" data-plate="v1"></i><i class="plate p-v2" data-plate="v2"></i><i class="plate p-v3" data-plate="v3"></i>
+              <video class="plate p-v1" data-plate="v1" muted loop playsinline preload="none" poster="./hero/fog.jpg" data-src="./hero/fog.mp4"></video>
+              <video class="plate p-v2" data-plate="v2" muted loop playsinline preload="none" poster="./hero/vending.jpg" data-src="./hero/vending.mp4"></video>
+              <video class="plate p-v3" data-plate="v3" muted loop playsinline preload="none" poster="./hero/skyline.jpg" data-src="./hero/skyline.mp4"></video>
               <p class="cut-title on" data-cut-title><span style="--i:0">CUT</span> <span style="--i:1">BY</span> <span style="--i:2">AN</span> <span style="--i:3">AGENT</span></p>
             </div>
           </div>
@@ -206,12 +209,12 @@
             <div class="clip c-title on" data-clip="t1" data-at="3.6" style="--s:.4;--d:2.8"><i>T</i>CUT BY AN AGENT</div>
           </div></div>
           <div class="cut-lane"><b>V1</b><div class="cut-track">
-            <div class="clip c-video c-v1 on" data-clip="v1" data-at="2.1" style="--s:0;--d:3.4">violet.mp4</div>
-            <div class="clip c-video c-v2 on" data-clip="v2" data-at="2.55" style="--s:3.2;--d:3.4">amber.mp4</div>
-            <div class="clip c-video c-v3 on" data-clip="v3" data-at="3" style="--s:6.4;--d:3.2">teal.mp4</div>
+            <div class="clip c-video c-v1 on" data-clip="v1" data-at="2.1" style="--s:0;--d:3.4"><span>fog-street.mp4</span></div>
+            <div class="clip c-video c-v2 on" data-clip="v2" data-at="2.55" style="--s:3.2;--d:3.4"><span>neon-vending.mp4</span></div>
+            <div class="clip c-video c-v3 on" data-clip="v3" data-at="3" style="--s:6.4;--d:3.2"><span>skyline.mp4</span></div>
           </div></div>
           <div class="cut-lane"><b>A1</b><div class="cut-track">
-            <div class="clip c-audio on" data-clip="a1" data-at="4.2" style="--s:0;--d:9.6"><svg viewBox="0 0 400 24" preserveAspectRatio="none"><path d="M1.3 7.7V16.3M4.0 7.8V16.2M6.6 6.1V17.9M9.3 8.0V16.0M12.0 6.8V17.2M14.6 7.5V16.5M17.3 8.4V15.6M20.0 6.9V17.1M22.6 7.9V16.1M25.3 5.8V18.2M28.0 6.6V17.4M30.6 6.1V17.9M33.3 4.4V19.6M36.0 2.8V21.2M38.6 6.3V17.7M41.3 6.3V17.7M44.0 5.1V18.9M46.6 4.1V19.9M49.3 5.3V18.7M52.0 5.7V18.3M54.6 3.3V20.7M57.3 7.0V17.0M60.0 4.3V19.7M62.6 7.0V17.0M65.3 8.1V15.9M68.0 8.7V15.3M70.6 8.6V15.4M73.3 7.4V16.6M76.0 8.6V15.4M78.6 7.0V17.0M81.3 6.3V17.7M84.0 6.9V17.1M86.6 6.3V17.7M89.3 8.0V16.0M92.0 8.1V15.9M94.6 7.8V16.2M97.3 6.1V17.9M100.0 6.4V17.6M102.6 6.2V17.8M105.3 4.3V19.7M108.0 4.4V19.6M110.6 4.9V19.1M113.3 2.8V21.2M116.0 3.8V20.2M118.6 6.2V17.8M121.3 5.4V18.6M124.0 5.8V18.2M126.6 4.5V19.5M129.3 4.8V19.2M132.0 6.3V17.7M134.6 3.7V20.3M137.3 7.2V16.8M140.0 6.7V17.3M142.6 6.4V17.6M145.3 8.7V15.3M148.0 8.3V15.7M150.6 9.3V14.7M153.3 7.5V16.5M156.0 6.6V17.4M158.6 6.5V17.5M161.3 5.1V18.9M164.0 6.8V17.2M166.6 5.6V18.4M169.3 6.2V17.8M172.0 6.4V17.6M174.6 6.6V17.4M177.3 4.9V19.1M180.0 3.7V20.3M182.6 4.8V19.2M185.3 3.4V20.6M188.0 6.0V18.0M190.6 3.1V20.9M193.3 3.9V20.1M196.0 3.2V20.8M198.6 4.6V19.4M201.3 6.8V17.2M204.0 6.5V17.5M206.6 5.4V18.6M209.3 7.5V16.5M212.0 5.9V18.1M214.6 7.1V16.9M217.3 7.7V16.3M220.0 8.4V15.6M222.6 7.2V16.8M225.3 9.1V14.9M228.0 8.8V15.2M230.6 8.2V15.8M233.3 6.4V17.6M236.0 8.0V16.0M238.6 6.3V17.7M241.3 5.7V18.3M244.0 4.6V19.4M246.6 5.1V18.9M249.3 5.1V18.9M252.0 7.0V17.0M254.6 6.2V17.8M257.3 5.9V18.1M260.0 3.0V21.0M262.6 2.0V22.0M265.3 5.5V18.5M268.0 5.5V18.5M270.6 5.7V18.3M273.3 6.3V17.7M276.0 5.9V18.1M278.6 6.0V18.0M281.3 7.2V16.8M284.0 8.0V16.0M286.6 6.4V17.6M289.3 6.5V17.5M292.0 5.9V18.1M294.6 5.2V18.8M297.3 6.7V17.3M300.0 7.8V16.2M302.6 8.0V16.0M305.3 7.9V16.1M308.0 9.0V15.0M310.6 6.3V17.7M313.3 5.7V18.3M316.0 4.7V19.3M318.6 4.6V19.4M321.3 6.0V18.0M324.0 6.2V17.8M326.6 7.4V16.6M329.3 5.6V18.4M332.0 7.4V16.6M334.6 7.0V17.0M337.3 5.9V18.1M340.0 5.7V18.3M342.6 4.7V19.3M345.3 6.1V17.9M348.0 6.7V17.3M350.6 6.6V17.4M353.3 7.4V16.6M356.0 6.9V17.1M358.6 8.2V15.8M361.3 5.5V18.5M364.0 6.1V17.9M366.6 7.5V16.5M369.3 7.1V16.9M372.0 7.1V16.9M374.6 7.6V16.4M377.3 8.7V15.3M380.0 7.4V16.6M382.6 7.2V16.8M385.3 8.0V16.0M388.0 7.3V16.7M390.6 7.9V16.1M393.3 7.3V16.7M396.0 6.0V18.0M398.6 6.2V17.8"/></svg><span>pad.mp3</span></div>
+            <div class="clip c-audio on" data-clip="a1" data-at="4.2" style="--s:0;--d:9.6"><svg viewBox="0 0 400 24" preserveAspectRatio="none"><path d="M1.3 10.7V13.3M4.0 10.0V14.0M6.6 10.1V13.9M9.3 10.4V13.6M12.0 10.2V13.8M14.7 10.1V13.9M17.3 10.2V13.8M20.0 10.3V13.7M22.7 10.0V14.0M25.3 10.2V13.8M28.0 10.4V13.6M30.7 10.4V13.6M33.4 10.1V13.9M36.0 9.9V14.1M38.7 10.1V13.9M41.4 10.1V13.9M44.0 10.3V13.7M46.7 10.5V13.5M49.4 10.3V13.7M52.1 10.4V13.6M54.7 10.6V13.4M57.4 10.0V14.0M60.1 9.7V14.3M62.7 9.9V14.1M65.4 10.1V13.9M68.1 10.0V14.0M70.7 10.0V14.0M73.4 9.7V14.3M76.1 9.8V14.2M78.8 10.1V13.9M81.4 9.8V14.2M84.1 9.7V14.3M86.8 9.9V14.1M89.4 10.1V13.9M92.1 9.9V14.1M94.8 9.6V14.4M97.5 9.8V14.2M100.1 9.9V14.1M102.8 9.9V14.1M105.5 10.3V13.7M108.1 10.1V13.9M110.8 10.4V13.6M113.5 10.1V13.9M116.2 9.9V14.1M118.8 10.4V13.6M121.5 10.6V13.4M124.2 10.2V13.8M126.8 10.0V14.0M129.5 9.9V14.1M132.2 9.8V14.2M134.9 9.9V14.1M137.5 10.0V14.0M140.2 10.0V14.0M142.9 9.7V14.3M145.5 9.9V14.1M148.2 9.8V14.2M150.9 9.6V14.4M153.6 9.7V14.3M156.2 9.6V14.4M158.9 9.5V14.5M161.6 9.5V14.5M164.2 7.9V16.1M166.9 6.8V17.2M169.6 8.2V15.8M172.3 8.1V15.9M174.9 7.9V16.1M177.6 6.1V17.9M180.3 7.4V16.6M182.9 6.6V17.4M185.6 6.0V18.0M188.3 7.2V16.8M191.0 7.9V16.1M193.6 6.9V17.1M196.3 7.3V16.7M199.0 8.0V16.0M201.6 8.2V15.8M204.3 5.2V18.8M207.0 3.7V20.3M209.6 5.8V18.2M212.3 6.6V17.4M215.0 6.3V17.7M217.7 6.6V17.4M220.3 6.5V17.5M223.0 2.1V21.9M225.7 3.0V21.0M228.3 4.1V19.9M231.0 5.8V18.2M233.7 6.8V17.2M236.4 6.0V18.0M239.0 5.9V18.1M241.7 1.5V22.5M244.4 5.1V18.9M247.0 6.4V17.6M249.7 6.5V17.5M252.4 7.2V16.8M255.1 7.5V16.5M257.7 7.2V16.8M260.4 6.9V17.1M263.1 6.9V17.1M265.7 5.8V18.2M268.4 6.2V17.8M271.1 5.3V18.7M273.8 4.4V19.6M276.4 4.3V19.7M279.1 6.4V17.6M281.8 5.6V18.4M284.4 5.2V18.8M287.1 5.4V18.6M289.8 5.4V18.6M292.5 5.7V18.3M295.1 5.4V18.6M297.8 3.0V21.0M300.5 3.3V20.7M303.1 4.9V19.1M305.8 6.5V17.5M308.5 5.0V19.0M311.2 2.4V21.6M313.8 4.9V19.1M316.5 1.6V22.4M319.2 5.8V18.2M321.8 4.6V19.4M324.5 6.9V17.1M327.2 7.3V16.7M329.9 6.3V17.7M332.5 3.4V20.6M335.2 3.1V20.9M337.9 6.2V17.8M340.5 6.8V17.2M343.2 7.5V16.5M345.9 7.1V16.9M348.5 8.0V16.0M351.2 7.6V16.4M353.9 7.6V16.4M356.6 7.6V16.4M359.2 7.6V16.4M361.9 7.7V16.3M364.6 7.4V16.6M367.2 5.0V19.0M369.9 6.2V17.8M372.6 7.2V16.8M375.3 6.3V17.7M377.9 6.5V17.5M380.6 6.1V17.9M383.3 6.9V17.1M385.9 6.7V17.3M388.6 7.2V16.8M391.3 2.0V22.0M394.0 5.6V18.4M396.6 6.8V17.2M399.3 7.4V16.6"/></svg><span>synthwave.mp3</span></div>
           </div></div>
           <div class="cut-ph" data-cut-ph style="--ph:.14"></div>
         </div>
@@ -239,41 +242,40 @@
   <div class="wrap">
     <div class="head reveal">
       <h2 id="madeTitle">Cut by an agent. No hand edits.</h2>
-      <p>Claude made these from stock clips by writing <code class="ic">project.json</code>: beat-synced cuts, a speed ramp, kinetic titles, shape layers that draw themselves on. Every frame is the editor's own export.</p>
+      <p>Claude made these from stock clips by writing <code class="ic">project.json</code>: beat-synced cuts, a speed ramp, track mattes, masks, text on a path, shape layers that draw themselves on. Every frame is the editor's own export.</p>
     </div>
-    <div class="made">
-      <figure class="reel reel-tall reveal">
-        <div class="reel-media" style="--ar:9/16">
-          <video muted loop playsinline preload="none" poster="./showcase/after-hours.jpg" data-src="./showcase/after-hours.mp4" aria-label="After Hours: a vertical night-city reel cut to a synthwave track"></video>
-          <button class="reel-snd" type="button" aria-pressed="false" aria-label="Turn sound on">Sound</button>
-        </div>
-        <figcaption><b>After Hours</b><span>9:16 reel. Cuts on every second beat from the track's BPM, a font-cut title, a shake hit on the drop, one adjustment layer for the night look.</span></figcaption>
-      </figure>
-      <figure class="reel reel-wide reveal">
-        <div class="reel-media" style="--ar:12/5">
+  </div>
+  <div class="wall-clip">
+    <div class="wall reveal" aria-label="Edits made by an agent">
+      <div class="tile t-tall" style="--ar:9/16">
+        <video muted loop playsinline preload="none" poster="./showcase/night-market.jpg" data-src="./showcase/night-market.mp4" aria-label="Night Market: a vertical street-food reel with punch-ins on the beat"></video>
+        <button class="reel-snd" type="button" aria-pressed="false" aria-label="Turn sound on">Sound</button>
+      </div>
+      <div class="tile t-tall" style="--ar:9/16">
+        <video muted loop playsinline preload="none" poster="./showcase/after-hours.jpg" data-src="./showcase/after-hours.mp4" aria-label="After Hours: a vertical night-city reel cut to a synthwave track"></video>
+        <button class="reel-snd" type="button" aria-pressed="false" aria-label="Turn sound on">Sound</button>
+      </div>
+      <div class="wall-block">
+        <div class="tile t-wide" style="--ar:12/5">
           <video muted loop playsinline preload="none" poster="./showcase/salt.jpg" data-src="./showcase/salt.mp4" aria-label="Salt: a widescreen surf trailer with a warm film grade"></video>
           <button class="reel-snd" type="button" aria-pressed="false" aria-label="Turn sound on">Sound</button>
         </div>
-        <figcaption><b>Salt</b><span>2.4:1 trailer. A cut every bar, a speed ramp into the turn, teal and orange film grade with grain.</span></figcaption>
-      </figure>
-      <figure class="reel reel-sq reveal">
-        <div class="reel-media" style="--ar:1/1">
+        <div class="tile t-sq" style="--ar:1/1">
           <video muted loop playsinline preload="none" poster="./showcase/slow-mornings.jpg" data-src="./showcase/slow-mornings.mp4" aria-label="Slow Mornings: a square coffee promo with animated shapes and a lower third"></video>
           <button class="reel-snd" type="button" aria-pressed="false" aria-label="Turn sound on">Sound</button>
         </div>
-        <figcaption><b>Slow Mornings</b><span>1:1 promo. Rings that draw on, beat captions, a lower third with a rule that draws itself.</span></figcaption>
-        <div class="code reel-code" aria-label="The part of project.json that draws the ring on">
-<pre><code><span class="c">// the ring, as the agent wrote it</span>
-{ "type": "ellipse", "w": 760, "h": 760,
-  "fill": "none", "stroke": "#f6e7d2",
-  "strokeWidth": 5,
-  "keys": [
-    { "t": 0,   "trimEnd": 0 },
-    { "t": 1.6, "trimEnd": 100 }
-  ] }</code></pre>
+        <div class="tile t-sq" style="--ar:1/1">
+          <video muted loop playsinline preload="none" poster="./showcase/summit.jpg" data-src="./showcase/summit.mp4" aria-label="Summit: a square mountain film with footage inside the title and a split screen"></video>
+          <button class="reel-snd" type="button" aria-pressed="false" aria-label="Turn sound on">Sound</button>
         </div>
-      </figure>
+      </div>
+      <div class="tile t-tall" style="--ar:9/16">
+        <video muted loop playsinline preload="none" poster="./showcase/open-road.jpg" data-src="./showcase/open-road.mp4" aria-label="Open Road: a vertical motorcycle reel with letterbox bars and whip cuts"></video>
+        <button class="reel-snd" type="button" aria-pressed="false" aria-label="Turn sound on">Sound</button>
+      </div>
     </div>
+  </div>
+  <div class="wrap">
     <p class="made-foot reveal">Footage from Pexels, music from Pixabay.</p>
   </div>
 </section>
@@ -639,6 +641,6 @@
   </div>
 </dialog>
 
-<script src="./main.js?v=24"></script>
+<script src="./main.js?v=26"></script>
 </body>
 </html>

@@ -215,6 +215,41 @@ h1, h2, h3 { font-weight: 600; margin: 0; }
   left: 50%; top: -120px; width: min(1400px, 140vw); height: 900px; transform: translateX(-50%);
   background: radial-gradient(50% 50% at 50% 30%, var(--glow), transparent 70%);
 }
+/* the light: a beam raking across the hero, a reflection under the reels.
+   --beam is the one colour it takes (data-beam on <html> picks it). */
+:root { --beam: 139 92 246; }
+:root[data-beam="cyan"] { --beam: 34 211 238; }
+:root[data-beam="crimson"] { --beam: 239 68 68; }
+:root[data-beam="amber"] { --beam: 245 158 11; }
+.beam { position: absolute; inset: 0 0 auto; height: 1000px; z-index: -1; pointer-events: none; overflow: hidden; }
+.beam::before {   /* a cone of light fanning down-left from the top-right corner, brightest along its upper edge */
+  content: ""; position: absolute; right: 0; top: 0; width: 72%; height: 100%;
+  background: conic-gradient(from 238deg at 100% 0%,
+    transparent 0deg, rgb(var(--beam) / .22) 5deg, rgb(var(--beam) / .65) 9.5deg, rgb(255 255 255 / .55) 10.4deg,
+    rgb(var(--beam) / .5) 11.2deg, rgb(var(--beam) / .16) 18deg, rgb(var(--beam) / .05) 30deg, transparent 40deg);
+  filter: blur(7px);
+  -webkit-mask: radial-gradient(130% 120% at 100% 0%, #000 25%, rgb(0 0 0 / .5) 55%, transparent 80%);
+  mask: radial-gradient(130% 120% at 100% 0%, #000 25%, rgb(0 0 0 / .5) 55%, transparent 80%);
+}
+.beam::after {    /* the glow where it comes in */
+  content: ""; position: absolute; right: -180px; top: -220px; width: 620px; height: 440px;
+  background: radial-gradient(closest-side, rgb(var(--beam) / .45), rgb(var(--beam) / .1) 60%, transparent);
+  filter: blur(20px);
+}
+:root[data-beam="off"] .beam, :root[data-theme="light"] .beam { display: none; }
+#made { position: relative; isolation: isolate; }
+#made::after {    /* the reels' reflection on the floor below them */
+  content: ""; position: absolute; z-index: -1; left: 50%; bottom: -60px; width: min(1600px, 120vw); height: 420px; transform: translateX(-50%);
+  background: radial-gradient(50% 50% at 50% 50%, rgb(var(--beam) / .16), transparent 70%); pointer-events: none;
+}
+:root[data-beam="off"] #made::after, :root[data-theme="light"] #made::after { display: none; }
+.beam-test { position: fixed; z-index: 100; right: 16px; bottom: 16px; display: flex; gap: 6px; padding: 6px; border-radius: 999px;
+  background: rgb(0 0 0 / .7); border: 1px solid var(--line-2); backdrop-filter: blur(8px); }
+.beam-test button { height: 30px; padding: 0 12px 0 8px; display: flex; align-items: center; gap: 6px; border-radius: 999px; border: 1px solid transparent;
+  background: none; color: var(--text-2); font: 500 12px/1 var(--font); cursor: pointer; }
+.beam-test button i { width: 12px; height: 12px; border-radius: 50%; background: var(--c); }
+.beam-test button[aria-pressed="true"] { border-color: var(--line-2); color: var(--text); background: rgb(255 255 255 / .06); }
+
 .pill {
   display: inline-flex; align-items: center; gap: 10px; max-width: 100%;
   height: 34px; padding: 0 12px 0 5px; border-radius: 999px;
@@ -308,17 +343,14 @@ h1, h2, h3 { font-weight: 600; margin: 0; }
   box-shadow: 0 0 0 1px rgb(255 255 255 / .06);
   transition: filter .8s ease, opacity .45s ease;
 }
-.cut-screen::after {  /* grain and a soft vignette, so the plates read as footage */
+.cut-screen::after {  /* a soft vignette, as a monitor shows it */
   content: ""; position: absolute; inset: 0; pointer-events: none;
-  background:
-    radial-gradient(120% 90% at 50% 45%, transparent 55%, rgb(0 0 0 / .55)),
-    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/></filter><rect width='160' height='160' filter='url(%23n)' opacity='.55'/></svg>");
-  mix-blend-mode: overlay; opacity: .9;
+  background: radial-gradient(120% 90% at 50% 45%, transparent 60%, rgb(0 0 0 / .45));
 }
-.plate { position: absolute; inset: -4%; opacity: 0; transition: opacity .3s ease; }
-.p-v1 { background: radial-gradient(60% 70% at 30% 35%, #a699ff, #4b3bc2 45%, #140f3a 100%); }
-.p-v2 { background: radial-gradient(60% 70% at 68% 40%, #ffc46b, #c2531c 48%, #2a0e05 100%); }
-.p-v3 { background: radial-gradient(60% 70% at 42% 62%, #6ff0de, #13808c 46%, #04191d 100%); }
+.plate {
+  position: absolute; left: 0; top: 0; width: 100%; height: 100%; display: block;
+  object-fit: cover; background: #000; opacity: 0; transition: opacity .3s ease;
+}
 .cut:not(.live) .p-v1 { opacity: 1; }
 .cut.noir .cut-screen, .cut.noir .c-video { filter: grayscale(1) contrast(1.18) brightness(.92); }
 .cut-title {
@@ -349,9 +381,12 @@ h1, h2, h3 { font-weight: 600; margin: 0; }
   transition: transform .6s var(--ease), opacity .3s ease, filter .8s ease;
 }
 .c-video { color: #fff; border-color: rgb(255 255 255 / .14); text-shadow: 0 1px 2px rgb(0 0 0 / .4); }
-.c-v1 { background: linear-gradient(90deg, #5b4bd6, #2a2170); }
-.c-v2 { background: linear-gradient(90deg, #d9782f, #6e2a0e); }
-.c-v3 { background: linear-gradient(90deg, #1d9aa3, #0b4a51); }
+/* filmstrips of the real clips, a frame every ~0.4 s */
+.c-video { background: #111 0 0 / auto 100% repeat-x; padding: 0 6px; }
+.c-video span { position: relative; padding: 3px 6px; border-radius: 4px; background: rgb(0 0 0 / .55); }
+.c-v1 { background-image: url("hero/fog-strip.jpg"); }
+.c-v2 { background-image: url("hero/vending-strip.jpg"); }
+.c-v3 { background-image: url("hero/skyline-strip.jpg"); }
 .c-title { background: var(--bg-3); color: var(--text); }
 .c-title i { font: 600 11px/1 var(--font); font-style: normal; color: var(--text-3); }
 .c-audio { background: color-mix(in oklab, var(--bg-3) 70%, transparent); color: var(--text-3); padding: 0 8px; }
@@ -491,52 +526,40 @@ h1, h2, h3 { font-weight: 600; margin: 0; }
   .pg-code { border-right: 0; border-top: 1px solid var(--line); }
 }
 
-/* ── Showcase: finished exports, three shapes ───────────── */
-.made {
-  display: grid; margin-top: 48px; gap: 20px; align-items: start;
-  grid-template-columns: minmax(0, 4fr) minmax(0, 8fr);
-  grid-template-areas: "tall wide" "tall sq";
+/* ── Showcase: a grid of finished exports, wider than the window ──
+   --t is a vertical reel's width; the middle block (a 12:5 over two squares)
+   is sized so it stands exactly as tall as the reels. The wall is centred and
+   runs off both edges; each clip appears once. */
+.wall-clip { margin-top: 52px; overflow: hidden; }
+.wall {
+  --t: clamp(220px, 23vw, 400px); --g: 16px;
+  --h: calc(var(--t) * 16 / 9);
+  --w: calc((var(--h) - var(--g) / 2) * 12 / 11);
+  display: grid; gap: var(--g); width: max-content; margin-left: 50%; transform: translateX(-50%);
+  grid-template-columns: var(--t) var(--t) var(--w) var(--t); height: var(--h);
 }
-.reel { margin: 0; }
-.reel-tall { grid-area: tall; }
-.reel-wide { grid-area: wide; }
-.reel-sq {
-  grid-area: sq; display: grid; gap: 16px 20px;
-  grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); grid-template-rows: auto 1fr;
+.js .wall.reveal { transform: translateX(-50%) translateY(16px); }
+.js .wall.reveal.in { transform: translateX(-50%); }
+.wall-block { display: grid; gap: var(--g); grid-template-columns: 1fr 1fr; grid-template-rows: calc(var(--w) * 5 / 12) 1fr; }
+.t-wide { grid-column: 1 / -1; }
+.tile {
+  position: relative; overflow: hidden; min-height: 0;
+  border: 1px solid var(--line-2); border-radius: var(--radius); background: #000; box-shadow: var(--shadow);
 }
-.reel-sq .reel-media { grid-row: 1 / 3; }
-.reel-code {
-  align-self: stretch; display: flex; align-items: center; overflow: hidden;
-  border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-2);
+.tile video { display: block; width: 100%; height: 100%; object-fit: cover; }
+@media (max-width: 760px) {
+  .wall { --t: 46vw; grid-template-columns: var(--t) var(--t) var(--w) var(--t); }
 }
-.reel-code pre { padding: 16px 18px; overflow: hidden; font-size: 12px; line-height: 1.65; }
-.reel-media {
-  position: relative; aspect-ratio: var(--ar); overflow: hidden;
-  border: 1px solid var(--line-2); border-radius: var(--radius);
-  background: #000; box-shadow: var(--shadow);
-}
-.reel-media video { display: block; width: 100%; height: 100%; object-fit: cover; }
-.reel figcaption { display: grid; gap: 4px; padding: 14px 2px 0; }
-.reel-sq figcaption { padding: 0 0 4px; }
-.reel figcaption b { font-size: 15px; font-weight: 600; letter-spacing: -.01em; }
-.reel figcaption span { font-size: 14px; line-height: 1.55; color: var(--text-2); text-wrap: pretty; }
 .reel-snd {
   position: absolute; right: 10px; bottom: 10px; height: 28px; padding: 0 11px; border-radius: 999px;
   border: 1px solid rgb(255 255 255 / .2); background: rgb(0 0 0 / .5); color: #fff;
   font: 500 12px/1 var(--font); cursor: pointer; backdrop-filter: blur(6px);
   opacity: 0; transition: opacity .2s, background-color .2s;
 }
-.reel-media:hover .reel-snd, .reel-snd:focus-visible, .reel-snd[aria-pressed="true"] { opacity: 1; }
+.tile:hover .reel-snd, .reel-snd:focus-visible, .reel-snd[aria-pressed="true"] { opacity: 1; }
 .reel-snd[aria-pressed="true"] { background: rgb(255 255 255 / .9); color: #000; }
 @media (hover: none) { .reel-snd { opacity: 1; } }
 .made-foot { margin: 22px 2px 0; font-size: 13px; color: var(--text-3); }
-@media (max-width: 900px) {
-  .made { grid-template-columns: minmax(0, 1fr); grid-template-areas: "wide" "tall" "sq"; }
-  .reel-tall { max-width: 380px; }
-  .reel-sq { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; }
-  .reel-sq .reel-media { grid-row: auto; }
-  .reel-sq figcaption { padding: 0 2px; }
-}
 
 /* ── Agents ─────────────────────────────────────────────── */
 .split {
@@ -936,8 +959,7 @@ h1, h2, h3 { font-weight: 600; margin: 0; }
     .shot-frame { animation: tilt linear both; animation-timeline: view(); animation-range: entry 0% cover 42%; }
   }
 
-  /* hero cut: plates drift like footage, title words pop in */
-  .cut.live .plate { animation: drift 9s ease-in-out infinite alternate; }
+  /* hero cut: title words pop in */
   .cut.live .cut-title.on span { animation: wpop .55s cubic-bezier(.34, 1.56, .64, 1) both; animation-delay: calc(var(--i) * 90ms); }
 
   .demo-dlg[open] { animation: pop .45s var(--ease); }
@@ -954,5 +976,4 @@ h1, h2, h3 { font-weight: 600; margin: 0; }
 @keyframes tilt { from { transform: rotateX(16deg) scale(.95); } to { transform: none; } }
 @keyframes pop { from { opacity: 0; transform: translateY(12px) scale(.98); } to { opacity: 1; transform: none; } }
 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
-@keyframes drift { from { transform: scale(1.02) translate(0, 0); } to { transform: scale(1.1) translate(-1.5%, -1%); } }
 @keyframes wpop { from { opacity: 0; transform: translateY(.3em) scale(.55); } to { opacity: 1; transform: none; } }

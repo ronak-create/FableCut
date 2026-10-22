@@ -140,9 +140,32 @@
     dlg.addEventListener("close", function () { video.pause(); });
   }
 
+  /* ── Light colour test: ?beam=violet|cyan|crimson|amber|off, ?beams shows a picker ── */
+  (function () {
+    var q = new URLSearchParams(location.search), root = document.documentElement;
+    var pick = q.get("beam");
+    if (pick && pick !== "violet") root.setAttribute("data-beam", pick);
+    if (!q.has("beams")) return;
+    var opts = [["violet", "#8b5cf6"], ["cyan", "#22d3ee"], ["crimson", "#ef4444"], ["amber", "#f59e0b"], ["off", "#3f3f46"]];
+    var bar = document.createElement("div");
+    bar.className = "beam-test";
+    opts.forEach(function (o) {
+      var b = document.createElement("button");
+      b.type = "button"; b.style.setProperty("--c", o[1]);
+      b.innerHTML = "<i></i>" + o[0];
+      b.setAttribute("aria-pressed", String((root.getAttribute("data-beam") || "violet") === o[0]));
+      b.addEventListener("click", function () {
+        if (o[0] === "violet") root.removeAttribute("data-beam"); else root.setAttribute("data-beam", o[0]);
+        [].forEach.call(bar.children, function (x) { x.setAttribute("aria-pressed", String(x === b)); });
+      });
+      bar.appendChild(b);
+    });
+    document.body.appendChild(bar);
+  })();
+
   /* ── Showcase reels: load when near, play while on screen, sound on ask ── */
   (function () {
-    var vids = document.querySelectorAll(".reel video[data-src]");
+    var vids = document.querySelectorAll(".tile video[data-src]");
     if (!vids.length) return;
     function load(v) { if (!v.getAttribute("src")) v.src = v.getAttribute("data-src"); }
     function play(v) { load(v); var p = v.play(); if (p && p.catch) p.catch(function () { }); }
@@ -329,9 +352,21 @@
       }
       prev = t;
     }
+    // the monitor's footage: real clips, loaded once the loop starts, paused with it
+    var reels = [].slice.call(root.querySelectorAll("video[data-src]"));
+    function footage(on) {
+      reels.forEach(function (v) {
+        if (on) {
+          if (!v.getAttribute("src")) v.src = v.getAttribute("data-src");
+          var p = v.play();
+          if (p && p.catch) p.catch(function () { });
+        } else v.pause();
+      });
+    }
     function run(on) {
       if (on === running) return;
       running = on;
+      footage(on);
       if (on) { t0 = null; raf = requestAnimationFrame(step); }
       else cancelAnimationFrame(raf);
     }
