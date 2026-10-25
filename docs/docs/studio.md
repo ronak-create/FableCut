@@ -6,6 +6,8 @@
 
 Studio opens the folder in the editor. Clips are read from the folder where they are, and the files are never uploaded. Your edits are saved to `project.json` in the same folder. Projects you have opened before are listed on the home page; opening one again only asks for the browser's permission.
 
+To try Studio without your own footage, click **Open the demo** on the home page: six skate clips, a music track and a first cut, kept in the browser's own storage (no folder to pick, nothing saved to your disk). It opens as you left it next time; exports from it download. Removing its card removes it, and the button brings a fresh copy back.
+
 ### Firefox and Safari
 
 Firefox and Safari can't open folders on your disk, so there Studio keeps projects in the browser's own storage instead:
@@ -33,11 +35,15 @@ Clips already in the folder are used where they are, and new files you drop into
 
 ### Connect an agent
 
-Open **Agent** in Studio's sidebar, or the **Agent** button in the editor. It shows your connection link and how to add it:
+The home page shows **Connect your agent** until one connects; it is also under **Agent** in Studio's sidebar and behind the **Agent** button in the editor. Pick your agent and **Copy setup** copies everything it needs, with your connection link in it:
 
 - **Claude Code:** `claude mcp add --transport http fablecut-studio <your link>`
 - **claude.ai:** Settings, Connectors, **Add custom connector**, then paste the link.
+- **Cursor:** **Add to Cursor** adds it in one click, or paste the copied setup into `~/.cursor/mcp.json`.
+- **opencode:** paste the copied setup into `opencode.json`.
 - **ChatGPT and other MCP clients:** add a custom connector (a remote MCP server) with the same link.
+
+Once an agent connects, Studio suggests a few things to ask it (make a reel, give it a look, tighten it, export it); **Copy** puts one on your clipboard to paste into the agent's chat.
 
 The agent's tools run in your Studio tab, so keep it open while the agent works. Its edit commands, and any frames it asks to see, pass through Studio's relay (see below). If the agent calls while no project is open, Studio asks you to open one and the call carries on once you do. Every edit shows up live in the editor, and the Agent panel lists each call.
 
@@ -47,7 +53,7 @@ The link stays the same for every project in that browser. Anyone who has it can
 
 The connection link points at a small relay on studio.fablecut.space. It forwards the agent's tool calls to your tab and the results back to the agent and doesn't store either. Your clip files never go through it. What does: the edit commands, the project text the agent reads, and the frames or scope readings the agent asks for with `fablecut_frame` and `fablecut_scopes`.
 
-For usage numbers, the relay logs each call: which tool, whether it worked and how long it took, plus your country and a one-way hash of your IP address. It never logs the arguments, results, file names or frames.
+For usage numbers, the relay logs each call: which tool, whether it worked and how long it took, plus your country and a one-way hash of your IP address. The page also reports a few things you do in it, by name only: a project opened (a folder, browser storage or the demo), media imported, an export finished, an agent setup or a starter prompt copied. It never logs the arguments, results, file or project names, or frames.
 
 ### Exports
 
