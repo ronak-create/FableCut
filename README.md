@@ -20,7 +20,7 @@
 
 </div>
 
-<https://github.com/user-attachments/assets/2430b854-168b-4a9a-af2e-489e5efa7543>
+[![Watch the FableCut Studio demo: an agent cuts a reel live (58 s)](docs/showcase/fablecut-studio-demo-play.jpg)](https://fablecut.space/showcase/fablecut-studio-demo.mp4)
 
 FableCut is a Premiere-style non-linear video editor that runs entirely in your
 browser — and exposes its whole timeline as one JSON document. Edit it by hand,

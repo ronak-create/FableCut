@@ -26,7 +26,7 @@
 
 </div>
 
-<https://github.com/user-attachments/assets/2430b854-168b-4a9a-af2e-489e5efa7543>
+[![FableCut Studio demo](../showcase/fablecut-studio-demo-play.jpg)](https://fablecut.space/showcase/fablecut-studio-demo.mp4)
 
 FableCut は、完全にブラウザ内で動作する Premiere スタイルのノンリニア編集ソフトです。
 そしてタイムライン全体を **1 つの JSON ドキュメント**として公開します。手で書き換えても、
