@@ -26,7 +26,7 @@
 
 </div>
 
-<https://github.com/user-attachments/assets/2430b854-168b-4a9a-af2e-489e5efa7543>
+[![FableCut Studio demo](../showcase/fablecut-studio-demo-play.jpg)](https://fablecut.space/showcase/fablecut-studio-demo.mp4)
 
 FableCut es un editor de vídeo no lineal al estilo Premiere que funciona
 enteramente en tu navegador — y que expone toda su línea de tiempo como **un

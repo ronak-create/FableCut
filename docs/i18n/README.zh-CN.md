@@ -26,7 +26,7 @@
 
 </div>
 
-<https://github.com/user-attachments/assets/2430b854-168b-4a9a-af2e-489e5efa7543>
+[![FableCut Studio demo](../showcase/fablecut-studio-demo-play.jpg)](https://fablecut.space/showcase/fablecut-studio-demo.mp4)
 
 FableCut 是一个完全运行在浏览器里的非线性视频编辑器（Premiere 风格的操作方式），
 并且把整条时间线暴露成**一个 JSON 文档**。你可以手动改这个文件、在界面里编辑，
