@@ -27,6 +27,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Agents use the new `fablecut_transcribe` tool: it reads the timeline's words
   as timed lines, finds phrases, and with `cut:true` cuts them in one revision
   after keeping a version of the project.
+- **Captions.** The Transcript tab's **Add captions** makes captions from
+  the transcript, timed word by word, in four styles: subtitle, karaoke,
+  highlight (the word being said in colour) and word pop. They are sized for
+  the canvas, break at pauses and sentences, and land on their own lane above
+  the edit. **SRT** and **VTT** download them, and **Import…** places a subtitle
+  file's captions. Text clips gain `wordTimes`, which word-pop, word-slide,
+  karaoke and the new `highlight` animation follow, and `highlightColor`.
+  Agents use the new `fablecut_captions` tool.
 - **Apple Silicon VideoToolbox export profiles** `videotoolbox-h264` and
   `videotoolbox-hevc`. Enables hardware-accelerated H.264 and HEVC encode on
   Apple Silicon. Also registers `h264_videotoolbox` and `hevc_videotoolbox` in

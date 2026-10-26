@@ -54,7 +54,7 @@
     bold: true, weight: 0, italic: false, uppercase: false, align: "center",
     letterSpacing: 0, lineHeight: 1.2, textShadow: 12, glow: 0, glowColor: "",
     strokeWidth: 0, strokeColor: "#000", bgColor: "#000", bgOpacity: 0,
-    textAnim: "none", wordRate: 0.15, direction: "auto", boxW: 0, boxH: 0, boxFit: false, vAlign: "middle",
+    textAnim: "none", wordRate: 0.15, highlightColor: "#ffd166", direction: "auto", boxW: 0, boxH: 0, boxFit: false, vAlign: "middle",
     anchorX: 0, anchorY: 0, trimStart: 0, trimEnd: 100, trimOffset: 0,
     autoOrient: false, motionBlur: 0, motionBlurSamples: 8, pathOffset: 0, pathAlign: "start",
   };
@@ -1169,14 +1169,15 @@
           kept[k] = v;
           continue;
         }
-        if (k === "masks" || k === "tracks" || k === "shapes" || k === "textPath") continue;   // summarized below — point lists and samples are long
+        if (k === "masks" || k === "tracks" || k === "shapes" || k === "textPath" || k === "wordTimes") continue;   // summarized below — point lists and samples are long
         if (hex(PROP_DEFAULTS[k]) !== hex(v)) kept[k] = v;
       }
       const masks = Mask.describe(Mask.normalizeMasks(o.masks)), tracks = Tracker.describe(Tracker.normalizeTracks(o.tracks));
       const shapes = Motion.describe(Motion.normalizeShapes(o.shapes));
       const tp = o.textPath && Motion.normalizeTextPath(o.textPath);
       if (tp) kept.textPath = tp.type + (tp.points ? `(${tp.points.length})` : tp.w ? ` ${tp.w}×${tp.h}` : "");
-      return (Object.keys(kept).length ? " " + JSON.stringify(kept) : "") + (shapes ? ` [${shapes}]` : "") + (masks ? ` [${masks}]` : "") + (tracks ? ` [tracks: ${tracks}]` : "");
+      const timed = Array.isArray(o.wordTimes) && o.wordTimes.length ? ` [${o.wordTimes.length} words timed to speech]` : "";
+      return (Object.keys(kept).length ? " " + JSON.stringify(kept) : "") + (shapes ? ` [${shapes}]` : "") + (masks ? ` [${masks}]` : "") + (tracks ? ` [tracks: ${tracks}]` : "") + timed;
     };
     // Mixer: only off-default faders / pans, so a fresh project adds no line.
     const signed = (v) => (v > 0 ? "+" : "") + v;
