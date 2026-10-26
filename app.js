@@ -9021,12 +9021,15 @@ function buildTranscriptPage() {
     paintTranscriptMarks();
   });
   window.addEventListener("mouseup", () => { trState.drag = false; });
-  E.body.addEventListener("keydown", (e) => {
-    // Delete here means the words: with none selected it does nothing (it never reaches the timeline's clips)
+  // Delete anywhere in this tab means the words, never the timeline's clips: with none selected it does
+  // nothing; in the Find box it edits the text
+  root.addEventListener("keydown", (e) => {
     if ((e.key === "Delete" || e.key === "Backspace") && !e.ctrlKey && !e.metaKey && !e.altKey) {
-      e.preventDefault(); e.stopPropagation();
+      e.stopPropagation();
+      if (isTypingTarget(e.target)) return;
+      e.preventDefault();
       if (trState.sel) cutTranscriptSelection();
-    } else if (e.key === "Escape" && trState.sel) {
+    } else if (e.key === "Escape" && trState.sel && !isTypingTarget(e.target)) {
       e.preventDefault(); e.stopPropagation();
       trState.sel = null; trState.anchor = null;
       paintTranscriptMarks();
