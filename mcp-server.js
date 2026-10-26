@@ -618,6 +618,13 @@ async function silenceTool(args) {
   return `Cut ${head} — timeline ${fmtDur(before)} → ${fmtDur(end(proj))} (revision ${proj.revision}). UI hot-reloaded.` +
     (verWarn || ` The project as it was is kept as a version (fablecut_versions lists it; restore undoes the cut).`);
 }
+/** What words are placed by and cuts land on: where each clip sits and plays from, the track
+ *  switches and the frame rate. An editor saving probed media details while a transcription runs
+ *  doesn't change it; a moved, trimmed or cut clip does. */
+function timelineSig(doc) {
+  return JSON.stringify([doc.fps, doc.lockedTracks || [], doc.untargetedTracks || [], doc.disabledTracks || [],
+    (doc.clips || []).map((c) => [c.id, c.track, c.start, c.in, c.duration, c.mediaId, c.props?.speed ?? 1, c.keyframes?.speed ?? null, !!c.locked, !!c.disabled])]);
+}
 /* fablecut_transcribe: transcripts from the editor (a job), read on the timeline, found, cut. */
 async function transcribeTool(args) {
   const T = require("./transcribe.js");
@@ -628,7 +635,7 @@ async function transcribeTool(args) {
   if (args.cut === true && !finds.length) throw new Error("cut:true needs find — the words or phrases to cut");
   if (args.cut === true && fileMode) throw new Error("cut works on the timeline — pass clipIds (or nothing), not mediaIds");
   const doc = readProject();
-  const readRev = doc.revision || 0;
+  const sig = timelineSig(doc);
   const mediaById = new Map((doc.media || []).map((m) => [m.id, m]));
   const disabled = new Set(Array.isArray(doc.disabledTracks) ? doc.disabledTracks : []);
   let entries = [], files = [], rampedN = 0;
@@ -731,9 +738,9 @@ async function transcribeTool(args) {
   if (args.cut !== true) return [head + ".", ...report,
     ...(spans.length && !fileMode ? [`Cutting them would remove ${spans.length} span${spans.length === 1 ? "" : "s"}, ${T.total(spans).toFixed(1)} s (the words and the pause after each): call again with cut:true.`] : [])].join("\n");
   if (!spans.length) return [head + ".", ...report, "Nothing to cut."].join("\n");
-  const proj = readProject();
-  if ((proj.revision || 0) !== readRev)
-    throw new Error(`the project changed while transcribing (revision ${readRev} → ${proj.revision}) — nothing cut; run fablecut_transcribe again`);
+  const proj = readProject(), readRev = proj.revision || 0;
+  if (timelineSig(proj) !== sig)
+    throw new Error("the timeline changed while transcribing (a clip was moved, trimmed or cut) — nothing cut; run fablecut_transcribe again");
   const end = (p) => p.clips.reduce((m, c) => Math.max(m, c.start + c.duration), 0);
   const before = end(proj);
   ProjectOps.applyPatch(proj, T.cutOps(spans, { tracks: args.tracks, force: args.force === true }), { savedItems });
