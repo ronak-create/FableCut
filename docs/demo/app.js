@@ -13599,6 +13599,7 @@ window.addEventListener("keydown", (e) => {
     return;
   }
   if (!maskUi.clip || (maskUi.sel < 0 && !maskUi.tool)) return;
+  if (els.transcriptPage?.contains(e.target)) return;   // keys typed in the Transcript tab are its own
   const tg = e.target;
   if (tg && (tg.tagName === "INPUT" || tg.tagName === "TEXTAREA" || tg.tagName === "SELECT" || tg.isContentEditable)) return;
   const c = getClip(state.selId);
@@ -14271,6 +14272,7 @@ els.preview.addEventListener("dblclick", (e) => {
   shapeUi.pt = -1; scheduleSave(); renderInspector();
 }, true);
 window.addEventListener("keydown", (e) => {
+  if (els.transcriptPage?.contains(e.target)) return;   // keys typed in the Transcript tab are its own
   if (e.key === "Escape" && runtime.anchorTool && !shapeUi.sel && !shapeUi.tool) {
     const tg0 = e.target;
     if (!(tg0 && (tg0.tagName === "INPUT" || tg0.tagName === "TEXTAREA" || tg0.tagName === "SELECT"))) {
