@@ -89,8 +89,8 @@ ops:[…]}` — the user's editor stays on what they are watching. Open one
   too); `find:"the line"` locates it and `cut:true` extracts it with the pause after it. `fablecut_silence {cut:true}` tightens
   the pauses. Whisper leaves out most "um"s, so don't hunt fillers by text.
   Lock the music lane before either cut. Caption it last:
-  `fablecut_captions {style:"highlight"}` (or subtitle, karaoke, pop), then look
-  at a frame mid-sentence.
+  `fablecut_captions {style:"highlight", clipIds:[…the speech clips]}` (or subtitle,
+  karaoke, pop), then look at a frame mid-sentence.
 - Vary the font per title. Reusing one typeface across a whole edit is the
   single clearest tell of a machine-made cut; `fablecut_docs {section:"Text"}`
   lists the built-in title styles.

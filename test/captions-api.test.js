@@ -102,4 +102,18 @@ test("refusals: a bad style, a locked caption, a missing file", async (t) => {
   assert.equal(keep.isError, false, keep.text);
   assert.ok(caps(dir).some((c) => c.track === "V5") && caps(dir).some((c) => c.locked), "both sets now");
   assert.match((await mcp.callTool("fablecut_captions", { remove: true })).text, /locked — nothing removed/);
+
+  // the user asks: force replaces them even on a locked lane, and export leaves out a disabled one
+  const d2 = readProject(dir);
+  d2.lockedTracks = ["V4"];
+  d2.disabledTracks = ["V5"];
+  d2.revision++;
+  writeProject(dir, d2);
+  const forced = await mcp.callTool("fablecut_captions", { style: "subtitle", force: true });
+  assert.equal(forced.isError, false, forced.text);
+  assert.ok(caps(dir).every((c) => c.props.captionStyle === "subtitle" && c.track === "V4"), "replaced on the locked lane");
+  const out = await mcp.callTool("fablecut_captions", { export: "srt" });
+  assert.equal(out.isError, false, out.text);
+  const file = out.text.match(/to (.+\.srt) /)[1];
+  assert.equal((fs.readFileSync(file, "utf8").match(/-->/g) || []).length, 3, "only the captions that show");
 });

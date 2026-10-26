@@ -9287,7 +9287,7 @@ function watchCaptions(now) {
   }
 }
 function downloadCaptions(kind) {
-  const C = FableCutCaptions, list = C.fromClips(project.clips);
+  const C = FableCutCaptions, list = C.fromClips(project.clips, [...state.disabledTracks]);
   if (!list.length) { toast("No captions on the timeline yet — Add captions first"); return; }
   const blob = new Blob([kind === "vtt" ? C.toVTT(list) : C.toSRT(list)], { type: kind === "vtt" ? "text/vtt" : "application/x-subrip" });
   const a = document.createElement("a");
@@ -14888,10 +14888,12 @@ function wordClock(c, p, n, rate) {
   if (Array.isArray(wt) && n) { const step = Math.max(0.05, (+c?.duration || n * rate) / n); return (i) => [i * step, (i + 1) * step]; }
   return (i) => [i * rate, (i + 1) * rate];
 }
-/** Is word i the one being said? From its start until the next word starts (or the clip ends). */
+/** Is word i the one being said? From its start to its end (a tenth of a second more, so the
+ *  highlight doesn't flicker between words), and never past the next word's start. */
 function wordIsCurrent(clk, i, n, local) {
-  const a = clk(i)[0];
-  return local >= a && (i + 1 >= n || local < clk(i + 1)[0]);
+  const [a, b] = clk(i);
+  const until = Math.max(b, a + 0.05) + 0.1;
+  return local >= a && local < (i + 1 < n ? Math.min(clk(i + 1)[0], until) : until);
 }
 const backOut = (u) => { const c1 = 1.70158, c3 = c1 + 1; const v = u - 1; return 1 + c3 * v * v * v + c1 * v * v; };
 function hexToRgba(hex, a) {

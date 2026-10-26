@@ -66,7 +66,7 @@
   /** Break words into at most `lines` lines of about `chars` characters, as even as it can. */
   function wrap(words, chars, lines) {
     const text = words.join(" ");
-    if (lines <= 1 || text.length <= chars) return [words.slice()];
+    if (lines <= 1 || words.length < 2 || text.length <= chars) return [words.slice()];   // one word stays whole, however long
     // the split that keeps the longest line shortest
     let best = null;
     for (let k = 1; k < words.length; k++) {
@@ -158,9 +158,11 @@
     return { ...(id ? { id } : {}), kind: "text", mediaId: null, track: track || "V2", start: r4(cue.start), duration: r4(cue.end - cue.start), name: "Caption", props };
   }
 
-  /** Cues of the caption clips in a clip list (props.caption), in time order. */
-  function fromClips(clips) {
-    return (clips || []).filter((c) => c && c.kind === "text" && c.props && c.props.caption === true && c.disabled !== true)
+  /** Cues of the caption clips in a clip list (props.caption), in time order — the ones that show:
+   *  not disabled, and not on a track in `disabledTracks`. */
+  function fromClips(clips, disabledTracks = []) {
+    const off = new Set(disabledTracks || []);
+    return (clips || []).filter((c) => c && c.kind === "text" && c.props && c.props.caption === true && c.disabled !== true && !off.has(c.track))
       .map((c) => ({ start: +c.start || 0, end: (+c.start || 0) + (+c.duration || 0), text: String(c.props.text || "") }))
       .filter((c) => c.text.trim() && c.end > c.start).sort((a, b) => a.start - b.start);
   }
