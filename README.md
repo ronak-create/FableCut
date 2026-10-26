@@ -131,6 +131,11 @@ same time.
   **Find silences**) listens to a take and marks every pause on the timeline;
   **Cut** extracts them all in one undo step, keeping a little quiet beside
   each phrase so words aren't clipped. Agents use `fablecut_silence`.
+- **Transcripts and text-based editing** — the **Transcript** tab turns speech
+  into words with times, in the browser (Whisper; the model downloads once and
+  the audio never leaves your machine). Click a word to go there, select words
+  and press Delete to cut them, or find a phrase and cut every time it is said.
+  Agents use `fablecut_transcribe` to read an interview, find a line and cut it.
 - **Project bin folders** — tree view with expand/collapse; drag media or folders to nest; right-click the **Project** tab → New folder; drop files onto a folder to import into it
 - **Media management** — each file's frame rate, codecs, audio channels and size (ffprobe); search by name, codec, resolution or `#tag`; filter by favorites, used / unused, kind, tag or collection; sort by any detail or by times used; a list view with metadata columns; favorites, tags and collections; **Find timeline instances** and **Reveal in project**; offline files flagged with a "Media offline" slate, **Relink…** (finds moved files by name and size) and **Replace file…**
 - **Projects** — a dashboard of every project with pictures, notes and tags: open, create from a canvas or a saved project template, duplicate, rename, archive and delete, import an old project file; media is shared, so copies cost no footage
@@ -463,7 +468,7 @@ Three equivalent control surfaces:
    `fablecut_get_project`, `fablecut_set_project`, `fablecut_patch_project`,
    `fablecut_import_media`, `fablecut_analyze_reference`, `fablecut_frame`,
    `fablecut_encode_profiles`, `fablecut_normalize_audio`, `fablecut_auto_duck`,
-   `fablecut_denoise`, `fablecut_silence`, `fablecut_export`, `fablecut_scopes`, `fablecut_track`.
+   `fablecut_denoise`, `fablecut_silence`, `fablecut_transcribe`, `fablecut_export`, `fablecut_scopes`, `fablecut_track`.
 
    FableCut is also published on the **official MCP registry** as
    [`io.github.ronak-create/fablecut`](https://registry.modelcontextprotocol.io/v0/servers?search=fablecut)

@@ -96,7 +96,7 @@
     return copy;
   }
 
-  var store = { project: DEMO };
+  var store = { project: DEMO, transcripts: {} };
   var listeners = [];   // live fake EventSources
 
   function emit(name) {
@@ -137,6 +137,15 @@
       return reply(toLocal(store.project));
     }
     if (path === "/api/export/ffmpeg") return reply({ available: false });
+    // transcripts made in the Transcript tab live as long as the page
+    if (path === "/api/transcript") {
+      var src = new URL(url, location.href).searchParams.get("src") || "";
+      if (method === "POST") {
+        try { var doc = JSON.parse((init && init.body) || "{}"); store.transcripts[src] = doc; return reply({ src: src, words: (doc.words || []).length }); }
+        catch (e) { return reply({ error: "bad transcript" }, 400); }
+      }
+      return reply({ transcript: store.transcripts[src] || null });
+    }
     if (path === "/api/library") return reply([]);
     if ((path === "/api/presets" || path === "/api/templates") && method === "GET") return reply([]);
     if (path === "/api/export/profiles") return reply({}, 404);

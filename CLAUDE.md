@@ -46,6 +46,9 @@ Every Claude Code session then has these tools:
   file and switches the clip's stems to it). See "Audio mix" below.
 - `fablecut_silence` — find the pauses in speech and, with `cut:true`, cut them out
   (extract on the targeted tracks, stems in step). See "Audio mix" below.
+- `fablecut_transcribe` — turn speech into words with times (Whisper, in the browser),
+  read them on the timeline, find a phrase and cut it out. See "Transcripts and
+  text-based editing" below.
 - `fablecut_export` — render the timeline to a file in `exports/` with the editor's own
   Fast export (open tab, or headless Chrome / Edge). See "Export" below.
 - `fablecut_scopes` — measure the graded picture at a moment (levels, clipping, colour
@@ -634,6 +637,76 @@ edits the key under the playhead. Agents:
   shaping, **duck** for dipping under dialogue, the **track fader** to
   balance whole lanes (dialogue against the music bed), and a **bus** when
   several lanes need the same processing or one fader.
+
+### Transcripts and text-based editing
+
+FableCut turns the speech in a clip into **words with times**, so an edit can be
+read, searched and cut like text. Transcription runs **in the browser**: Whisper
+(OpenAI's speech model, through transformers.js) in a background worker of the
+editor tab. The library and the model are fetched from a CDN the first time and
+kept by the browser after that; the audio never leaves the machine.
+
+| model | download | |
+|---|---|---|
+| `base` (default) | 77 MB | quick: about 15 s per minute of speech on a fast desktop |
+| `small` | 250 MB | often more accurate (accents, noisy rooms, numbers); about twice as slow |
+
+Whisper detects the language by itself; give it one (`en`, `es`, `hi`, `ja`, … any
+Whisper code) when a clip is short or mixes languages. Long files are split at
+their quietest moments into pieces of at most 28 s, and stretches of silence are
+skipped (Whisper invents words in silence).
+
+**One transcript per file**, kept by the server in `analysis/transcripts/`:
+`{v, src, model, language, duration, created, words:[[text, start, end], …]}`,
+times in seconds of the file. Like a proxy it belongs to the file's size and
+modification time, so a replaced or re-rendered file has none until it is
+transcribed again. It is not stored in `project.json`, so it never bloats the
+timeline, and every clip and sequence that uses the file reads the same one.
+
+**On the timeline** a clip shows the words its window of the file holds, placed
+through its `in` point and `speed` (a word counts when its middle is inside the
+clip). A clip with a speed ramp is left out, and so are disabled clips and pictures
+whose sound is off.
+
+**Cutting words** extracts on the targeted tracks, from just before the first word
+to just before the word after the last one: the pause after the cut goes too, the
+pause before it stays. Cuts land on whole frames, never in a neighbouring word or
+past the clip. Several cuts go last first, as one undo step (one revision for an
+agent): later material moves up, linked stems stay in step, and locked clips stay
+put — **lock the music bed first** if it should keep running under the tightened
+edit. Find matches whole words and ignores case, accents, punctuation and spacing:
+"ai powered" finds "A.I.-powered", and "cat" doesn't find "category".
+
+In the editor, the **Transcript** tab beside the Inspector:
+
+- **Transcribe** works on the selected clips' files, else on every file on the
+  timeline that has no transcript yet. The model and the language are beside it.
+  Progress shows below (the first time, the model download), with **Cancel**.
+- The timeline's words, in paragraphs with timecodes. Click a word to go there;
+  the word under the playhead is underlined and followed while playing. ⇧-click or
+  drag to select a run of words, then press **Delete** (or **Cut**) to extract it.
+- **Find words** marks every match, Enter steps through them, and **Cut N**
+  extracts them all. **Copy** copies the text with its timecodes.
+
+**Agents** use `fablecut_transcribe`. It transcribes in an open editor tab, else in
+headless Chrome / Edge, whose profile is kept in `analysis/browser-profile/` so the
+model downloads once:
+
+- `{}` transcribes every clip with sound that has no transcript yet, then returns
+  the timeline's words as timed lines: `[0:12.08] Open the demo, nothing to install.`
+  `clipIds` limits it to some clips; `from` / `to` limit the time (the reply stops
+  at 300 lines); `mediaIds` reads whole files in file seconds instead.
+- `model:"small"`, `language:"es"`, and `again:true` (transcribe again, with another
+  model or language).
+- `find:"phrase"` (or a list) reports each place it is said, with its span, the words
+  around it and how much cutting them would remove; `cut:true` extracts them
+  (`tracks` and `force` as for `fablecut_silence`). A version of the project is kept
+  before the cut.
+
+Whisper writes clean text: it often leaves out fillers ("um", "uh") and false
+starts, so find those by ear (`fablecut_silence` for the pauses), not by text. Word
+times are good to about a tenth of a second; listen to a cut that matters, or
+check it with `fablecut_frame`.
 
 ### Color
 
@@ -1988,6 +2061,13 @@ obvious cuts were missed, raise it if motion is being misread as cuts.
   port) in `media.src`: canvas CORS would taint the compositor and Fast /
   WebCodecs export cannot JPEG-encode. Import into `./media` so `src` is
   `/media/…`, or serve the remote with `Access-Control-Allow-Origin`.
+- `GET  /api/transcript?src=/media/x.mp4` → `{transcript}` (`null` when the file has none yet; 404 when the
+  file is missing) · `POST /api/transcript?src=` (a transcript document) → `{src, words}` ·
+  `POST /api/transcript/status {srcs}` → `{status:{src: {words, language, model, duration, created} | false | null}}` ·
+  `POST /api/transcript/delete {src}` → `{deleted}`. SSE event `transcript` (`{src}`) after each save or delete.
+  `POST /api/transcribe/request {transcribe:{srcs, model?, language?, again?}, where?}` queues a transcription
+  on the export-job queue (poll `GET /api/export/job?id=`); the tab saves each transcript, and the job's
+  `result` lists `done`, `skipped` and `failed`. See "Transcripts and text-based editing".
 - `POST /api/denoise` — body `{src:"/media/…", amount:"light"|"medium"|"strong"}`: writes a
   noise-reduced FLAC of the whole file into `./media/` (reused if it exists) and returns
   `{src, name, duration, channels}`. Does not touch `project.json` (see "Audio mix").
@@ -2094,6 +2174,11 @@ then `fablecut_silence {clipIds:[<the take>]}` to see the pauses (it does the
 listening; `fablecut_frame` only shows the picture, handy to check a cut won't land
 mid-gesture), and `fablecut_silence {clipIds:[<the take>], cut:true}`. Add
 `{op:"crossfade", ids:[…]}` on the new audio cuts if a breath clicks.
+
+**Cut an interview down by text**: lock the music lane, `fablecut_transcribe {}`
+to read what was said, decide what stays, then
+`fablecut_transcribe {find:["the sentence to drop", "and this one"], cut:true}`.
+Then `fablecut_silence {clipIds:[…], cut:true}` for the pauses that are left.
 
 **Center a mono stem**: linked or standalone audio clip with `props.pan: 0` (inspector **Pan** slider, −1…+1). Stereo video stems default to L `−1` / R `+1`; set A1 to `0` to center that channel in the mix.
 

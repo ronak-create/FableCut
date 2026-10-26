@@ -797,7 +797,7 @@ const els = {
   btnInsert: $("btnInsert"), btnReplace: $("btnReplace"),
   vuMeter: $("vuMeter"),
   sideTabs: $("sideTabs"),
-  mixer: $("mixer"), colorPage: $("colorPage"),
+  mixer: $("mixer"), colorPage: $("colorPage"), transcriptPage: $("transcriptPage"),
   exportSetup: $("exportSetup"), engineFast: $("engineFast"), engineRealtime: $("engineRealtime"),
   exportProfileRow: $("exportProfileRow"),
   exportProfileSel: $("exportProfileSel"), exportProfileNote: $("exportProfileNote"),
@@ -1681,6 +1681,7 @@ function listenSSE() {
   // Named events: "change" = project/media/library; "profiles" = encoding-profiles.json only
   es.addEventListener("change", () => { noteActivity(); syncFromServer(); scheduleOfflineCheck(); });
   es.addEventListener("proxy", (e) => onProxyEvent(e.data));
+  es.addEventListener("transcript", (e) => onTranscriptEvent(e.data));
   es.addEventListener("versions", (e) => {
     let d = {};
     try { d = JSON.parse(e.data); } catch { }
@@ -8758,6 +8759,458 @@ function cutSilences() {
   renderInspector();
   toast(`Cut ${cut} silence${cut === 1 ? "" : "s"} · ${secs.toFixed(1)} s shorter`);
 }
+
+/* ── Transcripts (transcribe.js, transcribe-worker.js): speech → words in this
+   browser with Whisper, kept per file by the server (analysis/transcripts/).
+   The Transcript tab shows the timeline's words: click one to go there, select
+   some and press Delete (or Cut) to extract them, find a phrase and cut every
+   time it is said — the same spans and extract ops as fablecut_transcribe. ── */
+const TRANSCRIBE_KEY = "fablecut-transcribe";
+const trState = { open: false, built: false, busy: null, sig: "", words: [], sel: null, anchor: null, drag: false, query: "", hits: [], now: -1 };
+const transcriptCache = new Map();   // src → validated transcript | false (none) | Promise while asking the server
+let transcriptGen = 0;               // bumps whenever a transcript arrives or changes: the tab redraws
+function transcribeSettings() {
+  let o = {};
+  try { o = JSON.parse(localStorage.getItem(TRANSCRIBE_KEY) || "{}"); } catch { }
+  let model = FableCutTranscribe.DEFAULT_MODEL, language = null;
+  try { model = FableCutTranscribe.model(o.model); } catch { }
+  try { language = FableCutTranscribe.language(o.language); } catch { }
+  return { model, language };
+}
+function saveTranscribeSettings(patch) {
+  try { localStorage.setItem(TRANSCRIBE_KEY, JSON.stringify({ ...transcribeSettings(), ...patch })); } catch { }
+}
+/** The transcript of a file, if it is here already. */
+function transcriptOf(src) {
+  const d = transcriptCache.get(src);
+  return d && !(d instanceof Promise) ? d : null;
+}
+/** Ask the server for a file's transcript (once; `force` asks again). Resolves to it, or false. */
+function loadTranscript(src, force = false) {
+  const have = transcriptCache.get(src);
+  if (!force && have !== undefined) return have instanceof Promise ? have : Promise.resolve(have);
+  const p = fetch("/api/transcript?src=" + encodeURIComponent(src)).then((r) => (r.ok ? r.json() : null))
+    .then((j) => {
+      let d = false;
+      try { d = j && j.transcript ? FableCutTranscribe.validate(j.transcript) : false; } catch { }
+      if (transcriptCache.get(src) === p) { transcriptCache.set(src, d); transcriptGen++; }
+      return d;
+    })
+    .catch(() => { if (transcriptCache.get(src) === p) transcriptCache.set(src, false); return false; });
+  transcriptCache.set(src, p);
+  return p;
+}
+function onTranscriptEvent(data) {
+  let src = null;
+  try { src = JSON.parse(data).src; } catch { }
+  if (!src) return;
+  loadTranscript(src, true).then(() => renderTranscript(true));
+}
+
+/* The worker: one at a time, each piece of audio answered in turn. */
+let trWorker = null, trSeq = 0, trIdleTimer = 0;
+const trPending = new Map();
+function transcribeWorker() {
+  if (trWorker) return trWorker;
+  trWorker = new Worker("transcribe-worker.js", { type: "module" });
+  trWorker.onmessage = (e) => {
+    const m = e.data || {};
+    if (m.type === "progress") { onModelProgress(m); return; }
+    const p = trPending.get(m.id);
+    if (!p) return;
+    trPending.delete(m.id);
+    if (m.type === "done") p.resolve(m.chunks || []);
+    else p.reject(new Error(/dynamically imported module|Failed to fetch|NetworkError|Load failed/i.test(m.error || "")
+      ? "couldn't download the speech model — check the internet connection (it is needed the first time)"
+      : m.error || "transcription failed"));
+  };
+  trWorker.onerror = (e) => {
+    for (const p of trPending.values()) p.reject(new Error(e.message || "the speech worker failed to start"));
+    trPending.clear();
+    trWorker = null;
+  };
+  return trWorker;
+}
+function stopTranscribeWorker() {
+  if (trWorker) { trWorker.terminate(); trWorker = null; }
+  for (const p of trPending.values()) p.reject(new Error("cancelled"));
+  trPending.clear();
+}
+function whisperPiece(pcm, model, language) {
+  return new Promise((resolve, reject) => {
+    const id = ++trSeq;
+    trPending.set(id, { resolve, reject });
+    transcribeWorker().postMessage({ type: "run", id, lib: FableCutTranscribe.LIBRARY, model: FableCutTranscribe.MODELS[model].id, pcm, language }, [pcm.buffer]);
+  });
+}
+function onModelProgress(m) {
+  const b = trState.busy;
+  if (!b || !m.file) return;
+  if (m.status === "done") { const f = b.dl.get(m.file); if (f) f.loaded = f.total; }
+  else if (m.total > 0) b.dl.set(m.file, { loaded: m.loaded, total: m.total });
+  b.beat?.();
+  paintTranscribeBusy();
+}
+/** A file's sound as Whisper hears it: mono, 16 kHz. */
+async function speechPcm(m) {
+  const buf = await getAudioBuffer(m);
+  const R = FableCutTranscribe.RATE;
+  const oc = new OfflineAudioContext(1, Math.max(1, Math.ceil(buf.duration * R)), R);
+  const node = oc.createBufferSource();
+  node.buffer = buf;
+  node.connect(oc.destination);
+  node.start();
+  return { pcm: (await oc.startRendering()).getChannelData(0), duration: buf.duration };
+}
+/** Transcribe one file and save it on the server. Resolves to {doc, saved}. */
+async function transcribeFile(src, { model, language, onProgress, cancelled }) {
+  const T = FableCutTranscribe, R = T.RATE;
+  const m = project.media.find((x) => x.src === src) || { src };
+  const { pcm, duration } = await speechPcm(m);
+  const pieces = T.plan(pcm, R), words = [];
+  for (let k = 0; k < pieces.length; k++) {
+    if (cancelled()) throw new Error("cancelled");
+    const [a, b] = pieces[k];
+    if (!T.quiet(pcm, a, b)) words.push(...T.joinChunks(await whisperPiece(pcm.slice(a, b), model, language), a / R, b / R));
+    onProgress((k + 1) / pieces.length);
+  }
+  const doc = T.validate({ src, model, language: language || "auto", duration, created: new Date().toISOString(), words });
+  let saved = false;
+  try { saved = (await fetch("/api/transcript?src=" + encodeURIComponent(src), { method: "POST", body: JSON.stringify(doc) })).ok; } catch { }
+  transcriptCache.set(src, doc);
+  transcriptGen++;
+  return { doc, saved };
+}
+/** Transcribe files one after another. `beat(fraction)` hears about progress (an agent's job). */
+async function transcribeSrcs(srcs, opts = transcribeSettings(), beat = null) {
+  if (trState.busy) throw new Error("this tab is already transcribing — wait for it, or cancel it");
+  const busy = trState.busy = { srcs, i: 0, frac: 0, cancel: false, dl: new Map(), beat: () => beat?.((busy.i + busy.frac) / srcs.length) };
+  const out = { done: [], failed: [], cancelled: false };
+  renderTranscript(true);
+  try {
+    for (let i = 0; i < srcs.length; i++) {
+      busy.i = i; busy.frac = 0;
+      paintTranscribeBusy();
+      busy.beat();
+      try {
+        const r = await transcribeFile(srcs[i], {
+          ...opts, cancelled: () => busy.cancel,
+          onProgress: (f) => { busy.frac = f; paintTranscribeBusy(); busy.beat(); },
+        });
+        out.done.push({ src: srcs[i], words: r.doc.words.length, language: r.doc.language, saved: r.saved });
+      } catch (e) {
+        if (busy.cancel) { out.cancelled = true; break; }
+        out.failed.push({ src: srcs[i], error: String((e && e.message) || e) });
+      }
+    }
+  } finally {
+    trState.busy = null;
+    renderTranscript(true);
+    // the model holds a few hundred MB: let it go after a quiet minute (the browser keeps the download)
+    clearTimeout(trIdleTimer);
+    trIdleTimer = setTimeout(() => { if (!trState.busy) stopTranscribeWorker(); }, 60000);
+  }
+  return out;
+}
+function cancelTranscribe() {
+  if (!trState.busy) return;
+  trState.busy.cancel = true;
+  stopTranscribeWorker();
+}
+
+/** Each linked group that sounds (its audio stems, else the clip), as on the timeline. */
+function transcriptGroups() {
+  return speechGroups(project.clips).map((g) => g.filter(clipRenders)).filter((g) => {
+    const m = g.length && getMedia(g[0].mediaId);
+    // a picture with its sound turned off, or a file with no audio stream, has nothing to say
+    return m && m.audioChannels !== 0 && !(g.length === 1 && g[0].kind === "video" && +(g[0].props?.volume ?? 1) === 0);
+  });
+}
+/** The timeline's words, every transcribed clip, in time order (transcribe.js layout). */
+function transcriptWords() {
+  const entries = [];
+  for (const g of transcriptGroups()) {
+    const d = transcriptOf(getMedia(g[0].mediaId).src);
+    if (d) entries.push({ clip: g[0], words: d.words });
+  }
+  return FableCutTranscribe.layout(entries);
+}
+/** What Transcribe works on: the selected clips' files, else every file on the timeline without a transcript. */
+function transcribeTargets() {
+  const groups = transcriptGroups();
+  const picked = new Set();
+  for (const id of state.selIds) {
+    const c = getClip(id);
+    if (c && (c.kind === "video" || c.kind === "audio")) { const m = getMedia(c.mediaId); if (m) picked.add(m.src); }
+  }
+  const srcs = [...new Set(groups.map((g) => getMedia(g[0].mediaId).src))];
+  const sel = srcs.filter((s) => picked.has(s));
+  return sel.length ? { srcs: sel, selected: true } : { srcs: srcs.filter((s) => transcriptCache.get(s) === false), selected: false };
+}
+/** What the words' places depend on: the timeline and the transcripts. */
+function transcriptWordsSig() {
+  return silenceSig() + "|" + transcriptGen;
+}
+/** What the tab shows: that, and the clip selection (the Transcribe button follows it). */
+function transcriptSig() {
+  return transcriptWordsSig() + "|" + [...state.selIds].join(",");
+}
+
+function buildTranscriptPage() {
+  const T = FableCutTranscribe, root = els.transcriptPage, set = transcribeSettings();
+  root.innerHTML = `<div class="tr-head">
+      <div class="tr-row">
+        <button type="button" class="btn primary" data-tr-go></button>
+        <select data-tr-model title="Speech model. Base is quick; Small is more accurate and slower. Each downloads once, then stays in this browser">${Object.entries(T.MODELS).map(([k, m]) =>
+          `<option value="${k}" ${k === set.model ? "selected" : ""}>${m.label} · ${m.mb} MB</option>`).join("")}</select>
+        <select data-tr-lang title="The language spoken. Auto-detect works for most; pick it when a clip is short or mixes languages">
+          <option value="auto">Auto-detect</option>${Object.entries(T.LANGUAGES).sort((a, b) => a[1].localeCompare(b[1])).map(([k, n]) =>
+            `<option value="${k}" ${k === set.language ? "selected" : ""}>${n}</option>`).join("")}</select>
+      </div>
+      <div class="tr-busy hidden" data-tr-busy><span data-tr-busy-text></span><span class="tr-bar"><i data-tr-bar></i></span>
+        <button type="button" class="btn tiny" data-tr-cancel title="Stop transcribing (what is done is kept)">Cancel</button></div>
+      <div class="tr-row">
+        <input type="search" data-tr-find placeholder="Find words…" spellcheck="false" title="A word or phrase; case and punctuation don't matter. Enter goes to the next one">
+        <span class="tr-count" data-tr-count></span>
+        <button type="button" class="btn tiny" data-tr-cut-found disabled title="Extract every place it is said, on the targeted tracks (one undo step)">Cut all</button>
+        <button type="button" class="btn tiny" data-tr-copy title="Copy the transcript as text, with timecodes">Copy</button>
+      </div>
+    </div>
+    <div class="tr-body" data-tr-body tabindex="0"></div>
+    <div class="tr-foot hidden" data-tr-foot><span data-tr-sel></span>
+      <button type="button" class="btn tiny" data-tr-cut-sel title="Extract the selected words and the pause after them, on the targeted tracks (Delete)">Cut</button></div>`;
+  const q = (s) => root.querySelector(s);
+  trState.el = { go: q("[data-tr-go]"), busy: q("[data-tr-busy]"), busyText: q("[data-tr-busy-text]"), bar: q("[data-tr-bar]"),
+    find: q("[data-tr-find]"), count: q("[data-tr-count]"), cutFound: q("[data-tr-cut-found]"), body: q("[data-tr-body]"),
+    foot: q("[data-tr-foot]"), selText: q("[data-tr-sel]") };
+  const E = trState.el;
+  E.go.addEventListener("click", transcribeFromTab);
+  q("[data-tr-cancel]").addEventListener("click", cancelTranscribe);
+  q("[data-tr-model]").addEventListener("change", (e) => saveTranscribeSettings({ model: e.target.value }));
+  q("[data-tr-lang]").addEventListener("change", (e) => saveTranscribeSettings({ language: e.target.value === "auto" ? null : e.target.value }));
+  E.find.addEventListener("input", () => { trState.query = E.find.value; findTranscript(); });
+  E.find.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); nextTranscriptHit(e.shiftKey ? -1 : 1); }
+    if (e.key === "Escape" && E.find.value) { e.stopPropagation(); E.find.value = ""; trState.query = ""; findTranscript(); }
+  });
+  E.cutFound.addEventListener("click", () => {
+    const n = trState.hits.length;
+    if (n) cutTranscriptRuns(trState.hits, `${n} × "${trState.query.trim()}"`);
+  });
+  q("[data-tr-copy]").addEventListener("click", copyTranscript);
+  q("[data-tr-cut-sel]").addEventListener("click", cutTranscriptSelection);
+  E.body.addEventListener("mousedown", (e) => {
+    const tc = e.target.closest(".tr-tc");
+    if (tc) { setTime(+tc.dataset.t); return; }
+    const w = e.target.closest(".tw");
+    if (!w || e.button !== 0) return;
+    e.preventDefault();
+    E.body.focus({ preventScroll: true });
+    const k = +w.dataset.k;
+    if (e.shiftKey && trState.anchor != null) trState.sel = { i: Math.min(trState.anchor, k), j: Math.max(trState.anchor, k) };
+    else { trState.anchor = k; trState.sel = { i: k, j: k }; setTime(trState.words[k].s); }
+    trState.drag = true;
+    paintTranscriptMarks();
+  });
+  E.body.addEventListener("mouseover", (e) => {
+    if (!trState.drag) return;
+    const w = e.target.closest(".tw");
+    if (!w || trState.anchor == null) return;
+    const k = +w.dataset.k;
+    trState.sel = { i: Math.min(trState.anchor, k), j: Math.max(trState.anchor, k) };
+    paintTranscriptMarks();
+  });
+  window.addEventListener("mouseup", () => { trState.drag = false; });
+  E.body.addEventListener("keydown", (e) => {
+    if ((e.key === "Delete" || e.key === "Backspace") && trState.sel && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault(); e.stopPropagation();
+      cutTranscriptSelection();
+    } else if (e.key === "Escape" && trState.sel) {
+      e.preventDefault(); e.stopPropagation();
+      trState.sel = null; trState.anchor = null;
+      paintTranscriptMarks();
+    }
+  });
+  trState.built = true;
+}
+function renderTranscript(force = false) {
+  if (!trState.open || !els.transcriptPage) return;
+  if (typeof FableCutTranscribe === "undefined") { els.transcriptPage.innerHTML = `<div class="tr-empty">Transcript module missing — reload the editor.</div>`; return; }
+  if (!trState.built) buildTranscriptPage();
+  const groups = transcriptGroups();
+  for (const g of groups) {
+    const src = getMedia(g[0].mediaId).src;
+    if (!transcriptCache.has(src)) loadTranscript(src).then(() => renderTranscript(true));
+  }
+  paintTranscribeBusy();
+  const sig = transcriptSig();
+  if (!force && sig === trState.sig) return;
+  trState.sig = sig;
+  const T = FableCutTranscribe, E = trState.el;
+  const words = trState.words = transcriptWords();
+  trState.wsig = transcriptWordsSig();
+  const tgt = transcribeTargets();
+  E.go.textContent = tgt.selected ? `Transcribe selected (${tgt.srcs.length})` : tgt.srcs.length ? `Transcribe ${tgt.srcs.length} file${tgt.srcs.length === 1 ? "" : "s"}` : "Transcribe";
+  E.go.disabled = !!trState.busy || !tgt.srcs.length;
+  E.go.title = tgt.srcs.length ? "Turn the speech into words, in this browser (the model downloads once). Select clips to transcribe just those, or again"
+    : groups.length ? "Every file on the timeline has a transcript — select clips to transcribe them again" : "Put clips with speech on the timeline first";
+  const missing = [...new Set(groups.map((g) => getMedia(g[0].mediaId)).filter((m) => transcriptCache.get(m.src) === false).map((m) => m.name || m.src))];
+  let html = "";
+  if (!groups.length) html = `<div class="tr-empty">Put clips with speech on the timeline, then transcribe them here. Speech becomes words in this browser; your audio never leaves it.</div>`;
+  else {
+    if (missing.length) html += `<div class="tr-note">No transcript yet: ${missing.slice(0, 6).map(escapeHtml).join(", ")}${missing.length > 6 ? ` +${missing.length - 6} more` : ""}</div>`;
+    if (!words.length && !missing.length) html += `<div class="tr-empty">${[...transcriptCache.values()].some((v) => v instanceof Promise) ? "Loading…" : "No words in these clips."}</div>`;
+    for (const s of T.segments(words)) {
+      let p = "";
+      for (let k = s.i; k <= s.j; k++) p += (k > s.i ? " " : "") + `<span class="tw" data-k="${k}">${escapeHtml(words[k].w)}</span>`;
+      html += `<p class="tr-seg"><span class="tr-tc" data-t="${s.from}" title="Go to ${fmt(s.from)}">${fmt(s.from)}</span>${p}</p>`;
+    }
+  }
+  E.body.innerHTML = html;
+  trState.now = -1;
+  // the selection stands only while the words are the same ones
+  const key = words.map((x) => x.s + x.w).join("|");
+  if (key !== trState.wordsKey) { trState.sel = null; trState.anchor = null; }
+  trState.wordsKey = key;
+  findTranscript(true);
+}
+function paintTranscribeBusy() {
+  const E = trState.el, b = trState.busy;
+  if (!E) return;
+  E.busy.classList.toggle("hidden", !b);
+  if (!b) return;
+  let loaded = 0, total = 0, downloading = false;
+  for (const f of b.dl.values()) { loaded += f.loaded; total += f.total; if (f.loaded < f.total) downloading = true; }
+  const name = (project.media.find((m) => m.src === b.srcs[b.i])?.name) || b.srcs[b.i].split("/").pop();
+  const frac = downloading && total ? loaded / total : (b.i + b.frac) / b.srcs.length;
+  E.busyText.textContent = downloading
+    ? `Downloading the speech model (once)… ${Math.round(100 * loaded / total)}%`
+    : `Transcribing ${name}${b.srcs.length > 1 ? ` (${b.i + 1} of ${b.srcs.length})` : ""}… ${Math.round(100 * b.frac)}%`;
+  E.bar.style.width = `${Math.round(100 * frac)}%`;
+}
+function findTranscript(keepSel = false) {
+  const E = trState.el;
+  if (!E) return;
+  const q = trState.query.trim();
+  trState.hits = q ? FableCutTranscribe.find(trState.words, q) : [];
+  E.count.textContent = q ? `${trState.hits.length} found` : "";
+  E.cutFound.disabled = !trState.hits.length;
+  E.cutFound.textContent = trState.hits.length ? `Cut ${trState.hits.length}` : "Cut all";
+  if (!keepSel) trState.hitAt = -1;
+  paintTranscriptMarks();
+}
+function nextTranscriptHit(dir) {
+  const h = trState.hits;
+  if (!h.length) return;
+  trState.hitAt = ((trState.hitAt ?? -1) + dir + h.length) % h.length;
+  const run = h[trState.hitAt];
+  trState.sel = { i: run.i, j: run.j };
+  trState.anchor = run.i;
+  setTime(trState.words[run.i].s);
+  paintTranscriptMarks();
+  trState.el.body.querySelector(`.tw[data-k="${run.i}"]`)?.scrollIntoView({ block: "center" });
+}
+function paintTranscriptMarks() {
+  const E = trState.el;
+  if (!E) return;
+  const hit = new Set();
+  for (const r of trState.hits) for (let k = r.i; k <= r.j; k++) hit.add(k);
+  const s = trState.sel;
+  for (const el of E.body.querySelectorAll(".tw")) {
+    const k = +el.dataset.k;
+    el.classList.toggle("hit", hit.has(k));
+    el.classList.toggle("sel", !!s && k >= s.i && k <= s.j);
+  }
+  E.foot.classList.toggle("hidden", !s);
+  if (s) {
+    const w = trState.words;
+    const txt = FableCutTranscribe.text(w, s.i, s.j);
+    E.selText.textContent = `${s.j - s.i + 1} word${s.j === s.i ? "" : "s"} · ${(w[s.j].e - w[s.i].s).toFixed(1)} s · “${txt.length > 60 ? txt.slice(0, 57) + "…" : txt}”`;
+  }
+}
+function cutTranscriptSelection() {
+  const s = trState.sel;
+  if (!s) return;
+  cutTranscriptRuns([s], `${s.j - s.i + 1} word${s.j === s.i ? "" : "s"}`);
+}
+/** Extract the words of each run (and the pause after them) on the targeted tracks: one undo step. */
+function cutTranscriptRuns(runs, label) {
+  // the words were placed on the timeline as it was at the last redraw: it may have moved since
+  if (transcriptWordsSig() !== trState.wsig) { renderTranscript(true); toast("The timeline changed — find or select the words again"); return; }
+  const spans = FableCutTranscribe.cutSpans(trState.words, runs, { fps: projectFps() });
+  if (!spans.length) { toast("Too short to cut"); return; }
+  const snap = undoSnapshot();
+  let cut = 0, secs = 0;
+  for (const sp of spans.slice().sort((a, b) => b.from - a.from)) {
+    if (!EDIT.liftRange(sp.from, sp.to, true)) { cut++; secs += sp.to - sp.from; }
+  }
+  if (!cut) { state.dirtyTimeline = true; toast("Nothing was cut — target the clip's tracks first (or unlock them)"); return; }
+  pushUndo(snap);
+  pruneSelection();
+  state.dirtyTimeline = true;
+  scheduleSave();
+  trState.sel = null; trState.anchor = null;
+  renderTranscript(true);
+  toast(`Cut ${label} · ${secs.toFixed(1)} s shorter`);
+}
+function copyTranscript() {
+  const lines = FableCutTranscribe.segments(trState.words).map((s) => `[${fmt(s.from)}] ${s.text}`);
+  if (!lines.length) { toast("Nothing to copy yet"); return; }
+  navigator.clipboard.writeText(lines.join("\n")).then(() => toast(`Copied ${lines.length} line${lines.length === 1 ? "" : "s"}`), () => toast("Couldn't copy — the browser refused"));
+}
+async function transcribeFromTab() {
+  const { srcs } = transcribeTargets();
+  if (!srcs.length) { toast("Put a clip with speech on the timeline first"); return; }
+  let out;
+  try { out = await transcribeSrcs(srcs); } catch (e) { toast(e.message); return; }
+  const unsaved = out.done.filter((d) => !d.saved).length;
+  const words = out.done.reduce((n, d) => n + d.words, 0);
+  toast(out.cancelled ? `Stopped — ${out.done.length} file${out.done.length === 1 ? "" : "s"} transcribed`
+    : out.failed.length && !out.done.length ? `Couldn't transcribe: ${out.failed[0].error}`
+    : `Transcribed ${out.done.length} file${out.done.length === 1 ? "" : "s"}, ${words} words` +
+      (out.failed.length ? ` · ${out.failed.length} failed (${out.failed[0].error})` : "") +
+      (unsaved ? " · kept for this session only (the server didn't save it)" : ""));
+}
+/** The word under the playhead, lit (and kept in view while playing); a redraw when the timeline changes. */
+let trTickAt = 0;
+function transcriptTick() {
+  const now = performance.now();
+  if (now - trTickAt > 300) { trTickAt = now; renderTranscript(); }
+  const w = trState.words;
+  let lo = 0, hi = w.length - 1, k = -1;
+  while (lo <= hi) { const m = (lo + hi) >> 1; if (w[m].s <= state.time + 1e-4) { k = m; lo = m + 1; } else hi = m - 1; }
+  if (k >= 0 && state.time > w[k].e + 0.25) k = -1;
+  if (k === trState.now || !trState.el) return;
+  trState.el.body.querySelector(".tw.now")?.classList.remove("now");
+  const el = k >= 0 ? trState.el.body.querySelector(`.tw[data-k="${k}"]`) : null;
+  el?.classList.add("now");
+  if (el && state.playing) el.scrollIntoView({ block: "nearest" });
+  trState.now = k;
+}
+/* fablecut_transcribe: transcribe the job's files in this tab, save them, report. */
+async function runTranscribeJob(ticket, fail) {
+  const spec = ticket.transcribe || {};
+  if (typeof FableCutTranscribe === "undefined") return fail("the transcript module is missing — reload the editor");
+  if (trState.busy) return fail("this editor tab is already transcribing — wait for it, or cancel it there");
+  const srcs = [], skipped = [];
+  for (const src of spec.srcs || []) {
+    if (!spec.again && await loadTranscript(src, true)) { skipped.push(src); continue; }
+    srcs.push(src);
+  }
+  const report = (body, force) => fetch("/api/export/job/report?id=" + encodeURIComponent(ticket.id), { method: "POST", body: JSON.stringify(body) })
+    .then((r) => r.json()).then((r) => { if (r?.cancel) cancelTranscribe(); }).catch(() => { });
+  if (!srcs.length) return report({ status: "done", result: { done: [], skipped, failed: [] } });
+  let last = 0;
+  const out = await transcribeSrcs(srcs, { model: FableCutTranscribe.model(spec.model), language: spec.language || null }, (f) => {
+    const t = performance.now();
+    if (t - last > 1000) { last = t; report({ progress: f }); }
+  }).catch((e) => ({ done: [], failed: srcs.map((src) => ({ src, error: e.message })) }));
+  for (const d of out.done) if (!d.saved) out.failed.push({ src: d.src, error: "transcribed, but the server didn't save it" });
+  out.done = out.done.filter((d) => d.saved);
+  if (out.cancelled) return report({ status: "failed", error: "cancelled" });
+  if (!out.done.length && out.failed.length) return fail(out.failed.map((f) => `${f.src}: ${f.error}`).join(" · "));
+  return report({ status: "done", result: { done: out.done, skipped, failed: out.failed } });
+}
 function clearSilences() {
   silenceGen++;   // a Find still listening doesn't bring the marks back
   state.silence = null;
@@ -8850,17 +9303,20 @@ function parseDbInput(s) {
   return Number.isFinite(v) ? clampFaderDb(v) : null;
 }
 function setSideTab(tab) {
-  const mixer = tab === "mixer", color = tab === "color";
+  const mixer = tab === "mixer", color = tab === "color", transcript = tab === "transcript";
   mixerState.open = mixer;
   colorState.open = color;
+  trState.open = transcript;
   for (const b of els.sideTabs.querySelectorAll("[data-side]"))
     b.classList.toggle("on", b.dataset.side === tab);
-  els.inspector.classList.toggle("hidden", mixer || color);
+  els.inspector.classList.toggle("hidden", mixer || color || transcript);
   els.mixer.classList.toggle("hidden", !mixer);
   els.colorPage.classList.toggle("hidden", !color);
+  els.transcriptPage.classList.toggle("hidden", !transcript);
   try { localStorage.setItem(SIDE_TAB_KEY, tab); } catch { }
   if (mixer) renderMixer();
   else if (color) renderColorPage(true);
+  else if (transcript) renderTranscript(true);
   else renderInspector();
 }
 /** Write a track's fader / pan, push it into the live graph, persist. */
@@ -14938,6 +15394,7 @@ function loop(ts) {
     }
   }
   if (state.dirtyTimeline) rebuildClips();
+  if (trState.open) transcriptTick();
   const phX = Math.round(state.time * state.pps);
   if (phX !== playheadPx) {
     playheadPx = phX;
@@ -16769,6 +17226,7 @@ async function runExportJob(ticket) {
   if (ticket.revision != null && (project.revision || 0) < ticket.revision) await syncFromServer();
   if (ticket.kind === "scopes") return runScopesJob(ticket, fail);
   if (ticket.kind === "track") return runTrackJob(ticket, fail);
+  if (ticket.kind === "transcribe") return runTranscribeJob(ticket, fail);
   if (!state.ffmpeg) {
     const j = await fetch("/api/export/ffmpeg").then((r) => r.json()).catch(() => ({}));
     state.ffmpeg = !!j.available;
@@ -19473,7 +19931,7 @@ for (const b of els.sideTabs.querySelectorAll("[data-side]"))
   b.addEventListener("click", () => setSideTab(b.dataset.side));
 try {
   const side = localStorage.getItem(SIDE_TAB_KEY);
-  if (side === "mixer" || side === "color") setSideTab(side);
+  if (side === "mixer" || side === "color" || side === "transcript") setSideTab(side);
   if (localStorage.getItem(WS_KEY) === "color") setWorkspace("color");
 } catch { }
 connectServer().then(() => { loadLibraryFonts(); runExportJobFromUrl(); });

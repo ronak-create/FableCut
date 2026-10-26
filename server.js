@@ -46,6 +46,7 @@ const Templates = require("./templates");
 const { probeFile } = require("./media-probe");
 const MediaLib = require("./media-lib");
 const { createProxies } = require("./proxy");
+const { createTranscripts } = require("./transcripts");
 const Delivery = require("./delivery");
 const { createProjects } = require("./projects");
 const { createHistory } = require("./history");
@@ -124,6 +125,8 @@ function broadcast(event = "change", data = event) {
   for (const res of sseClients) res.write(payload);
 }
 const proxies = createProxies({ dir: PROXIES_DIR, resolveSrc, probe: probeFile, broadcast: (ev, data) => broadcast(ev, data) });
+/* Word transcripts, one per version of a file (fablecut_transcribe, the Transcript tab). */
+const transcripts = createTranscripts({ dir: path.join(ANALYSIS_DIR, "transcripts"), resolveSrc });
 let debounce = null;
 let profilesDebounce = null;
 function onFsChange() {
@@ -544,6 +547,8 @@ function stopExportSweep() {
    headless browser the server starts (export-jobs.js). */
 const exportJobs = createExportJobs({
   url: (id) => `http://localhost:${PORT}/?exportJob=${encodeURIComponent(id)}`,
+  // a transcription's headless browser keeps its profile, so the speech model is downloaded once
+  keepProfile: (kind) => kind === "transcribe" ? path.join(ANALYSIS_DIR, "browser-profile") : null,
   broadcast,
   editors: () => sseClients.size,
 });
@@ -786,6 +791,61 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  /* API: word transcripts (transcripts.js) — one per version of a file, times in file seconds.
+       GET  /api/transcript?src=          → {transcript} (null when there is none; 404 when the file is missing)
+       POST /api/transcript?src=  {doc}   → {src, words} — saved by the tab that transcribed it
+       POST /api/transcript/status {srcs} → {status:{src: {words, language, model, duration, created} | false | null}}
+       POST /api/transcript/delete {src}  → {deleted}
+     Saves and deletes also arrive as SSE event "transcript" ({src}). */
+  if (p === "/api/transcript" && req.method === "GET") {
+    const src = url.searchParams.get("src") || "";
+    const d = transcripts.get(src);
+    if (d === null) { sendJSON(res, 404, { error: "no such file: " + src }); return; }
+    if (d === false) { sendJSON(res, 200, { transcript: null }); return; }   // none yet: not an error
+    sendJSON(res, 200, { transcript: d });
+    return;
+  }
+  if ((p === "/api/transcript" || p === "/api/transcript/status" || p === "/api/transcript/delete") && req.method === "POST") {
+    try {
+      const body = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+      if (p === "/api/transcript") {
+        const src = url.searchParams.get("src") || body.src || "";
+        const d = transcripts.put(src, body);
+        broadcast("transcript", JSON.stringify({ src }));
+        sendJSON(res, 200, { src, words: d.words.length });
+      } else if (p === "/api/transcript/delete") {
+        const deleted = transcripts.remove(String(body.src || ""));
+        if (deleted) broadcast("transcript", JSON.stringify({ src: String(body.src) }));
+        sendJSON(res, 200, { deleted });
+      } else {
+        const status = {};
+        for (const src of (Array.isArray(body.srcs) ? body.srcs.slice(0, 2000).map(String) : [])) status[src] = transcripts.info(src);
+        sendJSON(res, 200, { status });
+      }
+    } catch (e) { sendJSON(res, e.code === 404 ? 404 : 400, { error: String(e.message || e) }); }
+    return;
+  }
+  /* API: transcribe files (fablecut_transcribe) — a "transcribe" job on the
+     export-job queue; the tab that runs it saves each transcript. */
+  if (p === "/api/transcribe/request" && req.method === "POST") {
+    try {
+      const opts = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+      const t = opts.transcribe;
+      if (!t || typeof t !== "object" || !Array.isArray(t.srcs) || !t.srcs.length || t.srcs.length > 200 || !t.srcs.every((x) => typeof x === "string")) {
+        sendJSON(res, 400, { error: "transcribe must be {srcs: [\"/media/…\", …] (1–200), model?, language?, again?}" }); return;
+      }
+      const missing = t.srcs.find((x) => !resolveSrc(x));
+      if (missing) { sendJSON(res, 404, { error: "no such file: " + missing }); return; }
+      const TR = require("./transcribe.js");
+      let spec;
+      try { spec = { srcs: [...new Set(t.srcs)], model: TR.model(t.model), language: TR.language(t.language), again: t.again === true }; }
+      catch (e) { sendJSON(res, 400, { error: e.message }); return; }
+      sendJSON(res, 200, exportJobs.request({ kind: "transcribe", where: opts.where, transcribe: spec }));
+    } catch (e) {
+      sendJSON(res, e.code === 409 || e.code === 400 ? e.code : 500, { error: String(e.message || e) });
+    }
+    return;
+  }
   /* API: proxies (see proxy.js).
        POST /api/proxy {srcs:[…], height?:540|720|1080} → {status:{src: status}} — queue them
        POST /api/proxy/status {srcs:[…]} → {status:{src: status | null}}
