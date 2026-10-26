@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.17.0] - 2026-10-26
+
 ### Added
 - **Silence removal.** The inspector's **Silence** section on an audio or
   video clip (or right-click → **Find silences**) listens to the take and
@@ -39,7 +41,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `videotoolbox-hevc`. Enables hardware-accelerated H.264 and HEVC encode on
   Apple Silicon. Also registers `h264_videotoolbox` and `hevc_videotoolbox` in
   the delivery presets encoder list. Needs macOS on Apple Silicon and an ffmpeg
-  built with videotoolbox.
+  built with videotoolbox. (thanks @bradvatne, #128)
+
+### Changed
+- **Each level of the editor's layout has its own tone**: the app background,
+  panel bodies, the header bars and toolbars on top of each panel, and the
+  controls, darkest at the back, so the structure reads at a glance. The
+  timeline's lanes sit in a darker well under their track headers and ruler,
+  and Inspector sections are soft cards.
 
 ## [1.16.0] - 2026-10-21
 
@@ -939,7 +948,8 @@ the report in [#1](https://github.com/ronak-create/FableCut/issues/1) — thanks
 - Three control surfaces for AI agents: **MCP server**, direct `project.json`
   editing, and a **REST API** with live-reload over server-sent events.
 
-[Unreleased]: https://github.com/ronak-create/FableCut/compare/v1.16.0...HEAD
+[Unreleased]: https://github.com/ronak-create/FableCut/compare/v1.17.0...HEAD
+[1.17.0]: https://github.com/ronak-create/FableCut/compare/v1.16.0...v1.17.0
 [1.16.0]: https://github.com/ronak-create/FableCut/compare/v1.15.0...v1.16.0
 [1.15.0]: https://github.com/ronak-create/FableCut/compare/v1.14.0...v1.15.0
 [1.14.0]: https://github.com/ronak-create/FableCut/compare/v1.13.0...v1.14.0
