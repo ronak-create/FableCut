@@ -741,7 +741,7 @@ They go on the video lane captions are already on; otherwise on the top video
 lane when nothing is there while they run, else on a new lane above it. Making
 captions again **replaces** the ones there. Make them **after the cutting is done**:
 a cut through a caption shortens it but doesn't re-time its words, so make them
-again after you change the edit.
+again after you change the edit. The editor says so for a moment whenever an edit shortens a caption.
 
 In the editor, the **Captions** row of the **Transcript** tab: pick a style, then
 **Add captions** (one undo step). **SRT** and **VTT** download the timeline's

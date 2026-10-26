@@ -8990,6 +8990,7 @@ function buildTranscriptPage() {
         <button type="button" class="btn tiny" data-tr-cap-import title="Place the captions of an SRT or WebVTT file">Import…</button>
         <input type="file" accept=".srt,.vtt,text/vtt,application/x-subrip" data-tr-cap-input hidden>
       </div>
+      <div class="tr-note">Caption last: a cut through a caption doesn't re-time its words, so add captions again after changing the edit.</div>
     </div>
     <div class="tr-body" data-tr-body tabindex="0"></div>
     <div class="tr-foot hidden" data-tr-foot><span data-tr-sel></span>
@@ -9266,6 +9267,24 @@ function placeCaptions(list, styleKey, from) {
   scheduleSave();
   renderInspector();
   toast(`${list.length} caption${list.length === 1 ? "" : "s"} on ${track}${from ? " " + from : ""}${old.length ? ` · replaced ${old.length}` : ""}`);
+}
+/** A cut, split or trim that shortens a caption leaves its words timed to the old cut: say so, for a moment. */
+const capWatch = { durs: null, at: 0, said: 0 };
+function watchCaptions(now) {
+  if (now - capWatch.at < 500 || typeof FableCutCaptions === "undefined") return;
+  capWatch.at = now;
+  const durs = new Map();
+  for (const c of project.clips) if (FableCutCaptions.isCaption(c)) durs.set(c.id, c.duration);
+  const prev = capWatch.durs;
+  capWatch.durs = durs;
+  if (!prev || now - capWatch.said < 5000) return;
+  for (const [id, d] of durs) {
+    if (prev.has(id) && d < prev.get(id) - 1e-4) {
+      capWatch.said = now;
+      toast("Captions don't re-time when cut — add them again in the Transcript tab once the edit is done");
+      return;
+    }
+  }
 }
 function downloadCaptions(kind) {
   const C = FableCutCaptions, list = C.fromClips(project.clips);
@@ -15517,6 +15536,7 @@ function loop(ts) {
   }
   if (state.dirtyTimeline) rebuildClips();
   if (trState.open) transcriptTick();
+  watchCaptions(ts);
   const phX = Math.round(state.time * state.pps);
   if (phX !== playheadPx) {
     playheadPx = phX;
