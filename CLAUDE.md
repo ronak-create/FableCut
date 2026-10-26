@@ -49,6 +49,8 @@ Every Claude Code session then has these tools:
 - `fablecut_transcribe` — turn speech into words with times (Whisper, in the browser),
   read them on the timeline, find a phrase and cut it out. See "Transcripts and
   text-based editing" below.
+- `fablecut_captions` — caption clips from the transcript, timed word by word (subtitle,
+  karaoke, highlight, word pop); export or import SRT / WebVTT. See "Captions" below.
 - `fablecut_export` — render the timeline to a file in `exports/` with the editor's own
   Fast export (open tab, or headless Chrome / Edge). See "Export" below.
 - `fablecut_scopes` — measure the graded picture at a moment (levels, clipping, colour
@@ -440,8 +442,11 @@ These are quick looks. For real grading use `props.grade` (see "Color" below).
 | `glowColor` | "" | glow color ("" = use the text color) |
 | `strokeWidth` `strokeColor` | 0, "#000" | text outline |
 | `bgColor` `bgOpacity` | "#000", 0 | rounded pill behind each line |
-| `textAnim` | "none" | typewriter · word-pop · word-slide · karaoke · **letter-pop** (per-character entrance; Arabic/Indic auto-fallback to per-word clusters so joined letters shape correctly) · **wave** (looping per-character ride; same shaping fallback) · **bounce** (looping per-word hop) · **shake** (looping jitter) · **clip-reveal** (wipe-mask sweep, per line) · **zoom-in** (scale + opacity settle) · **font-cut** (rhythmically swaps typeface, then settles — see `fontCutSet`) · **rise-mask** (line rises from behind its baseline, lower-third reveal) |
+| `textAnim` | "none" | typewriter · word-pop · word-slide · karaoke · **highlight** (every word shown; the one being said in `highlightColor`) · **letter-pop** (per-character entrance; Arabic/Indic auto-fallback to per-word clusters so joined letters shape correctly) · **wave** (looping per-character ride; same shaping fallback) · **bounce** (looping per-word hop) · **shake** (looping jitter) · **clip-reveal** (wipe-mask sweep, per line) · **zoom-in** (scale + opacity settle) · **font-cut** (rhythmically swaps typeface, then settles — see `fontCutSet`) · **rise-mask** (line rises from behind its baseline, lower-third reveal) |
 | `wordRate` | 0.15 | seconds per word (typewriter: /4, letter-pop: /3 per character); also staggers `clip-reveal`/`zoom-in`/`rise-mask` per line |
+| `wordTimes` | — | `[[start, end], …]`, one pair per word (seconds from the clip's start): word-pop, word-slide, karaoke and highlight follow these instead of `wordRate` — a caption timed to speech. If the text is edited to another number of words they are spread over the clip. See "Captions" |
+| `highlightColor` | "#ffd166" | the colour of the word being said in `highlight` |
+| `caption` · `captionStyle` | — | set on caption clips (see "Captions"): how they are found, replaced and exported |
 | `textPath` | — | set the title along a path: one shape item (`path`, `line`, `ellipse`, `rect`, `polygon`, `star`) whose outline is the baseline; more lines follow on parallel curves below it. See "Motion paths, motion blur and text on a path" |
 | `pathOffset` · `pathAlign` | 0 · "start" | where along the path the text sits (% of its length, keyframable, wraps on closed paths) · which end of the text sits there: start · center · end |
 | `fontCutSet` | (curated) | array of font family names cycled by `font-cut`, e.g. `["Anton","Bebas Neue","Archivo Black","Oswald"]`; each is auto-loaded |
@@ -707,6 +712,61 @@ Whisper writes clean text: it often leaves out fillers ("um", "uh") and false
 starts, so find those by ear (`fablecut_silence` for the pauses), not by text. Word
 times are good to about a tenth of a second; listen to a cut that matters, or
 check it with `fablecut_frame`.
+
+### Captions
+
+Captions are made from a transcript (see "Transcripts and text-based editing"):
+the timeline's words are grouped into captions, and each caption is an ordinary
+**text clip** with `wordTimes` (each word's start and end), so its animation follows
+the speech word by word, and `caption: true`, so captions can be found, replaced
+and exported as a group. Because they are text clips they render the same way in
+preview and export (burned into the picture), and the Inspector restyles them like
+any title.
+
+| style | look |
+|---|---|
+| `subtitle` (default) | plain text on a dark bar, low on the frame, up to two lines |
+| `karaoke` | bold outlined text; each word lights up as it is said |
+| `highlight` | big uppercase outlined words, the one being said in a colour (`highlightColor`) — the short-video look; up to five words |
+| `pop` | one to three big words at a time, each popping in as it is said |
+
+A new caption starts at a pause of 0.6 s or more, after a sentence, after a comma
+once it has three words, or when it would run too long (lines, words or seconds).
+Lines are as long as fit the canvas at the style's size: sizes follow the
+canvas's shorter side, so a 9:16 reel gets narrower captions than a 16:9 video.
+Each caption stays about a quarter of a second after its last word, never into
+the next one, and starts and ends on whole frames.
+
+They go on the video lane captions are already on; otherwise on the top video
+lane when nothing is there while they run, else on a new lane above it. Making
+captions again **replaces** the ones there. Make them **after the cutting is done**:
+a cut through a caption shortens it but doesn't re-time its words, so make them
+again after you change the edit.
+
+In the editor, the **Captions** row of the **Transcript** tab: pick a style, then
+**Add captions** (one undo step). **SRT** and **VTT** download the timeline's
+captions as a subtitle file; **Import…** places the captions of an SRT or WebVTT
+file instead, re-broken to the style's line length, with their words spread over
+each caption. Select a caption to restyle it in the Inspector: the **Highlight**
+colour sits under **Animation**, and a note says its words follow the speech.
+
+**Agents** use `fablecut_captions`:
+
+- `{}` or `{style:"highlight"}` makes captions from every clip with sound
+  (transcribing what has no transcript yet, as `fablecut_transcribe` does), and
+  answers with where they went and the first few. `clipIds`, `from` / `to` limit
+  it; `lines`, `words` and `size` (a scale on the style's size) adjust it;
+  `track` picks the lane; `replace:false` keeps the captions already there.
+- `{export:"srt"}` or `{export:"vtt"}` writes the timeline's captions to
+  `exports/<project name>.srt` and returns the path.
+- `{import:"<path to .srt or .vtt>"}` places a file's captions (the file's text
+  works too).
+- `{remove:true}` deletes every caption clip. Locked captions are left alone and
+  refuse the call unless `force:true`.
+- Check one with `fablecut_frame {time}` while a word is being said. Restyle them
+  all with `updateClip` (e.g. `props:{highlightColor:"#22d3ee", y:500}`) on each
+  caption id from the compact view, which lists a caption as
+  `[5 words timed to speech]` instead of its times.
 
 ### Color
 
@@ -2179,6 +2239,11 @@ mid-gesture), and `fablecut_silence {clipIds:[<the take>], cut:true}`. Add
 to read what was said (name the speech clips, or the music bed is transcribed too), decide what stays, then
 `fablecut_transcribe {clipIds:[<the interview>], find:["the sentence to drop", "and this one"], cut:true}`.
 Then `fablecut_silence {clipIds:[…], cut:true}` for the pauses that are left.
+
+**Caption a talking-head reel**: finish the cut first, then
+`fablecut_captions {style:"highlight"}`, `fablecut_frame {time:<mid-sentence>}` to
+check the size and placement, and `fablecut_captions {export:"srt"}` for the
+platform's own subtitle upload.
 
 **Center a mono stem**: linked or standalone audio clip with `props.pan: 0` (inspector **Pan** slider, −1…+1). Stereo video stems default to L `−1` / R `+1`; set A1 to `0` to center that channel in the mix.
 

@@ -59,6 +59,11 @@ const PAGES = [
     parts: [["project.json schema", "Transcripts"]],
   },
   {
+    slug: "captions", nav: "Captions", title: "Captions", group: "Picture and sound",
+    lede: "Captions timed word by word from the transcript, in four styles, burned into the picture; SRT and WebVTT out and in.",
+    parts: [["project.json schema", "Captions"]],
+  },
+  {
     slug: "color", nav: "Color", title: "Color", group: "Picture and sound",
     lede: "Grade a clip with wheels, exposure, white balance and tone, and check it with scopes: in the Color workspace, or from an agent with setGrade and fablecut_scopes.",
     parts: [["project.json schema", "Color"]],

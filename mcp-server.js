@@ -314,6 +314,31 @@ const TOOLS = [
     },
   },
   {
+    name: "fablecut_captions",
+    description: "Captions from what is said: makes caption clips on the timeline from the clips' transcripts (transcribing first when there is none, like fablecut_transcribe), each one a text clip with `wordTimes` so its words follow the speech. Captions are cut at pauses and sentences, one or two lines as wide as the canvas allows. Styles: subtitle (plain, on a dark bar), karaoke (words light up as they are said), highlight (bold, the word being said in a colour — the reel look), pop (one to three big words at a time, each popping in). They go on the lane captions are already on, else the top video lane, else a new lane above it, and replace the captions there (replace:false keeps them). export:\"srt\"|\"vtt\" writes the timeline's captions to a subtitle file in exports/; import: a path to an SRT / WebVTT file (or its text) places its captions instead of the transcript's. remove:true deletes the captions. Captions are text clips: restyle them with updateClip, and make them after the cutting is done (a cut through a caption doesn't re-time its words — run this again). The same as the Transcript tab's Captions row.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        style: { type: "string", enum: ["subtitle", "karaoke", "highlight", "pop"], description: "The look (default subtitle)" },
+        clipIds: { type: "array", items: { type: "string" }, description: "Caption only these clips' speech (default: every clip with sound)" },
+        from: { type: "number", description: "Only speech from this time on (timeline seconds)" },
+        to: { type: "number", description: "Only speech before this time" },
+        lines: { type: "number", description: "Lines per caption, 1–3 (default: the style's)" },
+        words: { type: "number", description: "At most this many words per caption (pop and highlight have their own default)" },
+        size: { type: "number", description: "Scale the style's text size, e.g. 1.2 (default 1)" },
+        track: { type: "string", description: "The video lane to put them on (default: chosen as described)" },
+        replace: { type: "boolean", description: "Remove the captions already on the timeline first (default true)" },
+        export: { type: "string", enum: ["srt", "vtt"], description: "Write the timeline's captions to exports/ as SubRip or WebVTT, and change nothing" },
+        import: { type: "string", description: "An SRT or WebVTT file (absolute path, or a /media/… src) or its text: place its captions" },
+        remove: { type: "boolean", description: "Delete every caption clip" },
+        force: { type: "boolean", description: "Also replace or remove locked captions (only when the user asked)" },
+        model: { type: "string", enum: ["base", "small"], description: "Transcribing first: the Whisper model (see fablecut_transcribe)" },
+        language: { type: "string", description: "Transcribing first: the spoken language (default: detected)" },
+        where: { type: "string", enum: ["auto", "tab", "headless"], description: "Transcribing first: where (see fablecut_transcribe)" },
+      },
+    },
+  },
+  {
     name: "fablecut_denoise",
     description: "Reduce background noise (hiss, hum, room tone) on audio clips: ffmpeg's FFT denoiser renders a cleaned FLAC of each clip's whole source file into media/, and the clip — with its linked stems — switches to it (the picture keeps its own file, so links and timing stay intact). The same as the inspector's Noise control. amount 'off' switches back to the original. Re-running reuses a file already rendered. Needs ffmpeg + ffprobe on PATH. Refuses locked clips unless force:true.",
     inputSchema: {
@@ -625,17 +650,14 @@ function timelineSig(doc) {
   return JSON.stringify([doc.fps, doc.lockedTracks || [], doc.untargetedTracks || [], doc.disabledTracks || [],
     (doc.clips || []).map((c) => [c.id, c.track, c.start, c.in, c.duration, c.mediaId, c.props?.speed ?? 1, c.keyframes?.speed ?? null, !!c.locked, !!c.disabled])]);
 }
-/* fablecut_transcribe: transcripts from the editor (a job), read on the timeline, found, cut. */
-async function transcribeTool(args) {
+/* The words said on the timeline (or in whole files, mediaIds): transcribes what has no
+   transcript yet as a job in an open tab, else headless, then lays the words out. Shared by
+   fablecut_transcribe and fablecut_captions. */
+async function speechWords(args, fileMode) {
   const T = require("./transcribe.js");
   const model = T.model(args.model), language = T.language(args.language);
-  const finds = (args.find == null ? [] : Array.isArray(args.find) ? args.find : [args.find]).map(String).filter((q) => T.norm(q));
-  if (args.find != null && !finds.length) throw new Error("find needs a word or phrase with letters or digits in it");
-  const fileMode = Array.isArray(args.mediaIds) && args.mediaIds.length;
-  if (args.cut === true && !finds.length) throw new Error("cut:true needs find — the words or phrases to cut");
-  if (args.cut === true && fileMode) throw new Error("cut works on the timeline — pass clipIds (or nothing), not mediaIds");
   const doc = readProject();
-  const sig = timelineSig(doc);
+  const readRev = doc.revision || 0;
   const mediaById = new Map((doc.media || []).map((m) => [m.id, m]));
   const disabled = new Set(Array.isArray(doc.disabledTracks) ? doc.disabledTracks : []);
   let entries = [], files = [], rampedN = 0;
@@ -695,8 +717,6 @@ async function transcribeTool(args) {
     const g = await apiJSON("GET", "/api/transcript?src=" + encodeURIComponent(src));
     if (g.status === 200 && g.body?.transcript) docs.set(src, T.validate(g.body.transcript));
   }
-  const fmtT = (x) => fmtClock(Math.max(0, x));
-  const lo = Number.isFinite(args.from) ? args.from : -Infinity, hi = Number.isFinite(args.to) ? args.to : Infinity;
   const langs = [...new Set([...docs.values()].map((d) => d.language === "auto" ? "detected" : d.language).filter(Boolean))];
   const without = srcs.filter((s) => !docs.has(s));
   let words, scope;
@@ -709,6 +729,20 @@ async function transcribeTool(args) {
     words = T.layout(entries.filter((e) => docs.has(e.media.src)).map((e) => ({ clip: e.clip, words: docs.get(e.media.src).words })));
     scope = `${entries.length} clip${entries.length === 1 ? "" : "s"} on the timeline (timeline seconds)`;
   }
+  return { doc, readRev, sig: timelineSig(doc), words, scope, note, langs, without, rampedN };
+}
+/* fablecut_transcribe: transcripts from the editor (a job), read on the timeline, found, cut. */
+async function transcribeTool(args) {
+  const T = require("./transcribe.js");
+  const model = T.model(args.model), language = T.language(args.language);
+  const finds = (args.find == null ? [] : Array.isArray(args.find) ? args.find : [args.find]).map(String).filter((q) => T.norm(q));
+  if (args.find != null && !finds.length) throw new Error("find needs a word or phrase with letters or digits in it");
+  const fileMode = Array.isArray(args.mediaIds) && args.mediaIds.length;
+  if (args.cut === true && !finds.length) throw new Error("cut:true needs find — the words or phrases to cut");
+  if (args.cut === true && fileMode) throw new Error("cut works on the timeline — pass clipIds (or nothing), not mediaIds");
+  const { doc, sig, words, scope, note, langs, without, rampedN } = await speechWords(args, fileMode);
+  const fmtT = (x) => fmtClock(Math.max(0, x));
+  const lo = Number.isFinite(args.from) ? args.from : -Infinity, hi = Number.isFinite(args.to) ? args.to : Infinity;
   const inWin = (w) => w.e >= lo && w.s <= hi;
   const head = note + `${words.filter(inWin).length} words, ${scope}` + (langs.length ? `, language ${langs.join("/")}` : "") +
     (without.length ? `; no transcript for ${without.join(", ")}` : "") + (rampedN ? `; ${rampedN} clip(s) with a speed ramp left out` : "");
@@ -756,6 +790,81 @@ async function transcribeTool(args) {
   return [head + ".", ...report,
     `Cut ${spans.length} span${spans.length === 1 ? "" : "s"}, ${T.total(spans).toFixed(1)} s — timeline ${fmtDur(before)} → ${fmtDur(end(proj))} (revision ${proj.revision}). UI hot-reloaded.` +
     (verWarn || " The project as it was is kept as a version (fablecut_versions lists it; restore undoes the cut).")].join("\n");
+}
+/* fablecut_captions: caption clips from the transcripts (captions.js), subtitle files out and in. */
+async function captionsTool(args) {
+  const C = require("./captions.js");
+  const st = C.style(args.style);
+  const ownLocks = (proj, c) => c.locked === true || (Array.isArray(proj.lockedTracks) && proj.lockedTracks.includes(c.track));
+  if (args.export != null) {
+    if (args.export !== "srt" && args.export !== "vtt") throw new Error("export must be srt or vtt");
+    const proj = readProject(), list = C.fromClips(proj.clips);
+    if (!list.length) throw new Error("there are no captions on the timeline to export — make them first (fablecut_captions {})");
+    fs.mkdirSync(EXPORTS_DIR, { recursive: true });
+    const base = String(proj.name || "captions").replace(/[^\w\- ]+/g, "_").trim().slice(0, 80) || "captions";
+    let file = path.join(EXPORTS_DIR, `${base}.${args.export}`);
+    for (let n = 2; fs.existsSync(file); n++) file = path.join(EXPORTS_DIR, `${base} ${n}.${args.export}`);
+    fs.writeFileSync(file, args.export === "srt" ? C.toSRT(list) : C.toVTT(list));
+    return `Wrote ${list.length} caption${list.length === 1 ? "" : "s"} to ${file} (${args.export === "srt" ? "SubRip" : "WebVTT"}, ${fmtClock(list[0].start)} → ${fmtClock(list[list.length - 1].end)}).`;
+  }
+  if (args.remove === true) {
+    const proj = readProject(), caps = proj.clips.filter(C.isCaption);
+    if (!caps.length) return "There are no captions on the timeline.";
+    const locked = caps.filter((c) => ownLocks(proj, c));
+    if (locked.length && args.force !== true) throw new Error(`${locked.length} caption(s) are locked — nothing removed (pass force:true only if the user asked)`);
+    ProjectOps.applyPatch(proj, caps.map((c) => ({ op: "removeClip", id: c.id, ...(args.force === true ? { force: true } : {}) })), { savedItems });
+    proj.revision = (proj.revision || 0) + 1;
+    writeProject(proj);
+    lastReadRevision = proj.revision;
+    return `Removed ${caps.length} caption${caps.length === 1 ? "" : "s"} (revision ${proj.revision}). UI hot-reloaded.`;
+  }
+  let list, note = "", sig;
+  const first = readProject();
+  const m = C.metrics(st, first.width || 1920, first.height || 1080, { lines: args.lines, words: args.words, scale: args.size });
+  if (args.import != null) {
+    let text = String(args.import);
+    const asFile = text.length < 1024 && !text.includes("-->");
+    if (asFile) {
+      const file = text.startsWith("/media/") ? path.join(MEDIA_DIR, decodeURIComponent(text.slice(7))) : path.resolve(text);
+      if (!fs.existsSync(file)) throw new Error("no such subtitle file: " + text);
+      text = fs.readFileSync(file, "utf8");
+    }
+    list = C.fit(C.parse(text), m.chars, m.lines);
+    sig = timelineSig(first);
+    note = `Read ${list.length} caption${list.length === 1 ? "" : "s"} from the ${/^WEBVTT/m.test(text) ? "WebVTT" : "SubRip"} file.\n`;
+  } else {
+    const r = await speechWords(args, false);
+    const lo = Number.isFinite(args.from) ? args.from : -Infinity, hi = Number.isFinite(args.to) ? args.to : Infinity;
+    const words = r.words.filter((w) => w.s >= lo && w.e <= hi);
+    if (!words.length) throw new Error("no words to caption" + (r.without.length ? ` — no transcript for ${r.without.join(", ")}` : " in that stretch"));
+    list = C.cues(words, { chars: m.chars, lines: m.lines, words: m.words, maxDur: m.maxDur, fps: r.doc.fps });
+    sig = r.sig;
+    note = r.note;
+  }
+  const proj = readProject(), readRev = proj.revision || 0;
+  if (timelineSig(proj) !== sig)
+    throw new Error("the timeline changed while transcribing (a clip was moved, trimmed or cut) — nothing added; run fablecut_captions again");
+  const old = args.replace === false ? [] : proj.clips.filter(C.isCaption);
+  const lockedOld = old.filter((c) => ownLocks(proj, c));
+  if (lockedOld.length && args.force !== true) throw new Error(`${lockedOld.length} existing caption(s) are locked — nothing changed (pass replace:false to keep them, or force:true if the user asked)`);
+  const from = list[0].start, to = list[list.length - 1].end;
+  let lane = args.track ? { track: String(args.track), add: false } : C.trackFor(old.length ? proj : { ...proj, clips: proj.clips.filter((c) => !C.isCaption(c)) }, from, to);
+  if (!/^V\d+$/.test(lane.track)) throw new Error("track must be a video lane such as V3");
+  if (args.track && !(proj.tracks || C.DEFAULT_TRACKS).some((t) => t.id === lane.track)) lane.add = true;
+  if (Array.isArray(proj.lockedTracks) && proj.lockedTracks.includes(lane.track) && args.force !== true) throw new Error(`${lane.track} is locked — pick another track, or unlock it`);
+  if (lane.add) proj.tracks = [{ id: lane.track, kind: "video" }, ...(Array.isArray(proj.tracks) && proj.tracks.length ? proj.tracks : C.DEFAULT_TRACKS)];
+  const ops = [
+    ...old.map((c) => ({ op: "removeClip", id: c.id, ...(args.force === true ? { force: true } : {}) })),
+    ...list.map((cue) => ({ op: "addClip", clip: C.clip(cue, { style: st, width: proj.width, height: proj.height, track: lane.track, scale: args.size }) })),
+  ];
+  ProjectOps.applyPatch(proj, ops, { savedItems });
+  proj.revision = readRev + 1;
+  writeProject(proj);
+  lastReadRevision = proj.revision;
+  const sample = list.slice(0, 3).map((c) => `  [${fmtClock(c.start)}] ${c.text.replace(/\n/g, " / ")}`);
+  return note + `Added ${list.length} caption${list.length === 1 ? "" : "s"} (${C.STYLES[st].label}, ${m.fontSize} px) on ${lane.track}${lane.add ? " (a new lane)" : ""}, ${fmtClock(from)} → ${fmtClock(to)}` +
+    (old.length ? `, replacing ${old.length}` : "") + ` (revision ${proj.revision}). UI hot-reloaded.\n` + sample.join("\n") +
+    (list.length > 3 ? `\n  … ${list.length - 3} more` : "") + "\nfablecut_frame {time} shows how one looks; export:\"srt\" writes a subtitle file.";
 }
 /** The clips that sound for a selection: a linked group's audio stems, else the clip. */
 function normalizeGroups(proj, ids) {
@@ -1213,6 +1322,8 @@ async function callTool(name, args, attempt = 0) {
       return silenceTool(args);
     case "fablecut_transcribe":
       return transcribeTool(args);
+    case "fablecut_captions":
+      return captionsTool(args);
     case "fablecut_denoise":
       return denoiseTool(args);
     case "fablecut_proxy":

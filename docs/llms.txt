@@ -38,6 +38,8 @@ about 150 ms. A human and an agent can work the same timeline at once.
   reduction; silence removal (find the pauses in a take and cut them out).
 - Transcripts: speech to words with times in the browser (Whisper), read on
   the timeline; text-based editing (select words or find a phrase and cut it).
+- Captions: from the transcript, timed word by word (subtitle, karaoke, word
+  highlight, word pop); SRT and WebVTT export and import.
 - Color: a Color workspace with GPU grading per clip or adjustment layer
   (lift / gamma / gain / offset wheels, exposure, white balance with a picker,
   blacks / shadows / midtones / highlights / whites, log-style contrast and

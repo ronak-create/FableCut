@@ -3688,6 +3688,12 @@ body.file-drag::after {
 .tr-row input[type="search"] { flex: 1; min-width: 90px; padding: 4px 8px; }
 .tr-row select:focus, .tr-row input[type="search"]:focus { outline: none; border-color: var(--accent); }
 
+.tr-lbl {
+  font-size: 11px;
+  color: var(--dim);
+  white-space: nowrap;
+}
+
 .tr-count {
   font-size: 11px;
   color: var(--dim);

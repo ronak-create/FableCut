@@ -73,7 +73,7 @@ const DEFAULT_PROPS = {
   bold: true, italic: false, weight: 0, align: "center",
   letterSpacing: 0, lineHeight: 1.2, uppercase: false, textShadow: 12,
   glow: 0, glowColor: "",                      // neon glow (glowColor defaults to fill)
-  textAnim: "none", wordRate: 0.15, direction: "auto",
+  textAnim: "none", wordRate: 0.15, direction: "auto", highlightColor: "#ffd166",
   strokeWidth: 0, strokeColor: "#000000", bgColor: "#000000", bgOpacity: 0,
   boxW: 0, boxH: 0,                            // text box (px); 0 = hug content. Resize handles edit these.
   boxFit: false,                               // false = wrap at fixed fontSize; true = scale font to fit box
@@ -86,7 +86,7 @@ const ANIMATABLE = ["x", "y", "scale", "rotation", "opacity", "volume", "pan", "
 const TRANSITIONS = ["none", "fade", "slide-left", "slide-right", "slide-up", "slide-down",
   "zoom", "wipe", "wipe-right", "wipe-up", "wipe-down", "iris", "spin", "blur", "whip",
   "glitch", "pop"];
-const TEXT_ANIMS = ["none", "typewriter", "word-pop", "word-slide", "karaoke",
+const TEXT_ANIMS = ["none", "typewriter", "word-pop", "word-slide", "karaoke", "highlight",
   "letter-pop", "wave", "bounce", "shake",
   "clip-reveal", "zoom-in", "font-cut", "rise-mask"];
 const BLEND_MODES = self.FableCutMask.BLENDS;   // the canvas composite set, shared with the agent (mask.js)
@@ -6781,7 +6781,11 @@ function renderInspector(lite) {
       ${row("Title style", `<button type="button" class="btn tiny style-picker-btn" data-style-open title="Pick a style — hover to preview it live">${(TITLE_STYLES[c.styleName] || {}).label || "Choose…"} ▾</button>
         <button class="btn tiny" data-action="title-shuffle" title="Random style">Shuffle</button>`)}
       ${row("Animation", `<select data-k="textAnim">${TEXT_ANIMS.map((a) => `<option ${a === p.textAnim ? "selected" : ""}>${a}</option>`).join("")}</select>`, "", "textAnim")}
-      ${slider("wordRate", 0.05, 0.6, 0.01, p.wordRate, "s")}
+      ${p.textAnim === "highlight" ? row("Highlight", `<input type="color" data-k="highlightColor" value="${p.highlightColor || "#ffd166"}" title="The colour of the word being said">`, "", "highlightColor") : ""}
+      ${Array.isArray(p.wordTimes) && p.wordTimes.length ? `<div class="insp-note">${p.caption ? "Caption: its" : "Its"} ${p.wordTimes.length} words follow the speech${
+        String(p.text || "").split(/\s+/).filter(Boolean).length === p.wordTimes.length ? ", so Word rate doesn't apply"
+          : " — the text now has another number of words, so they are spread over the clip; Add captions again to re-time them"}.</div>`
+        : slider("wordRate", 0.05, 0.6, 0.01, p.wordRate, "s")}
     </div>`;
   }
   els.inspector.innerHTML = html;
@@ -8772,10 +8776,11 @@ let transcriptGen = 0;               // bumps whenever a transcript arrives or c
 function transcribeSettings() {
   let o = {};
   try { o = JSON.parse(localStorage.getItem(TRANSCRIBE_KEY) || "{}"); } catch { }
-  let model = FableCutTranscribe.DEFAULT_MODEL, language = null;
+  let model = FableCutTranscribe.DEFAULT_MODEL, language = null, captionStyle = null;
   try { model = FableCutTranscribe.model(o.model); } catch { }
   try { language = FableCutTranscribe.language(o.language); } catch { }
-  return { model, language };
+  try { captionStyle = typeof FableCutCaptions !== "undefined" && o.captionStyle ? FableCutCaptions.style(o.captionStyle) : null; } catch { }
+  return { model, language, captionStyle };
 }
 function saveTranscribeSettings(patch) {
   try { localStorage.setItem(TRANSCRIBE_KEY, JSON.stringify({ ...transcribeSettings(), ...patch })); } catch { }
@@ -8975,6 +8980,16 @@ function buildTranscriptPage() {
         <button type="button" class="btn tiny" data-tr-cut-found disabled title="Extract every place it is said, on the targeted tracks (one undo step)">Cut all</button>
         <button type="button" class="btn tiny" data-tr-copy title="Copy the transcript as text, with timecodes">Copy</button>
       </div>
+      <div class="tr-row">
+        <span class="tr-lbl">Captions</span>
+        <select data-tr-cap-style title="The look: subtitle on a dark bar, karaoke (words light up as said), highlight (the word being said in colour), word pop (a few big words at a time)">${Object.entries(FableCutCaptions.STYLES).map(([k, st]) =>
+          `<option value="${k}" ${k === (set.captionStyle || FableCutCaptions.DEFAULT_STYLE) ? "selected" : ""}>${st.label}</option>`).join("")}</select>
+        <button type="button" class="btn tiny" data-tr-cap-add title="Make captions from these words, timed word by word, on a video lane above the edit (replaces the captions there; one undo step)">Add captions</button>
+        <button type="button" class="btn tiny" data-tr-cap-file="srt" title="Download the timeline's captions as a SubRip file">SRT</button>
+        <button type="button" class="btn tiny" data-tr-cap-file="vtt" title="Download the timeline's captions as a WebVTT file">VTT</button>
+        <button type="button" class="btn tiny" data-tr-cap-import title="Place the captions of an SRT or WebVTT file">Import…</button>
+        <input type="file" accept=".srt,.vtt,text/vtt,application/x-subrip" data-tr-cap-input hidden>
+      </div>
     </div>
     <div class="tr-body" data-tr-body tabindex="0"></div>
     <div class="tr-foot hidden" data-tr-foot><span data-tr-sel></span>
@@ -8998,6 +9013,21 @@ function buildTranscriptPage() {
     if (n) cutTranscriptRuns(trState.hits, `${n} × "${trState.query.trim()}"`);
   });
   q("[data-tr-copy]").addEventListener("click", copyTranscript);
+  q("[data-tr-cap-style]").addEventListener("change", (e) => saveTranscribeSettings({ captionStyle: e.target.value }));
+  q("[data-tr-cap-add]").addEventListener("click", () => addCaptionsFromTranscript(q("[data-tr-cap-style]").value));
+  root.querySelectorAll("[data-tr-cap-file]").forEach((b) => b.addEventListener("click", () => downloadCaptions(b.dataset.trCapFile)));
+  const capInput = q("[data-tr-cap-input]");
+  q("[data-tr-cap-import]").addEventListener("click", () => capInput.click());
+  capInput.addEventListener("change", async () => {
+    const f = capInput.files && capInput.files[0];
+    capInput.value = "";
+    if (!f) return;
+    let list;
+    const st = q("[data-tr-cap-style]").value;
+    try { list = FableCutCaptions.parse(await f.text()); } catch (e) { toast(e.message); return; }
+    const m = FableCutCaptions.metrics(st, project.width, project.height);
+    placeCaptions(FableCutCaptions.fit(list, m.chars, m.lines), st, `from ${f.name}`);
+  });
   q("[data-tr-cut-sel]").addEventListener("click", cutTranscriptSelection);
   E.body.addEventListener("mousedown", (e) => {
     const tc = e.target.closest(".tr-tc");
@@ -9195,6 +9225,60 @@ function transcriptTick() {
   el?.classList.add("now");
   if (el && state.playing) el.scrollIntoView({ block: "nearest" });
   trState.now = k;
+}
+
+/* ── Captions (captions.js): the transcript's words become caption clips — text
+   clips with wordTimes, so karaoke / highlight / word pop follow the speech —
+   on a video lane above the edit; subtitle files out and in. The same clips as
+   fablecut_captions. ── */
+function addCaptionsFromTranscript(styleKey) {
+  const C = FableCutCaptions;
+  if (transcriptWordsSig() !== trState.wsig) renderTranscript(true);
+  const words = trState.words;
+  if (!words.length) { toast("Transcribe the clips first — captions are made from their words"); return; }
+  const m = C.metrics(styleKey, project.width, project.height);
+  placeCaptions(C.cues(words, { chars: m.chars, lines: m.lines, words: m.words, maxDur: m.maxDur, fps: projectFps() }), styleKey, "");
+}
+/** Put caption cues on the timeline (replacing the captions there), as one undo step. */
+function placeCaptions(list, styleKey, from) {
+  const C = FableCutCaptions;
+  if (!list.length) { toast("No captions to add"); return; }
+  const old = project.clips.filter(C.isCaption);
+  if (old.some(isGroupLocked)) { toastLocked(); return; }
+  const span = [list[0].start, list[list.length - 1].end];
+  const lane = C.trackFor(old.length ? project : { ...project, clips: project.clips.filter((c) => !C.isCaption(c)), tracks: serializeTracks() }, span[0], span[1]);
+  if (state.lockedTracks?.has?.(lane.track) || (project.lockedTracks || []).includes(lane.track)) { toast(`${lane.track} is locked — unlock it for the captions`); return; }
+  const snap = undoSnapshot();
+  let track = lane.track;
+  if (lane.add) {
+    const t = addTimelineTrack("video");
+    if (!t) return;
+    track = t.id;
+  }
+  const oldIds = new Set(old.map((c) => c.id));
+  project.clips = project.clips.filter((c) => !oldIds.has(c.id));
+  for (const id of oldIds) state.selIds.delete(id);
+  if (oldIds.has(state.selId)) state.selId = null;
+  for (const cue of list) project.clips.push({ ...C.clip(cue, { style: styleKey, width: project.width, height: project.height, track }), id: "c_" + uid() });
+  pushUndo(snap);
+  pruneSelection();
+  state.dirtyTimeline = true;
+  scheduleSave();
+  renderInspector();
+  toast(`${list.length} caption${list.length === 1 ? "" : "s"} on ${track}${from ? " " + from : ""}${old.length ? ` · replaced ${old.length}` : ""}`);
+}
+function downloadCaptions(kind) {
+  const C = FableCutCaptions, list = C.fromClips(project.clips);
+  if (!list.length) { toast("No captions on the timeline yet — Add captions first"); return; }
+  const blob = new Blob([kind === "vtt" ? C.toVTT(list) : C.toSRT(list)], { type: kind === "vtt" ? "text/vtt" : "application/x-subrip" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `${String(project.name || "captions").replace(/[^\w\- ]+/g, "_").trim() || "captions"}.${kind}`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  toast(`Saved ${list.length} caption${list.length === 1 ? "" : "s"} as ${a.download}`);
 }
 /* fablecut_transcribe: transcribe the job's files in this tab, save them, report. */
 async function runTranscribeJob(ticket, fail) {
@@ -14406,12 +14490,13 @@ function drawTextOnPath(c, p, local) {
     return out;
   };
   const words = anim === "word-pop" ? centre("word") : null, lineBox = anim === "zoom-in" ? centre("line") : null;
+  const clk = wordClock(c, p, wi, rate);
   const shown = anim === "typewriter" ? Math.floor(local / (rate / 4)) : Infinity;
   const ease = EASE["ease-out"];
   for (const q of glyphs) {
     if (q.space || q.gi >= shown) continue;
-    let d = q.d, scale = 1, alpha = 1, dx = 0, dy = 0, clipL = null, clipR = null, rise = null;
-    const uw = clamp((local - q.word * rate) / 0.25, 0, 1);         // per word
+    let d = q.d, scale = 1, alpha = 1, dx = 0, dy = 0, clipL = null, clipR = null, rise = null, lit = false;
+    const uw = clamp((local - clk(q.word)[0]) / 0.25, 0, 1);         // per word
     const ul = (dur) => clamp((local - q.line * rate) / dur, 0, 1);  // per line
     if (anim === "letter-pop") {
       const u = clamp((local - q.ci * rate / 3) / 0.18, 0, 1);
@@ -14429,6 +14514,7 @@ function drawTextOnPath(c, p, local) {
     } else if (anim === "bounce") dy -= Math.abs(Math.sin(local * 3.2 + q.word * 0.9)) * size * 0.18;
     else if (anim === "shake") { dx += Math.sin(local * 31 + q.word * 7.3) * size * 0.035; dy += Math.cos(local * 27 + q.word * 3.1) * size * 0.035; }
     else if (anim === "karaoke") alpha = uw >= 1 ? 1 : 0.3 + uw * 0.7;
+    else if (anim === "highlight") lit = wordIsCurrent(clk, q.word, wi, local);
     else if (anim === "clip-reveal") {   // a wipe runs along each line in reading order
       const u = ul(0.5);
       if (u <= 0) continue;
@@ -14467,7 +14553,7 @@ function drawTextOnPath(c, p, local) {
     }
     if (p.glow > 0) { ctx2d.shadowColor = p.glowColor || p.color || "#fff"; ctx2d.shadowBlur = (+p.glow) * size / 40; }
     else if (shadowBlur > 0) { ctx2d.shadowColor = "rgba(0,0,0,.7)"; ctx2d.shadowBlur = shadowBlur; ctx2d.shadowOffsetY = shadowBlur / 3; }
-    ctx2d.fillStyle = fill();
+    ctx2d.fillStyle = lit ? p.highlightColor || "#ffd166" : fill();
     ctx2d.fillText(q.g, 0, 0);
     if (p.glow > 0) ctx2d.fillText(q.g, 0, 0);
     ctx2d.globalAlpha = keep;
@@ -14772,7 +14858,22 @@ function letterAnimSegments(line) {
 
 /* ── Text rendering: styling (stroke / background pill) + kinetic animations.
    `local` is clip-local time in seconds. Word timing: word i enters at
-   i * wordRate; each entrance animation lasts ~0.25 s. ── */
+   i * wordRate — or, on a caption timed to speech, at its wordTimes start;
+   each entrance animation lasts ~0.25 s. ── */
+/** Word i's [start, end], seconds from the clip's start: props.wordTimes (a caption timed to speech)
+ *  when it has one pair per word; if the text was edited to another word count, spread over the clip;
+ *  else one every wordRate seconds. */
+function wordClock(c, p, n, rate) {
+  const wt = p.wordTimes;
+  if (Array.isArray(wt) && wt.length === n && n) return (i) => [+wt[i]?.[0] || 0, +wt[i]?.[1] || 0];
+  if (Array.isArray(wt) && n) { const step = Math.max(0.05, (+c?.duration || n * rate) / n); return (i) => [i * step, (i + 1) * step]; }
+  return (i) => [i * rate, (i + 1) * rate];
+}
+/** Is word i the one being said? From its start until the next word starts (or the clip ends). */
+function wordIsCurrent(clk, i, n, local) {
+  const a = clk(i)[0];
+  return local >= a && (i + 1 >= n || local < clk(i + 1)[0]);
+}
 const backOut = (u) => { const c1 = 1.70158, c3 = c1 + 1; const v = u - 1; return 1 + c3 * v * v * v + c1 * v * v; };
 function hexToRgba(hex, a) {
   const n = parseInt(String(hex).replace("#", ""), 16) || 0;
@@ -14966,7 +15067,7 @@ function drawText(c, p, local) {
     g.addColorStop(1, p.color2);
     return g;
   };
-  const paint = (str, x, y, alpha = 1, rtl = false) => {
+  const paint = (str, x, y, alpha = 1, rtl = false, fill = null) => {
     if (alpha <= 0) return;
     const keep = ctx2d.globalAlpha;
     const prevDir = ctx2d.direction;
@@ -14983,15 +15084,15 @@ function drawText(c, p, local) {
     if (p.glow > 0) { // neon: colored halo, double-fill for intensity
       ctx2d.shadowColor = p.glowColor || p.color || "#fff";
       ctx2d.shadowBlur = (+p.glow) * size / 40;
-      ctx2d.fillStyle = fillFor(y);
+      ctx2d.fillStyle = fill || fillFor(y);
       ctx2d.fillText(str, x, y);
       ctx2d.fillText(str, x, y);
     } else if (shadowBlur > 0) {
       ctx2d.shadowColor = "rgba(0,0,0,.7)"; ctx2d.shadowBlur = shadowBlur; ctx2d.shadowOffsetY = shadowBlur / 3;
-      ctx2d.fillStyle = fillFor(y);
+      ctx2d.fillStyle = fill || fillFor(y);
       ctx2d.fillText(str, x, y);
     } else {
-      ctx2d.fillStyle = fillFor(y);
+      ctx2d.fillStyle = fill || fillFor(y);
       ctx2d.fillText(str, x, y);
     }
     ctx2d.shadowColor = "transparent"; ctx2d.shadowBlur = 0; ctx2d.shadowOffsetY = 0;
@@ -15120,6 +15221,8 @@ function drawText(c, p, local) {
   }
   // word-based animations: lay words out manually, per-line, honoring alignment + direction
   const spaceW = ctx2d.measureText(" ").width;
+  const nWords = rawLines.reduce((n, ln) => n + ln.split(/\s+/).filter(Boolean).length, 0);
+  const clk = wordClock(c, p, nWords, rate);
   let wi = 0;
   rawLines.forEach((ln, i) => {
     const y = y0 + i * lh;
@@ -15137,8 +15240,16 @@ function drawText(c, p, local) {
     words.forEach((word, j) => {
       const w = widths[j];
       const cx = rtl ? x - w / 2 : x + w / 2;
-      const u = clamp((local - wi * rate) / 0.25, 0, 1);
-      if (anim === "word-pop") {
+      const u = clamp((local - clk(wi)[0]) / 0.25, 0, 1);
+      if (anim === "highlight") { // every word shown; the one being said lit and lifted a little
+        const on = wordIsCurrent(clk, wi, nWords, local);
+        const s = on ? 1 + 0.03 * backOut(clamp((local - clk(wi)[0]) / 0.15, 0, 1)) : 1;
+        ctx2d.save();
+        ctx2d.translate(cx, y);
+        if (s !== 1) ctx2d.scale(s, s);
+        paint(word, 0, 0, 1, rtl, on ? p.highlightColor || "#ffd166" : null);
+        ctx2d.restore();
+      } else if (anim === "word-pop") {
         if (u > 0) {
           ctx2d.save();
           ctx2d.translate(cx, y);
