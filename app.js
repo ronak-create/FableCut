@@ -9001,14 +9001,14 @@ function buildTranscriptPage() {
   q("[data-tr-cut-sel]").addEventListener("click", cutTranscriptSelection);
   E.body.addEventListener("mousedown", (e) => {
     const tc = e.target.closest(".tr-tc");
-    if (tc) { setTime(+tc.dataset.t); return; }
+    if (tc) { goToTranscriptTime(+tc.dataset.t); return; }
     const w = e.target.closest(".tw");
     if (!w || e.button !== 0) return;
     e.preventDefault();
     E.body.focus({ preventScroll: true });
     const k = +w.dataset.k;
     if (e.shiftKey && trState.anchor != null) trState.sel = { i: Math.min(trState.anchor, k), j: Math.max(trState.anchor, k) };
-    else { trState.anchor = k; trState.sel = { i: k, j: k }; setTime(trState.words[k].s); }
+    else { trState.anchor = k; trState.sel = { i: k, j: k }; goToTranscriptTime(trState.words[k].s); }
     trState.drag = true;
     paintTranscriptMarks();
   });
@@ -9022,9 +9022,10 @@ function buildTranscriptPage() {
   });
   window.addEventListener("mouseup", () => { trState.drag = false; });
   E.body.addEventListener("keydown", (e) => {
-    if ((e.key === "Delete" || e.key === "Backspace") && trState.sel && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    // Delete here means the words: with none selected it does nothing (it never reaches the timeline's clips)
+    if ((e.key === "Delete" || e.key === "Backspace") && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault(); e.stopPropagation();
-      cutTranscriptSelection();
+      if (trState.sel) cutTranscriptSelection();
     } else if (e.key === "Escape" && trState.sel) {
       e.preventDefault(); e.stopPropagation();
       trState.sel = null; trState.anchor = null;
@@ -9074,6 +9075,11 @@ function renderTranscript(force = false) {
   trState.wordsKey = key;
   findTranscript(true);
 }
+/** Go to a time from the transcript: the Program monitor shows it, as markers and placements do. */
+function goToTranscriptTime(t) {
+  if (isSourceMode()) setMonitorMode("program");
+  setTime(t);
+}
 function paintTranscribeBusy() {
   const E = trState.el, b = trState.busy;
   if (!E) return;
@@ -9106,7 +9112,7 @@ function nextTranscriptHit(dir) {
   const run = h[trState.hitAt];
   trState.sel = { i: run.i, j: run.j };
   trState.anchor = run.i;
-  setTime(trState.words[run.i].s);
+  goToTranscriptTime(trState.words[run.i].s);
   paintTranscriptMarks();
   trState.el.body.querySelector(`.tw[data-k="${run.i}"]`)?.scrollIntoView({ block: "center" });
 }

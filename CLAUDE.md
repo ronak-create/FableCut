@@ -2175,9 +2175,9 @@ listening; `fablecut_frame` only shows the picture, handy to check a cut won't l
 mid-gesture), and `fablecut_silence {clipIds:[<the take>], cut:true}`. Add
 `{op:"crossfade", ids:[…]}` on the new audio cuts if a breath clicks.
 
-**Cut an interview down by text**: lock the music lane, `fablecut_transcribe {}`
-to read what was said, decide what stays, then
-`fablecut_transcribe {find:["the sentence to drop", "and this one"], cut:true}`.
+**Cut an interview down by text**: lock the music lane, `fablecut_transcribe {clipIds:[<the interview>]}`
+to read what was said (name the speech clips, or the music bed is transcribed too), decide what stays, then
+`fablecut_transcribe {clipIds:[<the interview>], find:["the sentence to drop", "and this one"], cut:true}`.
 Then `fablecut_silence {clipIds:[…], cut:true}` for the pauses that are left.
 
 **Center a mono stem**: linked or standalone audio clip with `props.pan: 0` (inspector **Pan** slider, −1…+1). Stereo video stems default to L `−1` / R `+1`; set A1 to `0` to center that channel in the mix.
