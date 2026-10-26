@@ -757,8 +757,9 @@ colour sits under **Animation**, and a note says its words follow the speech.
   answers with where they went and the first few. `clipIds`, `from` / `to` limit
   it; `lines`, `words` and `size` (a scale on the style's size) adjust it;
   `track` picks the lane; `replace:false` keeps the captions already there.
-- `{export:"srt"}` or `{export:"vtt"}` writes the timeline's captions to
-  `exports/<project name>.srt` and returns the path.
+- `{export:"srt"}` or `{export:"vtt"}` writes the captions that show (not disabled,
+  not on a disabled track) to `exports/<project name>.srt` or `.vtt`, adding a number
+  when that name is taken (`<project name> 2.srt`), and returns the path: use that one.
 - `{import:"<path to .srt or .vtt>"}` places a file's captions (the file's text
   works too).
 - `{remove:true}` deletes every caption clip. Locked captions are left alone and
@@ -2241,7 +2242,8 @@ to read what was said (name the speech clips, or the music bed is transcribed to
 Then `fablecut_silence {clipIds:[…], cut:true}` for the pauses that are left.
 
 **Caption a talking-head reel**: finish the cut first, then
-`fablecut_captions {style:"highlight"}`, `fablecut_frame {time:<mid-sentence>}` to
+`fablecut_captions {style:"highlight", clipIds:[<the talking-head clips>]}` (name the speech
+clips, or a music bed with vocals gets captioned too), `fablecut_frame {time:<mid-sentence>}` to
 check the size and placement, and `fablecut_captions {export:"srt"}` for the
 platform's own subtitle upload.
 

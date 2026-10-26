@@ -798,7 +798,7 @@ async function captionsTool(args) {
   const ownLocks = (proj, c) => c.locked === true || (Array.isArray(proj.lockedTracks) && proj.lockedTracks.includes(c.track));
   if (args.export != null) {
     if (args.export !== "srt" && args.export !== "vtt") throw new Error("export must be srt or vtt");
-    const proj = readProject(), list = C.fromClips(proj.clips);
+    const proj = readProject(), list = C.fromClips(proj.clips, proj.disabledTracks);
     if (!list.length) throw new Error("there are no captions on the timeline to export — make them first (fablecut_captions {})");
     fs.mkdirSync(EXPORTS_DIR, { recursive: true });
     const base = String(proj.name || "captions").replace(/[^\w\- ]+/g, "_").trim().slice(0, 80) || "captions";
@@ -855,7 +855,7 @@ async function captionsTool(args) {
   if (lane.add) proj.tracks = [{ id: lane.track, kind: "video" }, ...(Array.isArray(proj.tracks) && proj.tracks.length ? proj.tracks : C.DEFAULT_TRACKS)];
   const ops = [
     ...old.map((c) => ({ op: "removeClip", id: c.id, ...(args.force === true ? { force: true } : {}) })),
-    ...list.map((cue) => ({ op: "addClip", clip: C.clip(cue, { style: st, width: proj.width, height: proj.height, track: lane.track, scale: args.size }) })),
+    ...list.map((cue) => ({ op: "addClip", clip: C.clip(cue, { style: st, width: proj.width, height: proj.height, track: lane.track, scale: args.size }), ...(args.force === true ? { force: true } : {}) })),
   ];
   ProjectOps.applyPatch(proj, ops, { savedItems });
   proj.revision = readRev + 1;

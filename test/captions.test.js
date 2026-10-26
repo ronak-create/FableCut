@@ -115,3 +115,17 @@ test("fit re-breaks an imported caption to the style's line length", () => {
   assert.deepEqual([c.start, c.end], [2, 3]);
 });
 
+test("one word longer than a line stays whole, in wrap, cues and fit", () => {
+  assert.deepEqual(C.wrap(["supercalifragilistic"], 8, 2), [["supercalifragilistic"]]);
+  const cs = C.cues(W([["short", 0, 0.3], ["https://fablecut.space/docs/captions", 1.2, 2.5], ["end.", 3.5, 3.8]]), { chars: 16, lines: 2 });
+  assert.deepEqual(cs.map((c) => c.text), ["short", "https://fablecut.space/docs/captions", "end."]);
+  assert.deepEqual(C.fit([{ start: 0, end: 1, text: "https://fablecut.space/docs" }], 16, 2).map((c) => c.text), ["https://fablecut.space/docs"]);
+});
+
+test("fromClips leaves out captions on a disabled track", () => {
+  const clips = [{ kind: "text", track: "V4", start: 0, duration: 1, props: { caption: true, text: "shown" } },
+    { kind: "text", track: "V5", start: 1, duration: 1, props: { caption: true, text: "hidden" } }];
+  assert.deepEqual(C.fromClips(clips, ["V5"]).map((c) => c.text), ["shown"]);
+  assert.equal(C.fromClips(clips).length, 2);
+});
+
