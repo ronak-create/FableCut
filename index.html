@@ -196,12 +196,14 @@
         <button type="button" data-side="inspector" class="on" title="Selected clip: transform, effects &amp; audio">Inspector</button>
         <button type="button" data-side="mixer" title="Track and master faders, pan, mute / solo, meters">Mixer</button>
         <button type="button" data-side="color" title="Grade the selected clip: wheels, exposure, white balance, tone">Color</button>
+        <button type="button" data-side="transcript" title="The words spoken on the timeline: transcribe, find, and cut by text">Transcript</button>
       </div>
       <div class="inspector-body" id="inspector">
         <div class="inspector-empty">Select a clip to edit its<br>transform, effects &amp; audio.</div>
       </div>
       <div class="mixer hidden" id="mixer"></div>
       <div class="color-page hidden" id="colorPage"></div>
+      <div class="tr-page hidden" id="transcriptPage"></div>
     </aside>
   </div>
 
@@ -654,6 +656,14 @@
           <tr><td>Track point</td><td>Click the spot to follow on the monitor — it tracks from the playhead to the clip's end · <kbd>Esc</kbd> cancels the pick, or stops a running track (what was tracked so far is kept)</td></tr>
         </table>
       </section>
+      <section class="keys-sec">
+        <h3>Transcript <span>side panel → Transcript</span></h3>
+        <table class="keys">
+          <tr><td>Click a word</td><td>Go to it · <kbd>⇧</kbd>+click or drag selects a run of words</td></tr>
+          <tr><td><kbd>Del</kbd></td><td>Cut the selected words and the pause after them (extract on the targeted tracks) · <kbd>Esc</kbd> clears the selection</td></tr>
+          <tr><td>Find words</td><td><kbd>Enter</kbd> / <kbd>⇧</kbd>+<kbd>Enter</kbd> go to the next / previous match · <b>Cut</b> extracts every match</td></tr>
+        </table>
+      </section>
       <p class="help-empty hidden" id="helpEmpty">No shortcut matches that.</p>
     </div>
     <div class="dialog-actions"><button class="btn primary" id="btnCloseHelp">Close</button></div>
@@ -665,6 +675,7 @@
 <script src="loudness.js"></script>
 <script src="ducking.js"></script>
 <script src="silence.js"></script>
+<script src="transcribe.js"></script>
 <script src="audio-fx.js"></script>
 <script src="mask.js"></script>
 <script src="tracker.js"></script>

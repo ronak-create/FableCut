@@ -292,6 +292,28 @@ const TOOLS = [
     },
   },
   {
+    name: "fablecut_transcribe",
+    description: "What is said, word by word, with times — and text-based editing. Transcribes the clips' speech with Whisper in the editor (an open tab, else headless Chrome / Edge; the speech model downloads once, the audio never leaves the machine), keeps one transcript per file (analysis/transcripts/), and answers with the timeline's words as timed lines (timeline seconds), so you can read an interview, pick the good takes, or find where something is said. find:\"phrase\" (or a list) reports every place it is said — case, punctuation and spacing ignored, whole words only — with the exact span; cut:true then extracts each of them on the targeted tracks (or `tracks`), the words and the pause after them, last first, in one revision: later material moves up, linked stems stay in sync, locked clips stay put (lock the music bed first). A version is saved before a cut. Files already transcribed aren't done again unless again:true. Default clips: every video / audio clip with sound on the open timeline. mediaIds reads whole files instead (file seconds; no cut). The same as the editor's Transcript tab.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        clipIds: { type: "array", items: { type: "string" }, description: "Clips to transcribe and read (a video brings its linked stems). Default: every clip with sound on the timeline" },
+        mediaIds: { type: "array", items: { type: "string" }, description: "Instead of clips: whole files, read in file seconds (find works, cut doesn't)" },
+        model: { type: "string", enum: ["base", "small"], description: "Whisper model: base (default, 77 MB, quick) or small (250 MB, more accurate, slower)" },
+        language: { type: "string", description: "The spoken language as a Whisper code (en, es, hi, ja, …) or auto (default: detected)" },
+        again: { type: "boolean", description: "Transcribe again even when a transcript exists (another model or language)" },
+        find: { anyOf: [{ type: "string" }, { type: "array", items: { type: "string" } }], description: "A word or phrase (or several) to find; matches are reported with their timeline spans" },
+        from: { type: "number", description: "Only words from this time on (timeline seconds; file seconds with mediaIds)" },
+        to: { type: "number", description: "Only words before this time" },
+        cut: { type: "boolean", description: "Cut every match of `find` out (default false: only report)" },
+        tracks: { type: "array", items: { type: "string" }, description: "cut: the lanes to cut on (default: the targeted tracks)" },
+        force: { type: "boolean", description: "cut: also cut through locked clips (only when the user asked)" },
+        where: { type: "string", enum: ["auto", "tab", "headless"], description: "Where to transcribe: auto (default): an open editor tab, else headless · tab · headless" },
+        timeout: { type: "number", description: "Seconds to wait for the transcription (default 1800)" },
+      },
+    },
+  },
+  {
     name: "fablecut_denoise",
     description: "Reduce background noise (hiss, hum, room tone) on audio clips: ffmpeg's FFT denoiser renders a cleaned FLAC of each clip's whole source file into media/, and the clip — with its linked stems — switches to it (the picture keeps its own file, so links and timing stay intact). The same as the inspector's Noise control. amount 'off' switches back to the original. Re-running reuses a file already rendered. Needs ffmpeg + ffprobe on PATH. Refuses locked clips unless force:true.",
     inputSchema: {
@@ -595,6 +617,145 @@ async function silenceTool(args) {
   lastReadRevision = proj.revision;
   return `Cut ${head} — timeline ${fmtDur(before)} → ${fmtDur(end(proj))} (revision ${proj.revision}). UI hot-reloaded.` +
     (verWarn || ` The project as it was is kept as a version (fablecut_versions lists it; restore undoes the cut).`);
+}
+/** What words are placed by and cuts land on: where each clip sits and plays from, the track
+ *  switches and the frame rate. An editor saving probed media details while a transcription runs
+ *  doesn't change it; a moved, trimmed or cut clip does. */
+function timelineSig(doc) {
+  return JSON.stringify([doc.fps, doc.lockedTracks || [], doc.untargetedTracks || [], doc.disabledTracks || [],
+    (doc.clips || []).map((c) => [c.id, c.track, c.start, c.in, c.duration, c.mediaId, c.props?.speed ?? 1, c.keyframes?.speed ?? null, !!c.locked, !!c.disabled])]);
+}
+/* fablecut_transcribe: transcripts from the editor (a job), read on the timeline, found, cut. */
+async function transcribeTool(args) {
+  const T = require("./transcribe.js");
+  const model = T.model(args.model), language = T.language(args.language);
+  const finds = (args.find == null ? [] : Array.isArray(args.find) ? args.find : [args.find]).map(String).filter((q) => T.norm(q));
+  if (args.find != null && !finds.length) throw new Error("find needs a word or phrase with letters or digits in it");
+  const fileMode = Array.isArray(args.mediaIds) && args.mediaIds.length;
+  if (args.cut === true && !finds.length) throw new Error("cut:true needs find — the words or phrases to cut");
+  if (args.cut === true && fileMode) throw new Error("cut works on the timeline — pass clipIds (or nothing), not mediaIds");
+  const doc = readProject();
+  const sig = timelineSig(doc);
+  const mediaById = new Map((doc.media || []).map((m) => [m.id, m]));
+  const disabled = new Set(Array.isArray(doc.disabledTracks) ? doc.disabledTracks : []);
+  let entries = [], files = [], rampedN = 0;
+  if (fileMode) {
+    for (const id of args.mediaIds.map(String)) {
+      const m = mediaById.get(id);
+      if (!m) throw new Error("no media " + id);
+      if (m.kind !== "audio" && m.kind !== "video") throw new Error(`media ${id} is ${m.kind} — no sound to transcribe`);
+      files.push(m);
+    }
+  } else {
+    const ids = Array.isArray(args.clipIds) && args.clipIds.length ? args.clipIds.map(String)
+      : doc.clips.filter((c) => (c.kind === "audio" || c.kind === "video") && mediaById.get(c.mediaId) && mediaById.get(c.mediaId).audioChannels !== 0
+        // a picture whose sound is on linked stems (they are read instead), or one with its sound off
+        && !(c.kind === "video" && (c.linkGroup ? doc.clips.some((x) => x.linkGroup === c.linkGroup && x.kind === "audio") : +(c.props?.volume ?? 1) === 0))).map((c) => c.id);
+    if (!ids.length) throw new Error("the timeline has no clips with sound — add some, or pass mediaIds");
+    const groups = speechGroups(doc, ids).map((g) => g.filter((x) => !disabled.has(x.track) && x.disabled !== true)).filter((g) => g.length);
+    if (!groups.length) throw new Error("those clips are disabled (or on disabled tracks) — nothing to read");
+    for (const g of groups) {
+      if (g.some(T.ramped)) { rampedN++; continue; }
+      const m = mediaById.get(g[0].mediaId);
+      if (m) entries.push({ clip: g[0], media: m });
+    }
+    if (!entries.length) throw new Error("those clips have a speed ramp (speed keyframes) — their words can't be placed on the timeline");
+    files = [...new Map(entries.map((e) => [e.media.src, e.media])).values()];
+  }
+  if (!(await ensureUIServer())) throw new Error(`the editor server is not running and could not be started on port ${PORT}`);
+  const srcs = files.map((m) => m.src);
+  const st = await apiJSON("POST", "/api/transcript/status", { srcs });
+  if (st.status !== 200) throw new Error(st.body?.error || "could not read the transcripts");
+  const gone = srcs.filter((s) => st.body.status[s] === null);
+  if (gone.length) throw new Error("these files are missing (offline): " + gone.join(", "));
+  const todo = args.again === true ? srcs : srcs.filter((s) => !st.body.status[s]);
+  let note = "";
+  if (todo.length) {
+    const r = await apiJSON("POST", "/api/transcribe/request", { where: args.where || "auto", transcribe: { srcs: todo, model, language, again: args.again === true } });
+    if (r.status !== 200) throw new Error(r.body?.error || `transcribe request failed (${r.status})`);
+    let job = r.body;
+    const deadline = Date.now() + 1000 * (Number.isFinite(args.timeout) && args.timeout > 0 ? args.timeout : 1800);
+    while (job.status === "pending" || job.status === "running") {
+      if (Date.now() > deadline) {
+        await apiJSON("POST", "/api/export/job/cancel?id=" + encodeURIComponent(job.id));
+        throw new Error("timed out waiting for the transcription — try fewer clips, or a larger timeout");
+      }
+      await sleep(1000);
+      const q = await apiJSON("GET", "/api/export/job?id=" + encodeURIComponent(job.id));
+      if (q.status !== 200) throw new Error(q.body?.error || "lost track of the transcription job");
+      job = q.body;
+    }
+    if (job.status !== "done") throw new Error(`transcription ${job.status}: ${job.error || "no reason given"}`);
+    const res = job.result || {};
+    note = `Transcribed ${(res.done || []).length} file${(res.done || []).length === 1 ? "" : "s"} (${model}${language ? ", " + language : ""}, in ${job.via === "headless" ? "a headless browser" : "the open editor tab"})` +
+      ((res.failed || []).length ? `; failed: ${res.failed.map((f) => `${f.src} (${f.error})`).join(", ")}` : "") + ".\n";
+  }
+  const docs = new Map();
+  for (const src of srcs) {
+    const g = await apiJSON("GET", "/api/transcript?src=" + encodeURIComponent(src));
+    if (g.status === 200 && g.body?.transcript) docs.set(src, T.validate(g.body.transcript));
+  }
+  const fmtT = (x) => fmtClock(Math.max(0, x));
+  const lo = Number.isFinite(args.from) ? args.from : -Infinity, hi = Number.isFinite(args.to) ? args.to : Infinity;
+  const langs = [...new Set([...docs.values()].map((d) => d.language === "auto" ? "detected" : d.language).filter(Boolean))];
+  const without = srcs.filter((s) => !docs.has(s));
+  let words, scope;
+  if (fileMode) {
+    // file seconds, one file after another
+    words = [];
+    for (const m of files) { const d = docs.get(m.src); if (d) words.push(...d.words.map(([w, s, e]) => ({ w, s, e, clip: m.id, r: [0, d.duration || e] }))); }
+    scope = `${files.length} file${files.length === 1 ? "" : "s"} (file seconds)`;
+  } else {
+    words = T.layout(entries.filter((e) => docs.has(e.media.src)).map((e) => ({ clip: e.clip, words: docs.get(e.media.src).words })));
+    scope = `${entries.length} clip${entries.length === 1 ? "" : "s"} on the timeline (timeline seconds)`;
+  }
+  const inWin = (w) => w.e >= lo && w.s <= hi;
+  const head = note + `${words.filter(inWin).length} words, ${scope}` + (langs.length ? `, language ${langs.join("/")}` : "") +
+    (without.length ? `; no transcript for ${without.join(", ")}` : "") + (rampedN ? `; ${rampedN} clip(s) with a speed ramp left out` : "");
+  if (!finds.length) {
+    const segs = T.segments(words).filter((sg) => sg.to >= lo && sg.from <= hi);
+    const MAX = 300;
+    const lines = segs.slice(0, MAX).map((sg) => `[${fmtT(sg.from)}] ${sg.text}`);
+    return [head + (segs.length ? ":" : "."), ...lines,
+      ...(segs.length > MAX ? [`… ${segs.length - MAX} more lines — pass from (e.g. ${segs[MAX].from.toFixed(1)}) to read on`] : []),
+      ...(segs.length ? ["find:\"…\" locates a phrase; with cut:true it is cut out."] : [])].join("\n");
+  }
+  // find (and cut)
+  const runs = [], report = [];
+  for (const q of finds) {
+    const hits = T.find(words, q).filter((r) => inWin(words[r.i]) && inWin(words[r.j]));
+    const spans = T.cutSpans(words, hits, { fps: doc.fps });
+    report.push(`"${q}": ${hits.length} match${hits.length === 1 ? "" : "es"}` + (hits.length ? ":" : ""));
+    for (const r of hits.slice(0, 50)) {
+      const ctx = `${T.text(words, Math.max(0, r.i - 4), r.i - 1)} «${T.text(words, r.i, r.j)}» ${T.text(words, r.j + 1, Math.min(words.length - 1, r.j + 4))}`.trim();
+      report.push(`  ${fmtT(words[r.i].s)} → ${fmtT(words[r.j].e)}  ${ctx}`);
+    }
+    if (hits.length > 50) report.push(`  … +${hits.length - 50} more`);
+    runs.push(...hits);
+    if (!spans.length && hits.length) report.push("  (each is too short to cut on its own)");
+  }
+  const spans = T.cutSpans(words, runs, { fps: doc.fps });
+  if (args.cut !== true) return [head + ".", ...report,
+    ...(spans.length && !fileMode ? [`Cutting them would remove ${spans.length} span${spans.length === 1 ? "" : "s"}, ${T.total(spans).toFixed(1)} s (the words and the pause after each): call again with cut:true.`] : [])].join("\n");
+  if (!spans.length) return [head + ".", ...report, "Nothing to cut."].join("\n");
+  const proj = readProject(), readRev = proj.revision || 0;
+  if (timelineSig(proj) !== sig)
+    throw new Error("the timeline changed while transcribing (a clip was moved, trimmed or cut) — nothing cut; run fablecut_transcribe again");
+  const end = (p) => p.clips.reduce((m, c) => Math.max(m, c.start + c.duration), 0);
+  const before = end(proj);
+  ProjectOps.applyPatch(proj, T.cutOps(spans, { tracks: args.tracks, force: args.force === true }), { savedItems });
+  let verWarn = "";
+  try { createHistory({ projects: createProjects({ dataDir: DATA_DIR, projectFile: PROJECT_FILE, libraryDir: LIBRARY_DIR }) }).beforeAgent("Before cutting words"); }
+  catch (e) { verWarn = ` Warning: no version was saved before the cut (${e.message}).`; }
+  let diskRev = readRev;
+  try { diskRev = readProject().revision || 0; } catch {}
+  if (diskRev !== readRev) throw new Error(`the project changed while cutting (revision ${readRev} → ${diskRev}) — nothing cut; run fablecut_transcribe again`);
+  proj.revision = readRev + 1;
+  writeProject(proj);
+  lastReadRevision = proj.revision;
+  return [head + ".", ...report,
+    `Cut ${spans.length} span${spans.length === 1 ? "" : "s"}, ${T.total(spans).toFixed(1)} s — timeline ${fmtDur(before)} → ${fmtDur(end(proj))} (revision ${proj.revision}). UI hot-reloaded.` +
+    (verWarn || " The project as it was is kept as a version (fablecut_versions lists it; restore undoes the cut).")].join("\n");
 }
 /** The clips that sound for a selection: a linked group's audio stems, else the clip. */
 function normalizeGroups(proj, ids) {
@@ -1050,6 +1211,8 @@ async function callTool(name, args, attempt = 0) {
       return frameTool(args);
     case "fablecut_silence":
       return silenceTool(args);
+    case "fablecut_transcribe":
+      return transcribeTool(args);
     case "fablecut_denoise":
       return denoiseTool(args);
     case "fablecut_proxy":

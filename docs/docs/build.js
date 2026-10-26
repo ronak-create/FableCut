@@ -54,6 +54,11 @@ const PAGES = [
     parts: [["project.json schema", "Audio mix"]],
   },
   {
+    slug: "transcripts", nav: "Transcripts", title: "Transcripts and text-based editing", group: "Picture and sound",
+    lede: "Turn speech into words with times, in the browser, then read, search and cut the edit like text: in the Transcript tab, or from an agent with fablecut_transcribe.",
+    parts: [["project.json schema", "Transcripts"]],
+  },
+  {
     slug: "color", nav: "Color", title: "Color", group: "Picture and sound",
     lede: "Grade a clip with wheels, exposure, white balance and tone, and check it with scopes: in the Color workspace, or from an agent with setGrade and fablecut_scopes.",
     parts: [["project.json schema", "Color"]],

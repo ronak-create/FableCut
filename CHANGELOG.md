@@ -17,6 +17,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   locked tracks (a music bed) keep running. Agents use the new
   `fablecut_silence` tool: it reports the pauses, and with `cut:true` cuts
   them in one revision after keeping a version of the project.
+- **Transcripts and text-based editing.** The new **Transcript** tab beside
+  the Inspector turns the speech on the timeline into words with times. It
+  runs Whisper in the browser: the model (77 MB, or 250 MB for the more
+  accurate one) downloads once, and the audio never leaves your machine.
+  Click a word to go there, select words and press Delete to cut them with
+  the pause after them, or find a phrase and cut every place it is said, in
+  one undo step. Transcripts are kept per file in `analysis/transcripts/`.
+  Agents use the new `fablecut_transcribe` tool: it reads the timeline's words
+  as timed lines, finds phrases, and with `cut:true` cuts them in one revision
+  after keeping a version of the project.
 - **Apple Silicon VideoToolbox export profiles** `videotoolbox-h264` and
   `videotoolbox-hevc`. Enables hardware-accelerated H.264 and HEVC encode on
   Apple Silicon. Also registers `h264_videotoolbox` and `hevc_videotoolbox` in
