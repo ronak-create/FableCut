@@ -4497,11 +4497,11 @@ a.btn { text-decoration: none; }
    lanes sit in a darker well under their track headers and ruler. ══ */
 body { background: var(--bg); }
 .topbar { background: var(--panel-sub); }
-.panel-head, .side-tabs, .timeline-toolbar { background: var(--panel-head); border-radius: 8px 8px 0 0; }
 .bin-tabs, .tr-head, .cp-head { background: var(--panel-sub); }
+.panel-head, .bin-tabs.side-tabs, .timeline-toolbar { background: var(--panel-head); border-radius: 8px 8px 0 0; }   /* the side tabs are also .bin-tabs */
 .btn:hover { background-color: #3a3a46; }
 .track-headers, .track-head { background: #1c1c23; }
 .ruler { background: #2a2a33; }
 .tracks-content, .timeline-scroll { background-color: var(--well); }
-.track:nth-child(even) { background-color: #ffffff05; }
+.track:nth-child(even):not(.drop-hint) { background-color: #ffffff05; }   /* a drop target keeps its highlight */
 .insp-section { background: var(--panel-sub); border-radius: 6px; padding: 8px 10px; margin: 0 0 10px; }
