@@ -1,9 +1,13 @@
 /* ══════════════════ FableCut — Premiere-style dark theme ══════════════════ */
 :root {
-  --bg: #0e0e10;
-  --panel: #1b1b1f;
-  --panel-2: #232329;
-  --border: #2d2d34;
+  /* surfaces, darkest at the back: app → panels → header bars → controls */
+  --bg: #050506;
+  --panel: #111115;
+  --panel-head: #23232b;
+  --panel-sub: #1a1a20;
+  --panel-2: #30303a;
+  --well: #0a0a0c;
+  --border: #2c2c35;
   --text: #d7d7dc;
   --dim: #8b8b93;
   --accent: #7b6cff;
@@ -4486,3 +4490,18 @@ a.btn { text-decoration: none; }
   margin: 8px 0 2px;
   font-size: 12px;
 }
+
+/* ══ Surface levels: each layer of the layout its own tone, so the structure
+   reads at a glance — the app background, then panel bodies, then the header
+   bars and toolbars on top of each panel, then the controls; the timeline's
+   lanes sit in a darker well under their track headers and ruler. ══ */
+body { background: var(--bg); }
+.topbar { background: var(--panel-sub); }
+.bin-tabs, .tr-head, .cp-head { background: var(--panel-sub); }
+.panel-head, .bin-tabs.side-tabs, .timeline-toolbar { background: var(--panel-head); border-radius: 8px 8px 0 0; }   /* the side tabs are also .bin-tabs */
+.btn:hover { background-color: #3a3a46; }
+.track-headers, .track-head { background: #1c1c23; }
+.ruler { background: #2a2a33; }
+.tracks-content, .timeline-scroll { background-color: var(--well); }
+.track:nth-child(even):not(.drop-hint) { background-color: #ffffff05; }   /* a drop target keeps its highlight */
+.insp-section { background: var(--panel-sub); border-radius: 6px; padding: 8px 10px; margin: 0 0 10px; }
