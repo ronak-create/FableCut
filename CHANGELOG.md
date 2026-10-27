@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.18.0] - 2026-10-28
+
 ### Added
 - **Beats.** The Inspector's **Beats** section on an audio or video clip finds
   the music's tempo, a steady beat grid (fitted to the hits, so it doesn't drift
@@ -43,6 +45,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   change was lost along with yours. When an outside edit lands while your own
   change is still unsaved, the outside edit wins as before, and Ctrl+Z now
   puts your version back.
+- **Agent tools never write over what they couldn't read.** When the project
+  file can't be read just before an agent's edit is saved, the edit is refused
+  instead of being written as if nothing had changed.
 
 ## [1.17.0] - 2026-10-26
 
@@ -985,7 +990,8 @@ the report in [#1](https://github.com/ronak-create/FableCut/issues/1) — thanks
 - Three control surfaces for AI agents: **MCP server**, direct `project.json`
   editing, and a **REST API** with live-reload over server-sent events.
 
-[Unreleased]: https://github.com/ronak-create/FableCut/compare/v1.17.0...HEAD
+[Unreleased]: https://github.com/ronak-create/FableCut/compare/v1.18.0...HEAD
+[1.18.0]: https://github.com/ronak-create/FableCut/compare/v1.17.0...v1.18.0
 [1.17.0]: https://github.com/ronak-create/FableCut/compare/v1.16.0...v1.17.0
 [1.16.0]: https://github.com/ronak-create/FableCut/compare/v1.15.0...v1.16.0
 [1.15.0]: https://github.com/ronak-create/FableCut/compare/v1.14.0...v1.15.0
