@@ -1763,6 +1763,7 @@ async function syncFromServer(force) {
     // An edit from outside (an agent, another tab) on the open timeline becomes an undo step of its own,
     // so Ctrl+Z takes it back first instead of replaying an older step over it.
     const before = !state.compCtx && SeqLib.activeId(data) === SeqLib.activeId(project) ? undoSnapshot() : null;
+    const mediaBefore = project.media;
     let clash = false;
     if (runtime.saveTimer) { // unsaved local edit vs. external write: external wins, tell the user
       clearTimeout(runtime.saveTimer); runtime.saveTimer = null;
@@ -1771,7 +1772,7 @@ async function syncFromServer(force) {
       clash = true;
     }
     applyProject(data);
-    const step = before && outsideEditStep(before, undoSnapshot());
+    const step = before && outsideEditStep(before, undoSnapshot(), mediaBefore, project.media);
     if (step) pushUndo(step);
     if (clash) toast(step ? "The project was changed from outside while you were editing. Ctrl+Z puts your version back."
       : "Project was updated externally — your last change may need redoing.");
@@ -3857,10 +3858,15 @@ function counterSnapshot(snap) {
     ...(hasSeqClips(snap) ? { seqClips: otherSequenceClips() } : {}) });
 }
 /** The undo step for an edit made outside this tab (an agent, another tab): the timeline as it was
- *  (`before`), marked so undo can say what it took back — or null when the open timeline didn't change. */
-function outsideEditStep(before, after) {
+ *  (`before`), marked so undo can say what it took back — or null when the open timeline didn't change.
+ *  When the edit removed media, the step carries the media list as it was too, so the clips it puts
+ *  back find their files (and redo, whose counter-snapshot then carries media, takes them out again). */
+function outsideEditStep(before, after, mediaBefore = null, mediaAfter = null) {
   if (before === after) return null;
-  return '{"outside":true,' + before.slice(1);
+  const now = new Set((mediaAfter || []).map((m) => m.id));
+  const lost = (mediaBefore || []).some((m) => !now.has(m.id));
+  const snap = lost ? before.slice(0, -1) + ',"media":' + JSON.stringify(mediaBefore) + "}" : before;
+  return '{"outside":true,' + snap.slice(1);
 }
 const isOutsideStep = (snap) => typeof snap === "string" && snap.startsWith('{"outside":true,');
 function undo() {

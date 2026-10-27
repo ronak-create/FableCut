@@ -23,8 +23,8 @@ function world(clips) {
     reloadMediaSource() {}, renderBin() {}, scheduleOfflineCheck() {},
   };
   const names = Object.keys(env);
-  const fns = new Function(...names, `${slice("function undoSnapshot()", "function redo()")}
-    return { undoSnapshot, pushUndo, outsideEditStep, isOutsideStep, undo };`)(...names.map((k) => env[k]));
+  const fns = new Function(...names, `${slice("function undoSnapshot()", "function defaultTrackFor(")}
+    return { undoSnapshot, pushUndo, outsideEditStep, isOutsideStep, undo, redo };`)(...names.map((k) => env[k]));
   return { ...fns, project, runtime, toasts };
 }
 
@@ -32,10 +32,11 @@ const clip = (id, text) => ({ id, kind: "text", track: "V1", start: 0, duration:
 const text = (w, id) => w.project.clips.find((c) => c.id === id).props.text;
 /* What syncFromServer does with a document written elsewhere. */
 function outsideEdit(w, change) {
-  const before = w.undoSnapshot();
+  const before = w.undoSnapshot(), mediaBefore = w.project.media;
   w.project.clips = JSON.parse(JSON.stringify(w.project.clips));
+  w.project.media = JSON.parse(JSON.stringify(w.project.media));
   change(w.project);
-  const step = w.outsideEditStep(before, w.undoSnapshot());
+  const step = w.outsideEditStep(before, w.undoSnapshot(), mediaBefore, w.project.media);
   if (step) w.pushUndo(step);
   return step;
 }
@@ -53,6 +54,26 @@ test("Ctrl+Z after an agent edit takes back the agent's edit, then the user's", 
   assert.equal(w.toasts.length, 1, "only the outside step says so");
 });
 
+test("undoing an outside edit that removed media brings the media back with its clips; redo removes it again", () => {
+  const w = world([{ ...clip("v", "x"), kind: "video", mediaId: "m1" }, clip("t", "title")]);
+  w.project.media = [{ id: "m1", name: "a.mp4", kind: "video", src: "/media/a.mp4" }];
+  const step = outsideEdit(w, (p) => { p.clips = p.clips.filter((c) => c.id !== "v"); p.media = []; });
+  assert.ok(step.includes('"media":'), "the step carries the media list");
+  w.undo();
+  assert.deepEqual(w.project.clips.map((c) => c.id), ["v", "t"]);
+  assert.deepEqual(w.project.media.map((m) => m.id), ["m1"], "the clip's file is back in the project");
+  w.redo();
+  assert.deepEqual(w.project.clips.map((c) => c.id), ["t"], "redo takes the clip out again");
+  assert.deepEqual(w.project.media, [], "and its media");
+});
+
+test("an outside edit that only changes clips keeps the step small (no media)", () => {
+  const w = world([clip("a", "x")]);
+  w.project.media = [{ id: "m1", name: "a.mp4", kind: "video", src: "/media/a.mp4" }];
+  const step = outsideEdit(w, (p) => { p.clips[0].props = { text: "y" }; });
+  assert.ok(!step.includes('"media":'));
+});
+
 test("an outside write that leaves the open timeline alone adds no undo step", () => {
   const w = world([clip("a", "x")]);
   w.pushUndo(); w.project.clips[0].props = { text: "y" };
@@ -64,6 +85,6 @@ test("an outside write that leaves the open timeline alone adds no undo step", (
 test("syncFromServer records the outside step for the open timeline only", () => {
   const body = slice("async function syncFromServer(", "/** Populate a media entry");
   assert.match(body, /const before = !state\.compCtx && SeqLib\.activeId\(data\) === SeqLib\.activeId\(project\) \? undoSnapshot\(\) : null;/);
-  assert.match(body, /outsideEditStep\(before, undoSnapshot\(\)\)/);
+  assert.match(body, /outsideEditStep\(before, undoSnapshot\(\), mediaBefore, project\.media\)/);
   assert.ok(body.indexOf("const before") < body.indexOf("applyProject(data);\n    const step"), "taken before the document is applied");
 });
