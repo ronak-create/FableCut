@@ -49,6 +49,15 @@ can edit video, and the open browser UI hot-reloads within ~150 ms via
 server-sent events. A human and an agent can work on the same timeline at the
 same time.
 
+**Taking back what the agent did.** Every agent edit is one undo step of its
+own: Ctrl+Z takes back the agent's last change first (and says so), then
+goes on to yours, so the two never get mixed. For bigger rollbacks there are
+**Versions**: one is kept when an agent starts editing (again at most every
+10 minutes while it works), before it rewrites the whole project, before every
+big operation (cutting silences, snapping to the beat, reframing), and every
+10 minutes while you edit. Restore one from the Versions panel, or ask the agent
+(`fablecut_versions`), and compare any version with now first.
+
 ## Features
 
 **Editing**

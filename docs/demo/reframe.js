@@ -236,7 +236,11 @@
   function targets(doc, { ids = null, force = false } = {}) {
     const lanes = new Set(Array.isArray(doc.lockedTracks) ? doc.lockedTracks : []);
     // a clip linked to a locked one is locked with it (its stems move and lock together)
-    const lockedGroups = new Set((doc.clips || []).filter((x) => x.linkGroup && (x.locked || lanes.has(x.track))).map((x) => x.linkGroup));
+    const isLocked = (x) => x.locked || lanes.has(x.track);
+    const lockedGroups = new Set((doc.clips || []).filter((x) => x.linkGroup && isLocked(x)).map((x) => x.linkGroup));
+    // older projects pair a picture and its sound with linkedId instead of a linkGroup
+    const lockedPairs = new Set();
+    for (const x of doc.clips || []) if (x.linkedId && isLocked(x)) { lockedPairs.add(x.id); lockedPairs.add(x.linkedId); }
     const take = [], skip = [];
     for (const c of doc.clips || []) {
       if (ids && !ids.includes(c.id)) continue;
@@ -245,7 +249,7 @@
       const p = c.props || {};
       const ours = p.reframe === "follow" || p.reframe === "centre";   // reframed before: its fit and keys are ours to redo
       const ramped = Array.isArray(c.keyframes?.speed) && c.keyframes.speed.length > 0;
-      const why = !force && (c.locked || lanes.has(c.track) || (c.linkGroup && lockedGroups.has(c.linkGroup))) ? "locked"
+      const why = !force && (c.locked || lanes.has(c.track) || (c.linkGroup && lockedGroups.has(c.linkGroup)) || lockedPairs.has(c.id)) ? "locked"
         : ramped ? "a speed ramp"
         : ours ? (["cropL", "cropR", "cropT", "cropB"].some((k) => +p[k] > 0) ? "cropped" : null)
         : p.fit === "none" || p.fit === "stretch" ? `fit:${p.fit}`

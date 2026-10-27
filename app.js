@@ -13238,17 +13238,24 @@ async function sampleClipFrames(c, w, h, onFrame, onRgb) {
 async function pictureSize(c) {
   const m = getMedia(c.mediaId);
   if (m && m.width > 0 && m.height > 0) return { width: m.width, height: m.height };
+  // a file that never answers mustn't hold Reframe busy for good
+  const wait = (el, ok, what) => new Promise((res, rej) => {
+    const tm = setTimeout(() => rej(new Error(`the ${what} did not load`)), 15000);
+    el.addEventListener(ok, () => { clearTimeout(tm); res(); }, { once: true });
+    el.addEventListener("error", () => { clearTimeout(tm); rej(new Error(`the ${what} could not be read`)); }, { once: true });
+  });
   if (c.kind === "image") {
     const img = new Image();
-    await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = m.src; });
+    if (isCrossOriginSrc(m.src)) img.crossOrigin = "anonymous";
+    const p = wait(img, "load", "picture"); img.src = m.src; await p;
     return { width: img.naturalWidth, height: img.naturalHeight };
   }
   const el = document.createElement("video");
-  el.preload = "metadata"; el.src = m.src;
-  await new Promise((res, rej) => { el.onloadedmetadata = res; el.onerror = rej; });
-  const r = { width: el.videoWidth, height: el.videoHeight };
-  el.removeAttribute("src"); el.load();
-  return r;
+  el.preload = "metadata";
+  try {
+    const p = wait(el, "loadedmetadata", "video"); el.src = m.src; await p;
+    return { width: el.videoWidth, height: el.videoHeight };
+  } finally { el.removeAttribute("src"); el.load(); }
 }
 /** Reframe `clips` (default: every full-frame shot on the timeline) for this canvas. Returns the plan lines. */
 async function reframeClips(clips, { follow = true, smooth = 0.5 } = {}) {

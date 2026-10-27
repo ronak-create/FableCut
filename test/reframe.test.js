@@ -77,11 +77,12 @@ test("targets: full-frame shots only; reframed ones can be redone", () => {
   assert.deepEqual(R.targets(doc, { force: true }).take.map((x) => x.id).includes("locked"), true);
   // a picture whose linked sound is locked (clip or lane) is locked with it
   const linked = { lockedTracks: ["A2"], clips: [c("v", { linkGroup: "g" }), { id: "a", kind: "audio", track: "A1", linkGroup: "g", locked: true, props: {} },
-    c("w", { linkGroup: "h" }), { id: "b", kind: "audio", track: "A2", linkGroup: "h", props: {} }, c("free")] };
+    c("w", { linkGroup: "h" }), { id: "b", kind: "audio", track: "A2", linkGroup: "h", props: {} }, c("free"),
+    c("old", { linkedId: "olda" }), { id: "olda", kind: "audio", track: "A1", linkedId: "old", locked: true, props: {} }] };
   const lr = R.targets(linked);
   assert.deepEqual(lr.take.map((x) => x.id), ["free"]);
-  assert.deepEqual(lr.skip.filter((x) => x.why === "locked").map((x) => x.id), ["v", "w"]);
-  assert.deepEqual(R.targets(linked, { force: true }).take.map((x) => x.id), ["v", "w", "free"]);
+  assert.deepEqual(lr.skip.filter((x) => x.why === "locked").map((x) => x.id), ["v", "w", "old"]);
+  assert.deepEqual(R.targets(linked, { force: true }).take.map((x) => x.id), ["v", "w", "free", "old"]);
 });
 
 test("clipPlan: follows, holds, centres — and redoing replaces its own keys", () => {
