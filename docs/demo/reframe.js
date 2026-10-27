@@ -233,13 +233,14 @@
       if (c.kind !== "video" && c.kind !== "image") { if (ids || c.kind !== "audio") skip.push({ id: c.id, why: c.kind === "text" ? "a title" : `a ${c.kind} clip` }); continue; }
       const p = c.props || {};
       const ours = p.reframe === "follow" || p.reframe === "centre";   // reframed before: its fit and keys are ours to redo
+      const ramped = Array.isArray(c.keyframes?.speed) && c.keyframes.speed.length > 0;
       const why = !force && (c.locked || lanes.has(c.track)) ? "locked"
+        : ramped ? "a speed ramp"
         : ours ? (["cropL", "cropR", "cropT", "cropB"].some((k) => +p[k] > 0) ? "cropped" : null)
         : p.fit === "none" || p.fit === "stretch" ? `fit:${p.fit}`
         : !near0(p.x) || !near0(p.y) || (p.scale != null && Math.abs(+p.scale - 1) > 0.01) ? "placed by hand (moved or scaled)"
         : hasKeys(c, "x") || hasKeys(c, "y") || hasKeys(c, "scale") ? "animated by hand (position or scale keys)"
         : ["cropL", "cropR", "cropT", "cropB"].some((k) => +p[k] > 0) ? "cropped"
-        : Array.isArray(c.keyframes?.speed) && c.keyframes.speed.length ? "a speed ramp"
         : null;
       if (why) skip.push({ id: c.id, why }); else take.push(c);
     }

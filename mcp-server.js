@@ -773,7 +773,8 @@ async function reframeTool(args) {
     let samples = null;
     if (args.follow !== false) {
       const w = R.SAMPLE_W, h = Math.max(8, Math.round(w * src.height / src.width / 2) * 2);
-      samples = R.subjectTrack(sampleFrames(file, c, w, h), w, h);
+      try { samples = R.subjectTrack(sampleFrames(file, c, w, h), w, h); }
+      catch (e) { skip.push({ id: c.id, why: e.message }); continue; }
     }
     const p = R.clipPlan(c, samples, src, canvas, { smooth, fps: work.fps || 30, follow: args.follow !== false });
     ops.push({ op: "updateClip", id: c.id, set: p.set, ...(args.force === true ? { force: true } : {}) });
@@ -786,6 +787,9 @@ async function reframeTool(args) {
   let verWarn = "";
   try { createHistory({ projects: createProjects({ dataDir: DATA_DIR, projectFile: PROJECT_FILE, libraryDir: LIBRARY_DIR }) }).beforeAgent("Before reframing"); }
   catch (e) { verWarn = ` Warning: no version was saved first (${e.message}).`; }
+  let diskRev = readRev;
+  try { diskRev = readProject().revision || 0; } catch {}
+  if (diskRev !== readRev) throw new Error(`the project changed meanwhile (revision ${readRev} → ${diskRev}) — nothing changed; run fablecut_reframe again`);
   ProjectOps.applyPatch(proj, ops, { savedItems });
   proj.revision = readRev + 1;
   writeProject(proj);

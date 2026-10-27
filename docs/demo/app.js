@@ -13276,7 +13276,8 @@ async function reframeClips(clips, { follow = true, smooth = 0.5 } = {}) {
       renderInspector();
     }
   } catch (e) {
-    toast("Couldn't look at the footage: " + (e?.message || e));
+    plans.length = 0;   // all or nothing, as with Cancel
+    toast("Couldn't look at the footage: " + (e?.message || e) + " — nothing changed");
   } finally {
     reframeRun.busy = false;
   }
