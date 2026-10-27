@@ -82,9 +82,64 @@ test("an outside write that leaves the open timeline alone adds no undo step", (
   assert.equal(w.isOutsideStep(w.runtime.undo[0]), false, "a user step is not marked");
 });
 
-test("syncFromServer records the outside step for the open timeline only", () => {
-  const body = slice("async function syncFromServer(", "/** Populate a media entry");
-  assert.match(body, /const before = !state\.compCtx && SeqLib\.activeId\(data\) === SeqLib\.activeId\(project\) \? undoSnapshot\(\) : null;/);
-  assert.match(body, /outsideEditStep\(before, undoSnapshot\(\), mediaBefore, project\.media\)/);
-  assert.ok(body.indexOf("const before") < body.indexOf("applyProject(data);\n    const step"), "taken before the document is applied");
+/* syncFromServer itself, run against a stubbed fetch: a document written elsewhere arrives. */
+function synced(clips) {
+  const project = { clips, markers: [], comps: [], media: [], revision: 1, sequence: undefined };
+  const runtime = { undo: [], redo: [], projectId: "p1", saveTimer: null, syncSeq: 0, pendingSync: false, audioBufs: new Map() };
+  const state = { gesture: false, exporting: false, binTab: "project", compCtx: null };
+  const toasts = [];
+  let disk = null;
+  const env = {
+    project, runtime, state, toast: (m) => toasts.push(m), pruneSelection() {}, scheduleSave() {}, renderInspector() {},
+    SeqLib: { others: () => [], activeId: () => "main", find: () => null }, seqRoot: () => project,
+    reloadMediaSource() {}, renderBin() {}, scheduleOfflineCheck() {},
+    fetchSaved: () => Promise.resolve(), fetchLibrary: () => Promise.resolve(), renderLibrary() {}, renderTemplatesTab() {},
+    loadLibraryFonts() {}, fetchEncodeProfiles() {}, onProjectSwitched() {}, setTime() {}, syncCompCrumb() {},
+    projectsOpen: () => false, pjLoad() {}, probeMissingMeta: async () => {}, renderProjectGrid() {},
+    pj: { verOf: null, verDiff: new Map() }, pjDropDiffs() {},
+    applyProject: (d) => Object.assign(project, { clips: d.clips, markers: d.markers || [], comps: d.comps || [], media: d.media || [], revision: d.revision }),
+    fetch: async () => ({ ok: true, headers: { get: () => "p1" }, json: async () => JSON.parse(JSON.stringify(disk)) }),
+    clearTimeout() {},
+  };
+  const names = Object.keys(env);
+  const fns = new Function(...names, `${slice("function undoSnapshot()", "function defaultTrackFor(")}
+    ${slice("async function syncFromServer(", "/** Populate a media entry")}
+    return { pushUndo, undo, redo, syncFromServer };`)(...names.map((k) => env[k]));
+  const write = (change) => {
+    disk = JSON.parse(JSON.stringify({ ...project, revision: project.revision + 1 }));
+    change(disk);
+  };
+  return { ...fns, project, runtime, toasts, write };
+}
+
+test("syncFromServer: an agent's edit becomes an undo step of its own; undo and redo walk through it in order", async () => {
+  const w = synced([clip("a", "user"), clip("b", "original")]);
+  w.pushUndo(); w.project.clips = [{ ...w.project.clips[0], props: { text: "user edit" } }, w.project.clips[1]];   // the user's edit
+  w.write((d) => { d.clips[1].props = { text: "agent" }; });
+  assert.equal(await w.syncFromServer(), true);
+  assert.equal(text(w, "b"), "agent", "the agent's edit is applied");
+  assert.equal(w.runtime.undo.length, 2, "and recorded as a step");
+  w.undo();
+  assert.deepEqual([text(w, "a"), text(w, "b")], ["user edit", "original"], "Ctrl+Z takes back the agent's edit only");
+  assert.match(w.toasts.at(-1), /outside this tab/);
+  w.undo();
+  assert.equal(text(w, "a"), "user");
+  w.redo(); w.redo();
+  assert.deepEqual([text(w, "a"), text(w, "b")], ["user edit", "agent"], "redo puts both back");
+});
+
+test("syncFromServer: a write that leaves the timeline alone adds no step; a collision lets Ctrl+Z put the user's version back", async () => {
+  const w = synced([clip("a", "x")]);
+  w.write((d) => { d.name = "renamed"; });
+  await w.syncFromServer();
+  assert.equal(w.runtime.undo.length, 0, "no step for a change outside the timeline");
+
+  w.project.clips = [{ ...w.project.clips[0], props: { text: "unsaved" } }];   // the user's edit, not saved yet
+  w.runtime.saveTimer = 1;
+  w.write((d) => { d.clips[0].props = { text: "agent" }; });
+  await w.syncFromServer();
+  assert.equal(text(w, "a"), "agent", "the outside write wins");
+  assert.match(w.toasts.at(-1), /Ctrl\+Z puts your version back/);
+  w.undo();
+  assert.equal(text(w, "a"), "unsaved", "Ctrl+Z puts the user's version back");
 });
