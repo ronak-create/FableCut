@@ -880,7 +880,7 @@ async function highlightsTool(args) {
     let aud = H.sound(NORM_SR);
     try { if (!(await streamClipAudio(doc, s.clip, () => true, (chs) => aud.push(Bt.mono(chs))))) aud = null; }
     catch { aud = null; }   // no sound to read: the picture alone decides
-    sources.push({ id: s.id, len, pic, aud });
+    sources.push({ id: s.id, len, pic, aud, speed: Math.min(8, Math.max(0.1, +s.clip.props?.speed || 1)) });
   }
   if (!sources.length) throw new Error("none of the footage could be read: " + why());
   const picks = H.pick(sources, opts);

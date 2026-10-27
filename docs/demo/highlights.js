@@ -136,22 +136,23 @@
     });
   }
 
-  /** The best moments: sources [{id, len, pic, aud}] (len: seconds of footage looked at,
-   *  times from its start) → [{source, from, to, score, why}] in story order, `duration`
-   *  seconds in all (the last one trimmed to fit). */
+  /** The best moments: sources [{id, len, pic, aud, speed?}] (len: seconds of footage looked at,
+   *  times from its start; speed: how fast the clip plays it, default 1) → [{source, from, to, len,
+   *  score, why}] in story order: from / to in seconds of footage, len in seconds of edit, `duration`
+   *  seconds of edit in all (the last ones trimmed to fit). */
   function pick(sources, opts = {}) {
     const { duration, shot } = options(opts);
     const scored = score(sources);
     const gap = Math.max(1, shot * 0.5);
     const cands = [];
     sources.forEach((s, k) => {
-      const sc = scored[k].scores, n = sc.length;
+      const sc = scored[k].scores, n = sc.length, sp = speedOfSource(s);
       const len = Math.min(s.len, n * BIN);
       const bounds = [0, ...scored[k].cuts, len];
       for (let b = 0; b + 1 < bounds.length; b++) {
         const a0 = bounds[b], a1 = bounds[b + 1];
-        const L = Math.min(shot, a1 - a0);
-        if (L < Math.min(1, shot)) continue;   // a flash between two cuts
+        const L = Math.min(shot * sp, a1 - a0);   // `shot` seconds of edit, in seconds of footage
+        if (L / sp < Math.min(1, shot)) continue;   // a flash between two cuts
         for (let t = a0; t + L <= a1 + 1e-6; t += BIN) {
           const i0 = Math.round(t / BIN), i1 = Math.max(i0 + 1, Math.round((t + L) / BIN));
           let sum = 0;
@@ -174,7 +175,7 @@
       best.used = true;
       chosen.push(best);
       perShot.set(best.k + ":" + best.shotNo, (perShot.get(best.k + ":" + best.shotNo) || 0) + 1);
-      total += best.to - best.from;
+      total += (best.to - best.from) / speedOfSource(sources[best.k]);
     }
     chosen.sort((a, b) => a.k - b.k || a.from - b.from);
     // ends on a quiet moment nearby (not through a word or a hit), never past a cut
@@ -197,10 +198,11 @@
       c.to = quiet(c.to, Math.min(c.hi, c.to + 0.3), c.to);
     }
     // exactly `duration`: trim the moments from the end
-    let over = chosen.reduce((n, c) => n + (c.to - c.from), 0) - duration;
+    // (in seconds of edit: a clip at 2× spends two seconds of footage on each)
+    let over = chosen.reduce((n, c) => n + (c.to - c.from) / speedOfSource(sources[c.k]), 0) - duration;
     for (let i = chosen.length - 1; i >= 0 && over > 1e-3; i--) {
-      const c = chosen[i], cut = Math.min(over, c.to - c.from - 0.5);
-      if (cut > 0) { c.to -= cut; over -= cut; }
+      const c = chosen[i], sp = speedOfSource(sources[c.k]), cut = Math.min(over, (c.to - c.from) / sp - 0.5);
+      if (cut > 0) { c.to -= cut * sp; over -= cut; }
     }
     return chosen.map((c) => {
       const sc = scored[c.k].scores, i0 = Math.round(c.from / BIN), i1 = Math.max(i0 + 1, Math.round(c.to / BIN));
@@ -210,7 +212,8 @@
       const db = sources[c.k].aud && sources[c.k].aud.db;
       const peak = db ? Math.max(-90, ...db.slice(Math.floor(c.from / AUD_STEP), Math.ceil(c.to / AUD_STEP))) : -90;
       const loud = !!(db && db.length && peak > median(db) + 8);
-      return { source: sources[c.k].id, from: round3(c.from), to: round3(c.to), score: Math.round(c.score * 100) / 100,
+      return { source: sources[c.k].id, from: round3(c.from), to: round3(c.to), len: round3((c.to - c.from) / speedOfSource(sources[c.k])),
+        score: Math.round(c.score * 100) / 100,
         why: busy && loud ? "movement and sound" : busy ? "movement" : loud ? "sound" : "a clear picture", bins: sc.slice(i0, i1).length };
     }).map(({ bins, ...p }) => p);
   }
@@ -234,6 +237,7 @@
   }
 
   const speedOf = (c) => clamp(+(c.props && c.props.speed) || 1, 0.1, 8);
+  function speedOfSource(s) { return clamp(+s.speed || 1, 0.1, 8); }
 
   /** The patch: a new sequence (`seq`: {name, width?, height?, fps?}) holding each moment as
    *  a clip back to back on V1, with the sound clips linked to its source alongside.
@@ -281,8 +285,9 @@
   /** The reply: what was picked, and why. */
   function describe(picks, { duration, seqName, made = false } = {}) {
     const clock = (t) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, "0")}`;
-    const total = picks.reduce((n, p) => n + (p.to - p.from), 0);
-    const lines = picks.map((p, i) => `  ${i + 1}. ${p.source} ${clock(p.from)}–${clock(p.to)} (${(p.to - p.from).toFixed(1)} s, ${p.why}, score ${p.score})`);
+    const lenOf = (p) => (p.len != null ? p.len : p.to - p.from);
+    const total = picks.reduce((n, p) => n + lenOf(p), 0);
+    const lines = picks.map((p, i) => `  ${i + 1}. ${p.source} ${clock(p.from)}–${clock(p.to)} (${lenOf(p).toFixed(1)} s, ${p.why}, score ${p.score})`);
     return (made ? `New sequence "${seqName}", opened: ` : "") + `${picks.length} moment${picks.length === 1 ? "" : "s"}, ${total.toFixed(1)} s` +
       (duration && total < duration - 0.5 ? ` (asked for ${duration} s: the footage has no more distinct moments)` : "") + ":\n" + lines.join("\n");
   }

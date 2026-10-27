@@ -1950,7 +1950,11 @@ moments go back to back on V1 in story order, each a clip of its source with
 its props (a reframed clip's framing isn't carried over) and its linked sound
 clips beside it (their own tracks, linked again); their keyframes aren't
 carried over. A moment from a whole file (`mediaIds`) is one video clip that
-plays its own sound, with no separate audio clips. Disabled clips and clips with a speed ramp are not read. `aspect`
+plays its own sound, with no separate audio clips. A clip played faster or
+slower counts by its length on the timeline: `duration` and `shot` are always
+seconds of the edit. In the editor (and Studio) the sound of a file longer than
+30 minutes isn't read, so as not to decode it whole in the browser; its picture
+decides. Disabled clips and clips with a speed ramp are not read. `aspect`
 makes the new sequence 9:16, 1:1 or 4:5: the shots are then letterboxed, and
 `fablecut_reframe {}` fits them and follows the subject. The reply lists each
 moment (its source, times, length, why it was picked and its score). A version

@@ -64,6 +64,17 @@ test("pick: the busy and the loud moments, in order, never across the cut, exact
   assert.match(H.describe(picks, { duration: 6 }), /moments, 6\.0 s/);
 });
 
+test("pick: a clip at 2× counts by its length on the timeline", () => {
+  const s = { ...source("c1"), speed: 2 };
+  const picks = H.pick([s], { duration: 6, shot: 2 });
+  const edit = picks.reduce((n, p) => n + p.len, 0), footage = picks.reduce((n, p) => n + (p.to - p.from), 0);
+  assert.ok(Math.abs(edit - 6) < 0.02, `edit ${edit}`);
+  assert.ok(Math.abs(footage - 12) < 0.05, `footage ${footage}`);
+  assert.ok(picks.every((p) => Math.abs(p.len - (p.to - p.from) / 2) < 0.002));
+  const out = H.ops({ clips: [{ id: "c1", mediaId: "m", kind: "video", track: "V1", start: 0, in: 0, duration: 30, props: { speed: 2 } }] }, picks, { name: "x" });
+  assert.ok(Math.abs(out.slice(1).reduce((n, o) => n + o.clip.duration, 0) - 6) < 0.02, "the clips add up to the edit");
+});
+
 test("options: limits and the default shot length", () => {
   assert.deepEqual(H.options({}), { duration: 30, shot: 3.75 });
   assert.deepEqual(H.options({ duration: 15 }), { duration: 15, shot: 1.875 });

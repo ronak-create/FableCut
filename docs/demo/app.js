@@ -13376,6 +13376,7 @@ async function reframeClips(clips, { follow = true, smooth = 0.5 } = {}) {
    reading, scores and picks as fablecut_highlights. ── */
 const Highlights = self.FableCutHighlights;
 const highlightRun = { busy: false, cancel: false };
+const HL_AUDIO_MAX_SECS = 30 * 60;
 async function readHighlightSource(c, cancelled, onFrame) {
   const src = await pictureSize(c);
   const w = Highlights.SAMPLE_W, h = Math.max(8, Math.round(w * src.height / src.width / 2) * 2);
@@ -13383,8 +13384,10 @@ async function readHighlightSource(c, cancelled, onFrame) {
   await sampleClipFrames(c, w, h, onFrame, (f) => pic.push(f), { fps: Highlights.PIC_FPS, cancelled });
   let aud = null;
   const media = getMedia(c.mediaId);
-  // stopped: the caller drops it; no audio stream: nothing to decode (a failed decode would fetch the file again next time)
-  if (cancelled() || !media || media.audioChannels === 0) return { id: c.id, len: c.duration * sp, pic, aud };
+  // stopped: the caller drops it; no audio stream: nothing to decode (a failed decode would fetch the file again next time);
+  // a file longer than HL_AUDIO_MAX_SECS isn't decoded whole in a browser tab: its picture decides
+  const done = () => ({ id: c.id, len: c.duration * sp, pic, aud, speed: sp });
+  if (cancelled() || !media || media.audioChannels === 0 || +media.duration > HL_AUDIO_MAX_SECS) return done();
   try {
     const buf = await getAudioBuffer(media);
     const a0 = Math.max(0, Math.floor((c.in || 0) * buf.sampleRate));
@@ -13396,7 +13399,7 @@ async function readHighlightSource(c, cancelled, onFrame) {
       aud.push(FableCutBeats.mono(chs));
     }
   } catch { aud = null; }   // no sound to read: the picture alone decides
-  return { id: c.id, len: c.duration * sp, pic, aud };
+  return done();
 }
 /** Read `clips` (default: every video clip on this timeline), pick the moments, and open them as a
  *  new sequence. Nothing changes if it is cancelled or the timeline changes meanwhile. */
@@ -13434,7 +13437,7 @@ async function makeHighlights(clips, { duration = 30, shot, size = null, follow 
   const opened = newSequence({ name, from: "empty", ...(size || {}) }, ops.slice(1).map((o) => o.clip));
   if (opened === undefined) return null;   // nothing was made: newSequence said why
   if (opened && follow) reframeClips(null, { follow: true });
-  const total = picks.reduce((n, p) => n + (p.to - p.from), 0);
+  const total = picks.reduce((n, p) => n + p.len, 0);
   toast(`Highlights: ${picks.length} moments, ${total.toFixed(1)} s` + (failed ? ` · ${failed} clip${failed === 1 ? "" : "s"} couldn't be read` : "") +
     (total < duration - 0.5 ? " — the footage has no more distinct moments" : ""));
   return picks;
