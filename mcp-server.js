@@ -837,6 +837,7 @@ async function highlightsTool(args) {
   const opts = H.options(args);
   const doc = readProject();
   const readRev = doc.revision || 0;
+  const canvas = args.aspect ? require("./reframe.js").canvasFor(args.aspect, doc.width, doc.height) : {};   // a bad shape refuses before any reading
   const srcs = [];
   let skip = [];
   if (Array.isArray(args.mediaIds) && args.mediaIds.length) {
@@ -884,8 +885,6 @@ async function highlightsTool(args) {
   if (!sources.length) throw new Error("none of the footage could be read: " + why());
   const picks = H.pick(sources, opts);
   if (!picks.length) throw new Error("no moments long enough to use — try a shorter shot");
-  let canvas = {};
-  if (args.aspect) canvas = require("./reframe.js").canvasFor(args.aspect, doc.width, doc.height);
   const seqName = String(args.name || `Highlights ${opts.duration} s`).slice(0, 80);
   const ops = H.ops(doc, picks, { name: seqName, ...canvas });
   const proj = readProject();

@@ -13382,8 +13382,11 @@ async function readHighlightSource(c, cancelled, onFrame) {
   const pic = Highlights.picture(w, h), sp = clipSpeed(c);
   await sampleClipFrames(c, w, h, onFrame, (f) => pic.push(f), { fps: Highlights.PIC_FPS, cancelled });
   let aud = null;
+  const media = getMedia(c.mediaId);
+  // stopped: the caller drops it; no audio stream: nothing to decode (a failed decode would fetch the file again next time)
+  if (cancelled() || !media || media.audioChannels === 0) return { id: c.id, len: c.duration * sp, pic, aud };
   try {
-    const buf = await getAudioBuffer(getMedia(c.mediaId));
+    const buf = await getAudioBuffer(media);
     const a0 = Math.max(0, Math.floor((c.in || 0) * buf.sampleRate));
     const a1 = Math.min(buf.length, Math.ceil(((c.in || 0) + c.duration * sp) * buf.sampleRate));
     if (a1 > a0) {
@@ -13400,6 +13403,7 @@ async function readHighlightSource(c, cancelled, onFrame) {
 async function makeHighlights(clips, { duration = 30, shot, size = null, follow = false, progress, cancelled: stop } = {}) {
   if (!Highlights) { toast("Highlights module missing — reload the editor"); return null; }
   if (highlightRun.busy) { toast("Already making highlights — wait for it, or Cancel"); return null; }
+  if (state.exporting) { toast("Wait for the export to finish"); return null; }
   const { take, skip } = Highlights.sourcesOf({ clips: project.clips, disabledTracks: [...state.disabledTracks] }, clips && clips.map((c) => c.id));
   if (!take.length) { toast(skip.length ? `Nothing to look at: ${skip[0].id} is ${skip[0].why}` : "Put video on the timeline first"); return null; }
   Object.assign(highlightRun, { busy: true, cancel: false });
@@ -13428,6 +13432,7 @@ async function makeHighlights(clips, { duration = 30, shot, size = null, follow 
   const name = `Highlights ${duration} s`;
   const ops = Highlights.ops(projectJSONHere(), picks, { name, ...(size || {}) });
   const opened = newSequence({ name, from: "empty", ...(size || {}) }, ops.slice(1).map((o) => o.clip));
+  if (opened === undefined) return null;   // nothing was made: newSequence said why
   if (opened && follow) reframeClips(null, { follow: true });
   const total = picks.reduce((n, p) => n + (p.to - p.from), 0);
   toast(`Highlights: ${picks.length} moments, ${total.toFixed(1)} s` + (failed ? ` · ${failed} clip${failed === 1 ? "" : "s"} couldn't be read` : "") +

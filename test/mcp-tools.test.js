@@ -768,6 +768,9 @@ test("fablecut_highlights picks the busy and the loud moments into a new sequenc
   assert.deepEqual([readProject(dir).width, readProject(dir).height], [1080, 1920]);
   assert.ok(readProject(dir).clips.every((c) => c.mediaId === "m_v"));
 
+  const shape = await mcp.callTool("fablecut_highlights", { aspect: "7:3" });
+  assert.ok(shape.isError);
+  assert.match(shape.text, /aspect must be one of/);
   const short = await mcp.callTool("fablecut_highlights", { duration: 2 });
   assert.ok(short.isError);
   assert.match(short.text, /duration must be/);
