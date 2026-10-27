@@ -1773,7 +1773,9 @@ list short without deleting anything.
 
 ### Versions
 
-Every edit is saved as it happens, and undo covers the session. **Versions** are
+Every edit is saved as it happens, and undo covers the session. An edit that
+reaches the open editor from outside (an agent, another tab) is one undo step of
+its own there: Ctrl+Z takes it back first, then the user's own edits. **Versions** are
 what you come back to later: full copies of a project, kept beside it, that are
 never overwritten. Restoring one is not destructive either — what is there is
 saved as a version first, so a restore can be undone by restoring that.
