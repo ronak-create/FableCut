@@ -75,6 +75,12 @@ from:"open", width?, height?}` and edit it with `{op:"inSequence", sequence,
 ops:[…]}` — the user's editor stays on what they are watching. Open one
 (`openSequence`) only when they ask, or to export it.
 
+For a vertical (or square) version of a finished edit, `fablecut_reframe
+{aspect:"9:16"}` does the copy for you: a new sequence on that canvas, opened,
+whose full-frame shots follow their subject with ordinary position keys. It
+leaves titles, picture-in-picture and clips placed by hand alone and lists
+them: look at those with `fablecut_frame` on the new canvas and move them.
+
 ## Things that trip people up
 
 - Cut, ripple, trim and insert with the `fablecut_patch_project` edit ops
@@ -114,7 +120,8 @@ ops:[…]}` — the user's editor stays on what they are watching. Open one
   `"x"`, `"linkedin"`, `"broadcast"`, `"web"`, `"archive"`) and adjust with
   `delivery:{…}` (fps, codec, bitrate, file name, metadata); a 16:9 timeline
   exported to a vertical preset is cropped from the middle unless the project
-  has an export frame, so say so or set one. `fablecut_encode_profiles` lists
+  has an export frame, so say so, set one, or make a reframed copy first
+  (`fablecut_reframe`). `fablecut_encode_profiles` lists
   the presets. Several files at once (a master, a YouTube cut, a reel, a
   square…): `outputs:[{preset:"master"}, {preset:"youtube"}, …]` renders the
   timeline once per frame rate and encodes every file from it; `setProject {outputs:[…]}`
