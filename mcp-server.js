@@ -323,6 +323,21 @@ const TOOLS = [
     },
   },
   {
+    name: "fablecut_highlights",
+    description: "The best moments of long footage, cut into a short edit: a 30 s reel from a 20-minute vlog, a match, a talk, a day of B-roll. Looks at the video clips on the open timeline (or clipIds, or whole files with mediaIds) — frames twice a second and the sound — and scores every half second: movement, sound louder than around it (a cheer, a laugh, a hit), a clear picture. Cuts already in the footage are found and never crossed. It takes the best moments of `shot` seconds (default: duration / 8, 1.5–4 s), apart from each other and spread over the shots, until the edit is `duration` seconds (default 30), and nudges each end to a quiet point so no word or hit is cut through. They go back to back on V1 of a new sequence, in story order, with their linked sound, and the sequence is opened; the timeline you started from is left as it was. aspect makes the new sequence 9:16, 1:1 or 4:5 (then fablecut_reframe {} fits the shots and follows the subject). The reply lists each moment (source, times, why it was picked). A version is saved first. Then: music under it and fablecut_beats {clipId, retime:{every:2}} cuts it on the beat. Needs ffmpeg on PATH.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        duration: { type: "number", description: "Seconds of edit to make, 5…600 (default 30)" },
+        shot: { type: "number", description: "Seconds per moment, 0.5…20 (default: duration / 8, kept within 1.5–4)" },
+        clipIds: { type: "array", items: { type: "string" }, description: "Video clips to look through (default: every video clip on the open timeline)" },
+        mediaIds: { type: "array", items: { type: "string" }, description: "Instead of clips: whole video files from the project's media" },
+        name: { type: "string", description: "The new sequence's name (default: Highlights <duration> s)" },
+        aspect: { type: "string", enum: ["9:16", "1:1", "4:5", "16:9", "4:3", "2:3"], description: "The new sequence's shape (default: the open one's canvas)" },
+      },
+    },
+  },
+  {
     name: "fablecut_transcribe",
     description: "What is said, word by word, with times — and text-based editing. Transcribes the clips' speech with Whisper in the editor (an open tab, else headless Chrome / Edge; the speech model downloads once, the audio never leaves the machine), keeps one transcript per file (analysis/transcripts/), and answers with the timeline's words as timed lines (timeline seconds), so you can read an interview, pick the good takes, or find where something is said. find:\"phrase\" (or a list) reports every place it is said — case, punctuation and spacing ignored, whole words only — with the exact span; cut:true then extracts each of them on the targeted tracks (or `tracks`), the words and the pause after them, last first, in one revision: later material moves up, linked stems stay in sync, locked clips stay put (lock the music bed first). A version is saved before a cut. Files already transcribed aren't done again unless again:true. Default clips: every video / audio clip with sound on the open timeline. mediaIds reads whole files instead (file seconds; no cut). The same as the editor's Transcript tab.",
     inputSchema: {
@@ -794,6 +809,101 @@ async function reframeTool(args) {
   lastReadRevision = proj.revision;
   return `${made}Reframed ${lines.length} shot${lines.length === 1 ? "" : "s"} for ${canvas.width}×${canvas.height} (revision ${proj.revision}):\n` + lines.join("\n") +
     (skip.length ? `\nLeft as they were: ${skip.map((x) => `${x.id} (${x.why})`).join(", ")} — check them on the new canvas with fablecut_frame {time}.` : "") +
+    (verWarn || "\nThe project as it was is kept as a version (fablecut_versions; restore undoes it).");
+}
+/* fablecut_highlights: highlights.js on the frames and sound ffmpeg streams from each source
+   (frame by frame, without holding the server), then a new sequence holding the best moments. */
+function streamPicture(file, from, len, w, h, push) {
+  const H = require("./highlights.js");
+  return new Promise((resolve, reject) => {
+    const proc = spawn("ffmpeg", ["-v", "error", "-ss", String(Math.max(0, from)), "-t", String(Math.max(0.1, len)), "-i", file, "-an",
+      "-vf", `fps=${H.PIC_FPS},scale=${w}:${h}`, "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]);
+    const fb = w * h * 3;
+    let rest = Buffer.alloc(0), err = "", n = 0;
+    const tm = setTimeout(() => { proc.kill(); reject(new Error("ffmpeg took too long reading the footage")); }, Math.max(120000, len * 1000));
+    proc.stdout.on("data", (chunk) => {
+      const buf = rest.length ? Buffer.concat([rest, chunk]) : chunk;
+      let o = 0;
+      for (; o + fb <= buf.length; o += fb) { push(buf.subarray(o, o + fb)); n++; }
+      rest = Buffer.from(buf.subarray(o));
+    });
+    proc.stderr.on("data", (d) => { err += d; });
+    proc.on("error", (e) => { clearTimeout(tm); reject(new Error(e.code === "ENOENT" ? "ffmpeg not found on PATH — needed to look at the footage" : e.message)); });
+    proc.on("close", (code) => { clearTimeout(tm); if (code === 0) resolve(n); else reject(new Error(`ffmpeg couldn't read the footage: ${err.trim().split("\n").pop() || code}`)); });
+  });
+}
+async function highlightsTool(args) {
+  const H = require("./highlights.js"), Bt = require("./beats.js");
+  const opts = H.options(args);
+  const doc = readProject();
+  const readRev = doc.revision || 0;
+  const canvas = args.aspect ? require("./reframe.js").canvasFor(args.aspect, doc.width, doc.height) : {};   // a bad shape refuses before any reading
+  const srcs = [];
+  let skip = [];
+  if (Array.isArray(args.mediaIds) && args.mediaIds.length) {
+    for (const id of args.mediaIds.map(String)) {
+      const m = (doc.media || []).find((x) => x.id === id);
+      if (!m) throw new Error(`no media ${id}`);
+      if (m.kind !== "video") throw new Error(`media ${id} is ${m.kind} — highlights are cut from video`);
+      if (!(m.duration > 0)) throw new Error(`media ${id}: its length isn't known yet — open the editor so it probes the file, then call again`);
+      srcs.push({ id: "media:" + id, clip: { id: "media:" + id, mediaId: id, kind: "video", in: 0, duration: m.duration, props: {} }, media: m });
+    }
+  } else {
+    const ids = Array.isArray(args.clipIds) && args.clipIds.length ? args.clipIds.map(String) : null;
+    const r = H.sourcesOf(doc, ids);
+    skip = r.skip;
+    for (const c of r.take) {
+      const m = (doc.media || []).find((x) => x.id === c.mediaId);
+      if (m) srcs.push({ id: c.id, clip: c, media: m });
+      else skip.push({ id: c.id, why: "its media isn't in the project" });
+    }
+  }
+  const why = () => skip.map((x) => `${x.id} (${x.why})`).join(", ");
+  if (!srcs.length) throw new Error("no video to make highlights from" + (skip.length ? `: ${why()}` : "") + " — put footage on the timeline, or pass mediaIds");
+  const total = srcs.reduce((n, s) => n + clipSourceLen(s.clip), 0);
+  if (total > H.MAX_SOURCE_SECS)
+    throw new Error(`that's ${Math.round(total / 60)} minutes of footage — up to ${H.MAX_SOURCE_SECS / 60} at a time; pass clipIds or mediaIds`);
+  const sources = [];
+  for (const s of srcs) {
+    const file = mediaFile(s.media.src);
+    if (!file) { skip.push({ id: s.id, why: "media file not found" }); continue; }
+    let mw = s.media.width, mh = s.media.height;
+    if (!(mw > 0 && mh > 0)) {
+      const pr = spawnSync("ffprobe", ["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0", file], { timeout: 10000 });
+      [mw, mh] = String(pr.stdout || "").trim().split(",").map(Number);
+    }
+    const w = H.SAMPLE_W, h = Math.max(8, Math.round((w * (mw > 0 && mh > 0 ? mh / mw : 9 / 16)) / 2) * 2);
+    const len = clipSourceLen(s.clip), pic = H.picture(w, h);
+    try { await streamPicture(file, s.clip.in || 0, len, w, h, (f) => pic.push(f)); }
+    catch (e) { skip.push({ id: s.id, why: e.message }); continue; }
+    if (pic.motion.length < 2) { skip.push({ id: s.id, why: "too short to look at" }); continue; }
+    let aud = H.sound(NORM_SR);
+    try { if (!(await streamClipAudio(doc, s.clip, () => true, (chs) => aud.push(Bt.mono(chs))))) aud = null; }
+    catch { aud = null; }   // no sound to read: the picture alone decides
+    sources.push({ id: s.id, len, pic, aud, speed: Math.min(8, Math.max(0.1, +s.clip.props?.speed || 1)) });
+  }
+  if (!sources.length) throw new Error("none of the footage could be read: " + why());
+  const picks = H.pick(sources, opts);
+  if (!picks.length) throw new Error("no moments long enough to use — try a shorter shot");
+  const seqName = String(args.name || `Highlights ${opts.duration} s`).slice(0, 80);
+  const ops = H.ops(doc, picks, { name: seqName, ...canvas });
+  const proj = readProject();
+  if ((proj.revision || 0) !== readRev)
+    throw new Error(`the project changed while looking at the footage (revision ${readRev} → ${proj.revision}) — nothing changed; run fablecut_highlights again`);
+  let verWarn = "";
+  try { createHistory({ projects: createProjects({ dataDir: DATA_DIR, projectFile: PROJECT_FILE, libraryDir: LIBRARY_DIR }) }).beforeAgent("Before making highlights"); }
+  catch (e) { verWarn = ` Warning: no version was saved first (${e.message}).`; }
+  const diskRev = readProject().revision || 0;   // a failed read stops it: never write over what we can't see
+  if (diskRev !== readRev) throw new Error(`the project changed meanwhile (revision ${readRev} → ${diskRev}) — nothing changed; run fablecut_highlights again`);
+  ProjectOps.applyPatch(proj, ops, { savedItems });
+  proj.revision = readRev + 1;
+  writeProject(proj);
+  lastReadRevision = proj.revision;
+  const reshaped = canvas.width && canvas.width * doc.height !== canvas.height * doc.width;
+  return H.describe(picks, { duration: opts.duration, seqName, made: true }) + `\n(revision ${proj.revision}; UI hot-reloaded.)` +
+    (skip.length ? `\nNot looked at: ${why()}.` : "") +
+    (reshaped ? "\nThe shots are letterboxed on the new canvas: fablecut_reframe {} fits them and follows the subject." : "") +
+    "\nCheck a moment with fablecut_frame {time}; with music under it, fablecut_beats {clipId, retime:{every:2}} cuts it on the beat." +
     (verWarn || "\nThe project as it was is kept as a version (fablecut_versions; restore undoes it).");
 }
 /** What words are placed by and cuts land on: where each clip sits and plays from, the track
@@ -1476,6 +1586,8 @@ async function callTool(name, args, attempt = 0) {
       return beatsTool(args);
     case "fablecut_reframe":
       return reframeTool(args);
+    case "fablecut_highlights":
+      return highlightsTool(args);
     case "fablecut_transcribe":
       return transcribeTool(args);
     case "fablecut_captions":

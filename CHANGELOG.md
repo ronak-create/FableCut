@@ -23,6 +23,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   From **New sequence…** (Follow the subject in each shot) or the Inspector's
   **Reframe** section (Follow subject, Centre, Lively / Balanced / Steady).
   Titles and clips placed by hand are left alone. Agents use `fablecut_reframe`.
+- **Highlights.** The best moments of long footage, cut into a short edit: every
+  half second of the timeline's video is scored for movement, sound louder than
+  around it and a clear picture; the best moments of a few seconds each go back
+  to back in a new sequence, in story order, never across a cut already in the
+  footage, their ends on quiet points. From the sequence menu's **Highlights…**
+  (15–90 s, any canvas, optionally following the subject). Agents use
+  `fablecut_highlights`.
 
 ### Changed
 - The reference analyzer (`fablecut_analyze_reference`) now shares its beat

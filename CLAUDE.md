@@ -50,6 +50,8 @@ Every Claude Code session then has these tools:
   cuts to them, or re-cut a track's clips on the beat. See "Audio mix" below.
 - `fablecut_reframe` — reframe for another shape (9:16, 1:1, 4:5): a copy of the sequence
   on that canvas whose shots follow the subject. See "Sequences" below.
+- `fablecut_highlights` — the best moments of long footage cut into a short edit, in a new
+  sequence. See "Sequences" below.
 - `fablecut_transcribe` — turn speech into words with times (Whisper, in the browser),
   read them on the timeline, find a phrase and cut it out. See "Transcripts and
   text-based editing" below.
@@ -1930,11 +1932,44 @@ another shape has **Follow the subject in each shot**; the Inspector's
 has **Follow subject**, **Centre** and Lively / Balanced / Steady (the selected
 clips, one undo step, with Cancel).
 
+**Highlights** — `fablecut_highlights {duration?, shot?, clipIds?, mediaIds?, name?, aspect?}`
+finds the best moments of long footage and cuts them into a short edit: a new
+sequence (`Highlights 30 s`, or `name`), opened, so the timeline it came from
+stays as it was. It reads the video clips on the open timeline (`clipIds`
+limits them; `mediaIds` reads whole files instead), up to an hour of footage
+at a time: frames twice a second at 64 px, and the sound. Every half second is
+scored for movement, sound louder than the 20 s around it (a cheer, a laugh, a
+hit), its overall level, and a clear picture; black frames and flat colour
+count for little. Cuts already in the footage are found, and a moment never
+crosses one. It then takes the best moments of `shot` seconds (default
+`duration` / 8, kept within 1.5–4 s), apart in the same footage (by half a
+moment, at least a second) and spread over its shots, until the edit is `duration` seconds
+(default 30; 5…600), trims the last ones to fit exactly, and nudges each end up
+to 0.3 s to the quietest point near it, so no word or hit is cut through. The
+moments go back to back on V1 in story order, each a clip of its source with
+its props (a reframed clip's framing isn't carried over) and its linked sound
+clips beside it (their own tracks, linked again); their keyframes aren't
+carried over. A moment from a whole file (`mediaIds`) is one video clip that
+plays its own sound, with no separate audio clips. A clip played faster or
+slower counts by its length on the timeline: `duration` and `shot` are always
+seconds of the edit. In the editor (and Studio) the sound of a file longer than
+30 minutes isn't read, so as not to decode it whole in the browser; its picture
+decides. Disabled clips and clips with a speed ramp are not read. `aspect`
+makes the new sequence 9:16, 1:1 or 4:5: the shots are then letterboxed, and
+`fablecut_reframe {}` fits them and follows the subject. The reply lists each
+moment (its source, times, length, why it was picked and its score). A version
+is kept first. In the editor: the sequence menu's **Highlights…** (15, 30, 60 or
+90 s; a canvas, and **Follow the subject in each shot** on another shape)
+reads the selected video clips, else every video clip on the timeline, with
+progress and **Cancel**.
+
 Recipes: **vertical cut of a finished edit** — `fablecut_reframe {aspect:"9:16"}`,
 then check the titles with `fablecut_frame`; by hand, `addSequence {name:"Reel 9:16",
 from:"open", width:1080, height:1920}`, then `inSequence` ops to re-position
 or re-scale the shots and `setProject {delivery:"instagram-reels"}` in it;
-**cut-downs** — duplicate the edit as "30 s" and "15 s" and tighten each with
+**reel from a long video** — `fablecut_highlights {duration:30, aspect:"9:16"}`,
+then `fablecut_reframe {}`, music on an audio track and `fablecut_beats {clipId:<the music>, retime:{every:2}}`,
+then captions; **cut-downs** — duplicate the edit as "30 s" and "15 s" and tighten each with
 the trim ops inside `inSequence`; **selects reel** — an empty sequence the
 user drops favourite takes on, cut into the edit from the Source monitor.
 

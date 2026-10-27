@@ -41,6 +41,7 @@
     { "name": "fablecut_silence", "description": "Find the pauses in speech and cut them out, keeping linked stems in step and a little quiet beside each phrase" },
     { "name": "fablecut_beats", "description": "Find the music's beat (BPM, a steady beat grid, the drop), mark it, snap cuts to it, or re-cut a track's clips on it" },
     { "name": "fablecut_reframe", "description": "Reframe for another shape (9:16, 1:1, 4:5): a copy of the sequence on that canvas whose shots follow the subject" },
+    { "name": "fablecut_highlights", "description": "The best moments of long footage (movement, sound, a clear picture) cut into a short edit in a new sequence" },
     { "name": "fablecut_transcribe", "description": "Transcribe speech word by word in the browser, read it on the timeline, find a phrase and cut it out (text-based editing)" },
     { "name": "fablecut_captions", "description": "Make captions from the transcript (subtitle, karaoke, word highlight, word pop), timed word by word; export or import SRT / WebVTT" },
     { "name": "fablecut_proxy", "description": "Make, check or delete proxies: light copies of heavy footage the editor plays while editing (export always uses the originals)" },

@@ -11925,12 +11925,13 @@ function openSequence(id) {
   return true;
 }
 /** Add a sequence ({name?, from?, width?, height?}) and open it. */
-function newSequence(opts) {
+function newSequence(opts, clips = null) {
   if (state.exporting) { toast("Wait for the export to finish"); return; }
   if (state.compCtx) exitComp(state.compCtx.path.length);
   const doc = projectJSONHere();
   let s;
   try { s = SeqLib.add(doc, opts); } catch (e) { toast(e.message); return; }
+  if (clips) s.clips = clips;   // an empty sequence that starts with these (Highlights)
   project.sequences = doc.sequences; project.sequence = doc.sequence;
   if (openSequence(s.id)) { toast(`New sequence “${s.name}” · ${s.width}×${s.height}`); return true; }
   scheduleSave(); syncCompCrumb(); toast(`New sequence “${s.name}” added — open it from the sequence menu`);
@@ -12011,6 +12012,8 @@ function showSequenceMenu(x, y) {
   }
   sep();
   item(`<span>New sequence…</span>`, () => promptNewSequence(x, y));
+  item(`<span>Highlights…</span>`, () => promptHighlights(x, y),
+    state.compCtx ? "Close the composition first" : !project.clips.some((c) => c.kind === "video") ? "Put video on the timeline first" : null);
   item(`<span>Duplicate “${escapeHtml(open.name)}”</span>`, () => newSequence({ from: "open" }));
   item(`<span>Rename “${escapeHtml(open.name)}”…</span>`, () => promptBinText(x, y, "Sequence name", open.name, (v) => renameSequence(openId, v), { max: 120, ok: "Rename" }));
   item(`<span>Delete “${escapeHtml(open.name)}”…</span>`, (b) => {
@@ -12065,6 +12068,49 @@ function promptNewSequence(x, y) {
   showPopover(pop, x, y);
   const input = pop.querySelector("#seqNewName");
   input.focus(); input.select();
+}
+/** Highlights: the best moments of this timeline's video (or the selected clips), cut into a new sequence. */
+function promptHighlights(x, y) {
+  const sel = selectedClips().filter((c) => c.kind === "video");
+  const from = sel.length ? sel : null;
+  const n = Highlights.sourcesOf({ clips: project.clips, disabledTracks: [...state.disabledTracks] }, from && from.map((c) => c.id)).take.length;
+  const sizes = [{ label: `Same as “${openSequenceName()}” · ${project.width}×${project.height}`, w: 0, h: 0 }, ...ASPECT_PRESETS];
+  const pop = document.createElement("div");
+  pop.className = "ctx-menu bin-pop seq-new";
+  pop.innerHTML = `<label class="bin-pop-label" for="hlLen">Highlights</label>
+    <select id="hlLen" class="bin-pop-input">${[15, 30, 60, 90].map((s) => `<option value="${s}" ${s === 30 ? "selected" : ""}>${s} s</option>`).join("")}</select>
+    <label class="bin-pop-label" for="hlSize">Canvas</label>
+    <select id="hlSize" class="bin-pop-input">${sizes.map((s, i) => `<option value="${i}">${escapeHtml(s.label)}</option>`).join("")}</select>
+    <label class="seq-new-copy" title="Each shot is fitted to the new shape and keyed to keep what matters in it in view (Inspector → Reframe)"><input type="checkbox" id="hlFollow" checked> Follow the subject in each shot</label>
+    <div class="bin-pop-hint" data-hl-status>From ${from ? `the ${n} selected video clip${n === 1 ? "" : "s"}` : `every video clip on this timeline (${n})`}: the moments with the most movement and sound, in story order, never across a cut. They go into a new sequence; this one stays as it is.</div>
+    <div class="bin-pop-btns"><button type="button" class="btn tiny" data-cancel>Cancel</button><button type="button" class="btn tiny accent" data-ok ${n ? "" : "disabled"}>Make</button></div>`;
+  const size = () => sizes[+pop.querySelector("#hlSize").value] || sizes[0];
+  const reshaped = () => { const s = size(); return !!(s.w && s.w * project.height !== s.h * project.width); };
+  const syncFollow = () => { pop.querySelector("#hlFollow").closest("label").hidden = !reshaped(); };
+  pop.querySelector("#hlSize").addEventListener("change", syncFollow);
+  syncFollow();
+  const status = pop.querySelector("[data-hl-status]");
+  const ok = async () => {
+    if (highlightRun.busy) return;
+    const okBtn = pop.querySelector("[data-ok]");
+    okBtn.disabled = true;
+    pop.querySelectorAll("select, input").forEach((el) => { el.disabled = true; });
+    const duration = +pop.querySelector("#hlLen").value, s = size();
+    const made = await makeHighlights(from, { duration, size: s.w ? { width: s.w, height: s.h } : null, follow: reshaped() && pop.querySelector("#hlFollow").checked,
+      progress: (f) => { status.textContent = `Looking at the footage… ${Math.round(f * 100)}%`; }, cancelled: () => !pop.isConnected });
+    if (pop.isConnected) hideTrackCtxMenu();
+    return made;
+  };
+  pop.querySelector("[data-ok]").addEventListener("click", ok);
+  // closing the dialog stops a run that has started
+  pop.querySelector("[data-cancel]").addEventListener("click", () => { highlightRun.cancel = true; hideTrackCtxMenu(); });
+  pop.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && e.target.tagName !== "SELECT") { e.preventDefault(); ok(); }
+    else if (e.key === "Escape") { e.preventDefault(); highlightRun.cancel = true; hideTrackCtxMenu(); }
+    e.stopPropagation();
+  });
+  showPopover(pop, x, y);
+  pop.querySelector("#hlLen").focus();
 }
 function initSequencesUi() {
   const b = $("btnSequences");
@@ -13196,7 +13242,7 @@ const Reframe = self.FableCutReframe;
 const reframeRun = { busy: false, cancel: false, done: 0, of: 0 };
 /** RGB frames of clip c (SAMPLE_FPS across its window; one for a still), w×h each. With `onRgb`,
  *  each frame goes to it as it is read and nothing is kept (a long shot needn't sit in memory). */
-async function sampleClipFrames(c, w, h, onFrame, onRgb) {
+async function sampleClipFrames(c, w, h, onFrame, onRgb, { fps = Reframe.SAMPLE_FPS, cancelled = () => reframeRun.cancel } = {}) {
   const m = getMedia(c.mediaId);
   const cv = document.createElement("canvas"); cv.width = w; cv.height = h;
   const x = cv.getContext("2d", { willReadFrequently: true });
@@ -13222,11 +13268,11 @@ async function sampleClipFrames(c, w, h, onFrame, onRgb) {
       el.addEventListener("loadeddata", () => { clearTimeout(tm); res(); }, { once: true });
       el.addEventListener("error", () => { clearTimeout(tm); rej(new Error("the video could not be read")); }, { once: true });
     });
-    const n = Math.max(1, Math.floor(c.duration * clipSpeed(c) * Reframe.SAMPLE_FPS + 1e-6));
+    const n = Math.max(1, Math.floor(c.duration * clipSpeed(c) * fps + 1e-6));
     const frames = [];
     for (let i = 0; i < n; i++) {
-      if (reframeRun.cancel) break;
-      await seekFrame(el, Math.max(0, (c.in || 0) + i / Reframe.SAMPLE_FPS) + 0.001);
+      if (cancelled()) break;
+      await seekFrame(el, Math.max(0, (c.in || 0) + i / fps) + 0.001);
       x.drawImage(el, 0, 0, w, h);
       if (onRgb) onRgb(rgb()); else frames.push(rgb());
       if (onFrame) onFrame(i + 1, n);
@@ -13324,6 +13370,80 @@ async function reframeClips(clips, { follow = true, smooth = 0.5 } = {}) {
   toast(`Reframed ${plans.length} shot${plans.length === 1 ? "" : "s"} for ${canvas.width}×${canvas.height}` +
     (follow ? ` · ${moving} follow${moving === 1 ? "s" : ""} the subject` : "") + (skip.length ? ` · ${skip.length} left as placed` : ""));
   return plans;
+}
+/* ── Highlights: the best moments of the timeline's video, cut into a new sequence. The frames
+   come from a private <video> (2 a second, small), the sound from the decoded file — the same
+   reading, scores and picks as fablecut_highlights. ── */
+const Highlights = self.FableCutHighlights;
+const highlightRun = { busy: false, cancel: false };
+const HL_AUDIO_MAX_SECS = 30 * 60;
+async function readHighlightSource(c, cancelled, onFrame) {
+  const src = await pictureSize(c);
+  const w = Highlights.SAMPLE_W, h = Math.max(8, Math.round(w * src.height / src.width / 2) * 2);
+  const pic = Highlights.picture(w, h), sp = clipSpeed(c);
+  await sampleClipFrames(c, w, h, onFrame, (f) => pic.push(f), { fps: Highlights.PIC_FPS, cancelled });
+  let aud = null;
+  const media = getMedia(c.mediaId);
+  // stopped: the caller drops it; no audio stream: nothing to decode (a failed decode would fetch the file again next time);
+  // a file longer than HL_AUDIO_MAX_SECS isn't decoded whole in a browser tab: its picture decides
+  const done = () => ({ id: c.id, len: c.duration * sp, pic, aud, speed: sp });
+  if (cancelled() || !media || media.audioChannels === 0 || +media.duration > HL_AUDIO_MAX_SECS) return done();
+  try {
+    const buf = await getAudioBuffer(media);
+    const a0 = Math.max(0, Math.floor((c.in || 0) * buf.sampleRate));
+    const a1 = Math.min(buf.length, Math.ceil(((c.in || 0) + c.duration * sp) * buf.sampleRate));
+    if (a1 > a0) {
+      const chs = [];
+      for (let k = 0; k < buf.numberOfChannels; k++) chs.push(buf.getChannelData(k).subarray(a0, a1));
+      aud = Highlights.sound(buf.sampleRate);
+      aud.push(FableCutBeats.mono(chs));
+    }
+  } catch { aud = null; }   // no sound to read: the picture alone decides
+  return done();
+}
+/** Read `clips` (default: every video clip on this timeline), pick the moments, and open them as a
+ *  new sequence. Nothing changes if it is cancelled or the timeline changes meanwhile. */
+async function makeHighlights(clips, { duration = 30, shot, size = null, follow = false, progress, cancelled: stop } = {}) {
+  if (!Highlights) { toast("Highlights module missing — reload the editor"); return null; }
+  if (highlightRun.busy) { toast("Already making highlights — wait for it, or Cancel"); return null; }
+  if (state.exporting) { toast("Wait for the export to finish"); return null; }
+  const { take, skip } = Highlights.sourcesOf({ clips: project.clips, disabledTracks: [...state.disabledTracks] }, clips && clips.map((c) => c.id));
+  if (!take.length) { toast(skip.length ? `Nothing to look at: ${skip[0].id} is ${skip[0].why}` : "Put video on the timeline first"); return null; }
+  Object.assign(highlightRun, { busy: true, cancel: false });
+  const gen = runtime.projectGen, seqId = SeqLib.activeId(seqRoot());
+  const cancelled = () => highlightRun.cancel || gen !== runtime.projectGen || (stop && stop());
+  const stamp = (c) => { const m = getMedia(c.mediaId) || {}; return JSON.stringify([c.mediaId, m.src, c.track, c.start, c.in, c.duration, c.props?.speed ?? 1, c.linkGroup || null]); };
+  const stamps = new Map(take.map((c) => [c.id, stamp(c)]));
+  const sources = [];
+  let failed = 0;
+  try {
+    for (let i = 0; i < take.length && !cancelled(); i++) {
+      try { sources.push(await readHighlightSource(take[i], cancelled, (k, n) => progress && progress((i + k / n) / take.length))); }
+      catch { failed++; }
+    }
+  } finally { highlightRun.busy = false; }
+  if (cancelled()) { highlightRun.cancel = false; toast("Highlights stopped — nothing changed"); return null; }
+  if (!sources.length) { toast("Couldn't read the footage"); return null; }
+  let picks;
+  try { picks = Highlights.pick(sources, { duration, shot }); } catch (e) { toast(e.message); return null; }
+  if (!picks.length) { toast("No moments long enough to use"); return null; }
+  // the picks name clips by id and read their in points: the timeline must be as it was read
+  // (and no video was added or taken away: the clips it would read now are the ones it read)
+  const now = Highlights.sourcesOf({ clips: project.clips, disabledTracks: [...state.disabledTracks] }, clips && clips.map((c) => c.id)).take;
+  if (seqId !== SeqLib.activeId(seqRoot()) || JSON.stringify(now.map((c) => c.id)) !== JSON.stringify(take.map((c) => c.id)) ||
+      take.some((c) => { const cur = getClip(c.id); return !cur || stamp(cur) !== stamps.get(c.id); })) {
+    toast("The timeline changed while reading — nothing was made; run it again");
+    return null;
+  }
+  const name = `Highlights ${duration} s`;
+  const ops = Highlights.ops(projectJSONHere(), picks, { name, ...(size || {}) });
+  const opened = newSequence({ name, from: "empty", ...(size || {}) }, ops.slice(1).map((o) => o.clip));
+  if (opened === undefined) return null;   // nothing was made: newSequence said why
+  if (opened && follow) reframeClips(null, { follow: true });
+  const total = picks.reduce((n, p) => n + p.len, 0);
+  toast(`Highlights: ${picks.length} moments, ${total.toFixed(1)} s` + (failed ? ` · ${failed} clip${failed === 1 ? "" : "s"} couldn't be read` : "") +
+    (total < duration - 0.5 ? " — the footage has no more distinct moments" : ""));
+  return picks;
 }
 /**
  * Follow `box` (picture fractions {x, y, w, h}) through clip c from clip-local

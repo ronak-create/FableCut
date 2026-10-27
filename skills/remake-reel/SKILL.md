@@ -44,6 +44,11 @@ as cuts, raise it.
 7. Posting it vertically: `fablecut_reframe {aspect:"9:16"}` makes a copy whose
    shots follow their subject.
 
+No reference, just long footage? `fablecut_highlights {duration:30}` picks its
+best moments (movement, sound, a clear picture) into a new sequence; then
+steps 6 and 7. Look at the picks with `fablecut_frame {time}` and swap any
+that miss.
+
 Full recipe, including the exact keyframe shapes for speed ramps and impact
 layers: `fablecut_docs {section:"Remake a reference video"}` and
 `fablecut_docs {section:"Recipes"}`.

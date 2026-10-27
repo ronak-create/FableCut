@@ -75,6 +75,10 @@ from:"open", width?, height?}` and edit it with `{op:"inSequence", sequence,
 ops:[…]}` — the user's editor stays on what they are watching. Open one
 (`openSequence`) only when they ask, or to export it.
 
+For "a 30 s reel from this footage", `fablecut_highlights {duration:30}` picks
+the best moments into a new sequence (it opens it); look at them with
+`fablecut_frame` before building on them.
+
 For a vertical (or square) version of a finished edit, `fablecut_reframe
 {aspect:"9:16"}` does the copy for you: a new sequence on that canvas whose
 full-frame shots follow their subject with ordinary position keys. It opens
