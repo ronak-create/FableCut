@@ -554,6 +554,8 @@ const state = {
   selIds: new Set(),     // full multi-selection (includes selId)
   silence: null,         // silences found (Inspector → Silence): {ids, spans, sig}, shown on the timeline until cut or cleared
   silenceBusy: false,    // a Find is listening (the Inspector offers Cancel)
+  beats: null,           // the beat Find beats heard (Inspector → Beats): {clipId, sig, a, grid, bpm, drop}, ticks on the timeline
+  beatsBusy: false,      // Find beats is listening
   trackSize: "l",        // s | m | l — timeline track density preset
   connected: false, exporting: false,
   rendering: false,      // fast (server/ffmpeg) export in progress
@@ -5019,6 +5021,7 @@ function rebuildClips() {
   }
   paintAudioOverlaps();
   paintSilences();
+  paintBeats();
   state.dirtyTimeline = false;
   updateWorkArea();
 }
@@ -5037,6 +5040,38 @@ function paintSilences() {
       el.style.left = (sp.from * state.pps) + "px";
       el.style.width = Math.max(2, (sp.to - sp.from) * state.pps) + "px";
       el.title = `Silence ${fmt(sp.from)} → ${fmt(sp.to)} (${(sp.to - sp.from).toFixed(2)} s) · Inspector → Silence → Cut`;
+      row.appendChild(el);
+    }
+  }
+}
+/* The beat Find beats heard: a tick on the music's lane and every video lane. */
+function paintBeats() {
+  const s = state.beats;
+  if (!s) return;
+  if (s.sig !== beatsSig(getClip(s.clipId))) { state.beats = null; return; }
+  const lanes = new Set([getClip(s.clipId).track, ...TRACKS.filter((t) => t.kind === "video").map((t) => t.id)]);
+  const g = s.grid, n = g.length;
+  if (!n) return;
+  // a steady grid is one striped band per lane, however long the song; onsets without a tempo are ticks
+  const per = n > 1 ? (g[n - 1] - g[0]) / (n - 1) : 0;
+  const steady = n > 2 && per > 0 && g.every((t, i) => !i || Math.abs(t - g[i - 1] - per) < 0.004);
+  for (const id of lanes) {
+    const row = els.tracks.querySelector(`[data-track="${id}"]`);
+    if (!row) continue;
+    if (steady) {
+      const el = document.createElement("div");
+      el.className = "beat-band";
+      const step = per * state.pps;
+      el.style.left = (g[0] * state.pps - 0.5) + "px";
+      el.style.width = ((g[n - 1] - g[0]) * state.pps + 1) + "px";
+      el.style.backgroundImage = `repeating-linear-gradient(to right, var(--beat-tick) 0 1px, transparent 1px ${step}px)`;
+      row.appendChild(el);
+      continue;
+    }
+    for (const t of g.slice(0, 600)) {
+      const el = document.createElement("div");
+      el.className = "beat-tick";
+      el.style.left = (t * state.pps) + "px";
       row.appendChild(el);
     }
   }
@@ -6718,6 +6753,24 @@ function renderInspector(lite) {
       ${found ? `<div class="insp-note">${found.spans.length} silence${found.spans.length === 1 ? "" : "s"}, ${FableCutSilence.total(found.spans).toFixed(1)} s, marked on the timeline. Cut extracts them on the targeted tracks — lock the music bed first to keep it running.</div>` : ""}
     </div>`;
   }
+  if ((c.kind === "video" || c.kind === "audio") && typeof FableCutBeats !== "undefined") {
+    const bt = state.beats && state.beats.clipId === c.id ? state.beats : null, bs = beatsSettings();
+    const lanes = TRACKS.filter((t) => t.kind === "video" && project.clips.some((x) => x.track === t.id)).map((t) => t.id)
+      .sort((x, y) => (+x.slice(1) || 0) - (+y.slice(1) || 0));
+    html += `<div class="insp-section"><h3>Beats</h3>
+      ${row("", state.beatsBusy
+        ? `<span class="insp-ctrls"><span style="opacity:.75">Listening…</span>
+        <button type="button" class="btn tiny" data-beat-clear title="Stop listening">Cancel</button></span>`
+        : `<span class="insp-ctrls"><button type="button" class="btn tiny" data-beat-find title="Listen to this clip's music and show its beat on the timeline">Find beats</button>
+        ${bt ? `<button type="button" class="btn tiny" data-beat-clear title="Hide the beat">Clear</button>` : ""}</span>`)}
+      ${bt ? `<div class="insp-note">${bt.bpm != null ? bt.bpm + " BPM · " : ""}${bt.grid.length} beats, ${fmt(bt.grid[0])} → ${fmt(bt.grid[bt.grid.length - 1])}${bt.drop != null ? ` · the drop at ${fmt(bt.drop)}` : ""}</div>
+      ${row("", `<span class="insp-ctrls"><button type="button" class="btn tiny" data-beat-mark title="A cyan marker on every beat (other markers stay)">Mark</button>
+        <button type="button" class="btn tiny" data-beat-snap title="Roll each cut on the targeted video tracks to the nearest beat — nothing else moves">Snap cuts</button></span>`)}
+      ${lanes.length ? row("Re-cut", `<span class="insp-ctrls"><select data-beat-track title="The track whose clips go on the beat" style="width:auto;min-width:4.2em">${lanes.map((id) => `<option>${id}</option>`).join("")}</select>
+        every <select data-beat-every title="Beats per shot" style="width:auto;min-width:3.6em">${FableCutBeats.EVERY.map((n) => `<option value="${n}" ${n === bs.every ? "selected" : ""}>${n}</option>`).join("")}</select> beats</span>`) +
+        row("", `<span class="insp-ctrls"><button type="button" class="btn tiny" data-beat-retime title="Lay that track's clips back to back on the beat, from the music's start (one undo step)">Re-cut</button></span>`) : ""}` : ""}
+    </div>`;
+  }
   if (c.kind === "audio" && typeof FableCutFx !== "undefined") {
     html += `<div class="insp-section" data-fx-section><h3>Audio effects</h3>${fxEditorHtml(c.fx, playheadOverClip(c) ? state.time - c.start : null)}</div>`;
   }
@@ -6944,6 +6997,16 @@ function renderInspector(lite) {
     findSilences(sel.length ? sel : [c]);
   });
   els.inspector.querySelector("[data-sil-cut]")?.addEventListener("click", cutSilences);
+  els.inspector.querySelector("[data-beat-find]")?.addEventListener("click", () => findBeats(c));
+  els.inspector.querySelector("[data-beat-clear]")?.addEventListener("click", clearBeats);
+  els.inspector.querySelector("[data-beat-mark]")?.addEventListener("click", () => beatsAction({ markers: true }));
+  els.inspector.querySelector("[data-beat-snap]")?.addEventListener("click", () => beatsAction({ snap: true }));
+  els.inspector.querySelector("[data-beat-every]")?.addEventListener("change", (e) => {
+    try { localStorage.setItem(BEATS_KEY, JSON.stringify({ every: +e.target.value })); } catch { }
+  });
+  els.inspector.querySelector("[data-beat-retime]")?.addEventListener("click", () => beatsAction({ retime: {
+    track: els.inspector.querySelector("[data-beat-track]")?.value,
+    every: +(els.inspector.querySelector("[data-beat-every]")?.value || 2) } }));
   els.inspector.querySelector("[data-sil-clear]")?.addEventListener("click", clearSilences);
   els.inspector.querySelector("[data-norm-target]")?.addEventListener("change", (e) => {
     try { localStorage.setItem(NORMALIZE_KEY, e.target.value); } catch { }
@@ -9351,6 +9414,108 @@ function clearSilences() {
   state.silenceBusy = false;
   state.dirtyTimeline = true;
   renderInspector();
+}
+
+/* ── Beats (beats.js): the music's tempo and beat grid, ticks on the timeline, and
+   edits on it — mark, snap the cuts, re-cut a track. The same plan and ops as
+   fablecut_beats; here each action is one undo step. ── */
+const BEATS_KEY = "fablecut-beats";
+function beatsSettings() {
+  let o = {};
+  try { o = JSON.parse(localStorage.getItem(BEATS_KEY) || "{}"); } catch { }
+  return { every: FableCutBeats.EVERY.includes(+o.every) ? +o.every : 2 };
+}
+/** What a found beat stands on: the clip's place, window, file and speed, and the frame rate. */
+function beatsSig(c) {
+  if (!c) return "";
+  // the open project and sequence too: a duplicate with the same clip ids must not inherit this beat
+  return JSON.stringify([runtime.projectId ?? null, SeqLib.activeId(seqRoot()), !!state.compCtx, project.fps, c.id, c.start, c.in, c.duration,
+    getMedia(c.mediaId)?.src ?? null, c.props?.speed ?? 1, c.keyframes?.speed ?? null]);
+}
+/** The project as beats.js reads it: the timeline plus the track switches. */
+function beatsDoc() {
+  return { ...project, tracks: TRACKS, lockedTracks: [...state.lockedTracks], untargetedTracks: [...state.untargetedTracks] };
+}
+let beatsGen = 0;
+async function findBeats(c) {
+  if (typeof FableCutBeats === "undefined") { toast("Beats module missing — reload the editor"); return; }
+  if (!c || (c.kind !== "audio" && c.kind !== "video")) { toast("Select the music clip to find its beat"); return; }
+  if (FableCutBeats.ramped(c)) { toast("This clip has a speed ramp — beats follow music playing at a steady speed"); return; }
+  const m = getMedia(c.mediaId);
+  if (!m) return;
+  const gen = ++beatsGen, sig = beatsSig(c);
+  state.beats = null; state.beatsBusy = true; state.dirtyTimeline = true;
+  renderInspector();
+  toast("Listening for the beat…");
+  try {
+    const buf = await getAudioBuffer(m);
+    await new Promise((res) => setTimeout(res, 0));   // let "Listening…" paint and Cancel land before the analysis runs
+    if (gen !== beatsGen) return;
+    const a0 = clamp(Math.floor((c.in || 0) * buf.sampleRate), 0, buf.length);
+    const a1 = clamp(Math.ceil(mediaTimeAt(c, clipEnd(c)) * buf.sampleRate), a0, buf.length);
+    const chs = [];
+    for (let ch = 0; ch < buf.numberOfChannels; ch++) chs.push(buf.getChannelData(ch).subarray(a0, a1));
+    const a = FableCutBeats.analyze(FableCutBeats.resample(FableCutBeats.mono(chs), buf.sampleRate));
+    const abs = { beats: a.beats.map((t) => t + (c.in || 0)), bpm: a.bpm, drop: a.drop != null ? a.drop + (c.in || 0) : null };
+    if (beatsSig(getClip(c.id)) !== sig) { toast("The clip changed while listening — find the beat again"); return; }
+    const r = FableCutBeats.plan(beatsDoc(), getClip(c.id), abs, {});
+    state.beats = r.grid.length ? { clipId: c.id, sig, a: abs, grid: r.grid, bpm: r.bpm, drop: r.drop } : null;
+    toast(r.grid.length ? `${r.bpm} BPM · ${r.grid.length} beats marked on the timeline` + (r.drop != null ? ` · the drop at ${fmt(r.drop)}` : "")
+      : "No steady beat found in this clip");
+  } catch (e) {
+    toast("Couldn't read this clip's audio: " + (e?.message || e));
+  } finally {
+    if (gen === beatsGen) { state.beatsBusy = false; state.dirtyTimeline = true; renderInspector(); }
+  }
+}
+function clearBeats() {
+  beatsGen++;
+  state.beats = null; state.beatsBusy = false; state.dirtyTimeline = true;
+  renderInspector();
+}
+/** markers / snap / retime on the found beat: beats.js plans, the editor's own edits apply it. One undo step. */
+function beatsAction(acts) {
+  const s = state.beats, c = s && getClip(s.clipId);
+  if (!s || !c || s.sig !== beatsSig(c)) { state.beats = null; renderInspector(); toast("The music clip changed — find the beat again"); return; }
+  let r;
+  try { r = FableCutBeats.plan(beatsDoc(), c, s.a, acts); }
+  catch (e) { toast(e.message); return; }
+  if (!r.ops.length) { toast(r.done.join(" · ") || "Nothing to change"); return; }
+  const snap = undoSnapshot();
+  let rolls = 0, rolled = 0;
+  for (const op of r.ops) {
+    if (op.op === "setProject") project.markers = normalizeMarkers(op.set.markers);
+    else if (op.op === "roll") {
+      const x = getClip(op.id);
+      rolls++;
+      // what the roll really moved (a refusal is a string, a clamp a smaller number)
+      if (!x) continue;
+      // what this roll can touch: the clips on either side of the cut and their linked partners
+      const end = x.start + x.duration;
+      const next = project.clips.find((c) => c !== x && c.track === x.track && Math.abs(c.start - end) < 1e-3);
+      const touched = withLinked(next ? [x, next] : [x]);
+      const before = new Map(touched.map((c) => [c.id, JSON.stringify(c)]));
+      const d = EDIT.rollEdit(x, op.side, op.delta);
+      if (typeof d === "number" && Math.abs(d - op.delta) < 1e-3) rolled++;
+      // a roll that couldn't reach the beat (clamped, refused) is undone exactly: the cut stays where it was
+      else project.clips = project.clips.map((c) => (before.has(c.id) ? JSON.parse(before.get(c.id)) : c));
+    } else if (op.op === "updateClip") {
+      const x = getClip(op.id);
+      if (x) for (const [k, v] of Object.entries(op.set)) { if (v === null) delete x[k]; else x[k] = v; }
+    }
+  }
+  if (undoSnapshot() === snap) {
+    state.dirtyTimeline = true; renderInspector();
+    toast(acts.markers ? "No new beats to mark: every beat already has a marker" : "Nothing could move: those cuts have no spare footage to reach the beat");
+    return;
+  }
+  pushUndo(snap);
+  pruneSelection();
+  state.dirtyTimeline = true;
+  scheduleSave();
+  renderInspector();
+  const done = r.done.map((d) => (rolls && rolled < rolls && /^snapped /.test(d) ? d.replace(/^snapped \d+/, "snapped " + rolled) : d));
+  toast(done.map((d) => d[0].toUpperCase() + d.slice(1)).join(" · "));
 }
 async function autoDuckClips(clips, { under = null, amount = duckAmount(), threshold = -40 } = {}) {
   if (typeof FableCutDucking === "undefined") { toast("Ducking module missing — reload the editor"); return; }

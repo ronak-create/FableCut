@@ -15,6 +15,7 @@ const fs = require("fs");
 const path = require("path");
 const { spawn } = require("child_process");
 const Stats = require("./frame-stats");
+const Beats = require("./beats");
 
 const SR = 22050;      // analysis sample rate
 const HOP = 512;       // onset-envelope hop size (~23 ms)
@@ -86,103 +87,9 @@ async function decodePCM(file) {
   return new Int16Array(buf.buffer, buf.byteOffset, Math.floor(buf.length / 2));
 }
 
+/* beats, BPM, energy curve and drop: beats.js, shared with the editor's Beats section and fablecut_beats */
 function analyzeAudio(pcm) {
-  const nFrames = Math.max(0, Math.floor((pcm.length - WIN) / HOP));
-  if (nFrames < 20) return { beats: [], bpm: null, energy: { step: 0.5, values: [] }, drop: null };
-
-  // frame energies
-  const E = new Float64Array(nFrames);
-  for (let i = 0; i < nFrames; i++) {
-    let s = 0;
-    const o = i * HOP;
-    for (let j = 0; j < WIN; j++) { const x = pcm[o + j] / 32768; s += x * x; }
-    E[i] = s / WIN;
-  }
-
-  // onset envelope: energy rise vs. trailing average
-  const O = new Float64Array(nFrames);
-  for (let i = 1; i < nFrames; i++) {
-    let m = 0, k = 0;
-    for (let j = Math.max(0, i - 8); j < i; j++) { m += E[j]; k++; }
-    O[i] = Math.max(0, E[i] - m / k);
-  }
-  let oMax = 0;
-  for (let i = 0; i < nFrames; i++) if (O[i] > oMax) oMax = O[i];
-  if (oMax > 0) for (let i = 0; i < nFrames; i++) O[i] /= oMax;
-
-  // peak-pick beats: local max, above an adaptive floor, min 0.25 s apart
-  const frameT = (i) => Math.round(((i * HOP + WIN / 2) / SR) * 1000) / 1000;
-  const minGap = Math.round(0.25 * SR / HOP);
-  const halfWin = Math.round(1.0 * SR / HOP);
-  const beats = [];
-  let last = -minGap;
-  for (let i = 3; i < nFrames - 3; i++) {
-    if (O[i] < 0.05) continue;
-    let isMax = true;
-    for (let j = -3; j <= 3; j++) if (O[i + j] > O[i]) { isMax = false; break; }
-    if (!isMax) continue;
-    let m = 0, k = 0;
-    for (let j = Math.max(0, i - halfWin); j < Math.min(nFrames, i + halfWin); j++) { m += O[j]; k++; }
-    if (O[i] < (m / k) * 1.5) continue;
-    if (i - last < minGap) continue;
-    beats.push(frameT(i));
-    last = i;
-  }
-
-  // BPM: autocorrelation of the onset envelope over 60–200 BPM lags,
-  // with a mild prior toward ~120; fold octaves into 70–180.
-  let bpm = null;
-  const lagMin = Math.round(60 / 200 * SR / HOP), lagMax = Math.round(60 / 60 * SR / HOP);
-  let best = 0, bestLag = 0;
-  for (let lag = lagMin; lag <= Math.min(lagMax, nFrames - 1); lag++) {
-    let s = 0;
-    for (let i = 0; i + lag < nFrames; i++) s += O[i] * O[i + lag];
-    const cand = 60 / (lag * HOP / SR);
-    const w = Math.exp(-0.5 * Math.pow(Math.log2(cand / 120) / 1.0, 2));
-    if (s * w > best) { best = s * w; bestLag = lag; }
-  }
-  if (bestLag) {
-    bpm = 60 / (bestLag * HOP / SR);
-    while (bpm < 70) bpm *= 2;
-    while (bpm > 180) bpm /= 2;
-    // refine: if the picked beats are regular, the median inter-beat interval
-    // is a much finer tempo estimate than the autocorrelation lag grid
-    if (beats.length >= 6) {
-      const gaps = beats.slice(1).map((t, i) => t - beats[i]).sort((a, b) => a - b);
-      const med = gaps[Math.floor(gaps.length / 2)];
-      const spread = gaps[Math.floor(gaps.length * 0.85)] - gaps[Math.floor(gaps.length * 0.15)];
-      if (med > 0 && spread < med * 0.15) {
-        // full span / count averages out the hop-grid quantization of each beat
-        let refined = 60 / ((beats[beats.length - 1] - beats[0]) / (beats.length - 1));
-        while (refined < 70) refined *= 2;
-        while (refined > 180) refined /= 2;
-        if (Math.abs(refined - bpm) / bpm < 0.15) bpm = refined;
-      }
-    }
-    bpm = Math.round(bpm * 10) / 10;
-  }
-
-  // loudness curve, one value per 0.5 s, normalized 0–100
-  const step = 0.5;
-  const perStep = Math.round(step * SR / HOP);
-  const values = [];
-  for (let i = 0; i < nFrames; i += perStep) {
-    let s = 0, k = 0;
-    for (let j = i; j < Math.min(nFrames, i + perStep); j++) { s += Math.sqrt(E[j]); k++; }
-    values.push(k ? s / k : 0);
-  }
-  const vMax = Math.max(...values, 1e-9);
-  const energy = values.map((v) => Math.round(v / vMax * 100));
-
-  // the drop: biggest sustained energy rise (skip the very start)
-  let drop = null, bestRise = 0;
-  for (let i = 2; i < energy.length - 1; i++) {
-    const before = (energy[i - 2] + energy[i - 1]) / 2;
-    const after = (energy[i] + energy[Math.min(i + 1, energy.length - 1)]) / 2;
-    if (after - before > bestRise && after > 55) { bestRise = after - before; drop = Math.round(i * step * 10) / 10; }
-  }
-
-  return { beats, bpm, energy: { step, values: energy }, drop };
+  return Beats.analyze(pcm, { scale: 1 / 32768 });
 }
 
 /* ── Extract the reference's music track into its own audio file ── */
