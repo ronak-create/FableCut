@@ -127,6 +127,10 @@ same time.
   Strong) measures the file's noise floor and renders a cleaned copy with
   ffmpeg; the clip's audio switches to it and **Off** switches back. Agents
   use `fablecut_denoise`.
+- **Reframe** — make a 9:16, 1:1 or 4:5 copy of your edit whose shots follow
+  the subject: a virtual camera pans after what matters in each shot and
+  writes ordinary position keys you can still edit. From **New sequence…**
+  or the Inspector's **Reframe** section; agents use `fablecut_reframe`.
 - **Silence removal** — the inspector's **Silence** section (or right-click →
   **Find silences**) listens to a take and marks every pause on the timeline;
   **Cut** extracts them all in one undo step, keeping a little quiet beside
@@ -471,7 +475,7 @@ Three equivalent control surfaces:
    `fablecut_get_project`, `fablecut_set_project`, `fablecut_patch_project`,
    `fablecut_import_media`, `fablecut_analyze_reference`, `fablecut_frame`,
    `fablecut_encode_profiles`, `fablecut_normalize_audio`, `fablecut_auto_duck`,
-   `fablecut_denoise`, `fablecut_silence`, `fablecut_transcribe`, `fablecut_captions`, `fablecut_export`, `fablecut_scopes`, `fablecut_track`.
+   `fablecut_denoise`, `fablecut_silence`, `fablecut_reframe`, `fablecut_transcribe`, `fablecut_captions`, `fablecut_export`, `fablecut_scopes`, `fablecut_track`.
 
    FableCut is also published on the **official MCP registry** as
    [`io.github.ronak-create/fablecut`](https://registry.modelcontextprotocol.io/v0/servers?search=fablecut)

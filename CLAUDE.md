@@ -46,6 +46,8 @@ Every Claude Code session then has these tools:
   file and switches the clip's stems to it). See "Audio mix" below.
 - `fablecut_silence` — find the pauses in speech and, with `cut:true`, cut them out
   (extract on the targeted tracks, stems in step). See "Audio mix" below.
+- `fablecut_reframe` — reframe for another shape (9:16, 1:1, 4:5): a copy of the sequence
+  on that canvas whose shots follow the subject. See "Sequences" below.
 - `fablecut_transcribe` — turn speech into words with times (Whisper, in the browser),
   read them on the timeline, find a phrase and cut it out. See "Transcripts and
   text-based editing" below.
@@ -379,6 +381,7 @@ Examples in `library/svg/`: `sparkles.svg` (loop), `lower-third.svg`,
 | `fit` | "contain" | contain · cover (fill canvas, crop overflow) · stretch · none (native px) |
 | `cropL` `cropR` `cropT` `cropB` | 0 | % of the source trimmed off each edge |
 | `cornerRadius` | 0 | px, rounded corners — the PiP look |
+| `reframe` | — | set by Reframe (`"follow"` or `"centre"`): the clip's `fit` and position are Reframe's own, so running it again replaces them (see "Sequences") |
 | `flipH`, `flipV` | false | mirror |
 
 **Filter / color** (video/image/svg):
@@ -1874,7 +1877,32 @@ sequence.
   sequence's changes on its own, sequences added and removed, and which one
   was open.
 
-Recipes: **vertical cut of a finished edit** — `addSequence {name:"Reel 9:16",
+**Reframe** — `fablecut_reframe {aspect?:"9:16"|"1:1"|"4:5"|"16:9"|"4:3"|"2:3", name?, clipIds?, follow?, smooth?, force?}`
+makes a copy of the open sequence on that canvas shape and opens it (the
+project's shorter side kept: 1920×1080 → 1080×1920 for 9:16, 1080×1080 for
+1:1), so the original cut stays as it was; without `aspect` it reframes the
+open sequence on its own canvas. Each full-frame shot — a video or still that
+isn't moved, scaled, cropped or keyed by hand — gets `fit:"cover"` and an `x`
+(or `y`) that keeps its subject in view. Frames are sampled 5 times a second at
+96 px; the subject is where motion (against the shot's own movement, so a pan
+or a flicker doesn't count), detail and colour gather, pulled gently toward
+the centre. A virtual camera operator then holds still while the subject
+stays inside a dead zone and eases after it no faster than a pan speed, and
+the path becomes ordinary keyframes (thinned to within ~2 px), or one steady
+position. Shots with no clear subject are centred. Titles, picture-in-picture,
+clips placed or animated by hand and locked clips (unless `force:true`) are
+left alone and listed in the reply — check them on the new canvas with
+`fablecut_frame {time}`. `follow:false` only fits and centres; `smooth` 0…1
+(default 0.5) holds longer and pans slower as it rises. `props.reframe` marks
+what Reframe did, so running it again replaces its own keys. A version is kept
+first. In the editor: **New sequence…** with a copy of the open sequence on
+another shape has **Follow the subject in each shot**; the Inspector's
+**Reframe** section on a video or picture of another shape than the canvas
+has **Follow subject**, **Centre** and Lively / Balanced / Steady (the selected
+clips, one undo step, with Cancel).
+
+Recipes: **vertical cut of a finished edit** — `fablecut_reframe {aspect:"9:16"}`,
+then check the titles with `fablecut_frame`; by hand, `addSequence {name:"Reel 9:16",
 from:"open", width:1080, height:1920}`, then `inSequence` ops to re-position
 or re-scale the shots and `setProject {delivery:"instagram-reels"}` in it;
 **cut-downs** — duplicate the edit as "30 s" and "15 s" and tighten each with

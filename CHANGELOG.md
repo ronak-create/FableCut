@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Reframe.** Make a 9:16, 1:1 or 4:5 copy of an edit whose shots follow the
+  subject: each full-frame shot is fitted to the new shape and a virtual camera
+  pans after what matters in it (motion, detail and colour, held in a dead
+  zone, eased, no faster than a pan speed), written as ordinary position keys.
+  From **New sequence…** (Follow the subject in each shot) or the Inspector's
+  **Reframe** section (Follow subject, Centre, Lively / Balanced / Steady).
+  Titles and clips placed by hand are left alone. Agents use `fablecut_reframe`.
+
 ### Fixed
 - **Undo after an agent edit.** An edit that reaches the open editor from
   outside (an agent, another tab) is now an undo step of its own: Ctrl+Z takes
