@@ -13263,7 +13263,7 @@ async function reframeClips(clips, { follow = true, smooth = 0.5 } = {}) {
   const canvas = { width: project.width, height: project.height }, fps = projectFps() || 30;
   // what the plans were made for: if any of it changes while the footage is read, nothing is applied
   const gen = runtime.projectGen, seqId = SeqLib.activeId(seqRoot()), lanes = JSON.stringify([...state.lockedTracks]);
-  const stamp = (c) => JSON.stringify([c.mediaId, c.track, c.start, c.in, c.duration, !!c.locked, c.props || {}, c.keyframes || {}]);
+  const stamp = (c) => { const m = getMedia(c.mediaId) || {}; return JSON.stringify([c.mediaId, m.src, m.width, m.height, c.track, c.start, c.in, c.duration, !!c.locked, c.props || {}, c.keyframes || {}]); };
   const stamps = new Map(take.map((c) => [c.id, stamp(c)]));
   const plans = [];
   try {
@@ -13272,7 +13272,8 @@ async function reframeClips(clips, { follow = true, smooth = 0.5 } = {}) {
       reframeRun.frac = 0;
       const src = await pictureSize(c);
       let samples = null;
-      if (follow) {
+      const cover = Reframe.coverRect(src.width, src.height, canvas.width, canvas.height, 1);
+      if (follow && Math.max(cover.maxX, cover.maxY) > 0.5) {   // no room to pan: nothing to look at
         const w = Reframe.SAMPLE_W, h = Math.max(8, Math.round(w * src.height / src.width / 2) * 2);
         // each frame is looked at as it is read, between seeks, so Cancel answers and nothing piles up
         const tr = Reframe.tracker(w, h);

@@ -769,7 +769,8 @@ async function reframeTool(args) {
     }
     if (!src) { skip.push({ id: c.id, why: "couldn't read its size" }); continue; }
     let samples = null;
-    if (args.follow !== false) {
+    const cover = R.coverRect(src.width, src.height, canvas.width, canvas.height, 1);
+    if (args.follow !== false && Math.max(cover.maxX, cover.maxY) > 0.5) {   // no room to pan: nothing to look at
       const w = R.SAMPLE_W, h = Math.max(8, Math.round(w * src.height / src.width / 2) * 2);
       try { samples = R.subjectTrack(sampleFrames(file, c, w, h), w, h); }
       catch (e) { skip.push({ id: c.id, why: e.message }); continue; }
