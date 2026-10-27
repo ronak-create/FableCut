@@ -523,6 +523,114 @@ test("fablecut_silence reports the pauses in speech, then cuts them with the ste
   assert.match(bad.text, /no sound to listen to/);
 });
 
+test("fablecut_beats finds the tempo and the beat, marks it, snaps cuts to it and re-cuts a track on it", async (t) => {
+  const { spawnSync } = require("node:child_process");
+  const has = (b) => { try { return spawnSync(b, ["-version"], { stdio: "ignore" }).status === 0; } catch { return false; } };
+  if (!has("ffmpeg") || !has("ffprobe")) { t.skip("ffmpeg / ffprobe not installed"); return; }
+  const v = (id, start, duration) => ({ id, mediaId: "m_v", kind: "video", track: "V1", start, in: 2, duration, props: {} });
+  const project = seedProject({
+    fps: 30,
+    media: [
+      { id: "m_k", name: "kicks.wav", kind: "audio", src: "/media/kicks.wav", duration: 16 },
+      { id: "m_v", name: "gray.mp4", kind: "video", src: "/media/gray.mp4", duration: 20 },
+    ],
+    // the music plays from 1 s into the file at 2 s on the timeline: kicks at 0.25 + k·0.5 in the file → 1.25 + k·0.5 on the timeline
+    clips: [
+      { id: "c_k", mediaId: "m_k", kind: "audio", track: "A1", start: 2, in: 1, duration: 12, props: {} },
+      v("v1", 2, 1.4), v("v2", 3.4, 2), v("v3", 5.4, 3),
+      { id: "c_t", kind: "text", mediaId: null, track: "V2", start: 0, in: 0, duration: 4, props: { text: "hi" } },
+    ],
+    markers: [{ t: 0.5, label: "intro" }],
+  });
+  const { dir, mcp } = await boot(t, project);
+  fs.mkdirSync(path.join(dir, "media"), { recursive: true });
+  const kick = "gte(t,0.25)*0.9*sin(2*PI*60*mod(t-0.25,0.5))*exp(-mod(t-0.25,0.5)/0.1)";
+  let r = spawnSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", `aevalsrc='${kick}':s=48000:d=16`, "-c:a", "pcm_f32le", path.join(dir, "media", "kicks.wav")]);
+  assert.equal(r.status, 0, String(r.stderr));
+  r = spawnSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=160x90:r=30:d=20", "-c:v", "libx264", "-pix_fmt", "yuv420p", path.join(dir, "media", "gray.mp4")]);
+  assert.equal(r.status, 0, String(r.stderr));
+  const near = (a, b, tol, what) => assert.ok(Math.abs(a - b) <= tol, `${what}: ${a} vs ${b}`);
+
+  const look = await mcp.callTool("fablecut_beats", { clipId: "c_k" });
+  assert.equal(look.isError, false, look.text);
+  const bpm = +/: ([\d.]+) BPM/.exec(look.text)[1];
+  near(bpm, 120, 0.6, "tempo");
+  const first = +/Beats \(timeline\): ([\d.]+)/.exec(look.text)[1];
+  near(first, 2.25, 0.017, "first beat");
+  assert.match(look.text, /Nothing changed/);
+  assert.equal(readProject(dir).revision, project.revision, "reporting changes nothing");
+
+  const mark = await mcp.callTool("fablecut_beats", { clipId: "c_k", markers: true });
+  assert.equal(mark.isError, false, mark.text);
+  let doc = readProject(dir);
+  const cyan = doc.markers.filter((m) => m.color === "cyan");
+  assert.ok(cyan.length >= 22 && cyan.length <= 24, `${cyan.length} beat markers`);
+  assert.ok(doc.markers.some((m) => m.label === "intro"), "the user's marker stays");
+
+  const snap = await mcp.callTool("fablecut_beats", { clipId: "c_k", snap: true });
+  assert.equal(snap.isError, false, snap.text);
+  assert.match(snap.text, /snapped 2 of 2 cuts on/);
+  assert.match(snap.text, /kept as a version/);
+  doc = readProject(dir);
+  const byId = (id) => doc.clips.find((c) => c.id === id);
+  near(byId("v2").start, 3.25, 1 / 30, "cut 1 on the beat");
+  near(byId("v3").start, 5.25, 1 / 30, "cut 2 on the beat");
+  near(byId("v1").start + byId("v1").duration, byId("v2").start, 1e-6, "a roll keeps the cut closed");
+  near(byId("v3").start + byId("v3").duration, 8.4, 1e-6, "nothing after the cut moves");
+
+  // a cut whose next clip starts at its very first frame can't move earlier
+  const noHead = readProject(dir);
+  const n2 = noHead.clips.find((c) => c.id === "v2"), n1 = noHead.clips.find((c) => c.id === "v1");
+  n1.duration += 0.15; n2.start += 0.15; n2.duration -= 0.15; n2.in = 0;
+  noHead.revision++;
+  writeProject(dir, noHead);
+  const blocked = await mcp.callTool("fablecut_beats", { clipId: "c_k", snap: true });
+  assert.equal(blocked.isError, false, blocked.text);
+  assert.match(blocked.text, /1 without spare footage to reach the beat/);
+  near(readProject(dir).clips.find((c) => c.id === "v2").start, n2.start, 1e-6, "that cut stays");
+
+  const re = await mcp.callTool("fablecut_beats", { clipId: "c_k", retime: { every: 2 } });
+  assert.equal(re.isError, false, re.text);
+  assert.match(re.text, /re-cut 3 clips on V1 to 2 beats each/);
+  doc = readProject(dir);
+  near(byId("v1").start, 2.25, 1 / 30, "v1 starts on the first beat");
+  for (const [a, b] of [["v1", "v2"], ["v2", "v3"]]) {
+    near(byId(a).duration, 1, 1 / 30, `${a} lasts two beats`);
+    near(byId(a).start + byId(a).duration, byId(b).start, 1e-6, `${a} → ${b} back to back`);
+  }
+
+  // footage that can't fill one beat refuses the whole re-cut
+  const short = readProject(dir);
+  short.clips.find((c) => c.id === "v3").in = 19.8;
+  short.clips.find((c) => c.id === "v3").duration = 0.2;
+  short.revision++;
+  writeProject(dir, short);
+  const refused = await mcp.callTool("fablecut_beats", { clipId: "c_k", retime: { every: 2 } });
+  assert.ok(refused.isError);
+  assert.match(refused.text, /v3 has less than one beat of footage/);
+  assert.equal(readProject(dir).revision, short.revision, "nothing re-cut");
+
+  // a locked track: retime refuses, force goes ahead
+  const locked = readProject(dir);
+  locked.clips.find((c) => c.id === "v3").in = 2;
+  locked.clips.find((c) => c.id === "v3").duration = 3;
+  locked.lockedTracks = ["V1"];
+  locked.revision++;
+  writeProject(dir, locked);
+  const lockedRe = await mcp.callTool("fablecut_beats", { clipId: "c_k", retime: true });
+  assert.ok(lockedRe.isError);
+  assert.match(lockedRe.text, /locked/);
+  const forced = await mcp.callTool("fablecut_beats", { clipId: "c_k", retime: true, force: true });
+  assert.equal(forced.isError, false, forced.text);
+
+  const notMusic = await mcp.callTool("fablecut_beats", { clipId: "c_t" });
+  assert.ok(notMusic.isError);
+  assert.match(notMusic.text, /no sound to find a beat in/);
+  const badEvery = await mcp.callTool("fablecut_beats", { clipId: "c_k", retime: { every: 3 } });
+  assert.ok(badEvery.isError);
+  assert.match(badEvery.text, /every must be one of/);
+});
+
 test("fablecut_reframe makes a 9:16 copy whose shots follow the subject", async (t) => {
   const { spawnSync } = require("node:child_process");
   const has = (b) => { try { return spawnSync(b, ["-version"], { stdio: "ignore" }).status === 0; } catch { return false; } };

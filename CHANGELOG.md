@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Beats.** The Inspector's **Beats** section on an audio or video clip finds
+  the music's tempo, a steady beat grid (fitted to the hits, so it doesn't drift
+  over a song) and the drop, and shows the beat as ticks across the timeline.
+  **Mark** puts a marker on every beat, **Snap cuts** rolls each cut on the
+  targeted video tracks onto the nearest beat (nothing else moves), and
+  **Re-cut** lays a track's clips back to back so each lasts 1, 2, 4, 8 or 16
+  beats. Each is one undo step. Agents use `fablecut_beats`, which keeps a
+  version before snapping or re-cutting.
 - **Reframe.** Make a 9:16, 1:1 or 4:5 copy of an edit whose shots follow the
   subject: each full-frame shot is fitted to the new shape and a virtual camera
   pans after what matters in it (motion, detail and colour, held in a dead
@@ -15,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   From **New sequence…** (Follow the subject in each shot) or the Inspector's
   **Reframe** section (Follow subject, Centre, Lively / Balanced / Steady).
   Titles and clips placed by hand are left alone. Agents use `fablecut_reframe`.
+
+### Changed
+- The reference analyzer (`fablecut_analyze_reference`) now shares its beat
+  detector with Beats; its results are unchanged.
 
 ### Fixed
 - **Undo after an agent edit.** An edit that reaches the open editor from

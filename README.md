@@ -135,6 +135,10 @@ same time.
   **Find silences**) listens to a take and marks every pause on the timeline;
   **Cut** extracts them all in one undo step, keeping a little quiet beside
   each phrase so words aren't clipped. Agents use `fablecut_silence`.
+- **Beats** — the inspector's **Beats** section finds a music clip's tempo, a
+  steady beat grid and the drop, and shows the beat across the timeline. Mark
+  the beats, snap every cut onto the nearest one, or re-cut a track so each
+  shot lasts 1, 2, 4, 8 or 16 beats. Agents use `fablecut_beats`.
 - **Transcripts and text-based editing** — the **Transcript** tab turns speech
   into words with times, in the browser (Whisper; the model downloads once and
   the audio never leaves your machine). Click a word to go there, select words
@@ -475,7 +479,7 @@ Three equivalent control surfaces:
    `fablecut_get_project`, `fablecut_set_project`, `fablecut_patch_project`,
    `fablecut_import_media`, `fablecut_analyze_reference`, `fablecut_frame`,
    `fablecut_encode_profiles`, `fablecut_normalize_audio`, `fablecut_auto_duck`,
-   `fablecut_denoise`, `fablecut_silence`, `fablecut_reframe`, `fablecut_transcribe`, `fablecut_captions`, `fablecut_export`, `fablecut_scopes`, `fablecut_track`.
+   `fablecut_denoise`, `fablecut_silence`, `fablecut_beats`, `fablecut_reframe`, `fablecut_transcribe`, `fablecut_captions`, `fablecut_export`, `fablecut_scopes`, `fablecut_track`.
 
    FableCut is also published on the **official MCP registry** as
    [`io.github.ronak-create/fablecut`](https://registry.modelcontextprotocol.io/v0/servers?search=fablecut)

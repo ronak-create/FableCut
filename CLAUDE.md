@@ -46,6 +46,8 @@ Every Claude Code session then has these tools:
   file and switches the clip's stems to it). See "Audio mix" below.
 - `fablecut_silence` — find the pauses in speech and, with `cut:true`, cut them out
   (extract on the targeted tracks, stems in step). See "Audio mix" below.
+- `fablecut_beats` — find a music clip's tempo, beat and drop; mark the beats, snap the
+  cuts to them, or re-cut a track's clips on the beat. See "Audio mix" below.
 - `fablecut_reframe` — reframe for another shape (9:16, 1:1, 4:5): a copy of the sequence
   on that canvas whose shots follow the subject. See "Sequences" below.
 - `fablecut_transcribe` — turn speech into words with times (Whisper, in the browser),
@@ -637,6 +639,33 @@ edits the key under the playhead. Agents:
   as amber bands, **Cut N** extracts them (one undo step), **Clear** removes the
   marks. The marks drop when the timeline, a clip's file, speed or level, or the
   frame rate changes.
+- **Beats** — `fablecut_beats {clipId, markers?, snap?, retime?, every?, force?}`
+  listens to a music clip (an audio clip, or a video's sound) and finds its tempo
+  (BPM), a **steady beat grid** — the tempo's period, phased and fitted to the
+  hits, so it doesn't drift over a song — and the drop, all in timeline seconds
+  through the clip's in point and speed. On its own it only reports. Then, in one
+  revision: `markers:true` puts a cyan marker on every beat (other markers stay, and a
+  beat that already has one keeps it);
+  `snap:true` (or `{tracks, maxShift}`) rolls each cut on the targeted video tracks
+  to the nearest beat within half a beat — a roll, so nothing else moves and
+  linked stems follow; a cut whose clips have no spare footage to reach the beat
+  stays where it is, and the reply says how many; `retime:{track?, every?, from?}`
+  lays a track's clips (default the lowest video track with clips) back to back
+  on the beat, `every` beats each (1, 2, 4, 8 or 16; default 2), from the first
+  beat at or after `from` (default the music's start), in their order — a clip
+  whose footage runs out gets fewer beats, clips past the music keep their
+  length, and one with less than a beat of footage refuses the whole re-cut.
+  Locked clips are left alone by snap and refuse retime, unless `force:true`
+  (only when the user asked). A version is kept before snap or retime; if saving it
+  fails, the edit still goes ahead and the reply says so in a warning. A re-cut clip
+  that gets shorter loses the keyframes past its new end, and its transitions are
+  kept no longer than the clip, as with a trim. The music clip itself (and its linked
+  stems) is never re-cut, even when it sits on the track being re-cut. Cuts land
+  on whole frames. A clip with a speed ramp is refused: its music doesn't keep
+  time on the timeline. In the editor: the Inspector's **Beats** section on an
+  audio or video clip — **Find beats** shows the beat as ticks across the
+  timeline and the BPM and drop below; then **Mark**, **Snap cuts**, and
+  **Re-cut** a track every N beats (each one undo step).
 - In the editor, each audio clip shows its **volume line** (yellow; dashed =
   after ducking): drag it to change the level, Ctrl/Cmd-click to add a keyframe,
   drag a point to move it, Alt-click or double-click to remove one. The corner
@@ -2259,6 +2288,16 @@ To try an alternative without deleting a clip, disable it (⇧E / `disabled:true
 so all takes sit at one loudness, then keep the music on its own lane and pull
 that lane down: `{op:"setTrack", id:"A3", set:{gain:-14}}`. Then dip it under the
 voice: `fablecut_auto_duck {clipIds:[<music clip>], under:["A1"], amount:-10}`.
+
+**Cut a montage to the music**: put the shots on V1 in the order you want (rough
+lengths are fine) and the music on an audio lane, then
+`fablecut_beats {clipId:<the music>, retime:{every:2}}` — each shot gets two beats
+where its footage allows (fewer when it runs out; clips past the music keep their
+length; one with less than a beat of footage refuses the re-cut), the cuts land on the beat. `every:1` for a fast reel, `4` for a calm one;
+re-cut the part after the drop separately with `retime:{from:<the drop>, every:1}`.
+For an edit whose cuts are already chosen, `snap:true` just nudges each one onto
+the nearest beat (cuts on untargeted tracks, beside locked clips, or without spare
+footage to reach it stay where they are; the reply counts them). Check a cut with `fablecut_frame` before exporting.
 
 **Tighten a talking-head take**: lock the music lane (`setProject {lockedTracks:["A3"]}`),
 then `fablecut_silence {clipIds:[<the take>]}` to see the pauses (it does the

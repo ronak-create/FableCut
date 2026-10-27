@@ -554,6 +554,8 @@ const state = {
   selIds: new Set(),     // full multi-selection (includes selId)
   silence: null,         // silences found (Inspector → Silence): {ids, spans, sig}, shown on the timeline until cut or cleared
   silenceBusy: false,    // a Find is listening (the Inspector offers Cancel)
+  beats: null,           // the beat Find beats heard (Inspector → Beats): {clipId, sig, a, grid, bpm, drop}, ticks on the timeline
+  beatsBusy: false,      // Find beats is listening
   trackSize: "l",        // s | m | l — timeline track density preset
   connected: false, exporting: false,
   rendering: false,      // fast (server/ffmpeg) export in progress
@@ -5019,6 +5021,7 @@ function rebuildClips() {
   }
   paintAudioOverlaps();
   paintSilences();
+  paintBeats();
   state.dirtyTimeline = false;
   updateWorkArea();
 }
@@ -5037,6 +5040,38 @@ function paintSilences() {
       el.style.left = (sp.from * state.pps) + "px";
       el.style.width = Math.max(2, (sp.to - sp.from) * state.pps) + "px";
       el.title = `Silence ${fmt(sp.from)} → ${fmt(sp.to)} (${(sp.to - sp.from).toFixed(2)} s) · Inspector → Silence → Cut`;
+      row.appendChild(el);
+    }
+  }
+}
+/* The beat Find beats heard: a tick on the music's lane and every video lane. */
+function paintBeats() {
+  const s = state.beats;
+  if (!s) return;
+  if (s.sig !== beatsSig(getClip(s.clipId))) { state.beats = null; return; }
+  const lanes = new Set([getClip(s.clipId).track, ...TRACKS.filter((t) => t.kind === "video").map((t) => t.id)]);
+  const g = s.grid, n = g.length;
+  if (!n) return;
+  // a steady grid is one striped band per lane, however long the song; onsets without a tempo are ticks
+  const per = n > 1 ? (g[n - 1] - g[0]) / (n - 1) : 0;
+  const steady = n > 2 && per > 0 && g.every((t, i) => !i || Math.abs(t - g[i - 1] - per) < 0.004);
+  for (const id of lanes) {
+    const row = els.tracks.querySelector(`[data-track="${id}"]`);
+    if (!row) continue;
+    if (steady) {
+      const el = document.createElement("div");
+      el.className = "beat-band";
+      const step = per * state.pps;
+      el.style.left = (g[0] * state.pps - 0.5) + "px";
+      el.style.width = ((g[n - 1] - g[0]) * state.pps + 1) + "px";
+      el.style.backgroundImage = `repeating-linear-gradient(to right, var(--beat-tick) 0 1px, transparent 1px ${step}px)`;
+      row.appendChild(el);
+      continue;
+    }
+    for (const t of g.slice(0, 600)) {
+      const el = document.createElement("div");
+      el.className = "beat-tick";
+      el.style.left = (t * state.pps) + "px";
       row.appendChild(el);
     }
   }
@@ -6650,6 +6685,23 @@ function renderInspector(lite) {
       ${check("Flip V", "flipV", p.flipV)}
     </div>`;
   }
+  if ((c.kind === "video" || c.kind === "image") && typeof Reframe !== "undefined") {
+    const m = getMedia(c.mediaId);
+    const shape = m && m.width > 0 && m.height > 0 && Math.abs(m.width / m.height - project.width / project.height) > 0.01;
+    if (shape || p.reframe) {
+      const note = p.reframe === "follow" ? `Follows the subject${c.keyframes?.x?.length || c.keyframes?.y?.length ? ` (${(c.keyframes.x || c.keyframes.y).length} keys)` : " (one steady position)"}`
+        : p.reframe === "centre" ? "Fitted and centred" : "This picture is another shape than the canvas.";
+      html += `<div class="insp-section"><h3>Reframe</h3>
+        <div class="insp-note">${note}</div>
+        ${reframeRun.busy
+          ? row("", `<span class="insp-ctrls"><span style="opacity:.75">Looking at the footage… ${reframeRun.done + 1}/${reframeRun.of}${reframeRun.frac ? ` · ${Math.round(reframeRun.frac * 100)}%` : ""}</span>
+            <button type="button" class="btn tiny" data-rf-cancel>Cancel</button></span>`)
+          : row("", `<span class="insp-ctrls"><button type="button" class="btn tiny" data-rf-follow title="Fit it to cover the canvas and key its position to keep the subject in view (the selected clips; one undo step)">Follow subject</button>
+            <button type="button" class="btn tiny" data-rf-centre title="Fit it to cover the canvas, centred">Centre</button>
+            <select data-rf-smooth title="How the virtual camera moves" style="width:auto;min-width:6.5em"><option value="0.2">Lively</option><option value="0.5" selected>Balanced</option><option value="0.85">Steady</option></select></span>`)}
+      </div>`;
+    }
+  }
   if (c.kind === "video" || c.kind === "image" || c.kind === "svg" || c.kind === "adjust" || c.kind === "comp") {
     html += `<div class="insp-section"><h3>Filter / Color</h3>
       ${sel("Preset", "filterPreset", Object.keys(FILTER_PRESETS), p.filterPreset)}
@@ -6716,6 +6768,24 @@ function renderInspector(lite) {
         ${found ? `<button type="button" class="btn tiny" data-sil-cut title="Extract every marked silence on the targeted tracks (one undo step)">Cut ${found.spans.length}</button>
         <button type="button" class="btn tiny" data-sil-clear title="Remove the marks">Clear</button>` : ""}</span>`)}
       ${found ? `<div class="insp-note">${found.spans.length} silence${found.spans.length === 1 ? "" : "s"}, ${FableCutSilence.total(found.spans).toFixed(1)} s, marked on the timeline. Cut extracts them on the targeted tracks — lock the music bed first to keep it running.</div>` : ""}
+    </div>`;
+  }
+  if ((c.kind === "video" || c.kind === "audio") && typeof FableCutBeats !== "undefined") {
+    const bt = state.beats && state.beats.clipId === c.id ? state.beats : null, bs = beatsSettings();
+    const lanes = TRACKS.filter((t) => t.kind === "video" && project.clips.some((x) => x.track === t.id)).map((t) => t.id)
+      .sort((x, y) => (+x.slice(1) || 0) - (+y.slice(1) || 0));
+    html += `<div class="insp-section"><h3>Beats</h3>
+      ${row("", state.beatsBusy
+        ? `<span class="insp-ctrls"><span style="opacity:.75">Listening…</span>
+        <button type="button" class="btn tiny" data-beat-clear title="Stop listening">Cancel</button></span>`
+        : `<span class="insp-ctrls"><button type="button" class="btn tiny" data-beat-find title="Listen to this clip's music and show its beat on the timeline">Find beats</button>
+        ${bt ? `<button type="button" class="btn tiny" data-beat-clear title="Hide the beat">Clear</button>` : ""}</span>`)}
+      ${bt ? `<div class="insp-note">${bt.bpm != null ? bt.bpm + " BPM · " : ""}${bt.grid.length} beats, ${fmt(bt.grid[0])} → ${fmt(bt.grid[bt.grid.length - 1])}${bt.drop != null ? ` · the drop at ${fmt(bt.drop)}` : ""}</div>
+      ${row("", `<span class="insp-ctrls"><button type="button" class="btn tiny" data-beat-mark title="A cyan marker on every beat (other markers stay)">Mark</button>
+        <button type="button" class="btn tiny" data-beat-snap title="Roll each cut on the targeted video tracks to the nearest beat — nothing else moves">Snap cuts</button></span>`)}
+      ${lanes.length ? row("Re-cut", `<span class="insp-ctrls"><select data-beat-track title="The track whose clips go on the beat" style="width:auto;min-width:4.2em">${lanes.map((id) => `<option>${id}</option>`).join("")}</select>
+        every <select data-beat-every title="Beats per shot" style="width:auto;min-width:3.6em">${FableCutBeats.EVERY.map((n) => `<option value="${n}" ${n === bs.every ? "selected" : ""}>${n}</option>`).join("")}</select> beats</span>`) +
+        row("", `<span class="insp-ctrls"><button type="button" class="btn tiny" data-beat-retime title="Lay that track's clips back to back on the beat, from the music's start (one undo step)">Re-cut</button></span>`) : ""}` : ""}
     </div>`;
   }
   if (c.kind === "audio" && typeof FableCutFx !== "undefined") {
@@ -6944,6 +7014,21 @@ function renderInspector(lite) {
     findSilences(sel.length ? sel : [c]);
   });
   els.inspector.querySelector("[data-sil-cut]")?.addEventListener("click", cutSilences);
+  els.inspector.querySelector("[data-beat-find]")?.addEventListener("click", () => findBeats(c));
+  els.inspector.querySelector("[data-beat-clear]")?.addEventListener("click", clearBeats);
+  els.inspector.querySelector("[data-beat-mark]")?.addEventListener("click", () => beatsAction({ markers: true }));
+  els.inspector.querySelector("[data-beat-snap]")?.addEventListener("click", () => beatsAction({ snap: true }));
+  els.inspector.querySelector("[data-beat-every]")?.addEventListener("change", (e) => {
+    try { localStorage.setItem(BEATS_KEY, JSON.stringify({ every: +e.target.value })); } catch { }
+  });
+  els.inspector.querySelector("[data-beat-retime]")?.addEventListener("click", () => beatsAction({ retime: {
+    track: els.inspector.querySelector("[data-beat-track]")?.value,
+    every: +(els.inspector.querySelector("[data-beat-every]")?.value || 2) } }));
+  const rfTargets = () => { const sel = selectedClips().filter((x) => x.kind === "video" || x.kind === "image"); return sel.length ? sel : [c]; };
+  els.inspector.querySelector("[data-rf-follow]")?.addEventListener("click", () =>
+    reframeClips(rfTargets(), { follow: true, smooth: +(els.inspector.querySelector("[data-rf-smooth]")?.value || 0.5) }));
+  els.inspector.querySelector("[data-rf-centre]")?.addEventListener("click", () => reframeClips(rfTargets(), { follow: false }));
+  els.inspector.querySelector("[data-rf-cancel]")?.addEventListener("click", () => { reframeRun.cancel = true; });
   els.inspector.querySelector("[data-sil-clear]")?.addEventListener("click", clearSilences);
   els.inspector.querySelector("[data-norm-target]")?.addEventListener("change", (e) => {
     try { localStorage.setItem(NORMALIZE_KEY, e.target.value); } catch { }
@@ -9352,6 +9437,108 @@ function clearSilences() {
   state.dirtyTimeline = true;
   renderInspector();
 }
+
+/* ── Beats (beats.js): the music's tempo and beat grid, ticks on the timeline, and
+   edits on it — mark, snap the cuts, re-cut a track. The same plan and ops as
+   fablecut_beats; here each action is one undo step. ── */
+const BEATS_KEY = "fablecut-beats";
+function beatsSettings() {
+  let o = {};
+  try { o = JSON.parse(localStorage.getItem(BEATS_KEY) || "{}"); } catch { }
+  return { every: FableCutBeats.EVERY.includes(+o.every) ? +o.every : 2 };
+}
+/** What a found beat stands on: the clip's place, window, file and speed, and the frame rate. */
+function beatsSig(c) {
+  if (!c) return "";
+  // the open project and sequence too: a duplicate with the same clip ids must not inherit this beat
+  return JSON.stringify([runtime.projectId ?? null, SeqLib.activeId(seqRoot()), !!state.compCtx, project.fps, c.id, c.start, c.in, c.duration,
+    getMedia(c.mediaId)?.src ?? null, c.props?.speed ?? 1, c.keyframes?.speed ?? null]);
+}
+/** The project as beats.js reads it: the timeline plus the track switches. */
+function beatsDoc() {
+  return { ...project, tracks: TRACKS, lockedTracks: [...state.lockedTracks], untargetedTracks: [...state.untargetedTracks] };
+}
+let beatsGen = 0;
+async function findBeats(c) {
+  if (typeof FableCutBeats === "undefined") { toast("Beats module missing — reload the editor"); return; }
+  if (!c || (c.kind !== "audio" && c.kind !== "video")) { toast("Select the music clip to find its beat"); return; }
+  if (FableCutBeats.ramped(c)) { toast("This clip has a speed ramp — beats follow music playing at a steady speed"); return; }
+  const m = getMedia(c.mediaId);
+  if (!m) return;
+  const gen = ++beatsGen, sig = beatsSig(c);
+  state.beats = null; state.beatsBusy = true; state.dirtyTimeline = true;
+  renderInspector();
+  toast("Listening for the beat…");
+  try {
+    const buf = await getAudioBuffer(m);
+    await new Promise((res) => setTimeout(res, 0));   // let "Listening…" paint and Cancel land before the analysis runs
+    if (gen !== beatsGen) return;
+    const a0 = clamp(Math.floor((c.in || 0) * buf.sampleRate), 0, buf.length);
+    const a1 = clamp(Math.ceil(mediaTimeAt(c, clipEnd(c)) * buf.sampleRate), a0, buf.length);
+    const chs = [];
+    for (let ch = 0; ch < buf.numberOfChannels; ch++) chs.push(buf.getChannelData(ch).subarray(a0, a1));
+    const a = FableCutBeats.analyze(FableCutBeats.resample(FableCutBeats.mono(chs), buf.sampleRate));
+    const abs = { beats: a.beats.map((t) => t + (c.in || 0)), bpm: a.bpm, drop: a.drop != null ? a.drop + (c.in || 0) : null };
+    if (beatsSig(getClip(c.id)) !== sig) { toast("The clip changed while listening — find the beat again"); return; }
+    const r = FableCutBeats.plan(beatsDoc(), getClip(c.id), abs, {});
+    state.beats = r.grid.length ? { clipId: c.id, sig, a: abs, grid: r.grid, bpm: r.bpm, drop: r.drop } : null;
+    toast(r.grid.length ? `${r.bpm} BPM · ${r.grid.length} beats marked on the timeline` + (r.drop != null ? ` · the drop at ${fmt(r.drop)}` : "")
+      : "No steady beat found in this clip");
+  } catch (e) {
+    toast("Couldn't read this clip's audio: " + (e?.message || e));
+  } finally {
+    if (gen === beatsGen) { state.beatsBusy = false; state.dirtyTimeline = true; renderInspector(); }
+  }
+}
+function clearBeats() {
+  beatsGen++;
+  state.beats = null; state.beatsBusy = false; state.dirtyTimeline = true;
+  renderInspector();
+}
+/** markers / snap / retime on the found beat: beats.js plans, the editor's own edits apply it. One undo step. */
+function beatsAction(acts) {
+  const s = state.beats, c = s && getClip(s.clipId);
+  if (!s || !c || s.sig !== beatsSig(c)) { state.beats = null; renderInspector(); toast("The music clip changed — find the beat again"); return; }
+  let r;
+  try { r = FableCutBeats.plan(beatsDoc(), c, s.a, acts); }
+  catch (e) { toast(e.message); return; }
+  if (!r.ops.length) { toast(r.done.join(" · ") || "Nothing to change"); return; }
+  const snap = undoSnapshot();
+  let rolls = 0, rolled = 0;
+  for (const op of r.ops) {
+    if (op.op === "setProject") project.markers = normalizeMarkers(op.set.markers);
+    else if (op.op === "roll") {
+      const x = getClip(op.id);
+      rolls++;
+      // what the roll really moved (a refusal is a string, a clamp a smaller number)
+      if (!x) continue;
+      // what this roll can touch: the clips on either side of the cut and their linked partners
+      const end = x.start + x.duration;
+      const next = project.clips.find((c) => c !== x && c.track === x.track && Math.abs(c.start - end) < 1e-3);
+      const touched = withLinked(next ? [x, next] : [x]);
+      const before = new Map(touched.map((c) => [c.id, JSON.stringify(c)]));
+      const d = EDIT.rollEdit(x, op.side, op.delta);
+      if (typeof d === "number" && Math.abs(d - op.delta) < 1e-3) rolled++;
+      // a roll that couldn't reach the beat (clamped, refused) is undone exactly: the cut stays where it was
+      else project.clips = project.clips.map((c) => (before.has(c.id) ? JSON.parse(before.get(c.id)) : c));
+    } else if (op.op === "updateClip") {
+      const x = getClip(op.id);
+      if (x) for (const [k, v] of Object.entries(op.set)) { if (v === null) delete x[k]; else x[k] = v; }
+    }
+  }
+  if (undoSnapshot() === snap) {
+    state.dirtyTimeline = true; renderInspector();
+    toast(acts.markers ? "No new beats to mark: every beat already has a marker" : "Nothing could move: those cuts have no spare footage to reach the beat");
+    return;
+  }
+  pushUndo(snap);
+  pruneSelection();
+  state.dirtyTimeline = true;
+  scheduleSave();
+  renderInspector();
+  const done = r.done.map((d) => (rolls && rolled < rolls && /^snapped /.test(d) ? d.replace(/^snapped \d+/, "snapped " + rolled) : d));
+  toast(done.map((d) => d[0].toUpperCase() + d.slice(1)).join(" · "));
+}
 async function autoDuckClips(clips, { under = null, amount = duckAmount(), threshold = -40 } = {}) {
   if (typeof FableCutDucking === "undefined") { toast("Ducking module missing — reload the editor"); return; }
   const music = withLinked(clips).filter((x) => x.kind === "audio" && !isGroupLocked(x));
@@ -11745,8 +11932,9 @@ function newSequence(opts) {
   let s;
   try { s = SeqLib.add(doc, opts); } catch (e) { toast(e.message); return; }
   project.sequences = doc.sequences; project.sequence = doc.sequence;
-  if (openSequence(s.id)) toast(`New sequence “${s.name}” · ${s.width}×${s.height}`);
-  else { scheduleSave(); syncCompCrumb(); toast(`New sequence “${s.name}” added — open it from the sequence menu`); }
+  if (openSequence(s.id)) { toast(`New sequence “${s.name}” · ${s.width}×${s.height}`); return true; }
+  scheduleSave(); syncCompCrumb(); toast(`New sequence “${s.name}” added — open it from the sequence menu`);
+  return false;
 }
 function renameSequence(id, name) {
   const r = seqRoot();
@@ -11843,15 +12031,27 @@ function promptNewSequence(x, y) {
     <label class="bin-pop-label" for="seqNewSize">Canvas</label>
     <select id="seqNewSize" class="bin-pop-input">${sizes.map((s, i) => `<option value="${i}">${escapeHtml(s.label)}</option>`).join("")}</select>
     <label class="seq-new-copy"><input type="checkbox" id="seqNewCopy"> Start from a copy of “${escapeHtml(openSequenceName())}”</label>
+    <label class="seq-new-copy" title="Each full-frame shot is fitted to the new shape and keyed to keep what matters in it in view (Inspector → Reframe)"><input type="checkbox" id="seqNewFollow" checked> Follow the subject in each shot</label>
     <div class="bin-pop-hint">Media and compositions are shared by every sequence. Each has its own timeline, canvas, frame rate, mix and delivery settings.</div>
     <div class="bin-pop-btns"><button type="button" class="btn tiny" data-cancel>Cancel</button><button type="button" class="btn tiny accent" data-ok>Create</button></div>`;
   pop.querySelector("#seqNewName").value = `Sequence ${n}`;
+  const syncFollow = () => {
+    const size = sizes[+pop.querySelector("#seqNewSize").value] || sizes[0];
+    const on = pop.querySelector("#seqNewCopy").checked && size.w && size.w * project.height !== size.h * project.width;
+    pop.querySelector("#seqNewFollow").closest("label").hidden = !on;
+  };
+  pop.querySelector("#seqNewSize").addEventListener("change", syncFollow);
+  pop.querySelector("#seqNewCopy").addEventListener("change", syncFollow);
+  syncFollow();
   const ok = () => {
     const name = pop.querySelector("#seqNewName").value.trim();
     const size = sizes[+pop.querySelector("#seqNewSize").value] || sizes[0];
     const copy = pop.querySelector("#seqNewCopy").checked;
+    const follow = pop.querySelector("#seqNewFollow").checked;
+    const reshaped = size.w && size.w * project.height !== size.h * project.width;
     hideTrackCtxMenu();
-    newSequence({ name: name || undefined, from: copy ? "open" : "empty", ...(size.w ? { width: size.w, height: size.h } : {}) });
+    const opened = newSequence({ name: name || undefined, from: copy ? "open" : "empty", ...(size.w ? { width: size.w, height: size.h } : {}) });
+    if (opened && copy && reshaped && follow) reframeClips(null, { follow: true });
   };
   pop.querySelector("[data-ok]").addEventListener("click", ok);
   pop.querySelector("[data-cancel]").addEventListener("click", () => hideTrackCtxMenu());
@@ -12986,6 +13186,110 @@ function seekFrame(el, t) {
     el.addEventListener("seeked", done);
     el.currentTime = t;
   });
+}
+/* ── Reframe (reframe.js): fit each full-frame shot to the canvas and key its position to keep
+   the subject in view. The frames come from a private <video>, small, 5 a second — the same
+   samples, plan and keys as fablecut_reframe. One undo step. ── */
+const Reframe = self.FableCutReframe;
+const reframeRun = { busy: false, cancel: false, done: 0, of: 0 };
+/** RGB frames of clip c (SAMPLE_FPS across its window; one for a still), w×h each. */
+async function sampleClipFrames(c, w, h, onFrame) {
+  const m = getMedia(c.mediaId);
+  const cv = document.createElement("canvas"); cv.width = w; cv.height = h;
+  const x = cv.getContext("2d", { willReadFrequently: true });
+  const rgb = () => {
+    const d = x.getImageData(0, 0, w, h).data, out = new Uint8Array(w * h * 3);
+    for (let i = 0, j = 0; i < d.length; i += 4, j += 3) { out[j] = d[i]; out[j + 1] = d[i + 1]; out[j + 2] = d[i + 2]; }
+    return out;
+  };
+  if (c.kind === "image") {
+    const img = new Image();
+    await new Promise((res, rej) => { img.onload = res; img.onerror = () => rej(new Error("the picture could not be read")); img.src = m.src; });
+    x.drawImage(img, 0, 0, w, h);
+    return [rgb()];
+  }
+  const el = document.createElement("video");
+  el.muted = true; el.preload = "auto"; el.playsInline = true; el.src = m.src;
+  try {
+    await new Promise((res, rej) => {
+      const tm = setTimeout(() => rej(new Error("the video did not load")), 15000);
+      el.addEventListener("loadeddata", () => { clearTimeout(tm); res(); }, { once: true });
+      el.addEventListener("error", () => { clearTimeout(tm); rej(new Error("the video could not be read")); }, { once: true });
+    });
+    const n = Math.max(1, Math.floor(c.duration * clipSpeed(c) * Reframe.SAMPLE_FPS + 1e-6));
+    const frames = [];
+    for (let i = 0; i < n; i++) {
+      if (reframeRun.cancel) break;
+      await seekFrame(el, Math.max(0, (c.in || 0) + i / Reframe.SAMPLE_FPS) + 0.001);
+      x.drawImage(el, 0, 0, w, h);
+      frames.push(rgb());
+      if (onFrame) onFrame(i + 1, n);
+    }
+    return frames;
+  } finally { el.removeAttribute("src"); el.load(); }
+}
+/** The picture size of clip c's media (probed, else read from the file). */
+async function pictureSize(c) {
+  const m = getMedia(c.mediaId);
+  if (m && m.width > 0 && m.height > 0) return { width: m.width, height: m.height };
+  if (c.kind === "image") {
+    const img = new Image();
+    await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = m.src; });
+    return { width: img.naturalWidth, height: img.naturalHeight };
+  }
+  const el = document.createElement("video");
+  el.preload = "metadata"; el.src = m.src;
+  await new Promise((res, rej) => { el.onloadedmetadata = res; el.onerror = rej; });
+  const r = { width: el.videoWidth, height: el.videoHeight };
+  el.removeAttribute("src"); el.load();
+  return r;
+}
+/** Reframe `clips` (default: every full-frame shot on the timeline) for this canvas. Returns the plan lines. */
+async function reframeClips(clips, { follow = true, smooth = 0.5 } = {}) {
+  if (!Reframe) { toast("Reframe module missing — reload the editor"); return null; }
+  if (reframeRun.busy) { toast("Already reframing — wait for it, or Cancel"); return null; }
+  const doc = { clips: clips || project.clips, lockedTracks: [...state.lockedTracks] };
+  const { take, skip } = Reframe.targets(doc, {});
+  if (!take.length) { toast(skip.length ? `Nothing to reframe: ${skip[0].id} is ${skip[0].why}` : "Select a video or picture clip to reframe"); return null; }
+  Object.assign(reframeRun, { busy: true, cancel: false, done: 0, of: take.length });
+  renderInspector();
+  const canvas = { width: project.width, height: project.height };
+  const plans = [];
+  try {
+    for (const c of take) {
+      if (reframeRun.cancel) break;
+      const src = await pictureSize(c);
+      let samples = null;
+      if (follow) {
+        const w = Reframe.SAMPLE_W, h = Math.max(8, Math.round(w * src.height / src.width / 2) * 2);
+        samples = Reframe.subjectTrack(await sampleClipFrames(c, w, h, (i, n) => {
+          reframeRun.frac = i / n; if (i % 10 === 0) renderInspector();
+        }), w, h);
+      }
+      plans.push({ id: c.id, ...Reframe.clipPlan(c, samples, src, canvas, { smooth, fps: projectFps() || 30, follow }) });
+      reframeRun.done++;
+      renderInspector();
+    }
+  } catch (e) {
+    toast("Couldn't look at the footage: " + (e?.message || e));
+  } finally {
+    reframeRun.busy = false;
+  }
+  if (reframeRun.cancel || !plans.length) { reframeRun.cancel = false; renderInspector(); if (plans.length) toast("Reframe stopped — nothing changed"); return null; }
+  pushUndo();
+  for (const p of plans) {
+    const c = getClip(p.id);
+    if (!c) continue;
+    for (const [k, v] of Object.entries(p.set.props || {})) { if (v === null) delete c.props[k]; else c.props[k] = v; }
+    if ("keyframes" in p.set) { if (p.set.keyframes === null) delete c.keyframes; else c.keyframes = p.set.keyframes; }
+  }
+  state.dirtyTimeline = true;
+  scheduleSave();
+  renderInspector();
+  const moving = plans.filter((p) => p.keys).length;
+  toast(`Reframed ${plans.length} shot${plans.length === 1 ? "" : "s"} for ${canvas.width}×${canvas.height}` +
+    (follow ? ` · ${moving} follow${moving === 1 ? "s" : ""} the subject` : "") + (skip.length ? ` · ${skip.length} left as placed` : ""));
+  return plans;
 }
 /**
  * Follow `box` (picture fractions {x, y, w, h}) through clip c from clip-local
