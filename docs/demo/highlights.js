@@ -156,8 +156,7 @@
           const i0 = Math.round(t / BIN), i1 = Math.max(i0 + 1, Math.round((t + L) / BIN));
           let sum = 0;
           for (let i = i0; i < i1 && i < n; i++) sum += sc[i];
-          const sig = sources[k].aud && sources[k].aud.db.length ? "sound" : null;
-          cands.push({ k, shotNo: b, from: t, to: t + L, score: sum / (i1 - i0), lo: a0, hi: a1, sig });
+          cands.push({ k, shotNo: b, from: t, to: t + L, score: sum / (i1 - i0), lo: a0, hi: a1 });
         }
       }
     });
@@ -182,16 +181,20 @@
     for (const c of chosen) {
       const db = sources[c.k].aud && sources[c.k].aud.db;
       if (!db || !db.length) continue;
-      const quiet = (t, lo, hi) => {
+      const quiet = (lo, hi, t) => {
         let bestT = t, bestD = Infinity;
-        for (let u = Math.max(lo, t - 0.3); u <= Math.min(hi, t + 0.3) + 1e-6; u += AUD_STEP) {
+        for (let u = lo; u <= hi + 1e-6; u += AUD_STEP) {
           const d = db[Math.round(u / AUD_STEP)];
           if (d != null && d < bestD - 1) { bestD = d; bestT = u; }
         }
         return bestT;
       };
-      const from = quiet(c.from, c.lo, c.to - 0.5), to = quiet(c.to, c.from + 0.5, c.hi);
-      c.from = from; c.to = to;
+      // the start moves either way and the moment keeps its length; the end only moves later, so the
+      // edit never comes out short (the trim below takes any extra off the last moments)
+      const L = c.to - c.from;
+      c.from = quiet(Math.max(c.lo, c.from - 0.3), Math.max(c.lo, Math.min(c.from + 0.3, c.hi - L)), c.from);
+      c.to = c.from + L;
+      c.to = quiet(c.to, Math.min(c.hi, c.to + 0.3), c.to);
     }
     // exactly `duration`: trim the moments from the end
     let over = chosen.reduce((n, c) => n + (c.to - c.from), 0) - duration;
@@ -203,8 +206,12 @@
       const sc = scored[c.k].scores, i0 = Math.round(c.from / BIN), i1 = Math.max(i0 + 1, Math.round(c.to / BIN));
       const moves = sources[c.k].pic.motion.slice(i0, i1);
       const busy = moves.length && median(moves) > quantile(sources[c.k].pic.motion, 0.6);
+      // loud: well above the footage's usual level somewhere in the moment
+      const db = sources[c.k].aud && sources[c.k].aud.db;
+      const peak = db ? Math.max(-90, ...db.slice(Math.floor(c.from / AUD_STEP), Math.ceil(c.to / AUD_STEP))) : -90;
+      const loud = !!(db && db.length && peak > median(db) + 8);
       return { source: sources[c.k].id, from: round3(c.from), to: round3(c.to), score: Math.round(c.score * 100) / 100,
-        why: busy && c.sig ? "movement and sound" : busy ? "movement" : c.sig ? "sound" : "a clear picture", bins: sc.slice(i0, i1).length };
+        why: busy && loud ? "movement and sound" : busy ? "movement" : loud ? "sound" : "a clear picture", bins: sc.slice(i0, i1).length };
     }).map(({ bins, ...p }) => p);
   }
 
