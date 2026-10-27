@@ -27,7 +27,7 @@
     {
       "registryType": "mcpb",
       "identifier": "https://github.com/ronak-create/FableCut/releases/download/v1.18.0/fablecut.mcpb",
-      "fileSha256": "e8c056a362114c4702400a378db94874797aa8cd6debaf9785f6f893ab7c494d",
+      "fileSha256": "1b8fae2686261f3ff3c6ba6d21c5c041b5ade82fcf07daa7b490adf5b13003f6",
       "transport": {
         "type": "stdio"
       }
