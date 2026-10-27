@@ -360,10 +360,18 @@
     const speedOf = (c) => Math.min(8, Math.max(0.1, +c.props?.speed || 1));
     /** source seconds a clip may still use from its in point (Infinity for pictures and titles) */
     const mediaDur = (c) => timed(c) ? media.get(c.mediaId).duration - (c.in || 0) : Infinity;
-    /** timeline seconds of footage before the clip's head and after its tail */
-    const spare = (c) => timed(c)
+    /** timeline seconds of footage before the clip's head and after its tail — the tightest of
+     *  its linked group, which a roll moves together (a stem may sit on a shorter file) */
+    const own = (c) => timed(c)
       ? { head: (c.in || 0) / speedOf(c), tail: Math.max(0, mediaDur(c) - c.duration * speedOf(c)) / speedOf(c) }
       : { head: Infinity, tail: Infinity };
+    const spare = (c) => {
+      const group = c.linkGroup ? doc.clips.filter((x) => x.linkGroup === c.linkGroup && x.id !== c.id).concat([c]) : [c];
+      // c may carry an earlier roll's timing (snapOps); its partners moved by the same amount
+      const shift = (x) => x.id === c.id ? c : { ...x, in: (x.in || 0) + ((c.in || 0) - (doc.clips.find((y) => y.id === c.id)?.in || 0)) * speedOf(x) / speedOf(c),
+        duration: c.duration };
+      return group.map((x) => own(shift(x))).reduce((m, r) => ({ head: Math.min(m.head, r.head), tail: Math.min(m.tail, r.tail) }), { head: Infinity, tail: Infinity });
+    };
 
     if (o.markers) {
       const have = doc.markers || [];

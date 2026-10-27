@@ -5028,10 +5028,25 @@ function paintBeats() {
   if (!s) return;
   if (s.sig !== beatsSig(getClip(s.clipId))) { state.beats = null; return; }
   const lanes = new Set([getClip(s.clipId).track, ...TRACKS.filter((t) => t.kind === "video").map((t) => t.id)]);
+  const g = s.grid, n = g.length;
+  if (!n) return;
+  // a steady grid is one striped band per lane, however long the song; onsets without a tempo are ticks
+  const per = n > 1 ? (g[n - 1] - g[0]) / (n - 1) : 0;
+  const steady = n > 2 && per > 0 && g.every((t, i) => !i || Math.abs(t - g[i - 1] - per) < 0.004);
   for (const id of lanes) {
     const row = els.tracks.querySelector(`[data-track="${id}"]`);
     if (!row) continue;
-    for (const t of s.grid) {
+    if (steady) {
+      const el = document.createElement("div");
+      el.className = "beat-band";
+      const step = per * state.pps;
+      el.style.left = (g[0] * state.pps - 0.5) + "px";
+      el.style.width = ((g[n - 1] - g[0]) * state.pps + 1) + "px";
+      el.style.backgroundImage = `repeating-linear-gradient(to right, var(--beat-tick) 0 1px, transparent 1px ${step}px)`;
+      row.appendChild(el);
+      continue;
+    }
+    for (const t of g.slice(0, 600)) {
       const el = document.createElement("div");
       el.className = "beat-tick";
       el.style.left = (t * state.pps) + "px";
@@ -6729,9 +6744,9 @@ function renderInspector(lite) {
       ${bt ? `<div class="insp-note">${bt.bpm != null ? bt.bpm + " BPM · " : ""}${bt.grid.length} beats, ${fmt(bt.grid[0])} → ${fmt(bt.grid[bt.grid.length - 1])}${bt.drop != null ? ` · the drop at ${fmt(bt.drop)}` : ""}</div>
       ${row("", `<span class="insp-ctrls"><button type="button" class="btn tiny" data-beat-mark title="A cyan marker on every beat (other markers stay)">Mark</button>
         <button type="button" class="btn tiny" data-beat-snap title="Roll each cut on the targeted video tracks to the nearest beat — nothing else moves">Snap cuts</button></span>`)}
-      ${lanes.length ? row("Re-cut", `<span class="insp-ctrls"><select data-beat-track title="The track whose clips go on the beat">${lanes.map((id) => `<option>${id}</option>`).join("")}</select>
-        every <select data-beat-every title="Beats per shot">${FableCutBeats.EVERY.map((n) => `<option value="${n}" ${n === bs.every ? "selected" : ""}>${n}</option>`).join("")}</select> beats
-        <button type="button" class="btn tiny" data-beat-retime title="Lay that track's clips back to back on the beat, from the music's start (one undo step)">Re-cut</button></span>`) : ""}` : ""}
+      ${lanes.length ? row("Re-cut", `<span class="insp-ctrls"><select data-beat-track title="The track whose clips go on the beat" style="width:auto;min-width:4.2em">${lanes.map((id) => `<option>${id}</option>`).join("")}</select>
+        every <select data-beat-every title="Beats per shot" style="width:auto;min-width:3.6em">${FableCutBeats.EVERY.map((n) => `<option value="${n}" ${n === bs.every ? "selected" : ""}>${n}</option>`).join("")}</select> beats</span>`) +
+        row("", `<span class="insp-ctrls"><button type="button" class="btn tiny" data-beat-retime title="Lay that track's clips back to back on the beat, from the music's start (one undo step)">Re-cut</button></span>`) : ""}` : ""}
     </div>`;
   }
   if (c.kind === "audio" && typeof FableCutFx !== "undefined") {
@@ -9451,7 +9466,11 @@ function beatsAction(acts) {
       const x = getClip(op.id);
       rolls++;
       // what the roll really moved (a refusal is a string, a clamp a smaller number)
-      if (x) { const d = EDIT.rollEdit(x, op.side, op.delta); if (typeof d === "number" && Math.abs(d - op.delta) < 1e-3) rolled++; }
+      if (!x) continue;
+      const d = EDIT.rollEdit(x, op.side, op.delta);
+      if (typeof d === "number" && Math.abs(d - op.delta) < 1e-3) rolled++;
+      // a roll that couldn't reach the beat (clamped) is put back: the cut stays where it was, not off the beat
+      else if (typeof d === "number" && d) EDIT.rollEdit(x, op.side, -d);
     } else if (op.op === "updateClip") {
       const x = getClip(op.id);
       if (x) for (const [k, v] of Object.entries(op.set)) { if (v === null) delete x[k]; else x[k] = v; }

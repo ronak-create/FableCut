@@ -137,3 +137,17 @@ test("plan: a re-cut shot carries its trimmed keyframes and transitions in the o
   assert.deepEqual(r.ops[0].set.keyframes, { opacity: [{ t: 0, v: 0 }] });
   assert.equal(r.ops[0].set.transitionIn.duration, 1);
 });
+
+test("plan: snap counts a linked stem's footage — a stem on a shorter file keeps the cut where it is", () => {
+  const music = { id: "m", kind: "audio", mediaId: "m1", track: "A1", start: 0, in: 0, duration: 10, props: {} };
+  // the cut at 1.4 wants 1.25: the clip after it must show 0.15 s more of its head
+  const a = clip("a", "V1", 0, 1.4, { in: 5, mediaId: "mv" });
+  const b = clip("b", "V1", 1.4, 3, { in: 5, mediaId: "mv", linkGroup: "g" });
+  const stem = { id: "bs", kind: "audio", mediaId: "ma", track: "A2", start: 1.4, in: 0.05, duration: 3, linkGroup: "g", props: {} };
+  const d = doc([music, a, b, stem], { media: [{ id: "m1", duration: 60 }, { id: "mv", duration: 60 }, { id: "ma", duration: 60 }] });
+  const r = B.plan(d, music, kicks, { snap: { tracks: ["V1"] } });
+  assert.equal(r.ops.length, 0, JSON.stringify(r.ops));
+  assert.match(r.done[0], /1 without spare footage/);
+  stem.in = 1;
+  assert.equal(B.plan(d, music, kicks, { snap: { tracks: ["V1"] } }).ops.length, 1, "with room on the stem it rolls");
+});
