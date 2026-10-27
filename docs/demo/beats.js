@@ -241,12 +241,13 @@
    *  inside the beat grid's span: [{t, a, b}] with a the clip before, b the one after. */
   function cuts(clips, tracks, g, fps) {
     const tol = 0.5 / (fps || 30);
+    const touch = 1e-3;   // edit-ops.js TRIM_EPS: what a roll counts as clips that meet
     const out = [];
     for (const tr of tracks) {
       const on = clips.filter((c) => c.track === tr).sort((x, y) => x.start - y.start);
       for (let i = 0; i + 1 < on.length; i++) {
         const a = on[i], b = on[i + 1], t = a.start + a.duration;
-        if (Math.abs(b.start - t) > tol) continue;   // a gap or an overlap: not a straight cut
+        if (Math.abs(b.start - t) > touch) continue;   // a gap or an overlap (even a hair's): not a cut a roll can move
         if (!g.length || t < g[0] - tol || t > g[g.length - 1] + tol) continue;
         out.push({ t, a, b });
       }

@@ -9490,17 +9490,25 @@ function beatsAction(acts) {
       rolls++;
       // what the roll really moved (a refusal is a string, a clamp a smaller number)
       if (!x) continue;
-      const before = JSON.stringify(project.clips);
+      // what this roll can touch: the clips on either side of the cut and their linked partners
+      const end = x.start + x.duration;
+      const next = project.clips.find((c) => c !== x && c.track === x.track && Math.abs(c.start - end) < 1e-3);
+      const touched = withLinked(next ? [x, next] : [x]);
+      const before = new Map(touched.map((c) => [c.id, JSON.stringify(c)]));
       const d = EDIT.rollEdit(x, op.side, op.delta);
       if (typeof d === "number" && Math.abs(d - op.delta) < 1e-3) rolled++;
       // a roll that couldn't reach the beat (clamped, refused) is undone exactly: the cut stays where it was
-      else project.clips = JSON.parse(before);
+      else project.clips = project.clips.map((c) => (before.has(c.id) ? JSON.parse(before.get(c.id)) : c));
     } else if (op.op === "updateClip") {
       const x = getClip(op.id);
       if (x) for (const [k, v] of Object.entries(op.set)) { if (v === null) delete x[k]; else x[k] = v; }
     }
   }
-  if (undoSnapshot() === snap) { state.dirtyTimeline = true; renderInspector(); toast("Nothing could move: those cuts have no spare footage to reach the beat"); return; }
+  if (undoSnapshot() === snap) {
+    state.dirtyTimeline = true; renderInspector();
+    toast(acts.markers ? "No new beats to mark: every beat already has a marker" : "Nothing could move: those cuts have no spare footage to reach the beat");
+    return;
+  }
   pushUndo(snap);
   pruneSelection();
   state.dirtyTimeline = true;

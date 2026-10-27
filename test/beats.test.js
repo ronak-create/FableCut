@@ -174,3 +174,9 @@ test("plan: re-cut gives a shot no more beats than its linked stem's footage all
   assert.equal(r.ops.find((o) => o.id === "s").set.duration, 0.5, "the stem has 0.6 s: one beat");
   assert.equal(r.ops.find((o) => o.id === "ss").set.duration, 0.5);
 });
+
+test("snapOps leaves a hairline gap alone: only clips that really meet make a cut a roll can move", () => {
+  const g = [0, 0.5, 1, 1.5];
+  const clips = [clip("a", "V1", 0, 0.52), clip("b", "V1", 0.525, 1)];
+  assert.deepEqual(B.snapOps(clips, ["V1"], g, { fps: 30, bpm: 120 }), []);
+});
