@@ -75,6 +75,13 @@ test("targets: full-frame shots only; reframed ones can be redone", () => {
     moved: "placed by hand (moved or scaled)", small: "placed by hand (moved or scaled)", title: "a title", keyed: "animated by hand (position or scale keys)",
     cropped: "cropped", none: "fit:none", locked: "locked", lane: "locked" });
   assert.deepEqual(R.targets(doc, { force: true }).take.map((x) => x.id).includes("locked"), true);
+  // a picture whose linked sound is locked (clip or lane) is locked with it
+  const linked = { lockedTracks: ["A2"], clips: [c("v", { linkGroup: "g" }), { id: "a", kind: "audio", track: "A1", linkGroup: "g", locked: true, props: {} },
+    c("w", { linkGroup: "h" }), { id: "b", kind: "audio", track: "A2", linkGroup: "h", props: {} }, c("free")] };
+  const lr = R.targets(linked);
+  assert.deepEqual(lr.take.map((x) => x.id), ["free"]);
+  assert.deepEqual(lr.skip.filter((x) => x.why === "locked").map((x) => x.id), ["v", "w"]);
+  assert.deepEqual(R.targets(linked, { force: true }).take.map((x) => x.id), ["v", "w", "free"]);
 });
 
 test("clipPlan: follows, holds, centres — and redoing replaces its own keys", () => {

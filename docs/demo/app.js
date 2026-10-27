@@ -13248,8 +13248,9 @@ async function pictureSize(c) {
 async function reframeClips(clips, { follow = true, smooth = 0.5 } = {}) {
   if (!Reframe) { toast("Reframe module missing — reload the editor"); return null; }
   if (reframeRun.busy) { toast("Already reframing — wait for it, or Cancel"); return null; }
-  const doc = { clips: clips || project.clips, lockedTracks: [...state.lockedTracks] };
-  const { take, skip } = Reframe.targets(doc, {});
+  // every clip, so a linked partner's lock counts; `clips` (the selection) picks which ones
+  const doc = { clips: project.clips, lockedTracks: [...state.lockedTracks] };
+  const { take, skip } = Reframe.targets(doc, { ids: clips ? clips.map((c) => c.id) : null });
   if (!take.length) { toast(skip.length ? `Nothing to reframe: ${skip[0].id} is ${skip[0].why}` : "Select a video or picture clip to reframe"); return null; }
   Object.assign(reframeRun, { busy: true, cancel: false, done: 0, of: take.length, frac: 0 });
   renderInspector();

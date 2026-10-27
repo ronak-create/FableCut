@@ -226,6 +226,8 @@
    *  not fitted "none" or "stretch", not locked (unless force). Returns {take, skip:[{id, why}]}. */
   function targets(doc, { ids = null, force = false } = {}) {
     const lanes = new Set(Array.isArray(doc.lockedTracks) ? doc.lockedTracks : []);
+    // a clip linked to a locked one is locked with it (its stems move and lock together)
+    const lockedGroups = new Set((doc.clips || []).filter((x) => x.linkGroup && (x.locked || lanes.has(x.track))).map((x) => x.linkGroup));
     const take = [], skip = [];
     for (const c of doc.clips || []) {
       if (ids && !ids.includes(c.id)) continue;
@@ -234,7 +236,7 @@
       const p = c.props || {};
       const ours = p.reframe === "follow" || p.reframe === "centre";   // reframed before: its fit and keys are ours to redo
       const ramped = Array.isArray(c.keyframes?.speed) && c.keyframes.speed.length > 0;
-      const why = !force && (c.locked || lanes.has(c.track)) ? "locked"
+      const why = !force && (c.locked || lanes.has(c.track) || (c.linkGroup && lockedGroups.has(c.linkGroup))) ? "locked"
         : ramped ? "a speed ramp"
         : ours ? (["cropL", "cropR", "cropT", "cropB"].some((k) => +p[k] > 0) ? "cropped" : null)
         : p.fit === "none" || p.fit === "stretch" ? `fit:${p.fit}`
