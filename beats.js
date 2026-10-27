@@ -24,6 +24,7 @@
    *  half a window after the hit. The grid takes it back, so cuts land on the hit itself. */
   const ONSET_LAG = WIN / 2 / SR;
   const EPS = 1e-6;
+  const MIN_DUR = 0.05;   // edit-ops.js: the shortest a clip may be
 
   /** Mono samples at another rate → SR (box average when shrinking, linear otherwise). */
   function resample(x, rate) {
@@ -199,6 +200,27 @@
       .filter((t) => t >= clip.start - EPS && t <= end + EPS);
   }
 
+  /** What a clip's timed data becomes when its length changes at the tail (as edit-ops trims do):
+   *  keyframes past the new end dropped, transitions no longer than the clip. Only changed keys;
+   *  null removes the keyframes. */
+  function fitTimed(c, dur) {
+    const set = {};
+    if (c.keyframes && typeof c.keyframes === "object") {
+      const out = {};
+      let changed = false;
+      for (const [k, arr] of Object.entries(c.keyframes)) {
+        if (!Array.isArray(arr)) { out[k] = arr; continue; }
+        const keep = arr.filter((kf) => !(kf.t > dur + 1e-3));
+        if (keep.length !== arr.length) changed = true;
+        if (keep.length) out[k] = keep;
+      }
+      if (changed) set.keyframes = Object.keys(out).length ? out : null;
+    }
+    for (const k of ["transitionIn", "transitionOut"])
+      if (c[k] && c[k].duration > dur) set[k] = { ...c[k], duration: Math.round(dur * 1000) / 1000 };
+    return set;
+  }
+
   /** A clip whose speed is keyframed: its sound doesn't keep the music's time on the timeline. */
   const ramped = (c) => Array.isArray(c.keyframes?.speed) && c.keyframes.speed.length > 0;
 
@@ -244,13 +266,22 @@
     const limit = maxShift == null ? beat / 2 : +maxShift;
     if (!(limit > 0)) throw new Error("maxShift must be > 0 seconds");
     const half = 0.5 / fps, ops = [];
-    for (const { t, a, b } of cuts(clips, tracks, g, fps)) {
+    // the rolls are planned one after another, each on the clips as the earlier ones left them:
+    // two cuts beside one short clip can't both take its time
+    const now = new Map();
+    const cur = (c) => now.get(c.id) || { ...c };
+    const speed = (c) => Math.min(8, Math.max(0.1, +c.props?.speed || 1));
+    for (const { t, a, b } of cuts(clips, tracks, g, fps).sort((x, y) => x.t - y.t)) {
       const to = nearest(g, Math.round(t * fps) / fps);
       if (to == null) continue;
       const snapped = Math.round(to * fps) / fps, delta = snapped - t;
       if (Math.abs(delta) <= half || Math.abs(delta) > limit + half) continue;
-      const room = delta < 0 ? spare(b).head : spare(a).tail;
-      if (room + 1e-6 < Math.abs(delta)) { if (blocked) blocked.n++; continue; }
+      const A = cur(a), B = cur(b);
+      const room = delta < 0 ? spare(B).head : spare(A).tail;
+      const keeps = (delta < 0 ? A.duration + delta : B.duration - delta) >= MIN_DUR - 1e-9;
+      if (room + 1e-6 < Math.abs(delta) || !keeps) { if (blocked) blocked.n++; continue; }
+      now.set(a.id, { ...A, duration: A.duration + delta });
+      now.set(b.id, { ...B, start: B.start + delta, in: (B.in || 0) + delta * speed(B), duration: B.duration - delta });
       ops.push({ op: "roll", id: a.id, side: "out", delta: Math.round(delta * 1e6) / 1e6 });
     }
     return ops;
@@ -335,9 +366,9 @@
       : { head: Infinity, tail: Infinity };
 
     if (o.markers) {
-      const keep = (doc.markers || []).filter((m) => !g.some((t) => Math.abs(t - m.t) < 0.01));
-      const add = g.slice(0, 1000).map((t) => ({ t, color: "cyan" }));
-      out.ops.push({ op: "setProject", set: { markers: keep.concat(add).sort((x, y) => x.t - y.t) } });
+      const have = doc.markers || [];
+      const add = g.filter((t) => !have.some((m) => Math.abs(t - m.t) < 0.01)).slice(0, 1000).map((t) => ({ t, color: "cyan" }));
+      out.ops.push({ op: "setProject", set: { markers: have.concat(add).sort((x, y) => x.t - y.t) } });
       out.done.push(`marked ${add.length} beat${add.length === 1 ? "" : "s"} (cyan markers)` + (g.length > add.length ? ` — the first ${add.length}` : ""));
     }
 
@@ -367,20 +398,22 @@
       const track = r.track != null ? String(r.track) : lanes.find((t) => doc.clips.some((c) => c.track === t)) || "V1";
       const from = r.from != null ? +r.from : clip.start;
       if (!Number.isFinite(from)) throw new Error("retime.from must be a time in seconds");
-      const on = doc.clips.filter((c) => c.track === track && c.start >= from - 0.5 / fps);
+      const music = (c) => c.id === clip.id || (clip.linkGroup && c.linkGroup === clip.linkGroup);
+      const rest = doc.clips.filter((c) => !music(c));
+      const on = rest.filter((c) => c.track === track && c.start >= from - 0.5 / fps);
       if (!on.length) throw new Error(`no clips on ${track} from ${fmt(from)} — nothing to re-cut`);
       const bad = on.filter((c) => locked.has(c.id));
       if (bad.length) throw new Error(`${bad.map((c) => c.id).join(", ")} ${bad.length === 1 ? "is" : "are"} locked — unlock, or pass force:true if the user asked`);
       const rampedOnes = on.filter(ramped);
       if (rampedOnes.length) throw new Error(`${rampedOnes.map((c) => c.id).join(", ")} ${rampedOnes.length === 1 ? "has" : "have"} a speed ramp — re-cutting needs clips at a steady speed`);
-      const p = retimePlan(doc.clips, track, g, { n, from, fps, mediaDur });
+      const p = retimePlan(rest, track, g, { n, from, fps, mediaDur });
       if (p.skipped.length) throw new Error(`${p.skipped.join(", ")} ${p.skipped.length === 1 ? "has" : "have"} less than one beat of footage ` +
         "left after the in point — slip it earlier, shorten its in point, or take it off this track; nothing re-cut");
       const partners = (c) => c.linkGroup ? doc.clips.filter((x) => x.linkGroup === c.linkGroup && x.id !== c.id) : [];
       const byId = new Map(doc.clips.map((c) => [c.id, c]));
       for (const q of p.plan) {
         for (const c of [byId.get(q.id), ...partners(byId.get(q.id))]) {
-          const op = { op: "updateClip", id: c.id, set: { start: q.start, duration: q.duration } };
+          const op = { op: "updateClip", id: c.id, set: { start: q.start, duration: q.duration, ...fitTimed(c, q.duration) } };
           out.ops.push(force ? { ...op, force: true } : op);
         }
       }
@@ -405,5 +438,5 @@
     return lines.join("\n");
   }
 
-  return { SR, HOP, WIN, EVERY, ONSET_LAG, lockedIds, videoTracks, plan, describe, resample, mono, analyze, grid, toTimeline, ramped, every, nearest, cuts, snapOps, retimePlan };
+  return { SR, HOP, WIN, EVERY, ONSET_LAG, MIN_DUR, fitTimed, lockedIds, videoTracks, plan, describe, resample, mono, analyze, grid, toTimeline, ramped, every, nearest, cuts, snapOps, retimePlan };
 });

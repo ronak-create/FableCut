@@ -9391,7 +9391,9 @@ function beatsSettings() {
 /** What a found beat stands on: the clip's place, window, file and speed, and the frame rate. */
 function beatsSig(c) {
   if (!c) return "";
-  return JSON.stringify([project.fps, c.id, c.start, c.in, c.duration, getMedia(c.mediaId)?.src ?? null, c.props?.speed ?? 1, c.keyframes?.speed ?? null]);
+  // the open project and sequence too: a duplicate with the same clip ids must not inherit this beat
+  return JSON.stringify([runtime.projectId ?? null, SeqLib.activeId(seqRoot()), !!state.compCtx, project.fps, c.id, c.start, c.in, c.duration,
+    getMedia(c.mediaId)?.src ?? null, c.props?.speed ?? 1, c.keyframes?.speed ?? null]);
 }
 /** The project as beats.js reads it: the timeline plus the track switches. */
 function beatsDoc() {
@@ -9442,17 +9444,26 @@ function beatsAction(acts) {
   catch (e) { toast(e.message); return; }
   if (!r.ops.length) { toast(r.done.join(" · ") || "Nothing to change"); return; }
   const snap = undoSnapshot();
+  let rolls = 0, rolled = 0;
   for (const op of r.ops) {
     if (op.op === "setProject") project.markers = normalizeMarkers(op.set.markers);
-    else if (op.op === "roll") { const x = getClip(op.id); if (x) EDIT.rollEdit(x, op.side, op.delta); }
-    else if (op.op === "updateClip") { const x = getClip(op.id); if (x) Object.assign(x, op.set); }
+    else if (op.op === "roll") {
+      const x = getClip(op.id);
+      rolls++;
+      // what the roll really moved (a refusal is a string, a clamp a smaller number)
+      if (x) { const d = EDIT.rollEdit(x, op.side, op.delta); if (typeof d === "number" && Math.abs(d - op.delta) < 1e-3) rolled++; }
+    } else if (op.op === "updateClip") {
+      const x = getClip(op.id);
+      if (x) for (const [k, v] of Object.entries(op.set)) { if (v === null) delete x[k]; else x[k] = v; }
+    }
   }
   pushUndo(snap);
   pruneSelection();
   state.dirtyTimeline = true;
   scheduleSave();
   renderInspector();
-  toast(r.done.map((d) => d[0].toUpperCase() + d.slice(1)).join(" · "));
+  const done = r.done.map((d) => (rolls && rolled < rolls && /^snapped /.test(d) ? d.replace(/^snapped \d+/, "snapped " + rolled) : d));
+  toast(done.map((d) => d[0].toUpperCase() + d.slice(1)).join(" · "));
 }
 async function autoDuckClips(clips, { under = null, amount = duckAmount(), threshold = -40 } = {}) {
   if (typeof FableCutDucking === "undefined") { toast("Ducking module missing — reload the editor"); return; }

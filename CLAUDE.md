@@ -641,7 +641,8 @@ edits the key under the playhead. Agents:
   (BPM), a **steady beat grid** — the tempo's period, phased and fitted to the
   hits, so it doesn't drift over a song — and the drop, all in timeline seconds
   through the clip's in point and speed. On its own it only reports. Then, in one
-  revision: `markers:true` puts a cyan marker on every beat (other markers stay);
+  revision: `markers:true` puts a cyan marker on every beat (other markers stay, and a
+  beat that already has one keeps it);
   `snap:true` (or `{tracks, maxShift}`) rolls each cut on the targeted video tracks
   to the nearest beat within half a beat — a roll, so nothing else moves and
   linked stems follow; a cut whose clips have no spare footage to reach the beat
@@ -652,7 +653,11 @@ edits the key under the playhead. Agents:
   whose footage runs out gets fewer beats, clips past the music keep their
   length, and one with less than a beat of footage refuses the whole re-cut.
   Locked clips are left alone by snap and refuse retime, unless `force:true`
-  (only when the user asked). A version is kept before snap or retime. Cuts land
+  (only when the user asked). A version is kept before snap or retime; if saving it
+  fails, the edit still goes ahead and the reply says so in a warning. A re-cut clip
+  that gets shorter loses the keyframes past its new end, and its transitions are
+  kept no longer than the clip, as with a trim. The music clip itself (and its linked
+  stems) is never re-cut, even when it sits on the track being re-cut. Cuts land
   on whole frames. A clip with a speed ramp is refused: its music doesn't keep
   time on the timeline. In the editor: the Inspector's **Beats** section on an
   audio or video clip — **Find beats** shows the beat as ticks across the

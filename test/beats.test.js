@@ -93,3 +93,47 @@ test("retimePlan only takes the clips from `from` on", () => {
   const r = B.retimePlan([clip("a", "V1", 0, 2.5), clip("b", "V1", 2.5, 3)], "V1", g, { n: 1, from: 2.5, fps: 30 });
   assert.deepEqual(r.plan, [{ id: "b", start: 3, duration: 1, beats: 1 }]);
 });
+
+test("snapOps plans the rolls one after another: two cuts can't both take a short clip's time", () => {
+  const g = [0, 0.5, 1, 1.5, 2];
+  // b runs 0.4 → 0.55; both cuts' nearest beat is 0.5, so together they would squeeze b to nothing
+  const clips = [clip("a", "V1", 0, 0.4, { in: 5 }), clip("b", "V1", 0.4, 0.15, { in: 5 }), clip("c", "V1", 0.55, 2, { in: 5 })];
+  const blocked = { n: 0 };
+  const ops = B.snapOps(clips, ["V1"], g, { fps: 30, bpm: 120, blocked });
+  assert.deepEqual(ops.map((o) => o.id), ["a"], "the first cut moves; the second would leave b shorter than allowed");
+  assert.equal(blocked.n, 1);
+});
+
+test("fitTimed drops keyframes past a shorter end and clamps transitions", () => {
+  const c = { duration: 4, keyframes: { opacity: [{ t: 0, v: 0 }, { t: 3, v: 1 }], scale: [{ t: 3.5, v: 2 }] }, transitionOut: { type: "fade", duration: 1.5 } };
+  assert.deepEqual(B.fitTimed(c, 1), { keyframes: { opacity: [{ t: 0, v: 0 }] }, transitionOut: { type: "fade", duration: 1 } });
+  assert.deepEqual(B.fitTimed({ duration: 4, keyframes: { x: [{ t: 3, v: 1 }] } }, 1), { keyframes: null }, "no keys left: removed");
+  assert.deepEqual(B.fitTimed(c, 5), {}, "longer: nothing to change");
+});
+
+const doc = (clips, extra = {}) => ({ fps: 30, clips, media: [{ id: "m1", duration: 60 }], tracks: [{ id: "V1", kind: "video" }, { id: "A1", kind: "audio" }], ...extra });
+const kicks = { beats: Array.from({ length: 20 }, (_, k) => 0.25 + k * 0.5), bpm: 120, drop: null };
+
+test("plan: markers keep every marker the user had, and add none where one already sits", () => {
+  const music = { id: "m", kind: "audio", mediaId: "m1", track: "A1", start: 0, in: 0, duration: 10, props: {} };
+  const r = B.plan(doc([music], { markers: [{ t: 2.25, label: "drop", color: "red" }] }), music, kicks, { markers: true });
+  const list = r.ops[0].set.markers;
+  assert.ok(list.some((m) => m.label === "drop" && m.t === 2.25), "the labeled marker stays");
+  assert.equal(list.filter((m) => Math.abs(m.t - 2.25) < 0.01).length, 1, "no cyan marker on top of it");
+});
+
+test("plan: retime never moves the music clip, even on the track it re-cuts", () => {
+  const music = { id: "mv", kind: "video", mediaId: "m1", track: "V1", start: 0, in: 0, duration: 10, props: {} };
+  const shots = [clip("s1", "V1", 10, 2), clip("s2", "V1", 12, 2)];
+  const r = B.plan(doc([music, ...shots]), music, kicks, { retime: { from: 0, every: 2 } });
+  assert.ok(!r.ops.some((o) => o.id === "mv"), JSON.stringify(r.ops));
+  assert.deepEqual(r.ops.map((o) => o.id), ["s1", "s2"]);
+});
+
+test("plan: a re-cut shot carries its trimmed keyframes and transitions in the op", () => {
+  const music = { id: "m", kind: "audio", mediaId: "m1", track: "A1", start: 0, in: 0, duration: 10, props: {} };
+  const shot = clip("s", "V1", 0, 3, { keyframes: { opacity: [{ t: 0, v: 0 }, { t: 2.5, v: 1 }] }, transitionIn: { type: "fade", duration: 2 } });
+  const r = B.plan(doc([music, shot]), music, kicks, { retime: { every: 2 } });
+  assert.deepEqual(r.ops[0].set.keyframes, { opacity: [{ t: 0, v: 0 }] });
+  assert.equal(r.ops[0].set.transitionIn.duration, 1);
+});
