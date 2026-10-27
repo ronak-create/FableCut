@@ -2382,6 +2382,7 @@ input[type=range] {
 }
 
 /* Silences Find marked (Inspector → Silence) — a band over the span, above the clips */
+.beat-tick { position: absolute; top: 0; bottom: 0; width: 1px; margin-left: -0.5px; background: rgba(34, 211, 238, .45); pointer-events: none; z-index: 3; }
 .silence-span {
   position: absolute;
   top: 2px;
