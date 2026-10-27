@@ -523,6 +523,53 @@ test("fablecut_silence reports the pauses in speech, then cuts them with the ste
   assert.match(bad.text, /no sound to listen to/);
 });
 
+test("fablecut_reframe makes a 9:16 copy whose shots follow the subject", async (t) => {
+  const { spawnSync } = require("node:child_process");
+  const has = (b) => { try { return spawnSync(b, ["-version"], { stdio: "ignore" }).status === 0; } catch { return false; } };
+  if (!has("ffmpeg") || !has("ffprobe")) { t.skip("ffmpeg / ffprobe not installed"); return; }
+  const project = seedProject({
+    width: 1920, height: 1080, fps: 30,
+    media: [{ id: "m_sq", name: "slide.mp4", kind: "video", src: "/media/slide.mp4", duration: 4, width: 1280, height: 720 }],
+    clips: [
+      { id: "c_sq", mediaId: "m_sq", kind: "video", track: "V1", start: 0, in: 0, duration: 4, props: {} },
+      { id: "c_pip", mediaId: "m_sq", kind: "video", track: "V2", start: 0, in: 0, duration: 2, props: { scale: 0.3, x: 500 } },
+      { id: "c_t", kind: "text", mediaId: null, track: "V3", start: 0, in: 0, duration: 4, props: { text: "hi" } },
+    ],
+  });
+  const { dir, mcp } = await boot(t, project);
+  fs.mkdirSync(path.join(dir, "media"), { recursive: true });
+  // an orange square sliding left to right across a dark frame
+  const r = spawnSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "color=c=0x111111:s=1280x720:r=30:d=4", "-f", "lavfi", "-i", "color=c=orange:s=150x150:r=30:d=4",
+    "-filter_complex", "[0][1]overlay=x='60+t*260':y=285", "-c:v", "libx264", "-pix_fmt", "yuv420p", path.join(dir, "media", "slide.mp4")]);
+  assert.equal(r.status, 0, String(r.stderr));
+
+  const res = await mcp.callTool("fablecut_reframe", { aspect: "9:16" });
+  assert.equal(res.isError, false, res.text);
+  assert.match(res.text, /New sequence ".* 9:16" 1080×1920, opened/);
+  assert.match(res.text, /c_sq: follows the subject/);
+  assert.match(res.text, /c_pip \(placed by hand/);
+  assert.match(res.text, /kept as a version/);
+  const doc = readProject(dir);
+  assert.deepEqual([doc.width, doc.height], [1080, 1920], "the new 9:16 sequence is open");
+  const sq = doc.clips.find((c) => c.id === "c_sq");
+  assert.equal(sq.props.fit, "cover");
+  const keys = sq.keyframes.x;
+  assert.ok(keys.length >= 2, JSON.stringify(keys));
+  assert.ok(keys[0].v > 150 && keys[keys.length - 1].v < -150, `the picture moves right then left with the square: ${JSON.stringify(keys)}`);
+  const max = (1280 * (1920 / 720) - 1080) / 2;
+  assert.ok(keys.every((k) => Math.abs(k.v) <= max + 1), "never past the picture's edge");
+  assert.deepEqual(doc.clips.find((c) => c.id === "c_pip").props, { scale: 0.3, x: 500 }, "the picture-in-picture is left alone");
+  const main = doc.sequences.find((s) => s.id !== doc.sequence);
+  assert.deepEqual(main.clips.find((c) => c.id === "c_sq").props, {}, "the original sequence is untouched");
+
+  const centred = await mcp.callTool("fablecut_reframe", { clipIds: ["c_sq"], follow: false });
+  assert.equal(centred.isError, false, centred.text);
+  assert.match(centred.text, /c_sq: centred/);
+  const none = await mcp.callTool("fablecut_reframe", { clipIds: ["c_t"] });
+  assert.ok(none.isError);
+  assert.match(none.text, /no full-frame shots/);
+});
+
 test("setFx puts validated chains or presets on clips (with their stems), tracks and the master", async (t) => {
   const project = seedProject({
     media: [{ id: "m_v", name: "v.mp4", kind: "video", src: "/media/v.mp4", duration: 10 }],

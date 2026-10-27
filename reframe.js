@@ -216,5 +216,65 @@
     return a[0] <= a[1] ? { width: even(short), height: even(short * a[1] / a[0]) } : { width: even(short * a[0] / a[1]), height: even(short) };
   }
 
-  return { SAMPLE_FPS, SAMPLE_W, ASPECTS, saliency, centre, subjectTrack, camera, simplify, coverRect, offsetFor, keysFor, canvasFor };
+  /* ── on a project: which clips, and what to write ── */
+
+  const near0 = (v) => v == null || Math.abs(+v) < 0.5;
+  const hasKeys = (c, k) => Array.isArray(c.keyframes?.[k]) && c.keyframes[k].length > 0;
+
+  /** The clips a reframe works on, from `doc` (the sequence as it will be): full-frame
+   *  pictures — video clips (and stills) not moved, scaled, cropped or animated by hand,
+   *  not fitted "none" or "stretch", not locked (unless force). Returns {take, skip:[{id, why}]}. */
+  function targets(doc, { ids = null, force = false } = {}) {
+    const lanes = new Set(Array.isArray(doc.lockedTracks) ? doc.lockedTracks : []);
+    const take = [], skip = [];
+    for (const c of doc.clips || []) {
+      if (ids && !ids.includes(c.id)) continue;
+      if (c.kind !== "video" && c.kind !== "image") { if (ids) skip.push({ id: c.id, why: `a ${c.kind} clip` }); continue; }
+      const p = c.props || {};
+      const ours = p.reframe === "follow" || p.reframe === "centre";   // reframed before: its fit and keys are ours to redo
+      const why = !force && (c.locked || lanes.has(c.track)) ? "locked"
+        : ours ? (["cropL", "cropR", "cropT", "cropB"].some((k) => +p[k] > 0) ? "cropped" : null)
+        : p.fit === "none" || p.fit === "stretch" ? `fit:${p.fit}`
+        : !near0(p.x) || !near0(p.y) || (p.scale != null && Math.abs(+p.scale - 1) > 0.01) ? "placed by hand (moved or scaled)"
+        : hasKeys(c, "x") || hasKeys(c, "y") || hasKeys(c, "scale") ? "animated by hand (position or scale keys)"
+        : ["cropL", "cropR", "cropT", "cropB"].some((k) => +p[k] > 0) ? "cropped"
+        : Array.isArray(c.keyframes?.speed) && c.keyframes.speed.length ? "a speed ramp"
+        : null;
+      if (why) skip.push({ id: c.id, why }); else take.push(c);
+    }
+    return { take, skip };
+  }
+
+  /** What one clip gets: fit cover, and an x (or y) that follows the subject — keys, or one
+   *  steady value. `samples` from subjectTrack (null: centre it); `src` {width, height} the
+   *  picture; `canvas` {width, height}. Returns {set, note} for an updateClip op. */
+  function clipPlan(c, samples, src, canvas, { smooth = 0.5, fps = 30, follow = true } = {}) {
+    const r = coverRect(src.width, src.height, canvas.width, canvas.height, 1);
+    const axis = r.maxX >= r.maxY ? "x" : "y";
+    const size = axis === "x" ? r.pw : r.ph, max = axis === "x" ? r.maxX : r.maxY;
+    // only what changes: updateClip merges props key by key, and null takes one away. props.reframe marks the
+    // fit and position as reframe's own, so running it again redoes them instead of calling them hand-made.
+    const props = { fit: "cover", x: null, y: null, reframe: follow ? "follow" : "centre" };
+    const rest = { ...(c.keyframes || {}) };
+    delete rest.x; delete rest.y;
+    const set = { props };
+    if (c.keyframes && (c.keyframes.x || c.keyframes.y)) set.keyframes = Object.keys(rest).length ? rest : null;
+    const sp = Math.min(8, Math.max(0.1, +c.props?.speed || 1));
+    const sure = samples && samples.length ? samples.reduce((n, s) => n + s[3], 0) / samples.length : 0;
+    if (!follow || max <= 0.5 || !samples || !samples.length || sure < 0.12) {
+      const why = max <= 0.5 ? "already this shape" : !follow ? "centred" : "no clear subject — centred";
+      return { set, note: why, axis, keys: 0 };
+    }
+    const path = camera(samples, axis === "x" ? 1 : 2, { smooth });
+    const k = keysFor(path, size, max, { speed: sp, fps });
+    if (k.keys) {
+      set.keyframes = { ...rest, [axis]: k.keys };
+      const vals = k.keys.map((q) => q.v), span = (Math.max(...vals) - Math.min(...vals)) / (2 * max || 1);
+      return { set, note: `follows the subject (${k.keys.length} keys, pans ${Math.round(span * 100)}% of the room)`, axis, keys: k.keys.length };
+    }
+    props[axis] = k.static;
+    return { set, note: k.static ? `held on the subject (${axis} ${k.static > 0 ? "+" : ""}${k.static})` : "subject in the middle — centred", axis, keys: 0 };
+  }
+
+  return { SAMPLE_FPS, SAMPLE_W, ASPECTS, targets, clipPlan, saliency, centre, subjectTrack, camera, simplify, coverRect, offsetFor, keysFor, canvasFor };
 });

@@ -292,6 +292,21 @@ const TOOLS = [
     },
   },
   {
+    name: "fablecut_reframe",
+    description: "Reframe for another shape, following the subject: a 16:9 edit made 9:16 (Reels, Shorts, TikTok), 1:1 or 4:5. With aspect, a copy of the open sequence is made on that canvas (the project's shorter side kept, e.g. 1920×1080 → 1080×1920) and opened, so the original cut stays as it was; without aspect, the open sequence is reframed on its own canvas. Each full-frame shot (a video or still that isn't moved, scaled, cropped or animated by hand) is fitted to cover the canvas, and its position follows what matters in it: frames are sampled 5 times a second, the subject is found by motion against the shot's own movement, detail and colour, and a virtual camera operator holds still until the subject leaves a dead zone, then eases after it no faster than a pan speed. The result is ordinary x (or y) keyframes, thinned to a few, or one steady position — edit them like any keys. Shots without a clear subject are centred. Titles, picture-in-picture, clips placed by hand and locked clips are left alone (listed in the reply) — check them with fablecut_frame on the new canvas. clipIds limits it to some clips; follow:false only fits and centres; smooth 0…1 (default 0.5) — higher holds longer and pans slower. A version is saved first. Needs ffmpeg on PATH.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        aspect: { type: "string", enum: ["9:16", "1:1", "4:5", "16:9", "4:3", "2:3"], description: "Make a copy of the open sequence on this canvas shape and reframe it (default: reframe the open sequence as it is)" },
+        name: { type: "string", description: "With aspect: the new sequence's name (default: the open one's name and the shape)" },
+        clipIds: { type: "array", items: { type: "string" }, description: "Only these clips (default: every full-frame shot)" },
+        follow: { type: "boolean", description: "Follow the subject (default true); false only fits and centres" },
+        smooth: { type: "number", description: "0…1, default 0.5: higher holds longer and pans slower" },
+        force: { type: "boolean", description: "Also reframe locked clips (only when the user asked)" },
+      },
+    },
+  },
+  {
     name: "fablecut_transcribe",
     description: "What is said, word by word, with times — and text-based editing. Transcribes the clips' speech with Whisper in the editor (an open tab, else headless Chrome / Edge; the speech model downloads once, the audio never leaves the machine), keeps one transcript per file (analysis/transcripts/), and answers with the timeline's words as timed lines (timeline seconds), so you can read an interview, pick the good takes, or find where something is said. find:\"phrase\" (or a list) reports every place it is said — case, punctuation and spacing ignored, whole words only — with the exact span; cut:true then extracts each of them on the targeted tracks (or `tracks`), the words and the pause after them, last first, in one revision: later material moves up, linked stems stay in sync, locked clips stay put (lock the music bed first). A version is saved before a cut. Files already transcribed aren't done again unless again:true. Default clips: every video / audio clip with sound on the open timeline. mediaIds reads whole files instead (file seconds; no cut). The same as the editor's Transcript tab.",
     inputSchema: {
@@ -642,6 +657,83 @@ async function silenceTool(args) {
   lastReadRevision = proj.revision;
   return `Cut ${head} — timeline ${fmtDur(before)} → ${fmtDur(end(proj))} (revision ${proj.revision}). UI hot-reloaded.` +
     (verWarn || ` The project as it was is kept as a version (fablecut_versions lists it; restore undoes the cut).`);
+}
+/* fablecut_reframe: a new sequence on the canvas asked for (or the open one), then reframe.js on frames
+   ffmpeg samples from each full-frame shot's window. */
+const REFRAME_MAX_SECS = 15 * 60;
+function sampleFrames(file, c, w, h) {
+  const R = require("./reframe.js");
+  const sp = Math.min(8, Math.max(0.1, +c.props?.speed || 1));
+  const len = Math.max(0.1, Math.min(REFRAME_MAX_SECS, c.duration * sp));
+  const args = c.kind === "image"
+    ? ["-v", "error", "-i", file, "-frames:v", "1", "-vf", `scale=${w}:${h}`, "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
+    : ["-v", "error", "-ss", String(Math.max(0, +c.in || 0)), "-t", String(len), "-i", file, "-an",
+       "-vf", `fps=${R.SAMPLE_FPS},scale=${w}:${h}`, "-f", "rawvideo", "-pix_fmt", "rgb24", "-"];
+  const r = require("child_process").spawnSync("ffmpeg", args, { maxBuffer: 1 << 29 });
+  if (r.error) throw new Error("ffmpeg not found on PATH — needed to look at the footage");
+  if (r.status !== 0) throw new Error(`ffmpeg couldn't read ${c.id}: ${String(r.stderr).trim().split("\n").pop()}`);
+  const fb = w * h * 3, frames = [];
+  for (let o = 0; o + fb <= r.stdout.length; o += fb) frames.push(r.stdout.subarray(o, o + fb));
+  return frames;
+}
+async function reframeTool(args) {
+  const R = require("./reframe.js");
+  const doc = readProject();
+  const readRev = doc.revision || 0;
+  const smooth = args.smooth == null ? 0.5 : +args.smooth;
+  if (!(smooth >= 0 && smooth <= 1)) throw new Error("smooth must be 0…1");
+  const ids = Array.isArray(args.clipIds) && args.clipIds.length ? args.clipIds.map(String) : null;
+  const ops = [];
+  // the sequence as it will be: a copy on the new canvas, opened — or the open one
+  let work = doc, made = "";
+  if (args.aspect) {
+    const canvas = R.canvasFor(args.aspect, doc.width, doc.height);
+    const open = (doc.sequences || []).find((s) => s.id === doc.sequence);
+    const seqName = String(args.name || `${open?.name || "Main"} ${args.aspect}`).slice(0, 80);
+    const add = { op: "addSequence", from: "open", name: seqName, width: canvas.width, height: canvas.height, open: true };
+    work = JSON.parse(JSON.stringify(doc));
+    ProjectOps.applyPatch(work, [add], { savedItems });
+    ops.push(add);
+    made = `New sequence "${seqName}" ${canvas.width}×${canvas.height}, opened. `;
+  }
+  const canvas = { width: work.width, height: work.height };
+  const { take, skip } = R.targets(work, { ids, force: args.force === true });
+  if (!take.length) throw new Error("no full-frame shots to reframe" + (skip.length ? ` (${skip.map((x) => `${x.id}: ${x.why}`).join("; ")})` : ""));
+  const lines = [];
+  for (const c of take) {
+    const m = work.media.find((x) => x.id === c.mediaId);
+    const file = m && mediaFile(m.src);
+    if (!file) { skip.push({ id: c.id, why: "media file not found" }); continue; }
+    let src = m.width > 0 && m.height > 0 ? { width: m.width, height: m.height } : null;
+    if (!src) {
+      const pr = require("child_process").spawnSync("ffprobe", ["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0", file]);
+      const [w, h] = String(pr.stdout).trim().split(",").map(Number);
+      if (w > 0 && h > 0) src = { width: w, height: h };
+    }
+    if (!src) { skip.push({ id: c.id, why: "couldn't read its size" }); continue; }
+    let samples = null;
+    if (args.follow !== false) {
+      const w = R.SAMPLE_W, h = Math.max(8, Math.round(w * src.height / src.width / 2) * 2);
+      samples = R.subjectTrack(sampleFrames(file, c, w, h), w, h);
+    }
+    const p = R.clipPlan(c, samples, src, canvas, { smooth, fps: work.fps || 30, follow: args.follow !== false });
+    ops.push({ op: "updateClip", id: c.id, set: p.set, ...(args.force === true ? { force: true } : {}) });
+    lines.push(`  ${c.id}: ${p.note}`);
+  }
+  if (!lines.length) throw new Error("nothing could be reframed: " + skip.map((x) => `${x.id}: ${x.why}`).join("; "));
+  const proj = readProject();
+  if ((proj.revision || 0) !== readRev)
+    throw new Error(`the project changed while looking at the footage (revision ${readRev} → ${proj.revision}) — nothing changed; run fablecut_reframe again`);
+  let verWarn = "";
+  try { createHistory({ projects: createProjects({ dataDir: DATA_DIR, projectFile: PROJECT_FILE, libraryDir: LIBRARY_DIR }) }).beforeAgent("Before reframing"); }
+  catch (e) { verWarn = ` Warning: no version was saved first (${e.message}).`; }
+  ProjectOps.applyPatch(proj, ops, { savedItems });
+  proj.revision = readRev + 1;
+  writeProject(proj);
+  lastReadRevision = proj.revision;
+  return `${made}Reframed ${lines.length} shot${lines.length === 1 ? "" : "s"} for ${canvas.width}×${canvas.height} (revision ${proj.revision}):\n` + lines.join("\n") +
+    (skip.length ? `\nLeft as they were: ${skip.map((x) => `${x.id} (${x.why})`).join(", ")} — check them on the new canvas with fablecut_frame {time}.` : "") +
+    (verWarn || "\nThe project as it was is kept as a version (fablecut_versions; restore undoes it).");
 }
 /** What words are placed by and cuts land on: where each clip sits and plays from, the track
  *  switches and the frame rate. An editor saving probed media details while a transcription runs
@@ -1320,6 +1412,8 @@ async function callTool(name, args, attempt = 0) {
       return frameTool(args);
     case "fablecut_silence":
       return silenceTool(args);
+    case "fablecut_reframe":
+      return reframeTool(args);
     case "fablecut_transcribe":
       return transcribeTool(args);
     case "fablecut_captions":
