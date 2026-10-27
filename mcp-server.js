@@ -665,8 +665,7 @@ async function silenceTool(args) {
   let verWarn = "";
   try { createHistory({ projects: createProjects({ dataDir: DATA_DIR, projectFile: PROJECT_FILE, libraryDir: LIBRARY_DIR }) }).beforeAgent("Before cutting silences"); }
   catch (e) { verWarn = ` Warning: no version was saved before the cut (${e.message}).`; }
-  let diskRev = readRev;
-  try { diskRev = readProject().revision || 0; } catch {}
+  const diskRev = readProject().revision || 0;   // a failed read stops it: never write over what we can't see
   if (diskRev !== readRev) throw new Error(`the project changed while cutting (revision ${readRev} → ${diskRev}) — nothing cut; run fablecut_silence again`);
   proj.revision = readRev + 1;
   writeProject(proj);
@@ -707,8 +706,7 @@ async function beatsTool(args) {
     try { createHistory({ projects: createProjects({ dataDir: DATA_DIR, projectFile: PROJECT_FILE, libraryDir: LIBRARY_DIR }) }).beforeAgent(acts.retime ? "Before re-cutting to the beat" : "Before snapping cuts to the beat"); }
     catch (e) { verWarn = ` Warning: no version was saved first (${e.message}).`; }
   }
-  let diskRev = readRev;
-  try { diskRev = readProject().revision || 0; } catch {}
+  const diskRev = readProject().revision || 0;   // a failed read stops it: never write over what we can't see
   if (diskRev !== readRev) throw new Error(`the project changed meanwhile (revision ${readRev} → ${diskRev}) — nothing changed; run fablecut_beats again`);
   proj.revision = readRev + 1;
   writeProject(proj);
@@ -787,8 +785,7 @@ async function reframeTool(args) {
   let verWarn = "";
   try { createHistory({ projects: createProjects({ dataDir: DATA_DIR, projectFile: PROJECT_FILE, libraryDir: LIBRARY_DIR }) }).beforeAgent("Before reframing"); }
   catch (e) { verWarn = ` Warning: no version was saved first (${e.message}).`; }
-  let diskRev = readRev;
-  try { diskRev = readProject().revision || 0; } catch {}
+  const diskRev = readProject().revision || 0;   // a failed read stops it: never write over what we can't see
   if (diskRev !== readRev) throw new Error(`the project changed meanwhile (revision ${readRev} → ${diskRev}) — nothing changed; run fablecut_reframe again`);
   ProjectOps.applyPatch(proj, ops, { savedItems });
   proj.revision = readRev + 1;
@@ -936,8 +933,7 @@ async function transcribeTool(args) {
   let verWarn = "";
   try { createHistory({ projects: createProjects({ dataDir: DATA_DIR, projectFile: PROJECT_FILE, libraryDir: LIBRARY_DIR }) }).beforeAgent("Before cutting words"); }
   catch (e) { verWarn = ` Warning: no version was saved before the cut (${e.message}).`; }
-  let diskRev = readRev;
-  try { diskRev = readProject().revision || 0; } catch {}
+  const diskRev = readProject().revision || 0;   // a failed read stops it: never write over what we can't see
   if (diskRev !== readRev) throw new Error(`the project changed while cutting (revision ${readRev} → ${diskRev}) — nothing cut; run fablecut_transcribe again`);
   proj.revision = readRev + 1;
   writeProject(proj);
@@ -1602,8 +1598,7 @@ async function callTool(name, args, attempt = 0) {
       const verWarn = versionBeforeAgent(false);
       // Someone else saved while the ops ran: writing now would drop their change.
       // Without a baseRevision the ops just re-apply on the newer document.
-      let diskRev = readRev;
-      try { diskRev = readProject().revision || 0; } catch {}
+      const diskRev = readProject().revision || 0;   // a failed read stops it: never write over what we can't see
       if (diskRev !== readRev) {
         if (base == null && attempt < 3) return callTool(name, args, attempt + 1);
         throw conflict(diskRev);
