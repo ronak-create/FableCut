@@ -38,6 +38,8 @@ about 150 ms. A human and an agent can work the same timeline at once.
   reduction; silence removal (find the pauses in a take and cut them out);
   beats (a music clip's tempo, beat grid and drop; snap cuts to the beat or
   re-cut a track so each shot lasts N beats).
+- Reframe: a 9:16, 1:1 or 4:5 copy of an edit whose shots follow the subject
+  (a virtual camera, written as ordinary position keys).
 - Transcripts: speech to words with times in the browser (Whisper), read on
   the timeline; text-based editing (select words or find a phrase and cut it).
 - Captions: from the transcript, timed word by word (subtitle, karaoke, word
