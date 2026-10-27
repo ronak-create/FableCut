@@ -140,6 +140,10 @@ big operation (cutting silences, snapping to the beat, reframing), and every
   the subject: a virtual camera pans after what matters in each shot and
   writes ordinary position keys you can still edit. From **New sequence…**
   or the Inspector's **Reframe** section; agents use `fablecut_reframe`.
+- **Highlights** — the best moments of long footage (movement, sound, a
+  clear picture) cut into a short edit in a new sequence, in story order and
+  never across a cut. From the sequence menu's **Highlights…**; agents use
+  `fablecut_highlights`.
 - **Silence removal** — the inspector's **Silence** section (or right-click →
   **Find silences**) listens to a take and marks every pause on the timeline;
   **Cut** extracts them all in one undo step, keeping a little quiet beside
@@ -488,7 +492,7 @@ Three equivalent control surfaces:
    `fablecut_get_project`, `fablecut_set_project`, `fablecut_patch_project`,
    `fablecut_import_media`, `fablecut_analyze_reference`, `fablecut_frame`,
    `fablecut_encode_profiles`, `fablecut_normalize_audio`, `fablecut_auto_duck`,
-   `fablecut_denoise`, `fablecut_silence`, `fablecut_beats`, `fablecut_reframe`, `fablecut_transcribe`, `fablecut_captions`, `fablecut_export`, `fablecut_scopes`, `fablecut_track`.
+   `fablecut_denoise`, `fablecut_silence`, `fablecut_beats`, `fablecut_reframe`, `fablecut_highlights`, `fablecut_transcribe`, `fablecut_captions`, `fablecut_export`, `fablecut_scopes`, `fablecut_track`.
 
    FableCut is also published on the **official MCP registry** as
    [`io.github.ronak-create/fablecut`](https://registry.modelcontextprotocol.io/v0/servers?search=fablecut)

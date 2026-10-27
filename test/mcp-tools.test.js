@@ -725,3 +725,53 @@ test("setFx puts validated chains or presets on clips (with their stems), tracks
   }
   assert.deepEqual(readProject(dir), before, "a refused op saves nothing");
 });
+
+test("fablecut_highlights picks the busy and the loud moments into a new sequence", async (t) => {
+  const { spawnSync } = require("node:child_process");
+  const has = (b) => { try { return spawnSync(b, ["-version"], { stdio: "ignore" }).status === 0; } catch { return false; } };
+  if (!has("ffmpeg") || !has("ffprobe")) { t.skip("ffmpeg / ffprobe not installed"); return; }
+  const project = seedProject({
+    width: 1920, height: 1080, fps: 30,
+    media: [{ id: "m_v", name: "day.mp4", kind: "video", src: "/media/day.mp4", duration: 30, width: 320, height: 180 }],
+    clips: [{ id: "c_v", mediaId: "m_v", kind: "video", track: "V1", start: 0, in: 0, duration: 30, props: {} }],
+  });
+  const { dir, mcp } = await boot(t, project);
+  fs.mkdirSync(path.join(dir, "media"), { recursive: true });
+  // a still gridded frame; an orange square racing about 10–14 s; a cut to a blue scene at 20 s; a loud tone 24–26 s
+  const r = spawnSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=320x180:r=30:d=30", "-f", "lavfi", "-i", "color=c=orange:s=40x40:r=30:d=30",
+    "-f", "lavfi", "-i", "color=c=0x203070:s=320x180:r=30:d=30", "-f", "lavfi", "-i", "aevalsrc='if(between(t,24,26),0.6,0.01)*sin(2*PI*220*t)':s=48000:d=30",
+    "-filter_complex", "[0][1]overlay=x='if(between(t,10,14),mod(t*900,280),20)':y=70[a];[a][2]overlay=enable='gte(t,20)',drawgrid=w=16:h=16:t=1:c=white@0.4[v]",
+    "-map", "[v]", "-map", "3", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", path.join(dir, "media", "day.mp4")]);
+  assert.equal(r.status, 0, String(r.stderr));
+
+  const res = await mcp.callTool("fablecut_highlights", { duration: 6, shot: 2 });
+  assert.equal(res.isError, false, res.text);
+  assert.match(res.text, /New sequence "Highlights 6 s", opened/);
+  assert.match(res.text, /kept as a version/);
+  const doc = readProject(dir);
+  assert.equal(doc.sequences.find((s) => s.id === doc.sequence).name, "Highlights 6 s");
+  const hl = doc.clips.filter((c) => c.track === "V1").sort((a, b) => a.start - b.start);
+  assert.ok(hl.length >= 3, JSON.stringify(hl));
+  const total = hl.reduce((n, c) => n + c.duration, 0);
+  assert.ok(Math.abs(total - 6) < 0.05, `total ${total}`);
+  for (let i = 1; i < hl.length; i++) assert.ok(Math.abs(hl[i].start - (hl[i - 1].start + hl[i - 1].duration)) < 1e-3, "back to back");
+  const spans = hl.map((c) => [c.in, c.in + c.duration]);
+  assert.ok(spans.some(([a, b]) => a >= 9.5 && b <= 14.5), `the busy moment: ${JSON.stringify(spans)}`);
+  assert.ok(spans.some(([a, b]) => a >= 23.5 && b <= 26.6), `the loud moment: ${JSON.stringify(spans)}`);
+  assert.ok(spans.every(([a, b]) => !(a < 19.9 && b > 20.1)), `none across the cut: ${JSON.stringify(spans)}`);
+  const main = doc.sequences.find((s) => s.id !== doc.sequence);
+  assert.deepEqual(main.clips.map((c) => c.id), ["c_v"], "the timeline it came from is untouched");
+
+  const tall = await mcp.callTool("fablecut_highlights", { duration: 6, mediaIds: ["m_v"], aspect: "9:16", name: "Reel" });
+  assert.equal(tall.isError, false, tall.text);
+  assert.match(tall.text, /fablecut_reframe \{\} fits them/);
+  assert.deepEqual([readProject(dir).width, readProject(dir).height], [1080, 1920]);
+  assert.ok(readProject(dir).clips.every((c) => c.mediaId === "m_v"));
+
+  const short = await mcp.callTool("fablecut_highlights", { duration: 2 });
+  assert.ok(short.isError);
+  assert.match(short.text, /duration must be/);
+  const none = await mcp.callTool("fablecut_highlights", { clipIds: ["nope"] });
+  assert.ok(none.isError);
+  assert.match(none.text, /no video to make highlights from/);
+});
