@@ -201,7 +201,7 @@
     const px = path.map(([t, u]) => [t / speed, Math.round(offsetFor(u, size, max) * 10) / 10]);
     const lo = Math.min(...px.map((p) => p[1])), hi = Math.max(...px.map((p) => p[1]));
     if (hi - lo <= tolPx * 2) return { static: Math.round((lo + hi) / 2) };
-    const keys = simplify(px, tolPx).map(([t, v], i) => ({ t: Math.round(t * fps) / fps, v: Math.round(v), ...(i ? { ease: "ease-in-out" } : {}) }));
+    const keys = simplify(px, tolPx).map(([t, v], i) => ({ t: Math.round(t * fps) / fps, v: Math.round(v), ...(i ? { ease: "linear" } : {}) }));
     // two keys can land on one frame after rounding: keep the later
     return { keys: keys.filter((k, i) => i === keys.length - 1 || keys[i + 1].t > k.t) };
   }
@@ -229,7 +229,8 @@
     const take = [], skip = [];
     for (const c of doc.clips || []) {
       if (ids && !ids.includes(c.id)) continue;
-      if (c.kind !== "video" && c.kind !== "image") { if (ids) skip.push({ id: c.id, why: `a ${c.kind} clip` }); continue; }
+      // audio has no picture; a title, shape or other layer on the picture is listed, to be checked on the new canvas
+      if (c.kind !== "video" && c.kind !== "image") { if (ids || c.kind !== "audio") skip.push({ id: c.id, why: c.kind === "text" ? "a title" : `a ${c.kind} clip` }); continue; }
       const p = c.props || {};
       const ours = p.reframe === "follow" || p.reframe === "centre";   // reframed before: its fit and keys are ours to redo
       const why = !force && (c.locked || lanes.has(c.track)) ? "locked"

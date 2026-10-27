@@ -76,8 +76,10 @@ ops:[…]}` — the user's editor stays on what they are watching. Open one
 (`openSequence`) only when they ask, or to export it.
 
 For a vertical (or square) version of a finished edit, `fablecut_reframe
-{aspect:"9:16"}` does the copy for you: a new sequence on that canvas, opened,
-whose full-frame shots follow their subject with ordinary position keys. It
+{aspect:"9:16"}` does the copy for you: a new sequence on that canvas whose
+full-frame shots follow their subject with ordinary position keys. It opens
+the copy, so the user's editor switches to it; say so. To build a copy without
+switching their view, use `addSequence` + `inSequence` as above instead. It
 leaves titles, picture-in-picture and clips placed by hand alone and lists
 them: look at those with `fablecut_frame` on the new canvas and move them.
 

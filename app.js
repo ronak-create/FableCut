@@ -13251,13 +13251,18 @@ async function reframeClips(clips, { follow = true, smooth = 0.5 } = {}) {
   const doc = { clips: clips || project.clips, lockedTracks: [...state.lockedTracks] };
   const { take, skip } = Reframe.targets(doc, {});
   if (!take.length) { toast(skip.length ? `Nothing to reframe: ${skip[0].id} is ${skip[0].why}` : "Select a video or picture clip to reframe"); return null; }
-  Object.assign(reframeRun, { busy: true, cancel: false, done: 0, of: take.length });
+  Object.assign(reframeRun, { busy: true, cancel: false, done: 0, of: take.length, frac: 0 });
   renderInspector();
-  const canvas = { width: project.width, height: project.height };
+  const canvas = { width: project.width, height: project.height }, fps = projectFps() || 30;
+  // what the plans were made for: if any of it changes while the footage is read, nothing is applied
+  const gen = runtime.projectGen, seqId = SeqLib.activeId(seqRoot()), lanes = JSON.stringify([...state.lockedTracks]);
+  const stamp = (c) => JSON.stringify([c.mediaId, c.track, c.start, c.in, c.duration, !!c.locked, c.props || {}, c.keyframes || {}]);
+  const stamps = new Map(take.map((c) => [c.id, stamp(c)]));
   const plans = [];
   try {
     for (const c of take) {
       if (reframeRun.cancel) break;
+      reframeRun.frac = 0;
       const src = await pictureSize(c);
       let samples = null;
       if (follow) {
@@ -13266,7 +13271,7 @@ async function reframeClips(clips, { follow = true, smooth = 0.5 } = {}) {
           reframeRun.frac = i / n; if (i % 10 === 0) renderInspector();
         }), w, h);
       }
-      plans.push({ id: c.id, ...Reframe.clipPlan(c, samples, src, canvas, { smooth, fps: projectFps() || 30, follow }) });
+      plans.push({ id: c.id, ...Reframe.clipPlan(c, samples, src, canvas, { smooth, fps, follow }) });
       reframeRun.done++;
       renderInspector();
     }
@@ -13276,11 +13281,22 @@ async function reframeClips(clips, { follow = true, smooth = 0.5 } = {}) {
     reframeRun.busy = false;
   }
   if (reframeRun.cancel || !plans.length) { reframeRun.cancel = false; renderInspector(); if (plans.length) toast("Reframe stopped — nothing changed"); return null; }
+  if (gen !== runtime.projectGen || seqId !== SeqLib.activeId(seqRoot()) || project.width !== canvas.width || project.height !== canvas.height ||
+      (projectFps() || 30) !== fps || JSON.stringify([...state.lockedTracks]) !== lanes ||
+      plans.some((p) => { const c = getClip(p.id); return !c || stamp(c) !== stamps.get(p.id); })) {
+    renderInspector();
+    toast("The project changed while reframing — nothing was applied; run it again");
+    return null;
+  }
   pushUndo();
   for (const p of plans) {
     const c = getClip(p.id);
     if (!c) continue;
-    for (const [k, v] of Object.entries(p.set.props || {})) { if (v === null) delete c.props[k]; else c.props[k] = v; }
+    for (const [k, v] of Object.entries(p.set.props || {})) {
+      if (v !== null) c.props[k] = v;
+      else if (Object.hasOwn(DEFAULT_PROPS, k)) c.props[k] = DEFAULT_PROPS[k];
+      else delete c.props[k];
+    }
     if ("keyframes" in p.set) { if (p.set.keyframes === null) delete c.keyframes; else c.keyframes = p.set.keyframes; }
   }
   state.dirtyTimeline = true;

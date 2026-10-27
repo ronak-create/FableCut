@@ -72,7 +72,7 @@ test("targets: full-frame shots only; reframed ones can be redone", () => {
   const r = R.targets(doc);
   assert.deepEqual(r.take.map((x) => x.id), ["ok", "again"]);
   assert.deepEqual(Object.fromEntries(r.skip.map((x) => [x.id, x.why])), {
-    moved: "placed by hand (moved or scaled)", small: "placed by hand (moved or scaled)", keyed: "animated by hand (position or scale keys)",
+    moved: "placed by hand (moved or scaled)", small: "placed by hand (moved or scaled)", title: "a title", keyed: "animated by hand (position or scale keys)",
     cropped: "cropped", none: "fit:none", locked: "locked", lane: "locked" });
   assert.deepEqual(R.targets(doc, { force: true }).take.map((x) => x.id).includes("locked"), true);
 });
