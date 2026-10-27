@@ -117,16 +117,25 @@
 
   /** Frames → samples [[t, u, v, conf], …]: t in seconds from the first frame (at `fps`),
    *  u / v the subject's centre as fractions of the picture. `frames` are RGB bytes (w×h×3). */
-  function subjectTrack(frames, w, h, { fps = SAMPLE_FPS } = {}) {
-    const out = [];
+  function subjectTrack(frames, w, h, opts) {
+    const t = tracker(w, h, opts);
+    for (const f of frames) t.push(f);
+    return t.samples;
+  }
+  /** The same, a frame at a time, so a long shot needn't be held in memory:
+   *  push(frame) as each one is read; `samples` grows as they come. */
+  function tracker(w, h, { fps = SAMPLE_FPS } = {}) {
     let prev = null;
-    for (let f = 0; f < frames.length; f++) {
-      const { map, luma } = saliency(frames[f], w, h, prev);
-      const c = centre(map, w, h);
-      out.push([Math.round((f / fps) * 1000) / 1000, c.u, c.v, c.conf]);
-      prev = luma;
-    }
-    return out;
+    const samples = [];
+    return {
+      samples,
+      push(frame) {
+        const { map, luma } = saliency(frame, w, h, prev);
+        const c = centre(map, w, h);
+        samples.push([Math.round((samples.length / fps) * 1000) / 1000, c.u, c.v, c.conf]);
+        prev = luma;
+      },
+    };
   }
 
   /* ── the virtual camera ── */
@@ -280,5 +289,5 @@
     return { set, note: k.static ? `held on the subject (${axis} ${k.static > 0 ? "+" : ""}${k.static})` : "subject in the middle — centred", axis, keys: 0 };
   }
 
-  return { SAMPLE_FPS, SAMPLE_W, ASPECTS, targets, clipPlan, saliency, centre, subjectTrack, camera, simplify, coverRect, offsetFor, keysFor, canvasFor };
+  return { SAMPLE_FPS, SAMPLE_W, ASPECTS, targets, clipPlan, saliency, centre, subjectTrack, tracker, camera, simplify, coverRect, offsetFor, keysFor, canvasFor };
 });

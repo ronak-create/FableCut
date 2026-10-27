@@ -12025,7 +12025,7 @@ function promptNewSequence(x, y) {
   const pop = document.createElement("div");
   pop.className = "ctx-menu bin-pop seq-new";
   const n = SeqLib.entries(seqRoot()).length + 1;
-  const sizes = [{ label: `Same as “${openSequenceName()}” · ${project.width}×${project.height}`, w: 0, h: 0 }, ...ASPECT_PRESETS];
+  const sizes = [{ label: `Same as “${openSequenceName()}” · ${seqRoot().width}×${seqRoot().height}`, w: 0, h: 0 }, ...ASPECT_PRESETS];
   pop.innerHTML = `<label class="bin-pop-label" for="seqNewName">New sequence</label>
     <input type="text" class="bin-pop-input" id="seqNewName" maxlength="120" spellcheck="false">
     <label class="bin-pop-label" for="seqNewSize">Canvas</label>
@@ -12037,7 +12037,8 @@ function promptNewSequence(x, y) {
   pop.querySelector("#seqNewName").value = `Sequence ${n}`;
   const syncFollow = () => {
     const size = sizes[+pop.querySelector("#seqNewSize").value] || sizes[0];
-    const on = pop.querySelector("#seqNewCopy").checked && size.w && size.w * project.height !== size.h * project.width;
+    const root = seqRoot();   // a composition may be open: the copy is of the sequence around it
+    const on = pop.querySelector("#seqNewCopy").checked && size.w && size.w * root.height !== size.h * root.width;
     pop.querySelector("#seqNewFollow").closest("label").hidden = !on;
   };
   pop.querySelector("#seqNewSize").addEventListener("change", syncFollow);
@@ -12048,7 +12049,8 @@ function promptNewSequence(x, y) {
     const size = sizes[+pop.querySelector("#seqNewSize").value] || sizes[0];
     const copy = pop.querySelector("#seqNewCopy").checked;
     const follow = pop.querySelector("#seqNewFollow").checked;
-    const reshaped = size.w && size.w * project.height !== size.h * project.width;
+    const root = seqRoot();
+    const reshaped = size.w && size.w * root.height !== size.h * root.width;
     hideTrackCtxMenu();
     const opened = newSequence({ name: name || undefined, from: copy ? "open" : "empty", ...(size.w ? { width: size.w, height: size.h } : {}) });
     if (opened && copy && reshaped && follow) reframeClips(null, { follow: true });
@@ -13192,8 +13194,9 @@ function seekFrame(el, t) {
    samples, plan and keys as fablecut_reframe. One undo step. ── */
 const Reframe = self.FableCutReframe;
 const reframeRun = { busy: false, cancel: false, done: 0, of: 0 };
-/** RGB frames of clip c (SAMPLE_FPS across its window; one for a still), w×h each. */
-async function sampleClipFrames(c, w, h, onFrame) {
+/** RGB frames of clip c (SAMPLE_FPS across its window; one for a still), w×h each. With `onRgb`,
+ *  each frame goes to it as it is read and nothing is kept (a long shot needn't sit in memory). */
+async function sampleClipFrames(c, w, h, onFrame, onRgb) {
   const m = getMedia(c.mediaId);
   const cv = document.createElement("canvas"); cv.width = w; cv.height = h;
   const x = cv.getContext("2d", { willReadFrequently: true });
@@ -13204,11 +13207,14 @@ async function sampleClipFrames(c, w, h, onFrame) {
   };
   if (c.kind === "image") {
     const img = new Image();
+    if (isCrossOriginSrc(m.src)) img.crossOrigin = "anonymous";   // else the canvas can't be read back
     await new Promise((res, rej) => { img.onload = res; img.onerror = () => rej(new Error("the picture could not be read")); img.src = m.src; });
     x.drawImage(img, 0, 0, w, h);
+    if (onRgb) { onRgb(rgb()); return []; }
     return [rgb()];
   }
   const el = document.createElement("video");
+  if (isCrossOriginSrc(m.src)) el.crossOrigin = "anonymous";
   el.muted = true; el.preload = "auto"; el.playsInline = true; el.src = m.src;
   try {
     await new Promise((res, rej) => {
@@ -13222,7 +13228,7 @@ async function sampleClipFrames(c, w, h, onFrame) {
       if (reframeRun.cancel) break;
       await seekFrame(el, Math.max(0, (c.in || 0) + i / Reframe.SAMPLE_FPS) + 0.001);
       x.drawImage(el, 0, 0, w, h);
-      frames.push(rgb());
+      if (onRgb) onRgb(rgb()); else frames.push(rgb());
       if (onFrame) onFrame(i + 1, n);
     }
     return frames;
@@ -13268,9 +13274,11 @@ async function reframeClips(clips, { follow = true, smooth = 0.5 } = {}) {
       let samples = null;
       if (follow) {
         const w = Reframe.SAMPLE_W, h = Math.max(8, Math.round(w * src.height / src.width / 2) * 2);
-        samples = Reframe.subjectTrack(await sampleClipFrames(c, w, h, (i, n) => {
-          reframeRun.frac = i / n; if (i % 10 === 0) renderInspector();
-        }), w, h);
+        // each frame is looked at as it is read, between seeks, so Cancel answers and nothing piles up
+        const tr = Reframe.tracker(w, h);
+        await sampleClipFrames(c, w, h, (i, n) => { reframeRun.frac = i / n; if (i % 10 === 0) renderInspector(); }, (f) => tr.push(f));
+        if (reframeRun.cancel) break;
+        samples = tr.samples;
       }
       plans.push({ id: c.id, ...Reframe.clipPlan(c, samples, src, canvas, { smooth, fps, follow }) });
       reframeRun.done++;
