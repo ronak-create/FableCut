@@ -13428,7 +13428,10 @@ async function makeHighlights(clips, { duration = 30, shot, size = null, follow 
   try { picks = Highlights.pick(sources, { duration, shot }); } catch (e) { toast(e.message); return null; }
   if (!picks.length) { toast("No moments long enough to use"); return null; }
   // the picks name clips by id and read their in points: the timeline must be as it was read
-  if (seqId !== SeqLib.activeId(seqRoot()) || take.some((c) => { const now = getClip(c.id); return !now || stamp(now) !== stamps.get(c.id); })) {
+  // (and no video was added or taken away: the clips it would read now are the ones it read)
+  const now = Highlights.sourcesOf({ clips: project.clips, disabledTracks: [...state.disabledTracks] }, clips && clips.map((c) => c.id)).take;
+  if (seqId !== SeqLib.activeId(seqRoot()) || JSON.stringify(now.map((c) => c.id)) !== JSON.stringify(take.map((c) => c.id)) ||
+      take.some((c) => { const cur = getClip(c.id); return !cur || stamp(cur) !== stamps.get(c.id); })) {
     toast("The timeline changed while reading — nothing was made; run it again");
     return null;
   }
