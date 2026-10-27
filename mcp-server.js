@@ -292,6 +292,22 @@ const TOOLS = [
     },
   },
   {
+    name: "fablecut_beats",
+    description: "The music's beat on the timeline, and cuts that land on it. Listens to a music clip (an audio clip, or a video's sound) and finds its tempo (BPM), a steady beat grid phased to the hits, and the drop — all in timeline seconds, through the clip's in point and speed. Then, in one revision: markers:true puts a cyan marker on every beat; snap:true rolls each cut on the video tracks (the targeted ones, or snap:{tracks}) to the nearest beat within half a beat (snap:{maxShift} seconds) — nothing else moves, linked stems follow; retime:{track?, every?, from?} lays the clips on a track (default the lowest video track with clips) back to back on the beat, `every` beats each (1, 2, 4, 8 or 16; default 2), from the first beat at or after `from` (default the music's start) — a clip whose footage runs out gets fewer beats, and the order is kept. Locked clips are left alone (snap) or refuse (retime) unless force:true. A version is saved before snap or retime. Without markers / snap / retime it only reports. The same as the Inspector's Beats section. Needs ffmpeg on PATH.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        clipId: { type: "string", description: "The music clip to listen to" },
+        markers: { type: "boolean", description: "Put a cyan marker on every beat (other markers stay)" },
+        snap: { description: "true, or {tracks?:[…], maxShift?: seconds}: roll each cut on those video tracks to the nearest beat" },
+        retime: { description: "true, or {track?: 'V1', every?: 1|2|4|8|16, from?: seconds}: re-cut that track's clips to the beat, `every` beats each" },
+        every: { type: "number", description: "Beats per shot for retime (1, 2, 4, 8 or 16; default 2)" },
+        force: { type: "boolean", description: "Also move locked clips (only when the user asked)" },
+      },
+      required: ["clipId"],
+    },
+  },
+  {
     name: "fablecut_transcribe",
     description: "What is said, word by word, with times — and text-based editing. Transcribes the clips' speech with Whisper in the editor (an open tab, else headless Chrome / Edge; the speech model downloads once, the audio never leaves the machine), keeps one transcript per file (analysis/transcripts/), and answers with the timeline's words as timed lines (timeline seconds), so you can read an interview, pick the good takes, or find where something is said. find:\"phrase\" (or a list) reports every place it is said — case, punctuation and spacing ignored, whole words only — with the exact span; cut:true then extracts each of them on the targeted tracks (or `tracks`), the words and the pause after them, last first, in one revision: later material moves up, linked stems stay in sync, locked clips stay put (lock the music bed first). A version is saved before a cut. Files already transcribed aren't done again unless again:true. Default clips: every video / audio clip with sound on the open timeline. mediaIds reads whole files instead (file seconds; no cut). The same as the editor's Transcript tab.",
     inputSchema: {
@@ -642,6 +658,48 @@ async function silenceTool(args) {
   lastReadRevision = proj.revision;
   return `Cut ${head} — timeline ${fmtDur(before)} → ${fmtDur(end(proj))} (revision ${proj.revision}). UI hot-reloaded.` +
     (verWarn || ` The project as it was is kept as a version (fablecut_versions lists it; restore undoes the cut).`);
+}
+/* fablecut_beats: beats.js on the music clip's sound, then its ops (markers, snap, retime). */
+const BEATS_MAX_SECS = 20 * 60;
+async function beatsTool(args) {
+  const Bt = require("./beats.js");
+  const doc = readProject();
+  const readRev = doc.revision || 0;
+  const clip = doc.clips.find((c) => c.id === String(args.clipId || ""));
+  if (!clip) throw new Error("`clipId` must name the music clip on the timeline (fablecut_get_project {compact:true} lists them)");
+  if (clip.kind !== "audio" && clip.kind !== "video") throw new Error(`clip ${clip.id} is ${clip.kind} — no sound to find a beat in`);
+  if (Bt.ramped(clip)) throw new Error(`clip ${clip.id} has a speed ramp — beats follow music playing at a steady speed`);
+  const sp = Math.min(8, Math.max(0.1, +clip.props?.speed || 1));
+  if (clip.duration * sp > BEATS_MAX_SECS) throw new Error(`clip ${clip.id} is longer than ${BEATS_MAX_SECS / 60} minutes of music — split it, or find the beat on a part of it`);
+  const parts = [];
+  const nCh = await streamClipAudio(doc, clip, () => true, (chs) => parts.push(Bt.mono(chs)));
+  if (!nCh) throw new Error(`clip ${clip.id} has no audio stream — nothing to listen to`);
+  const len = parts.reduce((n, p) => n + p.length, 0), all = new Float32Array(len);
+  let at = 0;
+  for (const p of parts) { all.set(p, at); at += p.length; }
+  const a = Bt.analyze(Bt.resample(all, NORM_SR));
+  const src0 = clip.in || 0;
+  const abs = { beats: a.beats.map((t) => t + src0), bpm: a.bpm, drop: a.drop != null ? a.drop + src0 : null };
+  const acts = { markers: args.markers === true, snap: args.snap || false, retime: args.retime || false, every: args.every, force: args.force === true };
+  const r = Bt.plan(doc, clip, abs, acts);
+  if (!r.ops.length) return Bt.describe(r);
+  const proj = readProject();
+  if ((proj.revision || 0) !== readRev)
+    throw new Error(`the project changed while listening (revision ${readRev} → ${proj.revision}) — nothing changed; run fablecut_beats again`);
+  ProjectOps.applyPatch(proj, r.ops, { savedItems });
+  let verWarn = "";
+  if (acts.snap || acts.retime) {
+    try { createHistory({ projects: createProjects({ dataDir: DATA_DIR, projectFile: PROJECT_FILE, libraryDir: LIBRARY_DIR }) }).beforeAgent(acts.retime ? "Before re-cutting to the beat" : "Before snapping cuts to the beat"); }
+    catch (e) { verWarn = ` Warning: no version was saved first (${e.message}).`; }
+  }
+  let diskRev = readRev;
+  try { diskRev = readProject().revision || 0; } catch {}
+  if (diskRev !== readRev) throw new Error(`the project changed meanwhile (revision ${readRev} → ${diskRev}) — nothing changed; run fablecut_beats again`);
+  proj.revision = readRev + 1;
+  writeProject(proj);
+  lastReadRevision = proj.revision;
+  return Bt.describe(r, { applied: true }) + ` (revision ${proj.revision}; UI hot-reloaded.)` +
+    (acts.snap || acts.retime ? verWarn || " The project as it was is kept as a version (fablecut_versions; restore undoes it)." : "");
 }
 /** What words are placed by and cuts land on: where each clip sits and plays from, the track
  *  switches and the frame rate. An editor saving probed media details while a transcription runs
@@ -1320,6 +1378,8 @@ async function callTool(name, args, attempt = 0) {
       return frameTool(args);
     case "fablecut_silence":
       return silenceTool(args);
+    case "fablecut_beats":
+      return beatsTool(args);
     case "fablecut_transcribe":
       return transcribeTool(args);
     case "fablecut_captions":

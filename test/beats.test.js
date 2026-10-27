@@ -1,0 +1,95 @@
+/* beats.js — the music's beat (analyze, grid) and cuts on it (snapOps, retimePlan). */
+"use strict";
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const B = require("../beats");
+
+/** A kick-drum track: a 60 Hz thump decaying over ~0.1 s at `at + k·60/bpm`, mono at `sr`. */
+function clicks({ bpm = 120, at = 0.3, secs = 20, sr = B.SR } = {}) {
+  const x = new Float32Array(Math.round(secs * sr));
+  for (let t = at; t < secs - 0.3; t += 60 / bpm) {
+    const i0 = Math.round(t * sr);
+    for (let j = 0; j < 0.25 * sr; j++) x[i0 + j] += Math.sin(2 * Math.PI * 60 * j / sr) * Math.exp(-j / (0.1 * sr)) * 0.9;
+  }
+  return x;
+}
+
+test("analyze + grid: a 120 BPM kick track gives 120 BPM and a grid on the clicks", () => {
+  const a = B.analyze(clicks());
+  assert.ok(Math.abs(a.bpm - 120) < 0.6, `bpm ${a.bpm}`);
+  const g = B.grid(a.beats, a.bpm, 0, 20);
+  assert.ok(g.length >= 38, `${g.length} beats`);
+  for (const t of g) {
+    const k = Math.round((t - 0.3) / 0.5);
+    assert.ok(Math.abs(t - (0.3 + k * 0.5)) < 0.017, `grid beat ${t} is off the kicks by more than half a frame`);
+  }
+});
+
+test("resample: a 48 kHz kick track analyzes like the 22.05 kHz one", () => {
+  const a = B.analyze(B.resample(clicks({ bpm: 100, sr: 48000 }), 48000));
+  assert.ok(Math.abs(a.bpm - 100) < 0.6, `bpm ${a.bpm}`);
+  assert.equal(B.resample(new Float32Array(10), B.SR).length, 10, "the analysis rate passes through");
+  assert.throws(() => B.resample(new Float32Array(4), 0), /sample rate/);
+});
+
+test("mono averages channels", () => {
+  assert.deepEqual([...B.mono([Float32Array.from([1, 0]), Float32Array.from([0, 1])])], [0.5, 0.5]);
+});
+
+test("grid without a tempo, or with too few onsets, is the onsets themselves", () => {
+  assert.deepEqual(B.grid([1, 2, 3], 120, 0, 10), [1, 2, 3]);
+  assert.deepEqual(B.grid([1, 2, 3, 4, 5], null, 1.5, 4), [2, 3, 4]);
+});
+
+test("toTimeline maps source seconds through in, start and speed, inside the clip", () => {
+  const c = { start: 10, in: 2, duration: 4, props: { speed: 2 } };
+  assert.deepEqual(B.toTimeline([1, 2, 4, 9, 10, 11], c), [10, 11, 13.5, 14]);
+});
+
+test("every accepts 1, 2, 4, 8, 16 beats", () => {
+  assert.equal(B.every(), 2);
+  assert.equal(B.every(4), 4);
+  assert.throws(() => B.every(3), /every must be one of/);
+});
+
+const clip = (id, track, start, duration, extra = {}) => ({ id, track, start, duration, in: 0, kind: "video", props: {}, ...extra });
+
+test("snapOps rolls each cut to the nearest beat within half a beat, at whole frames", () => {
+  const g = [0, 0.5, 1, 1.5, 2, 2.5, 3];
+  const clips = [clip("a", "V1", 0, 0.9), clip("b", "V1", 0.9, 1.25), clip("c", "V1", 2.15, 2), clip("t", "V2", 0, 3)];
+  const ops = B.snapOps(clips, ["V1"], g, { fps: 30, bpm: 120 });
+  assert.deepEqual(ops.map((o) => [o.id, o.side]), [["a", "out"], ["b", "out"]]);
+  assert.ok(Math.abs(ops[0].delta - 0.1) < 1e-6 && Math.abs(ops[1].delta + 0.15) < 1e-6, JSON.stringify(ops));
+  assert.deepEqual(B.snapOps(clips, ["V1"], g, { fps: 30, bpm: 120, maxShift: 0.12 }).map((o) => o.id), ["a"], "maxShift limits the move");
+  assert.deepEqual(B.snapOps([clip("a", "V1", 0, 1), clip("b", "V1", 1, 1)], ["V1"], g, { fps: 30 }), [], "a cut already on the beat stays");
+  assert.deepEqual(B.snapOps([clip("a", "V1", 0, 1), clip("b", "V1", 1.2, 1)], ["V1"], g, { fps: 30 }), [], "a gap is not a cut");
+});
+
+test("retimePlan lays a track's clips back to back, n beats each, from the first beat", () => {
+  const g = [0.2, 0.7, 1.2, 1.7, 2.2, 2.7, 3.2];
+  const clips = [clip("a", "V1", 0, 3), clip("b", "V1", 3, 3), clip("x", "V2", 0, 9)];
+  const r = B.retimePlan(clips, "V1", g, { n: 2, fps: 1000 });
+  assert.deepEqual(r.plan, [{ id: "a", start: 0.2, duration: 1, beats: 2 }, { id: "b", start: 1.2, duration: 1, beats: 2 }]);
+  assert.deepEqual([r.short, r.skipped], [[], []]);
+});
+
+test("retimePlan gives a clip with little source fewer beats, and skips one too short for a beat", () => {
+  const g = [0, 0.5, 1, 1.5, 2, 2.5, 3];
+  const clips = [clip("a", "V1", 0, 1), clip("b", "V1", 1, 1), clip("c", "V1", 2, 1)];
+  const left = { a: 0.6, b: 0.2, c: 5 };
+  const r = B.retimePlan(clips, "V1", g, { n: 2, fps: 1000, mediaDur: (c) => left[c.id] });
+  assert.deepEqual(r.plan, [{ id: "a", start: 0, duration: 0.5, beats: 1 }, { id: "c", start: 0.5, duration: 1, beats: 2 }]);
+  assert.deepEqual([r.short, r.skipped], [["a"], ["b"]]);
+});
+
+test("retimePlan: clips past the music follow on at their own length", () => {
+  const g = [0, 1, 2];
+  const r = B.retimePlan([clip("a", "V1", 0, 3), clip("b", "V1", 3, 3), clip("c", "V1", 6, 1.5)], "V1", g, { n: 2, fps: 30 });
+  assert.deepEqual(r.plan, [{ id: "a", start: 0, duration: 2, beats: 2 }, { id: "b", start: 2, duration: 3 }, { id: "c", start: 5, duration: 1.5 }]);
+});
+
+test("retimePlan only takes the clips from `from` on", () => {
+  const g = [0, 1, 2, 3, 4, 5];
+  const r = B.retimePlan([clip("a", "V1", 0, 2.5), clip("b", "V1", 2.5, 3)], "V1", g, { n: 1, from: 2.5, fps: 30 });
+  assert.deepEqual(r.plan, [{ id: "b", start: 3, duration: 1, beats: 1 }]);
+});
