@@ -2263,11 +2263,13 @@ voice: `fablecut_auto_duck {clipIds:[<music clip>], under:["A1"], amount:-10}`.
 
 **Cut a montage to the music**: put the shots on V1 in the order you want (rough
 lengths are fine) and the music on an audio lane, then
-`fablecut_beats {clipId:<the music>, retime:{every:2}}` — every shot lasts two
-beats, the cuts land on the beat. `every:1` for a fast reel, `4` for a calm one;
+`fablecut_beats {clipId:<the music>, retime:{every:2}}` — each shot gets two beats
+where its footage allows (fewer when it runs out; clips past the music keep their
+length; one with less than a beat of footage refuses the re-cut), the cuts land on the beat. `every:1` for a fast reel, `4` for a calm one;
 re-cut the part after the drop separately with `retime:{from:<the drop>, every:1}`.
 For an edit whose cuts are already chosen, `snap:true` just nudges each one onto
-the nearest beat. Check a cut with `fablecut_frame` before exporting.
+the nearest beat (cuts on untargeted tracks, beside locked clips, or without spare
+footage to reach it stay where they are; the reply counts them). Check a cut with `fablecut_frame` before exporting.
 
 **Tighten a talking-head take**: lock the music lane (`setProject {lockedTracks:["A3"]}`),
 then `fablecut_silence {clipIds:[<the take>]}` to see the pauses (it does the

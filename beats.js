@@ -351,7 +351,7 @@
     const src0 = clip.in || 0, src1 = src0 + clip.duration * sp;
     const g = toTimeline(grid(a.beats, a.bpm, src0, src1), clip);
     const drop = a.drop != null && a.drop >= src0 && a.drop <= src1 ? toTimeline([a.drop], clip)[0] : null;
-    const out = { clip: clip.id, bpm: a.bpm ? Math.round(a.bpm / sp * 10) / 10 : null, grid: g, drop, ops: [], done: [] };
+    const out = { clip: clip.id, bpm: a.bpm ? Math.round(a.bpm * sp * 10) / 10 : null, grid: g, drop, ops: [], done: [] };
     if (!g.length) return out;
     const locked = force ? new Set() : lockedIds(doc);
     const steady = (c) => !ramped(c);
@@ -375,9 +375,11 @@
 
     if (o.markers) {
       const have = doc.markers || [];
-      const add = g.filter((t) => !have.some((m) => Math.abs(t - m.t) < 0.01)).slice(0, 1000).map((t) => ({ t, color: "cyan" }));
+      const free = g.filter((t) => !have.some((m) => Math.abs(t - m.t) < 0.01));
+      const add = free.slice(0, 1000).map((t) => ({ t, color: "cyan" }));
       out.ops.push({ op: "setProject", set: { markers: have.concat(add).sort((x, y) => x.t - y.t) } });
-      out.done.push(`marked ${add.length} beat${add.length === 1 ? "" : "s"} (cyan markers)` + (g.length > add.length ? ` — the first ${add.length}` : ""));
+      out.done.push(`marked ${add.length} beat${add.length === 1 ? "" : "s"} (cyan markers)` +
+        (free.length > add.length ? ` — the first ${add.length}` : "") + (g.length > free.length ? ` (${g.length - free.length} already had a marker)` : ""));
     }
 
     if (o.snap) {
@@ -414,7 +416,12 @@
       if (bad.length) throw new Error(`${bad.map((c) => c.id).join(", ")} ${bad.length === 1 ? "is" : "are"} locked — unlock, or pass force:true if the user asked`);
       const rampedOnes = on.filter(ramped);
       if (rampedOnes.length) throw new Error(`${rampedOnes.map((c) => c.id).join(", ")} ${rampedOnes.length === 1 ? "has" : "have"} a speed ramp — re-cutting needs clips at a steady speed`);
-      const p = retimePlan(rest, track, g, { n, from, fps, mediaDur });
+      // a clip's linked stems take its new length too: the tightest of the group sets how long it can be
+      const groupDur = (c) => {
+        const group = c.linkGroup ? rest.filter((x) => x.linkGroup === c.linkGroup) : [c];
+        return Math.min(...group.map((x) => mediaDur(x) / speedOf(x))) * speedOf(c);
+      };
+      const p = retimePlan(rest, track, g, { n, from, fps, mediaDur: groupDur });
       if (p.skipped.length) throw new Error(`${p.skipped.join(", ")} ${p.skipped.length === 1 ? "has" : "have"} less than one beat of footage ` +
         "left after the in point — slip it earlier, shorten its in point, or take it off this track; nothing re-cut");
       const partners = (c) => c.linkGroup ? doc.clips.filter((x) => x.linkGroup === c.linkGroup && x.id !== c.id) : [];

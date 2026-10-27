@@ -9449,6 +9449,7 @@ async function findBeats(c) {
   toast("Listening for the beat…");
   try {
     const buf = await getAudioBuffer(m);
+    await new Promise((res) => setTimeout(res, 0));   // let "Listening…" paint and Cancel land before the analysis runs
     if (gen !== beatsGen) return;
     const a0 = clamp(Math.floor((c.in || 0) * buf.sampleRate), 0, buf.length);
     const a1 = clamp(Math.ceil(mediaTimeAt(c, clipEnd(c)) * buf.sampleRate), a0, buf.length);
@@ -9489,15 +9490,17 @@ function beatsAction(acts) {
       rolls++;
       // what the roll really moved (a refusal is a string, a clamp a smaller number)
       if (!x) continue;
+      const before = JSON.stringify(project.clips);
       const d = EDIT.rollEdit(x, op.side, op.delta);
       if (typeof d === "number" && Math.abs(d - op.delta) < 1e-3) rolled++;
-      // a roll that couldn't reach the beat (clamped) is put back: the cut stays where it was, not off the beat
-      else if (typeof d === "number" && d) EDIT.rollEdit(x, op.side, -d);
+      // a roll that couldn't reach the beat (clamped, refused) is undone exactly: the cut stays where it was
+      else project.clips = JSON.parse(before);
     } else if (op.op === "updateClip") {
       const x = getClip(op.id);
       if (x) for (const [k, v] of Object.entries(op.set)) { if (v === null) delete x[k]; else x[k] = v; }
     }
   }
+  if (undoSnapshot() === snap) { state.dirtyTimeline = true; renderInspector(); toast("Nothing could move: those cuts have no spare footage to reach the beat"); return; }
   pushUndo(snap);
   pruneSelection();
   state.dirtyTimeline = true;

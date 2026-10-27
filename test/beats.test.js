@@ -151,3 +151,26 @@ test("plan: snap counts a linked stem's footage — a stem on a shorter file kee
   stem.in = 1;
   assert.equal(B.plan(d, music, kicks, { snap: { tracks: ["V1"] } }).ops.length, 1, "with room on the stem it rolls");
 });
+
+test("plan: the tempo on the timeline follows the music clip's speed", () => {
+  const music = { id: "m", kind: "audio", mediaId: "m1", track: "A1", start: 0, in: 0, duration: 10, props: { speed: 0.5 } };
+  assert.equal(B.plan(doc([music]), music, kicks, {}).bpm, 60, "120 BPM played at half speed is 60 BPM on the timeline");
+});
+
+test("plan: marking twice adds nothing and says so plainly", () => {
+  const music = { id: "m", kind: "audio", mediaId: "m1", track: "A1", start: 0, in: 0, duration: 10, props: {} };
+  const d = doc([music]);
+  d.markers = B.plan(d, music, kicks, { markers: true }).ops[0].set.markers;
+  const again = B.plan(d, music, kicks, { markers: true });
+  assert.match(again.done[0], /^marked 0 beats \(cyan markers\) \(\d+ already had a marker\)$/);
+});
+
+test("plan: re-cut gives a shot no more beats than its linked stem's footage allows", () => {
+  const music = { id: "m", kind: "audio", mediaId: "m1", track: "A1", start: 0, in: 0, duration: 10, props: {} };
+  const shot = clip("s", "V1", 0, 3, { mediaId: "mv", in: 0, linkGroup: "g" });
+  const stem = { id: "ss", kind: "audio", mediaId: "ma", track: "A2", start: 0, in: 0, duration: 3, linkGroup: "g", props: {} };
+  const d = doc([music, shot, stem], { media: [{ id: "m1", duration: 60 }, { id: "mv", duration: 60 }, { id: "ma", duration: 0.6 }] });
+  const r = B.plan(d, music, kicks, { retime: { every: 4 } });
+  assert.equal(r.ops.find((o) => o.id === "s").set.duration, 0.5, "the stem has 0.6 s: one beat");
+  assert.equal(r.ops.find((o) => o.id === "ss").set.duration, 0.5);
+});
