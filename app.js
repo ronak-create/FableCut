@@ -1760,13 +1760,21 @@ async function syncFromServer(force) {
       return true;
     }
     if (!force && (data.revision || 0) === (project.revision || 0)) return; // our own save
+    // An edit from outside (an agent, another tab) on the open timeline becomes an undo step of its own,
+    // so Ctrl+Z takes it back first instead of replaying an older step over it.
+    const before = !state.compCtx && SeqLib.activeId(data) === SeqLib.activeId(project) ? undoSnapshot() : null;
+    let clash = false;
     if (runtime.saveTimer) { // unsaved local edit vs. external write: external wins, tell the user
       clearTimeout(runtime.saveTimer); runtime.saveTimer = null;
       // the undo steps describe the discarded edit; replaying one would re-save over the external write
       runtime.undo.length = 0; runtime.redo.length = 0;
-      toast("Project was updated externally — your last change may need redoing.");
+      clash = true;
     }
     applyProject(data);
+    const step = before && outsideEditStep(before, undoSnapshot());
+    if (step) pushUndo(step);
+    if (clash) toast(step ? "The project was changed from outside while you were editing. Ctrl+Z puts your version back."
+      : "Project was updated externally — your last change may need redoing.");
     syncCompCrumb();   // the top bar shows the project's name
     // "Compare with now" was against the document before this change
     // (always: a comparison still on its way was made against the old document too)
@@ -3848,6 +3856,13 @@ function counterSnapshot(snap) {
   return JSON.stringify({ clips: project.clips, markers: project.markers || [], comps: project.comps || [], media: project.media,
     ...(hasSeqClips(snap) ? { seqClips: otherSequenceClips() } : {}) });
 }
+/** The undo step for an edit made outside this tab (an agent, another tab): the timeline as it was
+ *  (`before`), marked so undo can say what it took back — or null when the open timeline didn't change. */
+function outsideEditStep(before, after) {
+  if (before === after) return null;
+  return '{"outside":true,' + before.slice(1);
+}
+const isOutsideStep = (snap) => typeof snap === "string" && snap.startsWith('{"outside":true,');
 function undo() {
   if (!runtime.undo.length) return;
   const snap = runtime.undo.pop();
@@ -3855,6 +3870,7 @@ function undo() {
   restoreSnapshot(snap);
   pruneSelection();
   scheduleSave(); renderInspector();
+  if (isOutsideStep(snap)) toast("Undid a change made outside this tab (an agent or another tab)");
 }
 function redo() {
   if (!runtime.redo.length) return;

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Undo after an agent edit.** An edit that reaches the open editor from
+  outside (an agent, another tab) is now an undo step of its own: Ctrl+Z takes
+  back that edit first and says so, and the next Ctrl+Z goes on to your own
+  edits. Before, Ctrl+Z replayed your previous step over it, so the agent's
+  change was lost along with yours. When an outside edit lands while your own
+  change is still unsaved, the outside edit wins as before, and Ctrl+Z now
+  puts your version back.
+
 ## [1.17.0] - 2026-10-26
 
 ### Added
