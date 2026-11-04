@@ -68,7 +68,11 @@
     if (install.done) return;
     install.done = true;
     let byPointer = false;
-    win.addEventListener("pointerdown", () => { byPointer = true; }, { capture: true, passive: true });
+    win.addEventListener("pointerdown", (e) => {
+      byPointer = true;
+      // clicking a control that already had keyboard focus (no new focusin): it is now a mouse focus
+      if (keyFocused && (e.target === keyFocused || (keyFocused.contains && keyFocused.contains(e.target)))) keyFocused = null;
+    }, { capture: true, passive: true });
     win.addEventListener("keydown", () => { byPointer = false; }, { capture: true, passive: true });
     doc.addEventListener("focusin", (e) => noteFocus(e.target, !byPointer), true);
     // Bubble phase: the control's own click handler has run by now.

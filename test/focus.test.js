@@ -83,10 +83,53 @@ test("release() gives focus back only outside dialogs", () => {
 
 test("the editor's Space handler asks focus.js first, and the page loads it before app.js", () => {
   const src = fs.readFileSync(path.join(ROOT, "app.js"), "utf8");
-  const space = src.indexOf("FableCutFocus.spaceShouldPlay(document.activeElement)");
-  const typing = src.indexOf('if (k === " ") { e.preventDefault(); toggleTransportPlay(); }');
-  assert.ok(space > 0 && typing > space, "Space checks focus.js before the plain Space shortcut");
+  const space = src.indexOf("FableCutFocus.spaceShouldPlay(el)");
+  const native = src.indexOf("if (FableCutFocus.isClickControl(el)) return;");
+  const typing = src.indexOf('if (k === " ") { e.preventDefault(); if (!e.repeat) toggleTransportPlay(); }');
+  assert.ok(space > 0 && native > space && typing > native,
+    "Space asks focus.js, then leaves Tab-focused / dialog controls to the browser, then plays");
+  const block = src.slice(space, typing);
+  assert.match(block, /if \(!e\.repeat\) toggleTransportPlay\(\)/, "a held Space doesn't toggle again on key repeat");
   const html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
   const a = html.indexOf('<script src="focus.js">'), b = html.indexOf('<script src="app.js">');
   assert.ok(a > 0 && a < b, "focus.js loads before app.js");
+});
+
+/* install() on a stub window / document: the listeners that release a clicked
+   control and track how it got focus, driven with the events a browser fires. */
+function page() {
+  const handlers = {};
+  const on = (target) => (type, fn, opts) => {
+    const capture = opts === true || !!(opts && opts.capture);
+    (handlers[`${target}:${type}:${capture}`] ||= []).push(fn);
+  };
+  const doc = { activeElement: null, addEventListener: on("doc") };
+  const win = { addEventListener: on("win") };
+  const fire = (type, e = {}) => {
+    for (const key of [`win:${type}:true`, `doc:${type}:true`, `doc:${type}:false`, `win:${type}:false`])
+      for (const fn of handlers[key] || []) fn(e);
+  };
+  const focus = (el) => { doc.activeElement = el; el.blur = () => { el.blurred = true; doc.activeElement = null; }; fire("focusin", { target: el }); };
+  return { win, doc, fire, focus };
+}
+const control = (tag, type) => Object.assign(el(tag, { type }), { contains(t) { return t === this; } });
+
+test("install(): a clicked button gives focus back; Tab then click on a select makes Space play", () => {
+  const p = page();
+  F.install(p.win, p.doc);
+
+  const snap = control("button");
+  p.fire("pointerdown", { target: snap });
+  p.focus(snap);
+  assert.equal(F.spaceShouldPlay(snap), true, "focused by the mouse");
+  p.fire("click", { target: snap });
+  assert.equal(snap.blurred, true, "released after its click");
+  assert.equal(p.doc.activeElement, null);
+
+  const fps = control("select");
+  p.fire("keydown", { key: "Tab" });
+  p.focus(fps);
+  assert.equal(F.spaceShouldPlay(fps), false, "reached with Tab: Space opens it");
+  p.fire("pointerdown", { target: fps });   // clicked while already focused: no new focusin
+  assert.equal(F.spaceShouldPlay(fps), true, "now a mouse focus: Space plays");
 });
