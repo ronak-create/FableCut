@@ -38,7 +38,9 @@
   function isClickControl(el) {
     if (!el || !el.tagName) return false;
     const tag = el.tagName.toUpperCase();
-    if (tag === "BUTTON" || tag === "SELECT" || tag === "SUMMARY") return true;
+    if (tag === "BUTTON" || tag === "SUMMARY") return true;
+    // a dropdown is clicked; a list box (multiple, or size > 1) is worked from the keyboard (Space selects in it)
+    if (tag === "SELECT") return !el.multiple && !(el.size > 1);
     if (tag === "INPUT") return CLICK_INPUTS.includes(String(el.type || "text").toLowerCase());
     if (tag === "A") return !!(el.hasAttribute && el.hasAttribute("href"));
     const role = el.getAttribute && el.getAttribute("role");
