@@ -4611,6 +4611,10 @@ input[type=url]:focus:not(:focus-visible), textarea:focus:not(:focus-visible) { 
   input[type=checkbox]:checked::before { background: HighlightText; }
   input[type=checkbox]:focus-visible,
   input[type=range]:not(.mix-fader):focus-visible { outline-color: Highlight; }
+  /* the track's fill is replaced by the canvas colour: outline it so it stays visible.
+     Separate rules: a browser drops a whole rule with a pseudo-element it doesn't know */
+  input[type=range]:not(.mix-fader)::-webkit-slider-runnable-track { border: 1px solid CanvasText; }
+  input[type=range]:not(.mix-fader)::-moz-range-track { border: 1px solid CanvasText; }
   input[type=number]:focus, input[type=text]:focus, input[type=search]:focus, input[type=url]:focus, textarea:focus { outline: 2px solid Highlight; }
 }
 input[type=number]::-webkit-inner-spin-button { opacity: .35; }
