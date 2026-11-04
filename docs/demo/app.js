@@ -19118,6 +19118,15 @@ window.addEventListener("keydown", (e) => {
     closeImportUrl();
     return;
   }
+  // Space on a button / select / slider still focused from a mouse click plays
+  // instead of pressing that control again (focus.js)
+  if (k === " " && !e.ctrlKey && !e.metaKey && !e.altKey && typeof FableCutFocus !== "undefined"
+    && FableCutFocus.spaceShouldPlay(document.activeElement)) {
+    e.preventDefault();
+    FableCutFocus.release(document.activeElement);
+    toggleTransportPlay();
+    return;
+  }
   if (isTypingTarget(document.activeElement)) return;
   if (k === " ") { e.preventDefault(); toggleTransportPlay(); }
   // JKL shuttle — bare keys only, so Cmd/Ctrl+J/K/L stay with the browser.
