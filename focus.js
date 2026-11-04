@@ -105,6 +105,17 @@
       const el = e.target;
       if (byPointer && el === doc.activeElement && el.tagName === "SELECT") release(el);
     });
+    // A native select picker closed without a change (Esc, a click outside, the
+    // same option) leaves the select focused, and ←/→ would change its value
+    // instead of moving the playhead. An arrow key on a select still focused from
+    // the mouse lets it go first, so the editor's arrow shortcuts run (Space is
+    // handled by the editor's Space check). The picker is closed by then: while
+    // it is open the browser keeps the keys, so nothing here closes it early.
+    win.addEventListener("keydown", (e) => {
+      const el = doc.activeElement;
+      if (!el || el.tagName !== "SELECT" || el === keyFocused || inKeyboardScope(el)) return;
+      if (e.key === "ArrowLeft" || e.key === "ArrowRight" || e.key === "ArrowUp" || e.key === "ArrowDown") release(el);
+    }, true);
   }
 
   return { isClickControl, inKeyboardScope, spaceShouldPlay, noteFocus, release, install, KEYBOARD_SCOPE };
