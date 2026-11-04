@@ -153,5 +153,17 @@ test("install(): a clicked button gives focus back; Tab then click on a select m
   p.fire("pointerup", { pointerId: 7 });
   await tick();
   assert.equal(touch.blurred, true, "released when the finger that started the drag lifts");
+
+  // a native select picker dismissed with no change: the next arrow key lets the select go
+  const rate = control("select");
+  p.fire("pointerdown", { target: rate, pointerId: 1 });
+  p.focus(rate);
+  p.fire("keydown", { key: "ArrowRight" });
+  assert.equal(rate.blurred, true, "→ after a dismissed mouse-opened select moves the playhead, not the value");
+  const tabbed = control("select");
+  p.fire("keydown", { key: "Tab" });
+  p.focus(tabbed);
+  p.fire("keydown", { key: "ArrowDown" });
+  assert.equal(tabbed.blurred, false, "a select reached with Tab keeps its arrow keys");
 });
 
