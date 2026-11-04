@@ -195,11 +195,12 @@
       if (e.button !== 0 || !isThemed(sel)) { close(); return; }
       e.preventDefault();
       // preventDefault keeps focus where it was: a text field typed into
-      // before would keep it, and swallow Space after the pick
+      // before, or a button reached with Tab, would keep it, and take Space after the pick
       const prev = doc.activeElement;
       const typing = !!prev && (prev.tagName === "INPUT" || prev.tagName === "TEXTAREA" || prev.isContentEditable);
+      const control = !!prev && !!win.FableCutFocus && win.FableCutFocus.isClickControl(prev);
       const inDialog = !!(sel.closest && sel.closest(".overlay, .ctx-menu, [role=dialog]"));
-      if (typing && prev !== sel && !inDialog) prev.blur();
+      if ((typing || control) && prev !== sel && !inDialog) prev.blur();
       show(sel, false);
     }, true);
     // A pick inside the list is not a click outside an open popover (those close on pointerdown).
@@ -232,6 +233,8 @@
       const sel = e.target;
       if (!isThemed(sel) || sel.disabled || e.ctrlKey || e.metaKey) return;
       const k = e.key;
+      // a select still focused from a mouse click (its list closed without a pick): Space plays (focus.js)
+      if (k === " " && win.FableCutFocus && win.FableCutFocus.spaceShouldPlay(sel)) return;
       if (k === " " || k === "Enter" || k === "ArrowDown" || k === "ArrowUp" || k === "F4") {
         e.preventDefault(); e.stopImmediatePropagation();
         show(sel, true);

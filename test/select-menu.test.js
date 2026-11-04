@@ -77,3 +77,12 @@ test("the page loads select-menu.js before app.js", () => {
   const a = html.indexOf('<script src="select-menu.js">'), b = html.indexOf('<script src="app.js">');
   assert.ok(a > 0 && a < b);
 });
+
+test("the list hands Space to focus.js and lets go of a Tab-focused button it opens over", () => {
+  const src = fs.readFileSync(path.join(ROOT, "select-menu.js"), "utf8");
+  const ask = src.indexOf('if (k === " " && win.FableCutFocus && win.FableCutFocus.spaceShouldPlay(sel)) return;');
+  const opens = src.indexOf('if (k === " " || k === "Enter" || k === "ArrowDown"');
+  assert.ok(ask > 0 && ask < opens, "a mouse-focused select lets Space play before Space opens the list");
+  assert.match(src, /const control = !!prev && !!win\.FableCutFocus && win\.FableCutFocus\.isClickControl\(prev\);/);
+  assert.match(src, /if \(\(typing \|\| control\) && prev !== sel && !inDialog\) prev\.blur\(\);/);
+});
