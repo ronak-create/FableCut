@@ -68,10 +68,13 @@
     if (install.done) return;
     install.done = true;
     let byPointer = false;
+    let dragging = null;   // the slider a pointer is dragging, until pointerup (a key pressed mid-drag doesn't end it)
     win.addEventListener("pointerdown", (e) => {
       byPointer = true;
       // clicking a control that already had keyboard focus (no new focusin): it is now a mouse focus
       if (keyFocused && (e.target === keyFocused || (keyFocused.contains && keyFocused.contains(e.target)))) keyFocused = null;
+      const t = e.target;
+      dragging = t && t.tagName === "INPUT" && t.type === "range" ? t : null;
     }, { capture: true, passive: true });
     win.addEventListener("keydown", () => { byPointer = false; }, { capture: true, passive: true });
     doc.addEventListener("focusin", (e) => noteFocus(e.target, !byPointer), true);
@@ -87,10 +90,11 @@
     });
     // A slider lets go when the drag ends; a select once a value is picked.
     win.addEventListener("pointerup", () => {
-      const el = doc.activeElement;
-      if (byPointer && el && el.tagName === "INPUT" && el.type === "range")
-        setTimeout(() => { if (doc.activeElement === el) release(el); }, 0);
+      const el = dragging;
+      dragging = null;
+      if (el) setTimeout(() => { if (doc.activeElement === el) release(el); }, 0);
     }, true);
+    win.addEventListener("pointercancel", () => { dragging = null; }, true);
     win.addEventListener("change", (e) => {
       const el = e.target;
       if (byPointer && el === doc.activeElement && el.tagName === "SELECT") release(el);

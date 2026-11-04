@@ -114,7 +114,7 @@ function page() {
 }
 const control = (tag, type) => Object.assign(el(tag, { type }), { contains(t) { return t === this; } });
 
-test("install(): a clicked button gives focus back; Tab then click on a select makes Space play", () => {
+test("install(): a clicked button gives focus back; Tab then click on a select makes Space play; a dragged slider lets go", async () => {
   const p = page();
   F.install(p.win, p.doc);
 
@@ -132,4 +132,13 @@ test("install(): a clicked button gives focus back; Tab then click on a select m
   assert.equal(F.spaceShouldPlay(fps), false, "reached with Tab: Space opens it");
   p.fire("pointerdown", { target: fps });   // clicked while already focused: no new focusin
   assert.equal(F.spaceShouldPlay(fps), true, "now a mouse focus: Space plays");
+
+  const slider = control("input", "range");
+  p.fire("pointerdown", { target: slider });
+  p.focus(slider);
+  p.fire("keydown", { key: "Shift" });   // a key pressed mid-drag
+  p.fire("pointerup", {});
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(slider.blurred, true, "released when the drag ends, even after a key mid-drag");
 });
+
