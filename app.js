@@ -19118,8 +19118,24 @@ window.addEventListener("keydown", (e) => {
     closeImportUrl();
     return;
   }
+  // Space on a button / select / slider still focused from a mouse click plays
+  // instead of pressing that control again (focus.js)
+  if (k === " " && !e.ctrlKey && !e.metaKey && !e.altKey && typeof FableCutFocus !== "undefined") {
+    const el = document.activeElement;
+    if (FableCutFocus.spaceShouldPlay(el)) {
+      e.preventDefault();
+      FableCutFocus.release(el);
+      if (!e.repeat) toggleTransportPlay();
+      return;
+    }
+    // reached with Tab, or in a dialog / popover: Space presses the control as usual.
+    // A slider has nothing for Space to press, so outside dialogs it still plays.
+    const slider = el && el.tagName === "INPUT" && el.type === "range";
+    if (FableCutFocus.isClickControl(el) && !(slider && !FableCutFocus.inKeyboardScope(el))) return;
+  }
   if (isTypingTarget(document.activeElement)) return;
-  if (k === " ") { e.preventDefault(); toggleTransportPlay(); }
+  // holding Space plays or pauses once, not on every key repeat
+  if (k === " ") { e.preventDefault(); if (!e.repeat) toggleTransportPlay(); }
   // JKL shuttle — bare keys only, so Cmd/Ctrl+J/K/L stay with the browser.
   // K stops; hold K and tap J / L to step a frame, hold both to crawl.
   else if ((k === "k" || k === "K") && !e.ctrlKey && !e.metaKey && !e.altKey) {
