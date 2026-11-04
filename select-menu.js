@@ -186,6 +186,12 @@
       const sel = e.target.closest && e.target.closest("select");
       if (e.button !== 0 || !isThemed(sel)) { close(); return; }
       e.preventDefault();
+      // preventDefault keeps focus where it was: a text field typed into
+      // before would keep it, and swallow Space after the pick
+      const prev = doc.activeElement;
+      const typing = !!prev && (prev.tagName === "INPUT" || prev.tagName === "TEXTAREA" || prev.isContentEditable);
+      const inDialog = !!(sel.closest && sel.closest(".overlay, .ctx-menu, [role=dialog]"));
+      if (typing && prev !== sel && !inDialog) prev.blur();
       show(sel, false);
     }, true);
     // A pick inside the list is not a click outside an open popover (those close on pointerdown).
