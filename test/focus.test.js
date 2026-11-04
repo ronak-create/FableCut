@@ -16,7 +16,7 @@ const F = require("../focus.js");
 function el(tag, { type, attrs = {}, cls = "", parent = null } = {}) {
   const e = {
     tagName: tag.toUpperCase(), type, parent, blurred: false,
-    classList: new Set(cls.split(/\s+/).filter(Boolean)),
+    classList: Object.assign(new Set(cls.split(/\s+/).filter(Boolean)), { contains(c) { return this.has(c); } }),
     hasAttribute: (a) => Object.hasOwn(attrs, a),
     getAttribute: (a) => (Object.hasOwn(attrs, a) ? attrs[a] : null),
     blur() { this.blurred = true; },
@@ -170,5 +170,21 @@ test("install(): a clicked button gives focus back; Tab then click on a select m
   p.focus(tabbed);
   p.fire("keydown", { key: "ArrowDown" });
   assert.equal(tabbed.blurred, false, "a select reached with Tab keeps its arrow keys");
+
+  // a touch drag the browser cancels (it became a scroll) lets the slider go too
+  const cancelled = control("input", "range");
+  p.fire("pointerdown", { target: cancelled, pointerId: 3 });
+  p.focus(cancelled);
+  p.fire("pointercancel", { pointerId: 3 });
+  await tick();
+  assert.equal(cancelled.blurred, true, "released after pointercancel");
+
+  // while the themed list is open on a select, the arrows stay with it
+  const themed = control("select");
+  themed.classList.add("fc-open");
+  p.fire("pointerdown", { target: themed, pointerId: 1 });
+  p.focus(themed);
+  p.fire("keydown", { key: "ArrowDown" });
+  assert.equal(themed.blurred, false, "an open themed list keeps the arrow keys");
 });
 

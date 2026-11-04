@@ -94,15 +94,15 @@
       if (el === t || el.contains(t) || (label && (label.contains(el) || label.control === el))) release(el);
     });
     // A slider lets go when the drag ends; a select once a value is picked.
-    win.addEventListener("pointerup", (e) => {
+    // that pointer lifting, or the browser cancelling it (a touch turned into a scroll), ends the drag
+    const endDrag = (e) => {
       if (!dragging || e.pointerId !== dragPointer) return;
       const el = dragging;
       dragging = null; dragPointer = null;
       setTimeout(() => { if (doc.activeElement === el) release(el); }, 0);
-    }, true);
-    win.addEventListener("pointercancel", (e) => {
-      if (dragging && e.pointerId === dragPointer) { dragging = null; dragPointer = null; }
-    }, true);
+    };
+    win.addEventListener("pointerup", endDrag, true);
+    win.addEventListener("pointercancel", endDrag, true);
     win.addEventListener("change", (e) => {
       const el = e.target;
       if (byPointer && el === doc.activeElement && el.tagName === "SELECT") release(el);
@@ -116,6 +116,8 @@
     win.addEventListener("keydown", (e) => {
       const el = doc.activeElement;
       if (!el || el.tagName !== "SELECT" || el === keyFocused || inKeyboardScope(el)) return;
+      // the editor's themed list (select-menu.js) is open on it: the arrows move through the list
+      if (el.classList && el.classList.contains("fc-open")) return;
       if (e.key === "ArrowLeft" || e.key === "ArrowRight" || e.key === "ArrowUp" || e.key === "ArrowDown") release(el);
     }, true);
   }
