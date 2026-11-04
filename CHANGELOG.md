@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **Node 22 or newer is now required** (was Node 18). CI runs the test suite on
   Node 22, 24 and 26. (#64)
+- **Dropdowns match the editor.** Every dropdown opens a list in the editor's
+  dark theme instead of the browser's own popup, with optgroup headings, the
+  current choice marked, and each font previewed in its face in the font menu.
+  Keyboard: ↑ ↓ to move, type to jump, Enter to pick, Esc to close. Picking
+  with the mouse leaves keyboard focus with the editor, so Space plays right
+  after.
 
 ### Fixed
 - **Space plays after you click a button.** A button, checkbox, slider or
