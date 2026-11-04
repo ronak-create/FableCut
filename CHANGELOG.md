@@ -11,6 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Node 22 or newer is now required** (was Node 18). CI runs the test suite on
   Node 22, 24 and 26. (#64)
 
+### Fixed
+- **Space plays after you click a button.** A button, checkbox, slider or
+  dropdown kept keyboard focus after a click, so Space pressed it again
+  (toggling Snap back, say) instead of playing the timeline, and ←/→ moved the
+  last slider instead of the playhead. A control used with the mouse now gives
+  focus back to the editor, and Space on one that still has it plays. Dialogs
+  and popovers, and controls reached with Tab, keep working from the keyboard
+  as before.
+
 ## [1.18.0] - 2026-10-28
 
 ### Added
