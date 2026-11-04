@@ -34,6 +34,7 @@
   function isThemed(sel) {
     return !!sel && sel.tagName === "SELECT" && !sel.multiple && !(sel.size > 1) && !sel.hasAttribute("data-native");
   }
+  /** An option's label as shown in the list (its label, else its text), whitespace collapsed. */
   function optionText(o) {
     return String(o.label || o.textContent || "").replace(/\s+/g, " ").trim();
   }
@@ -73,12 +74,14 @@
     return { down, maxH, top: down ? rect.bottom + 2 : Math.max(pad, rect.top - 2 - h) };
   }
 
+  /** Wire the themed lists to every <select> on the page through listeners on `win` (once). */
   function install(win, doc) {
     if (install.done) return;
     install.done = true;
     let open = null;   // { sel, list, items, active, byKey }
     let typed = "", typedAt = 0;
 
+    /** Build the list element for `sel`: group headings and one row per visible option. Returns { list, items }. */
     function draw(sel) {
       const list = doc.createElement("div");
       list.className = "fc-select-list";
@@ -112,6 +115,7 @@
       }
       return { list, items };
     }
+    /** Size and position the open list beside its select, above it when there's more room there. */
     function place() {
       const { sel, list } = open;
       const r = sel.getBoundingClientRect(), pad = 6;
@@ -123,6 +127,7 @@
       list.style.top = p.top + "px";
       list.classList.toggle("up", !p.down);
     }
+    /** Highlight item `i` (clamped) as the keyboard's current row and point aria-activedescendant at it. */
     function activate(i, scroll = true) {
       if (!open || !open.items.length) return;
       i = Math.max(0, Math.min(open.items.length - 1, i));
@@ -134,6 +139,7 @@
       open.sel.setAttribute("aria-activedescendant", el.id);
       if (scroll) el.scrollIntoView({ block: "nearest" });
     }
+    /** Open the list for `sel` (a second open on the same select closes it). `byKey`: opened from the keyboard. */
     function show(sel, byKey) {
       const again = open && open.sel === sel;
       close();
@@ -156,6 +162,7 @@
         if (d && !d.classList.contains("disabled")) pick(+d.dataset.i);
       });
     }
+    /** Close the open list, if any, and reset its select's open state. */
     function close() {
       if (!open) return;
       const { sel, list } = open;
@@ -165,6 +172,7 @@
       sel.setAttribute("aria-expanded", "false");
       sel.removeAttribute("aria-activedescendant");
     }
+    /** Choose item `i`: select its option, fire input + change when it changed, then close the list. */
     function pick(i) {
       if (!open) return;
       const { sel, items, byKey } = open;
