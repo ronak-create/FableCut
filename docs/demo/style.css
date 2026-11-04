@@ -4558,6 +4558,7 @@ input[type=range]:not(.mix-fader) {
   min-width: 0;
 }
 input[type=range]:not(.mix-fader):focus { outline: none; }
+input[type=range]:not(.mix-fader):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
 input[type=range]:not(.mix-fader)::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: var(--panel-2); }
 input[type=range]:not(.mix-fader)::-moz-range-track { height: 4px; border-radius: 2px; background: var(--panel-2); }
 input[type=range]:not(.mix-fader)::-moz-range-progress { height: 4px; border-radius: 2px; background: var(--accent); }
@@ -4583,15 +4584,34 @@ input[type=range]:not(.mix-fader):hover::-webkit-slider-thumb,
 input[type=range]:not(.mix-fader):active::-webkit-slider-thumb { transform: scale(1.2); }
 input[type=range]:not(.mix-fader):focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 40%, transparent); }
 input[type=range]:not(.mix-fader):disabled { opacity: .45; cursor: not-allowed; }
-/* the qualifier's hue slider shows the hue wheel as its track */
+/* the qualifier's hue slider shows the hue wheel as its track (the rule above
+   would otherwise replace its gradient: same specificity, later in the file) */
+input[type="range"].cq-hue:not(.mix-fader) {
+  background: linear-gradient(90deg, #f33, #ff3, #3f3, #3ff, #33f, #f3f, #f33);
+  border-radius: 3px;
+  height: 6px;
+}
 input[type="range"].cq-hue::-webkit-slider-runnable-track { background: transparent; }
 input[type="range"].cq-hue::-moz-range-track { background: transparent; }
 input[type="range"].cq-hue::-moz-range-progress { background: transparent; }
 
 input[type=number], input[type=text], input[type=search], input[type=url] { color-scheme: dark; }
 input[type=number]:focus, input[type=text]:focus, input[type=search]:focus, input[type=url]:focus, textarea:focus {
-  outline: none;
   border-color: var(--accent) !important;
+}
+input[type=number]:focus:not(:focus-visible), input[type=text]:focus:not(:focus-visible), input[type=search]:focus:not(:focus-visible),
+input[type=url]:focus:not(:focus-visible), textarea:focus:not(:focus-visible) { outline: none; }
+
+/* Windows High Contrast / forced colours: the system repaints backgrounds, so
+   give the switch knob and the focus rings system colours that stay visible */
+@media (forced-colors: active) {
+  input[type=checkbox] { border-color: CanvasText; }
+  input[type=checkbox]::before { background: CanvasText; forced-color-adjust: none; }
+  input[type=checkbox]:checked { background: Highlight; border-color: Highlight; }
+  input[type=checkbox]:checked::before { background: HighlightText; }
+  input[type=checkbox]:focus-visible,
+  input[type=range]:not(.mix-fader):focus-visible { outline-color: Highlight; }
+  input[type=number]:focus, input[type=text]:focus, input[type=search]:focus, input[type=url]:focus, textarea:focus { outline: 2px solid Highlight; }
 }
 input[type=number]::-webkit-inner-spin-button { opacity: .35; }
 input[type=number]:hover::-webkit-inner-spin-button { opacity: .8; }
