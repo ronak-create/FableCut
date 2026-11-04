@@ -68,13 +68,16 @@
     if (install.done) return;
     install.done = true;
     let byPointer = false;
-    let dragging = null;   // the slider a pointer is dragging, until pointerup (a key pressed mid-drag doesn't end it)
+    // the slider a pointer is dragging and that pointer's id, until that same pointer
+    // lifts or cancels (a key pressed mid-drag, or a second finger, doesn't end it)
+    let dragging = null, dragPointer = null;
     win.addEventListener("pointerdown", (e) => {
       byPointer = true;
       // clicking a control that already had keyboard focus (no new focusin): it is now a mouse focus
       if (keyFocused && (e.target === keyFocused || (keyFocused.contains && keyFocused.contains(e.target)))) keyFocused = null;
       const t = e.target;
-      dragging = t && t.tagName === "INPUT" && t.type === "range" ? t : null;
+      if (dragging) return;   // another pointer is already dragging a slider
+      if (t && t.tagName === "INPUT" && t.type === "range") { dragging = t; dragPointer = e.pointerId; }
     }, { capture: true, passive: true });
     win.addEventListener("keydown", () => { byPointer = false; }, { capture: true, passive: true });
     doc.addEventListener("focusin", (e) => noteFocus(e.target, !byPointer), true);
@@ -89,12 +92,15 @@
       if (el === t || el.contains(t) || (label && (label.contains(el) || label.control === el))) release(el);
     });
     // A slider lets go when the drag ends; a select once a value is picked.
-    win.addEventListener("pointerup", () => {
+    win.addEventListener("pointerup", (e) => {
+      if (!dragging || e.pointerId !== dragPointer) return;
       const el = dragging;
-      dragging = null;
-      if (el) setTimeout(() => { if (doc.activeElement === el) release(el); }, 0);
+      dragging = null; dragPointer = null;
+      setTimeout(() => { if (doc.activeElement === el) release(el); }, 0);
     }, true);
-    win.addEventListener("pointercancel", () => { dragging = null; }, true);
+    win.addEventListener("pointercancel", (e) => {
+      if (dragging && e.pointerId === dragPointer) { dragging = null; dragPointer = null; }
+    }, true);
     win.addEventListener("change", (e) => {
       const el = e.target;
       if (byPointer && el === doc.activeElement && el.tagName === "SELECT") release(el);

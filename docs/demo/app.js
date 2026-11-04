@@ -19128,8 +19128,10 @@ window.addEventListener("keydown", (e) => {
       if (!e.repeat) toggleTransportPlay();
       return;
     }
-    // reached with Tab, or in a dialog / popover: Space presses the control as usual
-    if (FableCutFocus.isClickControl(el)) return;
+    // reached with Tab, or in a dialog / popover: Space presses the control as usual.
+    // A slider has nothing for Space to press, so outside dialogs it still plays.
+    const slider = el && el.tagName === "INPUT" && el.type === "range";
+    if (FableCutFocus.isClickControl(el) && !(slider && !FableCutFocus.inKeyboardScope(el))) return;
   }
   if (isTypingTarget(document.activeElement)) return;
   // holding Space plays or pauses once, not on every key repeat

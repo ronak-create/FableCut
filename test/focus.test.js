@@ -84,7 +84,7 @@ test("release() gives focus back only outside dialogs", () => {
 test("the editor's Space handler asks focus.js first, and the page loads it before app.js", () => {
   const src = fs.readFileSync(path.join(ROOT, "app.js"), "utf8");
   const space = src.indexOf("FableCutFocus.spaceShouldPlay(el)");
-  const native = src.indexOf("if (FableCutFocus.isClickControl(el)) return;");
+  const native = src.indexOf("if (FableCutFocus.isClickControl(el) && !(slider && !FableCutFocus.inKeyboardScope(el))) return;");
   const typing = src.indexOf('if (k === " ") { e.preventDefault(); if (!e.repeat) toggleTransportPlay(); }');
   assert.ok(space > 0 && native > space && typing > native,
     "Space asks focus.js, then leaves Tab-focused / dialog controls to the browser, then plays");
@@ -133,12 +133,25 @@ test("install(): a clicked button gives focus back; Tab then click on a select m
   p.fire("pointerdown", { target: fps });   // clicked while already focused: no new focusin
   assert.equal(F.spaceShouldPlay(fps), true, "now a mouse focus: Space plays");
 
+  const tick = () => new Promise((r) => setTimeout(r, 0));
   const slider = control("input", "range");
-  p.fire("pointerdown", { target: slider });
+  p.fire("pointerdown", { target: slider, pointerId: 1 });
   p.focus(slider);
   p.fire("keydown", { key: "Shift" });   // a key pressed mid-drag
-  p.fire("pointerup", {});
-  await new Promise((r) => setTimeout(r, 0));
+  p.fire("pointerup", { pointerId: 1 });
+  await tick();
   assert.equal(slider.blurred, true, "released when the drag ends, even after a key mid-drag");
+
+  const touch = control("input", "range");
+  p.fire("pointerdown", { target: touch, pointerId: 7 });
+  p.focus(touch);
+  p.fire("pointerdown", { target: touch, pointerId: 8 });   // a second finger on the same slider
+  p.fire("pointerup", { pointerId: 8 });
+  p.fire("pointercancel", { pointerId: 8 });
+  await tick();
+  assert.equal(touch.blurred, false, "the second finger lifting doesn't end the first finger's drag");
+  p.fire("pointerup", { pointerId: 7 });
+  await tick();
+  assert.equal(touch.blurred, true, "released when the finger that started the drag lifts");
 });
 
