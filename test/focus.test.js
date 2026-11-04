@@ -45,6 +45,11 @@ test("buttons, selects, sliders, checkboxes and tabs are click controls; text fi
     assert.equal(F.isClickControl(el("input", { type: t })), false, String(t));
   for (const c of [el("textarea"), el("div"), el("a"), null, undefined])
     assert.equal(F.isClickControl(c), false);
+  // list boxes keep Space and the arrows: they are used from the keyboard, not opened
+  assert.equal(F.isClickControl(Object.assign(el("select"), { multiple: true })), false, "select multiple");
+  assert.equal(F.isClickControl(Object.assign(el("select"), { size: 4 })), false, "select size=4");
+  assert.equal(F.isClickControl(Object.assign(el("select"), { size: 1 })), true, "size=1 is a dropdown");
+  assert.equal(F.spaceShouldPlay(Object.assign(el("select"), { multiple: true })), false);
 });
 
 test("Space plays after a click on a control in the editor", () => {
