@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Switches, sliders and fields in the editor's theme.** Checkboxes draw as
+  on/off switches, sliders have a thin track with a round accent thumb, and
+  text and number fields light up in the accent colour while you type. The
+  vertical mixer faders and the export engine's radio buttons are unchanged.
+
 ## [1.18.0] - 2026-10-28
 
 ### Added
