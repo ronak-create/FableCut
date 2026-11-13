@@ -15,7 +15,7 @@ Closes #
 
 ## How was it verified?
 
-- [ ] `npm test` passes (CI runs it on Node 18 / 20 / 22)
+- [ ] `npm test` passes (CI runs it on Node 22 / 24 / 26)
 - [ ] Added or updated a test in `test/` if this touches the MCP surface, the REST API, or the SVG library
 - [ ] Opened the editor and confirmed the change in **preview**
 - [ ] Confirmed the change in an **export** (fast or realtime), if it affects rendering

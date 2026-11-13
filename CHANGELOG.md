@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Node 22 or newer is now required** (was Node 18). CI runs the test suite on
+  Node 22, 24 and 26. (#64)
+
 ## [1.18.0] - 2026-10-28
 
 ### Added

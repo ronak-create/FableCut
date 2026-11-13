@@ -13,8 +13,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The oldest version package.json supports, the current LTS, and latest.
-        node: ["18", "20", "22"]
+        # The oldest version package.json supports (engines), then the newer LTS lines.
+        node: ["22", "24", "26"]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -37,7 +37,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: "20"
+          node-version: "22"
 
       - name: Syntax-check JavaScript
         run: |
