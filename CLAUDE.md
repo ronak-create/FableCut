@@ -719,8 +719,12 @@ edit. Find matches whole words and ignores case, accents, punctuation and spacin
 In the editor, the **Transcript** tab beside the Inspector:
 
 - **Transcribe** works on the selected clips' files, else on every file on the
-  timeline that has no transcript yet. The model and the language are beside it.
-  Progress shows below (the first time, the model download), with **Cancel**.
+  timeline that has no transcript yet; once every file has one (an agent may
+  have made them), it reads **Transcribe again** and redoes them all. The model
+  and the language are beside it. Progress shows below (the first time, the
+  model download), with **Cancel**. A line above the words says which model and
+  language made them: when the words look wrong, pick the language spoken and
+  the Small model, then Transcribe again.
 - The timeline's words, in paragraphs with timecodes. Click a word to go there;
   the word under the playhead is underlined and followed while playing. ⇧-click or
   drag to select a run of words, then press **Delete** (or **Cut**) to extract it.

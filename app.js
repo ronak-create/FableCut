@@ -9057,7 +9057,12 @@ function transcribeTargets() {
   }
   const srcs = [...new Set(groups.map((g) => getMedia(g[0].mediaId).src))];
   const sel = srcs.filter((s) => picked.has(s));
-  return sel.length ? { srcs: sel, selected: true } : { srcs: srcs.filter((s) => transcriptCache.get(s) === false), selected: false };
+  if (sel.length) return { srcs: sel, selected: true };
+  const missing = srcs.filter((s) => transcriptCache.get(s) === false);
+  // every file has a transcript already (an agent may have made them): the button offers them all again
+  if (!missing.length && srcs.length && srcs.every((s) => transcriptCache.get(s) && !(transcriptCache.get(s) instanceof Promise)))
+    return { srcs, selected: false, again: true };
+  return { srcs: missing, selected: false };
 }
 /** What the words' places depend on: the timeline and the transcripts. */
 function transcriptWordsSig() {
@@ -9192,15 +9197,24 @@ function renderTranscript(force = false) {
   const words = trState.words = transcriptWords();
   trState.wsig = transcriptWordsSig();
   const tgt = transcribeTargets();
-  E.go.textContent = tgt.selected ? `Transcribe selected (${tgt.srcs.length})` : tgt.srcs.length ? `Transcribe ${tgt.srcs.length} file${tgt.srcs.length === 1 ? "" : "s"}` : "Transcribe";
+  E.go.textContent = tgt.selected ? `Transcribe selected (${tgt.srcs.length})` : tgt.again ? `Transcribe again (${tgt.srcs.length})`
+    : tgt.srcs.length ? `Transcribe ${tgt.srcs.length} file${tgt.srcs.length === 1 ? "" : "s"}` : "Transcribe";
   E.go.disabled = !!trState.busy || !tgt.srcs.length;
-  E.go.title = tgt.srcs.length ? "Turn the speech into words, in this browser (the model downloads once). Select clips to transcribe just those, or again"
-    : groups.length ? "Every file on the timeline has a transcript — select clips to transcribe them again" : "Put clips with speech on the timeline first";
+  E.go.title = tgt.again ? "Every file on the timeline has a transcript. Transcribe them all again, with the model and language picked here (or select clips to redo just those)"
+    : tgt.srcs.length ? "Turn the speech into words, in this browser (the model downloads once). Select clips to transcribe just those, or again"
+    : "Put clips with speech on the timeline first";
   const missing = [...new Set(groups.map((g) => getMedia(g[0].mediaId)).filter((m) => transcriptCache.get(m.src) === false).map((m) => m.name || m.src))];
   let html = "";
   if (!groups.length) html = `<div class="tr-empty">Put clips with speech on the timeline, then transcribe them here. Speech becomes words in this browser; your audio never leaves it.</div>`;
   else {
     if (missing.length) html += `<div class="tr-note">No transcript yet: ${missing.slice(0, 6).map(escapeHtml).join(", ")}${missing.length > 6 ? ` +${missing.length - 6} more` : ""}</div>`;
+    // which model and language made these words, so wrong words point at the fix
+    const made = [...new Set(groups.map((g) => transcriptCache.get(getMedia(g[0].mediaId).src)).filter((d) => d && d.words)
+      .map((d) => (T.MODELS[d.model]?.label || d.model || "base") + "|" + (d.language || "")))];
+    if (made.length) {
+      const said = made.map((k) => { const [model, lang] = k.split("|"); return `${escapeHtml(model)}, ${escapeHtml(T.LANGUAGES[lang] || lang || "auto-detected")}`; });
+      html += `<div class="tr-note tr-made">Transcribed with ${said.join("; ")}. Words look wrong? Pick the language spoken and the Small model above, then Transcribe again.</div>`;
+    }
     if (!words.length && !missing.length) html += `<div class="tr-empty">${[...transcriptCache.values()].some((v) => v instanceof Promise) ? "Loading…" : "No words in these clips."}</div>`;
     for (const s of T.segments(words)) {
       let p = "";
