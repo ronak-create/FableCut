@@ -205,7 +205,7 @@ cd FableCut
 node server.js        # → http://localhost:7777
 ```
 
-环境要求：**Node 18+** 和 Chromium 内核的浏览器。**PATH 中的 ffmpeg** 是可选的，
+环境要求：**Node 22+** 和 Chromium 内核的浏览器。**PATH 中的 ffmpeg** 是可选的，
 但推荐安装（用于快速导出和上传时的 remux）。AI 背景移除会在首次使用时从 CDN 拉取模型。
 
 服务器**只监听 127.0.0.1**（v1.3.1 起）。要在局域网内的其他设备上访问，需要显式开启：

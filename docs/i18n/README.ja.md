@@ -237,7 +237,7 @@ cd FableCut
 node server.js        # → http://localhost:7777
 ```
 
-必要なもの: **Node 18+** と Chromium 系ブラウザ。**PATH 上の ffmpeg** は任意ですが、
+必要なもの: **Node 22+** と Chromium 系ブラウザ。**PATH 上の ffmpeg** は任意ですが、
 高速書き出しとアップロード時の remux に使うため推奨です。AI 背景除去は初回利用時に
 CDN からモデルを取得します。
 

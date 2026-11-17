@@ -13,7 +13,7 @@ about 150 ms. A human and an agent can work the same timeline at once.
 
 - License: MIT. Free for personal and commercial use. No account, no telemetry,
   no paid tier.
-- Requirements: Node.js 18+ and a Chromium-based browser. ffmpeg on PATH is
+- Requirements: Node.js 22+ and a Chromium-based browser. ffmpeg on PATH is
   optional but recommended (fast export, upload remuxing, loudness
   normalization, auto-duck, noise reduction and silence removal).
 - Install: `npx -y fablecut`, then open http://localhost:7777 (projects and
