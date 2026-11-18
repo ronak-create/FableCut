@@ -22,7 +22,10 @@
   "use strict";
 
   const fold = (s) => String(s == null ? "" : s).toLowerCase().normalize("NFD")
-    .replace(/\p{M}/gu, "").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+    // accents on Latin, Greek and Cyrillic letters go (Café = cafe); other scripts' marks are
+    // part of the letter (दिन is not दीन), so they stay
+    .replace(/(\p{Script=Latin}|\p{Script=Greek}|\p{Script=Cyrillic})\p{M}+/gu, "$1")
+    .replace(/[^\p{L}\p{N}\p{M}]+/gu, " ").trim();
   const words = (s) => fold(s).split(" ").filter(Boolean);
 
   /** How well one typed word matches a text (folded, its words given): 0 when it doesn't.
@@ -44,7 +47,8 @@
   const symbolOnly = (query) => !words(query).length && String(query || "").trim() !== "";
   const symbolScore = (query, item) => {
     const q = String(query).trim();
-    return (item.keys || []).some((k) => String(k).split(/[\s/,+·]+/).includes(q) || String(k).trim() === q) ? 10 : 0;
+    // "+ / -" holds "+"; "Shift+;" holds ";"
+    return (item.keys || []).some((k) => String(k).trim() === q || String(k).split(/[\s/,·]+/).includes(q) || String(k).split(/[\s/,+·]+/).includes(q)) ? 10 : 0;
   };
   function score(query, item) {
     if (symbolOnly(query)) return symbolScore(query, item);

@@ -1746,6 +1746,7 @@ async function syncFromServer(force) {
     // another project was opened (the dashboard, another tab, an agent)
     const pid = res.headers.get("X-FableCut-Project");
     const switched = !!(pid && runtime.projectId && pid !== runtime.projectId);
+    if (pid && pid !== runtime.projectId && cmdk.pid && cmdkOpen()) closeCmdk(false);   // its results were for the other project
     if (pid) runtime.projectId = pid;
     if (switched) {
       onProjectSwitched();
@@ -18628,7 +18629,10 @@ function cmdkCollect() {
   }
   // media in the bin, clips on the timeline
   for (const m of project.media || []) {
-    add({ key: "m:" + m.id, label: m.name, group: "Media", hint: m.kind, keywords: [m.kind, ...(m.tags || [])], run: () => revealInProject({ kind: m.kind, mediaId: m.id }) });
+    // the bin folder it sits in tells two files of one name apart
+    const folders = [];
+    for (let f = m.folderId && getFolder(m.folderId), n = 0; f && n < 16; f = f.parentId && getFolder(f.parentId), n++) folders.unshift(f.name);
+    add({ key: "m:" + m.id, label: m.name, group: "Media", hint: folders.length ? `${m.kind} · ${folders.join(" / ")}` : m.kind, keywords: [m.kind, ...(m.tags || [])], run: () => revealInProject({ kind: m.kind, mediaId: m.id }) });
   }
   for (const c of project.clips || []) {
     const name = c.kind === "text" ? (c.props?.text || "Title").split("\n")[0].slice(0, 60) : c.name || getMedia(c.mediaId)?.name || c.kind;
@@ -18671,6 +18675,7 @@ function cmdkRender() {
 }
 function openCmdk() {
   if (state.exporting) return;
+  cmdk.pid = runtime.projectId;   // results belong to this project
   cmdk.back = document.activeElement;
   cmdk.items = cmdkCollect();
   cmdk.active = 0;
@@ -18687,8 +18692,9 @@ function closeCmdk(refocus = true) {
 function runCmdk(i) {
   const it = cmdk.shown[i];
   if (!it) return;
-  const back = cmdk.back;
+  const back = cmdk.back, pid = cmdk.pid;
   closeCmdk(false);
+  if (pid !== runtime.projectId) { toast("Another project opened — search again"); return; }
   // after the box has gone, so the action sees the editor as it was
   setTimeout(() => {
     // an export (an agent's too) may have taken the timeline meanwhile
@@ -18738,7 +18744,8 @@ $("cmdkOverlay").addEventListener("mousedown", (e) => {
    its own keys. */
 window.addEventListener("keydown", (e) => {
   const k = e.key;
-  if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (k === "k" || k === "K")) {
+  // e.code: the K key on any layout (a Cyrillic one reports "л")
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (k === "k" || k === "K" || e.code === "KeyK")) {
     e.preventDefault();
     e.stopImmediatePropagation();
     if (e.repeat) return;
@@ -18747,7 +18754,17 @@ window.addEventListener("keydown", (e) => {
     else if (![...document.querySelectorAll(".overlay")].some((o) => o.id !== "cmdkOverlay" && !o.classList.contains("hidden"))) openCmdk();
     return;
   }
-  if (cmdkOpen() && e.target !== $("cmdkInput")) { e.stopImmediatePropagation(); return; }
+  if (!cmdkOpen()) return;
+  // a dialog that opened meanwhile (Export setup finishing its load) takes the keyboard over
+  if ([...document.querySelectorAll(".overlay")].some((o) => o.id !== "cmdkOverlay" && !o.classList.contains("hidden"))) { closeCmdk(false); return; }
+  if (e.target !== $("cmdkInput")) { e.stopImmediatePropagation(); return; }
+  // Esc is Search's (before any picker or tool listening for it): clear the box, then close
+  if (k === "Escape" && !e.isComposing) {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if ($("cmdkInput").value) { $("cmdkInput").value = ""; cmdk.active = 0; cmdkRender(); }
+    else closeCmdk();
+  }
 }, true);
 function settingsFocusables() {
   const root = $("settingsDialog");

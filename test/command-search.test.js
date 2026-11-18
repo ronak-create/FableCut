@@ -49,3 +49,11 @@ test("letters of any script count; a symbol-only query matches only the keys tha
   assert.deepEqual(S.rank("@@", items), [], "no match runs nothing");
   assert.equal(S.rank("  ", items).length, items.length, "a blank query still lists everything");
 });
+
+test("marks that make another letter stay; '+' matches the key shown as '+ / -'", () => {
+  const items = [{ label: "दिन.mp4" }, { label: "दीन.mp4" }, { label: "Zoom", group: "Shortcut", keys: ["+ / -"] }, { label: "Lift", group: "Shortcut", keys: ["Shift+;"] }];
+  assert.equal(S.rank("दीन", items)[0].label, "दीन.mp4");
+  assert.deepEqual(S.rank("+", items).map((x) => x.label), ["Zoom"]);
+  assert.deepEqual(S.rank(";", items).map((x) => x.label), ["Lift"]);
+  assert.equal(S.fold("Café Ёлка"), "cafe елка");
+});
