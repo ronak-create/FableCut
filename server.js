@@ -177,10 +177,13 @@ function mediaUses(docs, srcs) {
    still be the one the plan was made from (else CONFLICT), and if one can't be put in place
    the ones already replaced go back (atomically too). The error is thrown so the caller can
    undo the move; `e.rollbackFailed` names projects that couldn't be put back. */
-function repointMedia(moved) {
+function repointMedia(moved, { force = false } = {}) {
   const map = new Map(moved.filter((m) => m.from && m.to).map((m) => [srcKey(m.from), m.to]));
   const plan = [];
-  for (const d of projectDocs().docs) {
+  const scan = projectDocs();
+  // a project that couldn't be read now (it could before) would keep the old place
+  if (scan.unreadable.length && !force) throw new Error(`can't read ${scan.unreadable.join(", ")}`);
+  for (const d of scan.docs) {
     let n = 0;
     for (const m of d.doc.media || []) {
       const to = map.get(srcKey(m.src));
@@ -909,20 +912,36 @@ const server = http.createServer(async (req, res) => {
           sendJSON(res, 409, { error: `can't check ${unreadable.join(", ")} (can't be read) — fix it first, or pass force:true to move anyway (the file goes offline there)`, unreadable });
           return;
         }
-        const r = mediaFiles.move(opts.from, opts.to);
+        let r, partial = null;
+        try { r = mediaFiles.move(opts.from, opts.to); }
+        catch (e) {
+          // copied whole across drives, but part of the original stayed: the move counts, with a warning
+          if (!e.published || !e.result) throw e;
+          r = e.result; partial = e.message;
+        }
         // each file's transcript goes along; the ones that couldn't are reported (the file needs transcribing again)
         const follow = (pairs) => {
-          const lost = [];
-          for (const m of pairs) { const f = srcFile(m.from), t = srcFile(m.to); if (f && t && transcripts.follow(f, t) === false) lost.push(m.to); }
-          return lost;
+          const lost = [], went = [];
+          for (const m of pairs) {
+            const f = srcFile(m.from), t = srcFile(m.to);
+            if (!f || !t) continue;
+            const got = transcripts.follow(f, t);
+            if (got === false) lost.push(m.to); else if (got) went.push(m);
+          }
+          return { lost, went };
         };
-        const lost = follow(r.moved);
+        const { lost, went } = follow(r.moved);
         let repointed;
-        try { repointed = repointMedia(r.moved); }
+        try { repointed = repointMedia(r.moved, { force: opts.force === true }); }
         catch (e) {
           const notBack = e.rollbackFailed ? `; ${e.rollbackFailed.join(", ")} couldn't be put back — check it in the editor and relink` : "";
-          // a project couldn't be updated: put the files back where every project expects them
-          try { mediaFiles.move(r.to, r.from); follow(r.moved.map((m) => ({ from: m.to, to: m.from }))); }
+          // a project couldn't be updated: put the files back exactly where every project expects them
+          // (never into something that appeared there meanwhile), with the transcripts that went along
+          try {
+            if (partial) throw new Error("part of the original is still there");
+            mediaFiles.move(r.to, r.from, { exact: true });
+            follow(went.map((m) => ({ from: m.to, to: m.from })));
+          }
           catch (e2) {
             broadcast("change");
             throw new Error(`moved, but a project couldn't be updated (${e.message}) and moving back failed too (${e2.message}) — the files are at ${r.to}: relink them in the editor${notBack}`);
@@ -932,7 +951,10 @@ const server = http.createServer(async (req, res) => {
         }
         broadcast("change");
         const out = { from: r.from, to: r.to, moved: r.moved, repointed };
-        if (lost.length) out.warning = `the transcript of ${lost.length} file${lost.length === 1 ? "" : "s"} couldn't be moved with it — transcribe ${lost.length === 1 ? "it" : "them"} again`;
+        const warn = [];
+        if (partial) warn.push(partial);
+        if (lost.length) warn.push(`the transcript of ${lost.length} file${lost.length === 1 ? "" : "s"} couldn't be moved with it — transcribe ${lost.length === 1 ? "it" : "them"} again`);
+        if (warn.length) out.warning = warn.join("; ");
         sendJSON(res, 200, out);
         return;
       }
@@ -960,7 +982,9 @@ const server = http.createServer(async (req, res) => {
           return;
         }
         broadcast("change");
-        sendJSON(res, 200, { trashed: r.trashed, offline: uses });
+        // a trash that left part of the original (a warning on that item) may still play there
+        const offline = uses.filter((u) => !mediaFiles.pathOf(u.src));
+        sendJSON(res, 200, { trashed: r.trashed, offline, ...(offline.length < uses.length ? { stillThere: uses.filter((u) => mediaFiles.pathOf(u.src)) } : {}) });
         return;
       }
       if (a === "restore") { const r = mediaFiles.restore(opts.id); broadcast("change"); sendJSON(res, 200, { restored: r.restored }); return; }

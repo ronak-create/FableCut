@@ -1394,6 +1394,7 @@ async function filesTool(args) {
   }
   if (action === "trash") {
     const lines = b.trashed.map(restoreWith);
+    if (b.stillThere?.length) lines.push("Still playing (part of the original stayed): " + b.stillThere.map((u) => `"${u.name}"`).join(", "));
     if (b.offline.length) lines.push("Now OFFLINE: " + b.offline.map((u) => `"${u.name}" in ${u.open ? "the open project" : `"${u.project}"`}`).join(", "));
     return lines.join("\n");
   }

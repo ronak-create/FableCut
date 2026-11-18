@@ -12,7 +12,8 @@
      createMediaFiles({mediaDir}) → {
        list(dir?)            → {dir, folders:[name], files:[{name, src, size}]}   (one level)
        mkdir(dir)            → {dir}                       (parents too; an existing one is fine)
-       move(from, to)        → {from, to, moved:[{from, to}]}  (srcs: the item, and every file in it)
+       move(from, to, {exact}?) → {from, to, moved:[{from, to}]}  (srcs: the item, and every file in it;
+                               exact: `to` is the new path itself, never a folder to go into)
        trash(paths)          → {trashed:[{id, src}], moved:[{from, to}]}
        trashList()           → [{id, src, kind, size, trashed}]
        restore(id)           → {restored:{id, src}, moved:[{from, to}]}
@@ -108,8 +109,16 @@ function createMediaFiles({ mediaDir }) {
       fs.unlinkSync(fromAbs);
       return;
     }
-    if (fs.existsSync(toAbs)) throw taken(toAbs);
-    fs.renameSync(fromAbs, toAbs);
+    // a folder: Windows never renames onto an existing folder; elsewhere an empty folder made
+    // here first holds the name (mkdir fails if it is taken), and the rename replaces only it
+    if (process.platform === "win32") {
+      if (fs.existsSync(toAbs)) throw taken(toAbs);
+      fs.renameSync(fromAbs, toAbs);
+      return;
+    }
+    try { fs.mkdirSync(toAbs); } catch (e) { if (e.code === "EEXIST") throw taken(toAbs); throw e; }
+    try { fs.renameSync(fromAbs, toAbs); }
+    catch (e) { try { fs.rmdirSync(toAbs); } catch { } throw e.code === "ENOTEMPTY" || e.code === "EEXIST" ? taken(toAbs) : e; }
   }
   /** Move `fromAbs` to `toAbs` (both inside media/), creating the folder above; a name
       taken meanwhile is refused, never replaced. Across drives the copy goes to a staging
@@ -164,13 +173,13 @@ function createMediaFiles({ mediaDir }) {
       fs.mkdirSync(abs, { recursive: true });
       return { dir: rel };
     },
-    move(from, to) {
+    move(from, to, { exact = false } = {}) {
       if (to == null || String(to).trim() === "") throw new Error("say where to move it: a folder, a new name, or \"/media/\" for the top of media/");
       const a = resolve(from), b = resolve(to, { allowRoot: true });
       const st = stat(a.abs);
       if (!st) throw new Error(`no file or folder ${JSON.stringify(a.rel)} in media/`);
       // into an existing folder keeps the name; otherwise `to` is the new path
-      const into = stat(b.abs)?.isDirectory();
+      const into = !exact && stat(b.abs)?.isDirectory();
       const destRel = into ? (b.rel ? b.rel + "/" : "") + path.basename(a.abs) : b.rel;
       const destAbs = into ? path.join(b.abs, path.basename(a.abs)) : b.abs;
       if (destAbs === a.abs) return { from: toSrc(a.rel), to: toSrc(a.rel), moved: [] };
@@ -178,8 +187,10 @@ function createMediaFiles({ mediaDir }) {
       if (stat(destAbs)) throw new Error(`${JSON.stringify(destRel)} already exists — pick another name`);
       noLinks(destAbs);
       const files = filesUnder(a.abs);
-      rename(a.abs, destAbs);
-      return { from: toSrc(a.rel), to: toSrc(destRel), moved: pairs(files, a.rel, destRel) };
+      const result = { from: toSrc(a.rel), to: toSrc(destRel), moved: pairs(files, a.rel, destRel) };
+      // a copy that is whole at the new place but left part of the original: it moved (with a warning)
+      try { rename(a.abs, destAbs); } catch (e) { if (e.published) e.result = result; throw e; }
+      return result;
     },
     trash(paths) {
       const list = (Array.isArray(paths) ? paths : [paths]).map((p) => resolve(p));

@@ -225,3 +225,13 @@ test("a move never replaces a file that appears at the destination", (t) => {
   assert.equal(fs.readFileSync(path.join(root, "b.mp4"), "utf8"), "theirs");
   assert.equal(fs.readFileSync(path.join(root, "a.mp4"), "utf8"), "mine");
 });
+
+test("an exact move takes the path itself: a folder that appeared there is refused, not gone into", (t) => {
+  const root = mediaDir(t);
+  put(root, "b/a.mp4", "a");
+  fs.mkdirSync(path.join(root, "a.mp4"));   // something made a folder at the old name meanwhile
+  const F = createMediaFiles({ mediaDir: root });
+  assert.throws(() => F.move("b/a.mp4", "a.mp4", { exact: true }), /already exists/);
+  assert.equal(fs.readFileSync(path.join(root, "b/a.mp4"), "utf8"), "a");
+  assert.deepEqual(F.move("b/a.mp4", "a.mp4").moved, [{ from: "/media/b/a.mp4", to: "/media/a.mp4/a.mp4" }], "without exact, a folder is gone into");
+});

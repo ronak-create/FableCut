@@ -2238,7 +2238,7 @@ obvious cuts were missed, raise it if motion is being misread as cuts.
   (`from` / `to` are the item itself; `moved` lists each file in it, so it is empty for an empty folder or a no-op;
   409 while a project can't be read, unless `force:true`) ·
   `trash {paths, force?}` → `{trashed:[{id, src}], offline}` (409 while a project uses one or can't be read, unless `force:true`;
-  a batch that stops part-way answers 400 with `trashed` and `failed`) ·
+  a batch that stops part-way answers 400 with `trashed` and `failed`; `stillThere` lists uses whose file is still in place) ·
   `trash-list` → `{items}` · `restore {id}`. See "Media management".
 - `GET  /api/library?dir=sfx|elements|svg|fonts|presets|templates` — list library assets
 - `GET  /api/presets` · `GET /api/templates` — the saved presets / templates, validated (bad files skipped);
