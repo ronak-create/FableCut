@@ -52,6 +52,6 @@
     { "name": "fablecut_track", "description": "Motion tracking: follow a region of a video clip frame by frame, store it as a track, and make a mask follow it or pin another clip to it" }
   ],
   "compatibility": {
-    "runtimes": { "node": ">=18" }
+    "runtimes": { "node": ">=22" }
   }
 }

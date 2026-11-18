@@ -257,7 +257,7 @@ cd FableCut
 node server.js        # → http://localhost:7777
 ```
 
-Requisitos: **Node 18+** e um navegador baseado em Chromium. Ter o **ffmpeg no
+Requisitos: **Node 22+** e um navegador baseado em Chromium. Ter o **ffmpeg no
 PATH** é opcional, mas recomendado (exportação rápida e remux dos uploads). A
 remoção de fundo com IA baixa o modelo de uma CDN no primeiro uso.
 

@@ -23,7 +23,7 @@ cd FableCut
 node server.js        # → http://localhost:7777
 ```
 
-Requirements: **Node 18+**, a Chromium-based browser, and (optional but
+Requirements: **Node 22+**, a Chromium-based browser, and (optional but
 recommended) **ffmpeg on PATH** for fast export and upload remuxing.
 
 ## Where things live
@@ -45,7 +45,7 @@ recommended) **ffmpeg on PATH** for fast export and upload remuxing.
    npm test          # node --test — no install needed, no dependencies
    ```
    It covers the MCP protocol and tools, the REST API and its path/Host guards,
-   and the shipped SVG library. CI runs the same command on Node 18, 20 and 22
+   and the shipped SVG library. CI runs the same command on Node 22, 24 and 26
    for every pull request. Add a test with your change when it touches any of
    those surfaces — see [`test/`](test/) and the harness in `test/helpers.js`
    (every test gets a throwaway data dir and its own port, so the suite never

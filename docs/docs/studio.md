@@ -63,7 +63,7 @@ Studio renders in the browser and encodes an `.mp4` with H.264 video and AAC aud
 
 | | Studio | Local (`npx -y fablecut`) |
 |---|---|---|
-| Install | None | Node 18+, optional ffmpeg |
+| Install | None | Node 22+, optional ffmpeg |
 | Browser | Chrome, Edge, Brave, Arc; Firefox and Safari keep projects in the browser | Any Chromium browser |
 | Your media | Stays in the folder you pick (Firefox and Safari: copied into browser storage) | Stays in `~/FableCut` |
 | Agents | Claude Code, claude.ai, Cursor, opencode, ChatGPT and any MCP client, by link | Any MCP client on the same machine |
