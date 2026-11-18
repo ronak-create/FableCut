@@ -143,14 +143,17 @@ const srcKey = canonicalSrc;
 function projectDocs() {
   const docs = [], unreadable = [];
   const active = projects.peekActive();
-  try { docs.push({ id: active, file: PROJECT_FILE, open: true, doc: JSON.parse(fs.readFileSync(PROJECT_FILE, "utf8").replace(/^﻿/, "")) }); }
+  // `text` is the file as read: a write planned from it checks the file is still that
+  const read = (file) => { const text = fs.readFileSync(file, "utf8"); return { text, doc: JSON.parse(text.replace(/^﻿/, "")) }; };
+  try { docs.push({ id: active, file: PROJECT_FILE, open: true, ...read(PROJECT_FILE) }); }
   catch { unreadable.push("the open project"); }
   let ids = [];
-  try { ids = fs.readdirSync(projects.DIR); } catch { }
+  // no projects folder yet is the first-run state; any other failure means projects weren't checked
+  try { ids = fs.readdirSync(projects.DIR); } catch (e) { if (e.code !== "ENOENT") unreadable.push("the projects folder"); }
   for (const id of ids) {
     if (id === active || !fs.existsSync(path.join(projects.DIR, id, "meta.json"))) continue;
     const file = path.join(projects.DIR, id, "project.json");
-    try { docs.push({ id, file, open: false, doc: JSON.parse(fs.readFileSync(file, "utf8")) }); }
+    try { docs.push({ id, file, open: false, ...read(file) }); }
     catch { unreadable.push(`project ${id}`); }
   }
   return { docs, unreadable };
@@ -170,8 +173,10 @@ function mediaUses(docs, srcs) {
   return out;
 }
 /* Point media entries at files that moved ([{from, to}] srcs); a name that was the old file
-   name follows it. All or nothing: if one project can't be written, the ones already written
-   are put back and the error is thrown, so the caller can undo the move. */
+   name follows it. All or nothing: every new document is staged first, each project must
+   still be the one the plan was made from (else CONFLICT), and if one can't be put in place
+   the ones already replaced go back (atomically too). The error is thrown so the caller can
+   undo the move; `e.rollbackFailed` names projects that couldn't be put back. */
 function repointMedia(moved) {
   const map = new Map(moved.filter((m) => m.from && m.to).map((m) => [srcKey(m.from), m.to]));
   const plan = [];
@@ -185,18 +190,31 @@ function repointMedia(moved) {
     }
     if (n) plan.push({ d, n });
   }
-  const written = [];
+  const staged = [], written = [];
+  const drop = () => { for (const s of staged) { try { fs.rmSync(s.tmp, { force: true }); } catch { } } };
   try {
     for (const { d } of plan) {
-      const before = fs.readFileSync(d.file);
       if (d.open) d.doc.revision = (d.doc.revision || 0) + 1;
       const tmp = d.file + ".files.tmp";
       fs.writeFileSync(tmp, JSON.stringify(d.doc, null, 2));
-      fs.renameSync(tmp, d.file);
-      written.push({ file: d.file, before });
+      staged.push({ d, tmp });
+    }
+  } catch (e) { drop(); throw e; }
+  try {
+    for (const s of staged) {
+      // an edit saved since the plan was read would be lost: refuse instead
+      if (fs.readFileSync(s.d.file, "utf8") !== s.d.text) throw new Error(`CONFLICT — ${s.d.open ? "the open project" : `project "${s.d.doc.name || s.d.id}"`} changed meanwhile; try again`);
+      fs.renameSync(s.tmp, s.d.file);
+      written.push(s.d);
     }
   } catch (e) {
-    for (const w of written) { try { fs.writeFileSync(w.file, w.before); } catch { } }
+    drop();
+    const failed = [];
+    for (const d of written) {
+      try { const tmp = d.file + ".files.undo"; fs.writeFileSync(tmp, d.text); fs.renameSync(tmp, d.file); }
+      catch { failed.push(d.open ? "the open project" : `project "${d.doc.name || d.id}"`); }
+    }
+    if (failed.length) e.rollbackFailed = failed;
     throw e;
   }
   return plan.map(({ d, n }) => ({ project: d.doc.name || d.id, open: d.open, media: n }));
@@ -884,19 +902,38 @@ const server = http.createServer(async (req, res) => {
       if (a === "mkdir") { sendJSON(res, 200, mediaFiles.mkdir(opts.dir)); broadcast("change"); return; }
       if (a === "trash-list") { sendJSON(res, 200, { items: mediaFiles.trashList() }); return; }
       if (a === "move") {
+        if (opts.force !== undefined && typeof opts.force !== "boolean") { sendJSON(res, 400, { error: "force is true or false" }); return; }
+        // a project that can't be read can't be repointed: it would keep the old place
+        const { unreadable } = projectDocs();
+        if (unreadable.length && opts.force !== true) {
+          sendJSON(res, 409, { error: `can't check ${unreadable.join(", ")} (can't be read) — fix it first, or pass force:true to move anyway (the file goes offline there)`, unreadable });
+          return;
+        }
         const r = mediaFiles.move(opts.from, opts.to);
-        const follow = (pairs) => { for (const m of pairs) { const f = srcFile(m.from), t = srcFile(m.to); if (f && t) transcripts.follow(f, t); } };
-        follow(r.moved);
+        // each file's transcript goes along; the ones that couldn't are reported (the file needs transcribing again)
+        const follow = (pairs) => {
+          const lost = [];
+          for (const m of pairs) { const f = srcFile(m.from), t = srcFile(m.to); if (f && t && transcripts.follow(f, t) === false) lost.push(m.to); }
+          return lost;
+        };
+        const lost = follow(r.moved);
         let repointed;
         try { repointed = repointMedia(r.moved); }
         catch (e) {
+          const notBack = e.rollbackFailed ? `; ${e.rollbackFailed.join(", ")} couldn't be put back — check it in the editor and relink` : "";
           // a project couldn't be updated: put the files back where every project expects them
           try { mediaFiles.move(r.to, r.from); follow(r.moved.map((m) => ({ from: m.to, to: m.from }))); }
-          catch (e2) { throw new Error(`moved, but a project couldn't be updated (${e.message}) and moving back failed too (${e2.message}) — relink in the editor`); }
-          throw new Error(`not moved: a project couldn't be updated (${e.message})`);
+          catch (e2) {
+            broadcast("change");
+            throw new Error(`moved, but a project couldn't be updated (${e.message}) and moving back failed too (${e2.message}) — the files are at ${r.to}: relink them in the editor${notBack}`);
+          }
+          if (notBack) broadcast("change");
+          throw new Error(`not moved: a project couldn't be updated (${e.message})${notBack}`);
         }
         broadcast("change");
-        sendJSON(res, 200, { from: r.from, to: r.to, moved: r.moved, repointed });
+        const out = { from: r.from, to: r.to, moved: r.moved, repointed };
+        if (lost.length) out.warning = `the transcript of ${lost.length} file${lost.length === 1 ? "" : "s"} couldn't be moved with it — transcribe ${lost.length === 1 ? "it" : "them"} again`;
+        sendJSON(res, 200, out);
         return;
       }
       if (a === "trash") {
@@ -913,7 +950,15 @@ const server = http.createServer(async (req, res) => {
           sendJSON(res, 409, { error: why + ", or pass force:true to trash it anyway (it goes offline there until restored)", uses, unreadable });
           return;
         }
-        const r = mediaFiles.trash(paths);
+        let r;
+        try { r = mediaFiles.trash(paths); }
+        catch (e) {
+          // part of the batch went: say which (with their ids), so they can be restored
+          if (!e.partial?.trashed.length) throw e;
+          broadcast("change");
+          sendJSON(res, 400, { error: `stopped at ${e.partial.failed}: ${e.message} — the ones before it are in the trash`, trashed: e.partial.trashed, failed: e.partial.failed });
+          return;
+        }
         broadcast("change");
         sendJSON(res, 200, { trashed: r.trashed, offline: uses });
         return;

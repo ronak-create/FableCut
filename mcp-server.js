@@ -242,7 +242,7 @@ const TOOLS = [
         from: { type: "string", description: "move: the file or folder" },
         to: { type: "string", description: "move: an existing folder to move it into, or the new path (a rename)" },
         paths: { type: "array", items: { type: "string" }, description: "trash: files or folders" },
-        force: { type: "boolean", description: "trash: even files a project still uses (they go offline until restored)" },
+        force: { type: "boolean", description: "trash: even files a project still uses (they go offline until restored); move: even while a project can't be read (the file goes offline there)" },
         id: { type: "string", description: "restore: a trashed item's id (trash-list shows them)" },
       },
     },
@@ -1367,9 +1367,14 @@ async function filesTool(args) {
   const action = args.action || "list";
   const body = { action, dir: args.dir, from: args.from, to: args.to, paths: args.paths, force: args.force, id: args.id };
   const r = await apiJSON("POST", "/api/files", body);
-  if (r.status !== 200) throw new Error(r.body?.error || `files request failed (${r.status})`);
-  const b = r.body;
   const name = (src) => { try { return decodeURIComponent(String(src).replace(/^\/media\//, "")); } catch { return src; } };
+  const restoreWith = (t) => `Trashed ${name(t.src)} (id ${t.id} — restore with {action:"restore", id:"${t.id}"})${t.warning ? ` — ${t.warning}` : ""}`;
+  if (r.status !== 200) {
+    // a trash that stopped part-way: the ones that went still need their ids
+    if (r.body?.trashed?.length) throw new Error(r.body.error + "\n" + r.body.trashed.map(restoreWith).join("\n"));
+    throw new Error(r.body?.error || `files request failed (${r.status})`);
+  }
+  const b = r.body;
   const kb = (n) => n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB";
   if (action === "list") {
     const lines = [`media/${b.dir ? b.dir + "/" : ""} — ${b.folders.length} folder${b.folders.length === 1 ? "" : "s"}, ${b.files.length} file${b.files.length === 1 ? "" : "s"}`];
@@ -1384,10 +1389,11 @@ async function filesTool(args) {
     const lines = [`Moved ${b.moved.length} file${b.moved.length === 1 ? "" : "s"}:`, ...b.moved.slice(0, 20).map((m) => `  ${name(m.from)} → ${name(m.to)}`)];
     if (b.moved.length > 20) lines.push(`  … +${b.moved.length - 20} more`);
     lines.push(b.repointed.length ? "Media entries repointed: " + b.repointed.map((x) => `${x.media} in ${x.open ? "the open project" : `"${x.project}"`}`).join(", ") : "No project used them.");
+    if (b.warning) lines.push("Warning: " + b.warning);
     return lines.join("\n");
   }
   if (action === "trash") {
-    const lines = b.trashed.map((t) => `Trashed ${name(t.src)} (id ${t.id} — restore with {action:"restore", id:"${t.id}"})`);
+    const lines = b.trashed.map(restoreWith);
     if (b.offline.length) lines.push("Now OFFLINE: " + b.offline.map((u) => `"${u.name}" in ${u.open ? "the open project" : `"${u.project}"`}`).join(", "));
     return lines.join("\n");
   }
@@ -1395,7 +1401,7 @@ async function filesTool(args) {
     if (!b.items.length) return "The trash is empty.";
     return b.items.map((t) => `${t.id}  ${name(t.src)}${t.kind === "folder" ? `/ (${t.size} files)` : "  " + kb(t.size)}  trashed ${t.trashed}`).join("\n");
   }
-  if (action === "restore") return `Restored ${name(b.restored.src)}`;
+  if (action === "restore") return `Restored ${name(b.restored.src)}` + (b.restored.warning ? ` — ${b.restored.warning}` : "");
   return JSON.stringify(b);
 }
 

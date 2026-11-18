@@ -72,12 +72,14 @@ function createTranscripts({ dir, resolveSrc }) {
       for (const f of list) if (f.startsWith(prefix) && f.endsWith(".json")) { try { fs.unlinkSync(path.join(dir, f)); n++; } catch { } }
       return n > 0;
     },
-    /** A file moved from `fromFile` to `toFile` (same size and time): its transcript goes with it. */
+    /** A file moved from `fromFile` to `toFile` (same size and time): its transcript goes with it.
+        true = moved, null = the file had none, false = it couldn't be moved. */
     follow(fromFile, toFile) {
       let to;
       try { to = names(toFile); } catch { return false; }
       const stem = path.basename(fromFile, path.extname(fromFile)).replace(/[^\w\-]+/g, "_").slice(0, 40) || "media";
       const old = `${stem}-${hash(path.resolve(fromFile))}-` + to.name.slice(to.prefix.length);
+      if (!fs.existsSync(path.join(dir, old))) return null;   // the file had no transcript
       try { fs.renameSync(path.join(dir, old), path.join(dir, to.name)); return true; } catch { return false; }
     },
   };

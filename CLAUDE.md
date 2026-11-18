@@ -1581,8 +1581,9 @@ it in every project; **titles that arrive and leave the same way** —
 ### Media management
 
 The Project bin knows each file's details and helps find, group and track
-footage. Everything here is organization: none of it changes what plays or
-exports.
+footage. The bin's organizing (details, favorites, tags, collections, search)
+changes nothing that plays or exports; moving and trashing the files themselves
+("Files on disk" below) does what it says.
 
 **Metadata.** The editor reads every file in `media/` and `library/` with
 ffprobe (via `GET /api/media-info`) and writes what it finds onto the media
@@ -1723,17 +1724,24 @@ in subfolders. `fablecut_files` works on those (or `POST /api/files`):
   or to a new path (a rename); `to` is required (`"/media/"` is the top of
   `media/`). Every project's media entries that point at a moved file are repointed (the open project gets a new revision, so the editor
   reloads), a media name that was the old file name follows it, and the file's
-  transcript goes with it. Nothing goes offline: if a project can't be written,
-  the move is undone. A name that is taken, and links inside `media/`, are refused.
+  transcript goes with it (a `warning` says when one couldn't be). The move is
+  refused while a project can't be read (`force:true` moves anyway, and the file
+  goes offline there), and a project edited meanwhile stops it (CONFLICT, try
+  again). If a project can't be written, the move is undone; if undoing fails
+  too, the error says where the files are and which project couldn't be put
+  back: check them there and relink. A name that is taken (also one taken while
+  the move runs), and links inside `media/`, are refused, never replaced.
 - `{action:"trash", paths:[…]}` moves files or folders into `media/.trash/<id>/files/`
   with a note of where they were; nothing is deleted. A file a project still
   uses is refused (the reply names the project and how many clips place it):
   `removeMedia` it first, or `force:true` to trash it anyway, and it shows as
   offline there until it is restored. A project whose `project.json` can't be
   read counts as possibly using it, so the same applies. One call can't list a
-  folder and something inside it. `{action:"trash-list"}` lists the trash,
-  `{action:"restore", id}` puts one back where it was (refused while something
-  else has that name).
+  folder and something inside it. When one of several fails, the reply lists the
+  ones already trashed, with their ids, and the path it stopped at.
+  `{action:"trash-list"}` lists the trash, `{action:"restore", id}` puts one back
+  where it was (refused while something else has that name; a `warning` says
+  when its trash entry couldn't be cleaned up).
 - Move, rename and trash only when the user asked: they change the user's
   folder. Versions keep the paths they were saved with, so restoring an old
   version after a move may need **Relink**.
@@ -2226,8 +2234,11 @@ obvious cuts were missed, raise it if motion is being misread as cuts.
   is that version's document; `GET /api/projects/backup?id=` a project with all its versions (import it with
   `POST /api/projects {action:"import", project:<the backup>}`). SSE event `versions` (`{project, action}`). See "Versions".
 - `POST /api/files {action, …}` — the files in `media/`: `list {dir?}` → `{dir, folders, files:[{name, src, size}]}` ·
-  `mkdir {dir}` · `move {from, to}` → `{moved:[{from, to}], repointed:[{project, open, media}]}` ·
-  `trash {paths, force?}` → `{trashed:[{id, src}], offline}` (409 while a project uses one or can't be read, unless `force:true`) ·
+  `mkdir {dir}` · `move {from, to, force?}` → `{from, to, moved:[{from, to}], repointed:[{project, open, media}], warning?}`
+  (`from` / `to` are the item itself; `moved` lists each file in it, so it is empty for an empty folder or a no-op;
+  409 while a project can't be read, unless `force:true`) ·
+  `trash {paths, force?}` → `{trashed:[{id, src}], offline}` (409 while a project uses one or can't be read, unless `force:true`;
+  a batch that stops part-way answers 400 with `trashed` and `failed`) ·
   `trash-list` → `{items}` · `restore {id}`. See "Media management".
 - `GET  /api/library?dir=sfx|elements|svg|fonts|presets|templates` — list library assets
 - `GET  /api/presets` · `GET /api/templates` — the saved presets / templates, validated (bad files skipped);

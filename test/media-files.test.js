@@ -185,3 +185,43 @@ test("POST /api/files: force must be true, and a project that can't be read bloc
   assert.match(r.body.error, /can't check project p_0000000002/);
   assert.equal((await post({ action: "trash", paths: ["x.mp4"], force: true })).status, 200);
 });
+
+test("a stored name keeps its spaces; a batch that fails part-way says what went; a restore is never reported as failed after it lands", (t) => {
+  const root = mediaDir(t);
+  put(root, " take.mp4", "spaced");
+  put(root, "a.mp4", "a");
+  const F = createMediaFiles({ mediaDir: root });
+  const { trashed: [sp] } = F.trash(["/media/%20take.mp4"]);
+  assert.deepEqual(F.restore(sp.id).restored, { id: sp.id, src: "/media/%20take.mp4" });
+  assert.equal(fs.readFileSync(path.join(root, " take.mp4"), "utf8"), "spaced");
+
+  // the second path is gone by its turn: the first is reported with its id
+  const err = (() => { try { F.trash(["a.mp4", "missing.mp4"]); } catch (e) { return e; } })();
+  assert.ok(err, "a missing path is refused");
+  assert.equal(fs.existsSync(path.join(root, "a.mp4")), true, "checked before anything moves");
+  const realRename = fs.renameSync, realLink = fs.linkSync;
+  put(root, "b.mp4", "b");
+  let n = 0;
+  fs.linkSync = (a, b) => { if (++n === 2) throw Object.assign(new Error("denied"), { code: "EPERM" }); return realLink(a, b); };
+  fs.renameSync = (a, b) => { if (n >= 2) throw Object.assign(new Error("denied"), { code: "EPERM" }); return realRename(a, b); };
+  let part;
+  try { F.trash(["a.mp4", "b.mp4"]); } catch (e) { part = e.partial; } finally { fs.renameSync = realRename; fs.linkSync = realLink; }
+  assert.equal(part.trashed.length, 1, "the first went");
+  assert.equal(part.trashed[0].src, "/media/a.mp4");
+  assert.equal(part.failed, "/media/b.mp4");
+  assert.equal(fs.existsSync(path.join(root, "b.mp4")), true, "the second stayed");
+  assert.equal(F.trashList().length, 1, "no record left for the one that didn't go");
+});
+
+test("a move never replaces a file that appears at the destination", (t) => {
+  const root = mediaDir(t);
+  put(root, "a.mp4", "mine");
+  const F = createMediaFiles({ mediaDir: root });
+  const realLink = fs.linkSync;
+  // another program writes b.mp4 between the check and the move
+  fs.linkSync = (a, b) => { fs.writeFileSync(b, "theirs"); return realLink(a, b); };
+  try { assert.throws(() => F.move("a.mp4", "b.mp4"), /already exists/); }
+  finally { fs.linkSync = realLink; }
+  assert.equal(fs.readFileSync(path.join(root, "b.mp4"), "utf8"), "theirs");
+  assert.equal(fs.readFileSync(path.join(root, "a.mp4"), "utf8"), "mine");
+});

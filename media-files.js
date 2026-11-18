@@ -54,7 +54,8 @@ function createMediaFiles({ mediaDir }) {
   /** "a/b.mp4" or "/media/a/b.mp4" → {rel, abs}; throws on anything outside media/.
       raw: a path as stored (no "/media" / "media" shorthand for the folder itself). */
   function resolve(p, { allowRoot = false, raw = false } = {}) {
-    let s = String(p == null ? "" : p).trim().replace(/\\/g, "/");
+    let s = String(p == null ? "" : p).replace(/\\/g, "/");
+    if (!raw) s = s.trim();   // a stored path keeps its spaces: " take.mp4" is a real name
     if (!raw) {
       if (s.startsWith("/media/")) { try { s = decodeURIComponent(s.slice(7)); } catch { throw new Error(`bad path ${JSON.stringify(p)}`); } }
       else if (s === "/media" || s === "media" || s === "media/") s = "";
@@ -88,23 +89,49 @@ function createMediaFiles({ mediaDir }) {
     walk(abs);
     return out;
   }
-  /** Move `fromAbs` to `toAbs` (both inside media/), creating the folder above. Across
-      drives the copy goes to a staging name first and takes the final name only once
-      it is complete, so a failed copy never leaves a half folder under that name. */
+  const relOf = (abs) => path.relative(root, abs).split(path.sep).join("/");
+  const taken = (toAbs) => Object.assign(new Error(`${JSON.stringify(relOf(toAbs))} already exists — pick another name`), { code: "EEXIST" });
+  /** Put `fromAbs` at `toAbs` without replacing anything there: a file is hard-linked to
+      its new name (which fails if the name is taken) and then unlinked; a folder is
+      renamed, which never lands on a folder with something in it. */
+  function publish(fromAbs, toAbs) {
+    if (fs.lstatSync(fromAbs).isFile()) {
+      try { fs.linkSync(fromAbs, toAbs); }
+      catch (e) {
+        if (e.code === "EEXIST") throw taken(toAbs);
+        if (e.code === "EXDEV") throw e;
+        // a file system without hard links: check, then rename
+        if (fs.existsSync(toAbs)) throw taken(toAbs);
+        fs.renameSync(fromAbs, toAbs);
+        return;
+      }
+      fs.unlinkSync(fromAbs);
+      return;
+    }
+    if (fs.existsSync(toAbs)) throw taken(toAbs);
+    fs.renameSync(fromAbs, toAbs);
+  }
+  /** Move `fromAbs` to `toAbs` (both inside media/), creating the folder above; a name
+      taken meanwhile is refused, never replaced. Across drives the copy goes to a staging
+      name first (timestamps kept, so the file's transcript still matches it) and takes
+      the final name only once it is complete. If removing the original then fails, the
+      error says so with `published: true`: the copy is whole and stays. */
   function rename(fromAbs, toAbs) {
     fs.mkdirSync(path.dirname(toAbs), { recursive: true });
-    try { fs.renameSync(fromAbs, toAbs); return; }
+    try { publish(fromAbs, toAbs); return; }
     catch (e) { if (e.code !== "EXDEV") throw e; }
     const stage = path.join(path.dirname(toAbs), `.fc-move-${process.pid}-${Date.now().toString(36)}`);
     try {
-      fs.cpSync(fromAbs, stage, { recursive: true, errorOnExist: true, force: false });
-      fs.renameSync(stage, toAbs);
+      fs.cpSync(fromAbs, stage, { recursive: true, errorOnExist: true, force: false, preserveTimestamps: true });
+      publish(stage, toAbs);
     } catch (e) {
       fs.rmSync(stage, { recursive: true, force: true });
       throw e;
     }
     try { fs.rmSync(fromAbs, { recursive: true, force: true }); }
-    catch (e) { throw new Error(`copied to ${path.relative(root, toAbs)}, but the original could not be removed (${e.code || e.message}) — both copies are there`); }
+    catch (e) {
+      throw Object.assign(new Error(`copied to ${relOf(toAbs)}, but the original could not be removed (${e.code || e.message}) — both copies are there`), { published: true });
+    }
   }
   /** [{from, to}] srcs for what moved from `fromRel` to `toRel`, given the files that were under fromRel. */
   const pairs = (files, fromRel, toRel) => files.map((f) => ({ from: toSrc(f), to: toSrc(toRel + f.slice(fromRel.length)) }));
@@ -164,21 +191,36 @@ function createMediaFiles({ mediaDir }) {
         if ((r.rel + "/").startsWith(o.rel + "/")) throw new Error(`${JSON.stringify(r.rel)} is inside ${JSON.stringify(o.rel)} — trash the folder, or the file, not both`);
       }
       const trashed = [], moved = [];
+      // a failure part-way through says what already went (`partial`), so those can be restored
+      const fail = (e, src) => { throw Object.assign(e, { partial: { trashed, moved, failed: src } }); };
+      fs.mkdirSync(trashDir, { recursive: true });
       for (const r of list) {
         const st = stat(r.abs);
         const files = filesUnder(r.abs);
-        const id = "t" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-        const box = path.join(trashDir, id);
+        // each item's folder is made without `recursive`, so a taken id is never shared
+        let id, box;
+        for (let i = 0; ; i++) {
+          id = "t" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+          box = path.join(trashDir, id);
+          try { fs.mkdirSync(box); break; }
+          catch (e) { if (e.code !== "EEXIST" || i > 20) fail(e, toSrc(r.rel)); }
+        }
         // the record goes first: if the move then fails it is removed, and nothing is lost either way
-        fs.mkdirSync(box, { recursive: true });
-        fs.writeFileSync(path.join(box, "item.json"), JSON.stringify({
-          id, src: toSrc(r.rel), rel: r.rel, kind: st.isDirectory() ? "folder" : "file",
-          size: st.isDirectory() ? files.length : st.size, trashed: new Date().toISOString(),
-        }, null, 2));
-        try { rename(r.abs, path.join(box, "files", path.basename(r.abs))); }
-        catch (e) {
-          if (stat(r.abs)) fs.rmSync(box, { recursive: true, force: true });
-          throw e;
+        try {
+          fs.writeFileSync(path.join(box, "item.json"), JSON.stringify({
+            id, src: toSrc(r.rel), rel: r.rel, kind: st.isDirectory() ? "folder" : "file",
+            size: st.isDirectory() ? files.length : st.size, trashed: new Date().toISOString(),
+          }, null, 2));
+          rename(r.abs, path.join(box, "files", path.basename(r.abs)));
+        } catch (e) {
+          if (e.published) {
+            // the trash holds a whole copy, and part of the original may be gone: keep the copy
+            trashed.push({ id, src: toSrc(r.rel), warning: e.message });
+            for (const f of files) moved.push({ from: toSrc(f), to: null });
+            continue;
+          }
+          fs.rmSync(box, { recursive: true, force: true });
+          fail(e, toSrc(r.rel));
         }
         trashed.push({ id, src: toSrc(r.rel) });
         for (const f of files) moved.push({ from: toSrc(f), to: null });
@@ -203,10 +245,14 @@ function createMediaFiles({ mediaDir }) {
       const src = path.join(trashDir, id, "files", path.basename(back.abs));
       if (!fs.existsSync(src)) throw new Error(`trashed item ${id} has no files left to restore`);
       const inner = filesUnder(src).map((f) => f.slice((TRASH + "/" + id + "/files/").length));
-      rename(src, back.abs);
-      fs.rmSync(path.join(trashDir, id), { recursive: true, force: true });
+      let warning;
+      try { rename(src, back.abs); }
+      catch (e) { if (!e.published) throw e; warning = e.message; }
+      // the file is back: a record left behind is only clutter in the trash list
+      try { if (!warning) fs.rmSync(path.join(trashDir, id), { recursive: true, force: true }); }
+      catch (e) { warning = `restored, but its trash entry ${id} couldn't be removed (${e.code || e.message})`; }
       const parent = back.rel.slice(0, back.rel.length - path.basename(back.abs).length);
-      return { restored: { id, src: it.src }, moved: inner.map((f) => ({ from: null, to: toSrc(parent + f) })) };
+      return { restored: { id, src: it.src, ...(warning ? { warning } : {}) }, moved: inner.map((f) => ({ from: null, to: toSrc(parent + f) })) };
     },
   };
 }
