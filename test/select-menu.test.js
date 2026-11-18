@@ -86,3 +86,10 @@ test("the list hands Space to focus.js and lets go of a Tab-focused button it op
   assert.match(src, /const control = !!prev && !!win\.FableCutFocus && win\.FableCutFocus\.isClickControl\(prev\);/);
   assert.match(src, /if \(\(typing \|\| control\) && prev !== sel && !inDialog\) prev\.blur\(\);/);
 });
+
+test("the CSS themes the same selects as isThemed(): no size or size=\"1\", not multiple, not data-native", () => {
+  const css = fs.readFileSync(path.join(ROOT, "style.css"), "utf8");
+  assert.match(css, /select:not\(\[multiple\]\):not\(\[data-native\]\):is\(:not\(\[size\]\), \[size="1"\]\) \{/);
+  assert.ok(!/select:not\(\[multiple\]\):not\(\[size\]\)/.test(css), "no rule that skips size=\"1\"");
+  assert.equal(S.isThemed(select([], { size: 1 })), true, "size=1 is themed in JS too");
+});
