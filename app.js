@@ -9062,8 +9062,11 @@ function transcribeTargets() {
   if (sel.length) return { srcs: sel, selected: true };
   const missing = srcs.filter((s) => transcriptCache.get(s) === false);
   // every file has a transcript already (an agent may have made them): the button offers them all again
-  if (!missing.length && srcs.length && srcs.every((s) => transcriptCache.get(s) && !(transcriptCache.get(s) instanceof Promise)))
+  if (!missing.length && srcs.length && srcs.every((s) => transcriptCache.get(s) && !(transcriptCache.get(s) instanceof Promise))) {
+    // ...but a selection with no speech in it (a title) never turns into "redo everything"
+    if (state.selIds.size) return { srcs: [], selected: false, none: true };
     return { srcs, selected: false, again: true };
+  }
   return { srcs: missing, selected: false };
 }
 /** What the words' places depend on: the timeline and the transcripts. */
@@ -9204,6 +9207,7 @@ function renderTranscript(force = false) {
   E.go.disabled = !!trState.busy || !tgt.srcs.length;
   E.go.title = tgt.again ? "Every file on the timeline has a transcript. Transcribe them all again, with the model and language picked here (or select clips to redo just those)"
     : tgt.srcs.length ? "Turn the speech into words, in this browser (the model downloads once). Select clips to transcribe just those, or again"
+    : tgt.none ? "The selected clips have no speech. Select clips with speech to transcribe those again, or clear the selection to redo every file"
     : "Put clips with speech on the timeline first";
   const missing = [...new Set(groups.map((g) => getMedia(g[0].mediaId)).filter((m) => transcriptCache.get(m.src) === false).map((m) => m.name || m.src))];
   let html = "";
@@ -9221,7 +9225,7 @@ function renderTranscript(force = false) {
         return `${escapeHtml(model)}, ${escapeHtml(lang)}`;
       });
       // with some files still untranscribed the button does those, so redoing others takes a selection
-      const how = missing.length ? "select those clips, then Transcribe selected" : "then Transcribe again";
+      const how = tgt.selected ? "then Transcribe selected" : missing.length || tgt.none ? "select those clips, then Transcribe selected" : "then Transcribe again";
       html += `<div class="tr-note tr-made">Transcribed with ${said.join("; ")}. Words look wrong? Pick the language spoken and the Small model above, ${how}.</div>`;
     }
     if (!words.length && !missing.length) html += `<div class="tr-empty">${[...transcriptCache.values()].some((v) => v instanceof Promise) ? "Loading…" : "No words in these clips."}</div>`;
@@ -9329,11 +9333,23 @@ function copyTranscript() {
   navigator.clipboard.writeText(lines.join("\n")).then(() => toast(`Copied ${lines.length} line${lines.length === 1 ? "" : "s"}`), () => toast("Couldn't copy — the browser refused"));
 }
 async function transcribeFromTab() {
-  // transcripts being re-read (another tab saved one) are waited for, then the targets taken again
-  const loading = [...transcriptCache.values()].filter((v) => v instanceof Promise);
-  if (loading.length) await Promise.allSettled(loading);
-  const { srcs } = transcribeTargets();
-  if (!srcs.length) { toast("Put a clip with speech on the timeline first"); return; }
+  // what the click meant is taken now; a selection already names its files
+  let tgt = transcribeTargets();
+  if (!tgt.selected) {
+    // transcripts being re-read (another tab saved one) decide which files are left: wait for
+    // those of this timeline's files (a few seconds at most), then take the targets again,
+    // unless the timeline or the selection changed meanwhile
+    const at = silenceSig() + "|" + [...state.selIds].join(",");
+    const srcs = new Set(transcriptGroups().map((g) => getMedia(g[0].mediaId).src));
+    const loading = [...transcriptCache].filter(([s, v]) => srcs.has(s) && v instanceof Promise).map(([, v]) => v);
+    if (loading.length) {
+      await Promise.race([Promise.allSettled(loading), new Promise((r) => setTimeout(r, 5000))]);
+      if (silenceSig() + "|" + [...state.selIds].join(",") !== at) { renderTranscript(true); toast("The timeline changed — check the button and click again"); return; }
+      tgt = transcribeTargets();
+    }
+  }
+  const { srcs } = tgt;
+  if (!srcs.length) { toast(tgt.none ? "The selected clips have no speech — select clips with speech, or clear the selection" : "Put a clip with speech on the timeline first"); return; }
   let out;
   try { out = await transcribeSrcs(srcs); } catch (e) { toast(e.message); return; }
   const unsaved = out.done.filter((d) => !d.saved).length;
