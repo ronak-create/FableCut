@@ -477,6 +477,7 @@ const DEFAULT_SETTINGS = {
   webCodecsBitrateMode: "variable", // "variable" | "constant"
   snapTargets: { clips: true, playhead: true, markers: true, inout: true, keyframes: false, frames: true },
   useProxies: true, // play proxies (when a file has one) while editing; export always reads the original
+  exportAsk: true, // Export opens its dialog (name + settings) first; false = render straight away
 };
 let settings = { ...DEFAULT_SETTINGS };
 function loadSettings() {
@@ -16379,6 +16380,7 @@ function refreshDeliveryNotes() {
   $("dlvSummary").textContent = `${Delivery.describe(sp, { width: fr.outW, height: fr.outH, fps })}` +
     (size ? ` · about ${Delivery.fmtBytes(size)}` : "");
   $("dlvFilePreview").textContent = "→ exports/" + deliveryFileName(sp, fps) + Delivery.CONTAINERS[sp.container].ext;
+  syncExportName();
   const cv = deliveryCanvas();
   const warn = [...dlvNotes.map((n) => n[0].toUpperCase() + n.slice(1)),
     ...Delivery.checks(sp, { duration: range.dur, fps, canvasW: cv.w, canvasH: cv.h, region: cv.region })];
@@ -16457,6 +16459,33 @@ function webCodecsBitrate(w, h, fps) {
   // ~0.1 bit/pixel/frame, clamped — same heuristic as before
   return Math.min(20_000_000, Math.max(2_000_000, Math.round(w * h * fps * 0.1)));
 }
+/* The Export dialog's "Save as" name. Filled with the name the export would get;
+   once typed in, that name is used for this export (blank = back to the default). */
+let exportNameTyped = false;
+function defaultExportName() {
+  const c = selectedExportChoice();
+  if (c.kind === "delivery" && dlvSpec) return deliveryFileName(dlvSpec);
+  return project.name.replace(/[^\w\- ]+/g, "").trim() || "export";
+}
+function exportNameExt() {
+  const c = selectedExportChoice();
+  if (c.kind === "delivery" && dlvSpec) return Delivery.CONTAINERS[dlvSpec.container].ext;
+  return ".mp4";
+}
+function syncExportName() {
+  const el = $("exportName");
+  if (!el) return;
+  if (!exportNameTyped || !el.value.trim()) { exportNameTyped = false; el.value = defaultExportName(); }
+  const note = $("exportNameNote");
+  if (note) note.textContent = "→ exports/" + (exportName() || defaultExportName()) + exportNameExt() +
+    " · a number is added if that name is taken";
+}
+/** The typed name (file-safe), or null for the default. */
+function exportName() {
+  const v = exportNameTyped ? ($("exportName")?.value || "").trim() : "";
+  const safe = v.replace(/\.(mp4|mov|mkv|webm|mxf)$/i, "").replace(/[^\w\- ()\[\].]+/g, "_").replace(/^[.\s]+/, "").slice(0, 120);
+  return safe || null;
+}
 async function openExportSetup() {
   if (state.exporting) return;
   if (!project.clips.length) { alert("Timeline is empty — add some clips first."); return; }
@@ -16529,6 +16558,16 @@ async function openExportSetup() {
     syncExportProfileVisibility();
     renderBatchList();
     renderQueue();
+    exportNameTyped = false;
+    syncExportName();
+    const skip = $("exportSkipAsk");
+    if (skip) skip.checked = false;
+    if (!getSetting("exportAsk")) {
+      // "Don't ask again": render with the last settings under the default name
+      toast(`Exporting “${defaultExportName()}” — Settings → Ask before exporting brings the dialog back`);
+      startChosenExport();
+      return;
+    }
     els.exportSetup.classList.remove("hidden");
     // aria-modal hides what is behind — focus has to come inside
     if (!els.exportSetup.contains(document.activeElement)) $("exportRangeSel")?.focus();
@@ -16555,17 +16594,19 @@ function startChosenExport() {
     alert("Export range is empty — IN/OUT is at or past the end of the timeline. Choose Entire timeline, or move the markers.");
     return;
   }
+  const name = exportName();
+  if ($("exportSkipAsk")?.checked) setSetting("exportAsk", false);
   closeExportSetup();
   if (useFast) {
     const c = selectedExportChoice();
     setSetting("exportKind", c.kind);
     if (c.kind === "delivery") {
       setSetting("delivery", dlvSpec);
-      fastExport({ delivery: dlvSpec });
-    } else fastExport({ profile: c.id });
+      fastExport({ delivery: dlvSpec, name });
+    } else fastExport({ profile: c.id, name });
   }
-  else if (useSecond && state.connected && state.ffmpeg && state.webCodecs && !getExportFrame()) webCodecsExport();
-  else startExport();
+  else if (useSecond && state.connected && state.ffmpeg && state.webCodecs && !getExportFrame()) webCodecsExport(name);
+  else startExport(name);
 }
 
 /* Keep Range's IN–OUT option in sync with marker presence without clobbering
@@ -17482,7 +17523,7 @@ async function fastExport(opts = {}) {
   els.exportProgress.style.width = "0%";
   els.exportNote.textContent = "Rendering frames → ffmpeg. You can switch tabs; export continues.";
   restoreExportVideoState();
-  const deliveries = opts.deliveries || (opts.delivery ? [{ delivery: opts.delivery }] : null);
+  const deliveries = opts.deliveries || (opts.delivery ? [{ delivery: opts.delivery, name: opts.name || undefined }] : null);
   const delivery = deliveries ? deliveries[0].delivery : null;
   const fps = (delivery && delivery.fps) || projectFps();
   let result = null;
@@ -17504,7 +17545,7 @@ async function fastExport(opts = {}) {
         canvasW: cv.w, canvasH: cv.h, region: cv.region, hasAudio: !!wav,
       } : {
         fps,
-        name: project.name.replace(/[^\w\- ]+/g, "") || "export",
+        name: opts.name || project.name.replace(/[^\w\- ]+/g, "") || "export",
         profile: profileId,
         hasAudio: !!wav,
       }),
@@ -18166,7 +18207,7 @@ function waitEncodeQueue(encoder, max = 2, { signal, getError } = {}) {
     tick();
   });
 }
-async function webCodecsExport() {
+async function webCodecsExport(name) {
   if (state.exporting) return;
   await detectWebCodecs();
   if (!state.webCodecs) { startExport(); return; }
@@ -18195,7 +18236,7 @@ async function webCodecsExport() {
       method: "POST",
       body: JSON.stringify({
         fps,
-        name: project.name.replace(/[^\w\- ]+/g, "") || "export",
+        name: name || project.name.replace(/[^\w\- ]+/g, "") || "export",
         mode: "annexb",
         hasAudio: !!wav,
       }),
@@ -18316,7 +18357,7 @@ function pickMime() {
   ];
   return cands.find((m) => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || "";
 }
-async function startExport() {
+async function startExport(name) {
   if (state.exporting) return;
   if (!project.clips.length) { alert("Timeline is empty — add some clips first."); return; }
   const mime = pickMime();
@@ -18342,7 +18383,7 @@ async function startExport() {
     const blob = new Blob(recChunks, { type: mime.split(";")[0] });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = (project.name.replace(/[^\w\- ]+/g, "") || "export") + "." + ext;
+    a.download = (name || project.name.replace(/[^\w\- ]+/g, "") || "export") + "." + ext;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 30_000);
   };
@@ -18401,6 +18442,10 @@ $("btnRippleDelete").addEventListener("click", () => {
 });
 $("btnExport").addEventListener("click", openExportSetup);
 $("btnStartExport").addEventListener("click", startChosenExport);
+$("exportName")?.addEventListener("input", () => { exportNameTyped = true; syncExportName(); });
+$("exportName")?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !$("btnStartExport").disabled) { e.preventDefault(); startChosenExport(); }
+});
 els.exportSetup?.addEventListener("change", (e) => {
   if (e.target.name === "engine") {
     syncExportProfileVisibility();
@@ -18413,6 +18458,7 @@ els.exportProfileSel?.addEventListener("change", () => {
   if (c.kind === "profile" && !project.encodeProfile)
     setSetting("encodeProfile", c.id === encodeProfiles.default ? null : c.id);
   syncExportChoiceUi("preset");
+  syncExportName();
 });
 $("dlvBody")?.addEventListener("change", onDeliveryControl);
 $("dlvBody")?.addEventListener("input", onDeliveryControl);
@@ -18591,6 +18637,8 @@ function onSettingsTabTrap(e) {
 function openSettings() {
   const cb = $("setLinkSelect");
   if (cb) cb.checked = !!getSetting("linkSelect");
+  const ask = $("setExportAsk");
+  if (ask) ask.checked = getSetting("exportAsk") !== false;
   const overlay = $("settingsOverlay");
   overlay.classList.remove("hidden");
   overlay.addEventListener("keydown", onSettingsTabTrap);
@@ -18608,6 +18656,7 @@ $("btnCloseSettings").addEventListener("click", closeSettings);
 $("settingsOverlay").addEventListener("click", (e) => {
   if (e.target === $("settingsOverlay")) closeSettings();
 });
+$("setExportAsk")?.addEventListener("change", (e) => setSetting("exportAsk", !!e.target.checked));
 $("setLinkSelect").addEventListener("change", (e) => {
   setSetting("linkSelect", !!e.target.checked);
   if (!getSetting("linkSelect")) {

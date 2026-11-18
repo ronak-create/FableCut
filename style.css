@@ -3048,6 +3048,27 @@ body.track-size-s .clip.c-comp .comp-open-hint {
   font-size: 12px;
 }
 
+.export-name {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+.export-skip {
+  margin-right: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--dim);
+  cursor: pointer;
+}
+
 .export-profile-note,
 .export-profile-hint {
   margin: 6px 0 0;

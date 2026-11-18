@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Name the file before it renders.** The Export dialog opens with **Save as**:
+  the file's name, filled with the default (the preset's pattern) and yours to
+  change for this export. **Don't ask again** makes the Export button render
+  straight away with the last settings; **Settings → Ask before exporting**
+  turns the dialog back on. Agents pass `name` to `fablecut_export`.
+
 ### Changed
 - **Node 22 or newer is now required** (was Node 18). CI runs the test suite on
   Node 22, 24 and 26. (#64)

@@ -455,6 +455,7 @@ const TOOLS = [
       type: "object",
       properties: {
         range: { type: "string", enum: ["entire", "in-out"], description: "Whole timeline, or the project's inPoint→outPoint (default: in-out when either is set)" },
+        name: { type: "string", description: "The file's name, without the extension (tokens as in delivery.filename work too). Default: the preset's filename pattern, which starts with the project's name — so name the file after what it is (e.g. 'salon-promo-15s') whenever the project holds more than this one video. The editor's own Export dialog asks the user for a name; this is that answer. Not with profile or outputs" },
         preset: { type: "string", description: "Delivery preset: youtube, youtube-shorts, instagram-reels, tiktok, x, linkedin, master, broadcast, web, archive, custom, or a saved preset's id (fablecut_encode_profiles lists them). The output is reframed to the preset's size — cropped from the middle (or from the project's exportFrame), or padded with reframe:'fit'" },
         delivery: { type: "object", description: "Delivery settings over the preset (or over custom): {width, height (null = the picture's size), fps (null = the project's), reframe:'fill'|'fit'|'stretch', container:'mp4'|'mov'|'mkv'|'webm'|'mxf', video:{codec:'h264'|'hevc'|'av1'|'vp9'|'prores'|'dnxhr'|'mpeg2'|'ffv1', encoder?, rate:'crf'|'vbr'|'cbr', crf, bitrate (kb/s), maxrate (kb/s), keyint (s), pixFmt, speed:'fast'|'balanced'|'best', profile (prores: proxy|lt|standard|hq|4444|4444xq · dnxhr: lb|sq|hq|hqx|444)}, audio:{codec:'aac'|'opus'|'mp3'|'pcm16'|'pcm24'|'flac'|'none', bitrate (kb/s), sampleRate, channels, loudness (LUFS target: -14 streaming/social, -16 podcast, -23 EBU R128, -24 ATSC; null = as mixed), truePeak (dBTP ceiling, default -1)}, color:'bt709'|'bt709-full'|'bt601-625'|'bt601-525', filename:'{project}_{preset}_{res}' (tokens {project} {preset} {res} {w} {h} {fps} {codec} {date} {time} {range} {n}), metadata:{title, artist, description, copyright, date, keywords}}. Anything left out comes from the preset; impossible combinations are corrected and the reply says how. Every finished file is checked against what was asked (size, fps, frames, codecs, length, loudness, true peak, file size) and the reply lists the checks" },
         outputs: { description: "Several files, rendered once per frame rate (up to 8 outputs per render): true = the project's checked batch outputs (project.outputs, set with setProject {outputs:[…]}), or a list like [{preset:'master'}, {preset:'youtube'}, {preset:'instagram-reels'}, {preset:'custom', width:1080, height:1080, filename:'{project}_square_{res}'}, {preset:'web', filename:'{project}_preview_{res}'}]. Outputs with the same fps share one render; the reply lists every file", anyOf: [{ type: "boolean" }, { type: "array", items: { anyOf: [{ type: "string" }, { type: "object" }] } }] },
@@ -1359,7 +1360,18 @@ async function exportTool(args) {
     if (r.status !== 200) throw new Error(r.body?.error || "no such export job");
     job = r.body;
   } else {
-    const r = await apiJSON("POST", "/api/export/request", { range: args.range, profile: args.profile, preset: args.preset, delivery: args.delivery, outputs: args.outputs, where: args.where || "auto" });
+    let delivery = args.delivery;
+    if (args.name != null && String(args.name).trim()) {
+      if (args.profile || args.outputs) throw new Error("name goes with a preset / delivery export, not with profile or outputs (give each output its own filename)");
+      // the file name over the delivery the export would use anyway: the one passed, else the project's
+      let base = delivery && typeof delivery === "object" ? delivery : null;
+      if (!base && !args.preset) {
+        const pd = readProject().delivery;
+        base = typeof pd === "string" ? { preset: pd } : pd && typeof pd === "object" ? pd : null;
+      }
+      delivery = { ...(base || {}), filename: String(args.name).trim() };
+    }
+    const r = await apiJSON("POST", "/api/export/request", { range: args.range, profile: args.profile, preset: args.preset, delivery, outputs: args.outputs, where: args.where || "auto" });
     if (r.status !== 200) throw new Error(r.body?.error || `export request failed (${r.status})`);
     job = r.body;
     if (job.notes && job.notes.length) startNote = `Settings adjusted: ${job.notes.join("; ")}\n`;

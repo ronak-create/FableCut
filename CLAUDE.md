@@ -2513,6 +2513,14 @@ cannot produce a one-frame black file.
 3. IN–OUT, OUT only → from the start to `outPoint`
 4. IN–OUT, both → the range between them
 
+**Save as** at the top of the dialog names the file. It starts as the name the
+export would get (the preset's filename pattern, `{project}_…`); type over it
+and that name is used for this export (blank goes back to the default, and a
+number is added when the name is taken). Enter renders. **Don't ask again**
+beside the buttons makes the Export button render straight away with the last
+settings under the default name; **Settings → Ask before exporting** brings the
+dialog back (stored in this browser).
+
 **Agents export with `fablecut_export`** (or `POST /api/export/request`). It is
 the same Fast export as the button — same compositor, audio mix and encoding
 profile — so it needs ffmpeg on PATH. The job goes to an open editor tab (the
@@ -2528,6 +2536,10 @@ agent last wrote, so an export right after a patch includes that patch.
   settings (`{preset:"youtube", delivery:{fps:60, video:{rate:"vbr", bitrate:16000}}}`).
   `profile:"hq"` picks a raw encoding profile instead. With neither, `project.delivery`
   is used when set, else `project.encodeProfile`, else the server's default profile.
+- `name:"salon-promo-15s"` names the file (no extension), the answer the Export dialog asks
+  the user for. Without it the preset's pattern starts with the project's name, so name the
+  file after what it is whenever the project holds more than this one video. It goes over
+  `delivery` / `preset`, else over `project.delivery` (else Master); not with `profile` or `outputs`.
 - `outputs:true` exports the project's checked batch outputs; `outputs:[{preset:"master"},
   {preset:"youtube"}, {preset:"instagram-reels"}, …]` exports a list. One render per
   frame rate; the reply lists every file (or why one failed).
