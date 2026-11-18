@@ -18569,6 +18569,144 @@ $("helpFilter").addEventListener("keydown", (e) => {
   if ($("helpFilter").value) { $("helpFilter").value = ""; filterHelp(); }
   else $("helpOverlay").classList.add("hidden");
 });
+/* ── Command search (Ctrl/Cmd+K) ──
+   One box that finds what the editor can do: toolbar actions, panels and
+   tabs, Settings, the selected clip's Inspector sections, media in the bin,
+   clips on the timeline and the keyboard shortcuts. The items are read from
+   the page each time it opens, so a new button or setting turns up without a
+   list to keep; command-search.js ranks them. */
+const cmdk = { items: [], shown: [], active: 0, back: null };
+/** A control's name: its aria-label, else the start of its title, else its text. */
+function cmdkName(el) {
+  const text = (el.textContent || "").replace(/\s+/g, " ").trim();
+  const title = (el.getAttribute("aria-label") || el.title || "").replace(/\s+/g, " ").trim();
+  const short = title.split(/ — |: |\. | \(/)[0];
+  // icons and single symbols (▶ ⊡ ?) say little; a title does
+  return /[a-z]{3}/i.test(text) && text.length <= 32 ? text.replace(/^[^\w(]+/, "") : short || text;
+}
+const cmdkShown = (el) => !el.disabled && !el.closest(".hidden") && el.getClientRects().length > 0;
+function cmdkFlash(el) {
+  if (!el) return;
+  el.scrollIntoView({ block: "nearest" });
+  el.classList.remove("cmdk-flash");
+  void el.offsetWidth;
+  el.classList.add("cmdk-flash");
+}
+function cmdkCollect() {
+  const items = [], seen = new Set();
+  const add = (it) => {
+    const key = it.group + "|" + it.label;
+    if (!it.label || seen.has(key)) return;
+    seen.add(key);
+    items.push(it);
+  };
+  // panels and tabs
+  for (const b of document.querySelectorAll("#sideTabs [data-side], #binTabs [data-tab], #wsSwitch [data-ws]"))
+    add({ label: cmdkName(b), group: "Panel", hint: (b.title || "").split(/ — |: /)[0] === cmdkName(b) ? "" : b.title, keywords: ["tab", "show", "open"], run: () => b.click() });
+  // toolbar actions: every named button outside dialogs, menus and the Inspector
+  for (const b of document.querySelectorAll("button[id]")) {
+    if (b.closest(".overlay, .ctx-menu, .style-menu, #inspector, #sideTabs, #binTabs, #wsSwitch") || b.id === "btnSearch") continue;
+    if (!cmdkShown(b)) continue;
+    add({ label: cmdkName(b), group: "Action", hint: b.title && b.title !== cmdkName(b) ? b.title : "", run: () => b.click() });
+  }
+  // the selected clip's Inspector sections
+  for (const h of document.querySelectorAll("#inspector .insp-section > h3")) {
+    const name = h.textContent.replace(/\s+/g, " ").trim();
+    add({ label: name, group: "Inspector", keywords: ["inspector", "section", "clip"], run: () => { setSideTab("inspector"); cmdkFlash(h.closest(".insp-section")); } });
+  }
+  // Settings
+  for (const row of document.querySelectorAll("#settingsDialog .settings-row")) {
+    const name = row.querySelector(".settings-label")?.textContent.trim();
+    const hint = row.querySelector(".settings-hint")?.textContent.trim() || "";
+    add({ label: name, group: "Setting", hint, keywords: ["settings", "preference", "option"], run: () => { openSettings(); const inp = row.querySelector("input, select"); inp?.focus(); cmdkFlash(row); } });
+  }
+  // media in the bin, clips on the timeline
+  for (const m of project.media || []) {
+    add({ label: m.name, group: "Media", hint: m.kind, keywords: [m.kind, ...(m.tags || [])], run: () => revealInProject({ kind: m.kind, mediaId: m.id }) });
+  }
+  for (const c of project.clips || []) {
+    const name = c.kind === "text" ? (c.props?.text || "Title").split("\n")[0].slice(0, 60) : c.name || getMedia(c.mediaId)?.name || c.kind;
+    add({ label: name, group: "Clip", hint: `${c.track} · ${fmt(c.start)}`, keywords: [c.kind, c.track], run: () => { selectClip(c.id); setTime(c.start); } });
+  }
+  // keyboard shortcuts: Enter opens the list, filtered to that one
+  for (const tr of document.querySelectorAll("#helpKeys tr")) {
+    const cells = tr.querySelectorAll("td");
+    if (cells.length < 2) continue;
+    const keys = cells[0].textContent.replace(/\s+/g, " ").trim(), what = cells[1].textContent.replace(/\s+/g, " ").trim();
+    const label = what.split(/ — |; |\. /)[0].slice(0, 70);
+    const section = tr.closest(".keys-sec")?.querySelector("h3")?.textContent || "";
+    add({ label, group: "Shortcut", hint: keys, keywords: [section, keys, what], run: () => {
+      $("helpOverlay").classList.remove("hidden");
+      $("helpFilter").value = label.split(/\s+/).slice(0, 3).join(" ");
+      filterHelp();
+      $("helpFilter").focus();
+    } });
+  }
+  return items;
+}
+function cmdkRender() {
+  const list = $("cmdkList");
+  cmdk.shown = FableCutSearch.rank($("cmdkInput").value, cmdk.items, 60);
+  cmdk.active = Math.min(cmdk.active, Math.max(0, cmdk.shown.length - 1));
+  list.innerHTML = cmdk.shown.length
+    ? cmdk.shown.map((it, i) => `<li class="cmdk-item${i === cmdk.active ? " active" : ""}" role="option" id="cmdk-${i}" data-i="${i}" aria-selected="${i === cmdk.active}">` +
+      `<span class="cmdk-label">${escapeHtml(it.label)}</span>${it.hint ? `<span class="cmdk-hint">${escapeHtml(it.hint)}</span>` : ""}` +
+      `<span class="cmdk-group">${it.group}</span></li>`).join("")
+    : `<li class="cmdk-empty">Nothing matches — try another word.</li>`;
+  $("cmdkInput").setAttribute("aria-activedescendant", cmdk.shown.length ? "cmdk-" + cmdk.active : "");
+  list.querySelector(".cmdk-item.active")?.scrollIntoView({ block: "nearest" });
+}
+function openCmdk() {
+  if (state.exporting) return;
+  cmdk.back = document.activeElement;
+  cmdk.items = cmdkCollect();
+  cmdk.active = 0;
+  $("cmdkInput").value = "";
+  $("cmdkOverlay").classList.remove("hidden");
+  cmdkRender();
+  $("cmdkInput").focus();
+}
+function closeCmdk(refocus = true) {
+  $("cmdkOverlay").classList.add("hidden");
+  if (refocus && cmdk.back && document.contains(cmdk.back)) cmdk.back.focus();
+  cmdk.back = null;
+}
+function runCmdk(i) {
+  const it = cmdk.shown[i];
+  if (!it) return;
+  closeCmdk(false);
+  // after the box has gone, so the action sees the editor as it was
+  setTimeout(() => { try { it.run(); } catch (e) { toast(String(e.message || e)); } }, 0);
+}
+$("btnSearch")?.addEventListener("click", openCmdk);
+$("cmdkInput").addEventListener("input", () => { cmdk.active = 0; cmdkRender(); });
+$("cmdkInput").addEventListener("keydown", (e) => {
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    const n = cmdk.shown.length;
+    if (n) cmdk.active = (cmdk.active + (e.key === "ArrowDown" ? 1 : n - 1)) % n;
+    cmdkRender();
+  } else if (e.key === "Enter") {
+    e.preventDefault();
+    runCmdk(cmdk.active);
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    e.stopPropagation();
+    if ($("cmdkInput").value) { $("cmdkInput").value = ""; cmdk.active = 0; cmdkRender(); }
+    else closeCmdk();
+  } else if (e.key === "Tab") e.preventDefault();   // the box is the dialog's only control
+});
+$("cmdkList").addEventListener("mousemove", (e) => {
+  const li = e.target.closest(".cmdk-item");
+  if (!li || +li.dataset.i === cmdk.active) return;
+  cmdk.active = +li.dataset.i;
+  cmdkRender();
+});
+$("cmdkList").addEventListener("click", (e) => {
+  const li = e.target.closest(".cmdk-item");
+  if (li) runCmdk(+li.dataset.i);
+});
+$("cmdkOverlay").addEventListener("mousedown", (e) => { if (e.target === $("cmdkOverlay")) closeCmdk(); });
 function settingsFocusables() {
   const root = $("settingsDialog");
   if (!root) return [];
@@ -19105,6 +19243,12 @@ window.addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (k === "s" || k === "S")) {
     e.preventDefault();   // never the browser's Save Page dialog, and not S (split) either
     if (!e.repeat && $("btnProjectsDash") && !$("btnProjectsDash").classList.contains("hidden")) saveVersionNow();   // holding the keys makes one
+    return;
+  }
+  // Ctrl/Cmd+K: the command search (works from a text field too; the browser's own Ctrl+K stays out)
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (k === "k" || k === "K")) {
+    e.preventDefault();
+    if ($("cmdkOverlay").classList.contains("hidden")) openCmdk(); else closeCmdk();
     return;
   }
   // Ctrl/Cmd+O: the Projects dashboard (where the editor server has projects)

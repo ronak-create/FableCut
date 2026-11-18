@@ -30,6 +30,9 @@
           <button type="button" class="btn tiny" data-track-size="l" title="Large tracks">L</button>
         </span>
       </span>
+      <button class="btn ghost" id="btnSearch" title="Search actions, panels, settings, media and shortcuts (Ctrl/Cmd+K)" aria-label="Search">
+        <svg class="ico" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><circle cx="7" cy="7" r="4.6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10.4 10.4L14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      </button>
       <button class="btn ghost" id="btnSettings" title="Settings" aria-label="Settings">
         <svg class="ico" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
           <path fill="currentColor" fill-rule="evenodd" d="M6.71 2.81L6.88.94L9.12.94L9.29 2.81L10.76 3.41L12.2 2.22L13.78 3.8L12.59 5.24L13.19 6.71L15.06 6.88L15.06 9.12L13.19 9.29L12.59 10.76L13.78 12.2L12.2 13.78L10.76 12.59L9.29 13.19L9.12 15.06L6.88 15.06L6.71 13.19L5.24 12.59L3.8 13.78L2.22 12.2L3.41 10.76L2.81 9.29L.94 9.12L.94 6.88L2.81 6.71L3.41 5.24L2.22 3.8L3.8 2.22L5.24 3.41Z M5.15 8a2.85 2.85 0 1 0 5.7 0a2.85 2.85 0 1 0-5.7 0"/>
@@ -495,6 +498,16 @@
   </div>
 </div>
 
+<!-- ══════════ COMMAND SEARCH (Ctrl/Cmd+K) ══════════ -->
+<div class="overlay hidden" id="cmdkOverlay">
+  <div class="cmdk" role="dialog" aria-modal="true" aria-label="Search">
+    <input type="search" id="cmdkInput" class="cmdk-input" placeholder="Search actions, panels, settings, media, shortcuts…" autocomplete="off" spellcheck="false"
+      role="combobox" aria-expanded="true" aria-controls="cmdkList" aria-autocomplete="list">
+    <ul class="cmdk-list" id="cmdkList" role="listbox"></ul>
+    <div class="cmdk-foot dim"><kbd>↑</kbd> <kbd>↓</kbd> to move · <kbd>Enter</kbd> to run · <kbd>Esc</kbd> to close</div>
+  </div>
+</div>
+
 <!-- ══════════ HELP OVERLAY ══════════ -->
 <div class="overlay hidden" id="helpOverlay">
   <div class="dialog help">
@@ -506,6 +519,7 @@
       <section class="keys-sec">
         <h3>Playback</h3>
         <table class="keys">
+          <tr><td><kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>K</kbd></td><td>Search: actions, panels, settings, Inspector sections, media, clips and shortcuts</td></tr>
           <tr><td><kbd>Space</kbd></td><td>Play / pause (Source or Program — whichever is active)</td></tr>
           <tr><td><kbd>J</kbd> <kbd>K</kbd> <kbd>L</kbd></td><td>Shuttle — <kbd>L</kbd> plays forward, <kbd>J</kbd> in reverse (silent); tap again for 1.5× · 2× · 4×, the other key turns around; <kbd>K</kbd> stops</td></tr>
           <tr><td><kbd>K</kbd>+<kbd>J</kbd> / <kbd>K</kbd>+<kbd>L</kbd></td><td>Hold <kbd>K</kbd> and tap to step one frame; hold both to crawl at ¼ speed</td></tr>
@@ -691,6 +705,7 @@
 <script src="sequences.js"></script>
 <script src="templates.js"></script>
 <script src="media-lib.js"></script>
+<script src="command-search.js"></script>
 <script src="delivery.js"></script>
 <script src="mp4-demux.js"></script>
 <script src="app.js"></script>

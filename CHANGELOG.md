@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Search everything with Ctrl/Cmd+K.** A box over the editor (or the
+  magnifier in the top bar) finds toolbar actions, panels and tabs, Settings,
+  the selected clip's Inspector sections, media in the bin, clips on the
+  timeline and keyboard shortcuts. Type a few letters of each word (“rip del”
+  finds Ripple delete); Enter runs it: a panel opens, a setting is shown, a clip
+  is selected and the playhead goes to it, a shortcut opens in the list.
+
 ### Changed
 - **Node 22 or newer is now required** (was Node 18). CI runs the test suite on
   Node 22, 24 and 26. (#64)
