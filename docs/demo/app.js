@@ -9050,10 +9050,12 @@ function transcriptWords() {
 /** What Transcribe works on: the selected clips' files, else every file on the timeline without a transcript. */
 function transcribeTargets() {
   const groups = transcriptGroups();
+  // a selected clip picks the file its speech group is heard from (a picture's sound may come
+  // from denoised stems, another file): the group counts when it or a clip linked to it is selected
   const picked = new Set();
-  for (const id of state.selIds) {
-    const c = getClip(id);
-    if (c && (c.kind === "video" || c.kind === "audio")) { const m = getMedia(c.mediaId); if (m) picked.add(m.src); }
+  for (const g of groups) {
+    const ids = new Set(withLinked(g).map((c) => c.id));
+    if ([...ids].some((id) => state.selIds.has(id))) picked.add(getMedia(g[0].mediaId).src);
   }
   const srcs = [...new Set(groups.map((g) => getMedia(g[0].mediaId).src))];
   const sel = srcs.filter((s) => picked.has(s));
@@ -9209,11 +9211,18 @@ function renderTranscript(force = false) {
   else {
     if (missing.length) html += `<div class="tr-note">No transcript yet: ${missing.slice(0, 6).map(escapeHtml).join(", ")}${missing.length > 6 ? ` +${missing.length - 6} more` : ""}</div>`;
     // which model and language made these words, so wrong words point at the fix
-    const made = [...new Set(groups.map((g) => transcriptCache.get(getMedia(g[0].mediaId).src)).filter((d) => d && d.words)
-      .map((d) => (T.MODELS[d.model]?.label || d.model || "base") + "|" + (d.language || "")))];
-    if (made.length) {
-      const said = made.map((k) => { const [model, lang] = k.split("|"); return `${escapeHtml(model)}, ${escapeHtml(T.LANGUAGES[lang] || lang || "auto-detected")}`; });
-      html += `<div class="tr-note tr-made">Transcribed with ${said.join("; ")}. Words look wrong? Pick the language spoken and the Small model above, then Transcribe again.</div>`;
+    const docs = groups.map((g) => transcriptCache.get(getMedia(g[0].mediaId).src)).filter((d) => d && d.words);
+    const made = new Map();
+    for (const d of docs) made.set(JSON.stringify([d.model ?? null, d.language ?? null]), d);
+    if (made.size) {
+      const said = [...made.values()].map((d) => {
+        const model = d.model == null ? "an unknown model" : T.MODELS[d.model]?.label || d.model;
+        const lang = d.language == null ? "an unknown language" : d.language === "" || d.language === "auto" ? "auto-detected" : T.LANGUAGES[d.language] || d.language;
+        return `${escapeHtml(model)}, ${escapeHtml(lang)}`;
+      });
+      // with some files still untranscribed the button does those, so redoing others takes a selection
+      const how = missing.length ? "select those clips, then Transcribe selected" : "then Transcribe again";
+      html += `<div class="tr-note tr-made">Transcribed with ${said.join("; ")}. Words look wrong? Pick the language spoken and the Small model above, ${how}.</div>`;
     }
     if (!words.length && !missing.length) html += `<div class="tr-empty">${[...transcriptCache.values()].some((v) => v instanceof Promise) ? "Loading…" : "No words in these clips."}</div>`;
     for (const s of T.segments(words)) {
@@ -9320,6 +9329,9 @@ function copyTranscript() {
   navigator.clipboard.writeText(lines.join("\n")).then(() => toast(`Copied ${lines.length} line${lines.length === 1 ? "" : "s"}`), () => toast("Couldn't copy — the browser refused"));
 }
 async function transcribeFromTab() {
+  // transcripts being re-read (another tab saved one) are waited for, then the targets taken again
+  const loading = [...transcriptCache.values()].filter((v) => v instanceof Promise);
+  if (loading.length) await Promise.allSettled(loading);
   const { srcs } = transcribeTargets();
   if (!srcs.length) { toast("Put a clip with speech on the timeline first"); return; }
   let out;
