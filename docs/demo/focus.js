@@ -73,8 +73,15 @@
     // the slider a pointer is dragging and that pointer's id, until that same pointer
     // lifts or cancels (a key pressed mid-drag, or a second finger, doesn't end it)
     let dragging = null, dragPointer = null;
+    // The pointerdown a click comes from. byPointer only says what the last input was;
+    // a screen reader's virtual-cursor click fires `click` with no pointerdown, so a
+    // click counts as a mouse click only when a pointerdown on that same element came
+    // just before it.
+    let downOn = null, downAt = 0;
+    const CLICK_MS = 1500;   // a press held longer than this isn't paired (the click is left to the keyboard path)
     win.addEventListener("pointerdown", (e) => {
       byPointer = true;
+      downOn = e.target; downAt = Date.now();
       // clicking a control that already had keyboard focus (no new focusin): it is now a mouse focus
       if (keyFocused && (e.target === keyFocused || (keyFocused.contains && keyFocused.contains(e.target)))) keyFocused = null;
       const t = e.target;
@@ -85,7 +92,12 @@
     doc.addEventListener("focusin", (e) => noteFocus(e.target, !byPointer), true);
     // Bubble phase: the control's own click handler has run by now.
     win.addEventListener("click", (e) => {
-      if (!byPointer) return;
+      const t0 = e.target;
+      const paired = byPointer && !!downOn && Date.now() - downAt < CLICK_MS &&
+        (downOn === t0 || (downOn.contains && downOn.contains(t0)) || (t0 && t0.contains && t0.contains(downOn)) ||
+         (t0 && t0.control && (t0.control === downOn || (t0.control.contains && t0.control.contains(downOn)))));
+      downOn = null;
+      if (!paired) return;   // a click with no mouse press (screen reader, el.click() in code): focus stays
       const el = doc.activeElement;
       // a <select> stays focused while its list is open; a text field is typed into
       if (!el || !isClickControl(el) || el.tagName === "SELECT") return;

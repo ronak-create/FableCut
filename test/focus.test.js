@@ -131,6 +131,15 @@ test("install(): a clicked button gives focus back; Tab then click on a select m
   assert.equal(snap.blurred, true, "released after its click");
   assert.equal(p.doc.activeElement, null);
 
+  // a screen reader's virtual-cursor click: `click` with no pointerdown of its own, even
+  // though the last real input was the mouse. Focus stays where the reader put it.
+  const markers = control("button");
+  p.fire("pointerdown", { target: control("div") });   // the last real input: a mouse press somewhere else
+  p.fire("click", { target: control("div") });
+  p.focus(markers);
+  p.fire("click", { target: markers });
+  assert.equal(markers.blurred, false, "a click with no pointerdown on it keeps focus");
+
   const fps = control("select");
   p.fire("keydown", { key: "Tab" });
   p.focus(fps);
