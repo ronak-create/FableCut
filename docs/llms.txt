@@ -30,7 +30,8 @@ about 150 ms. A human and an agent can work the same timeline at once.
   direct edits to `project.json` with live reload over server-sent events.
 - Editing: multi-track video and audio (up to 16 per kind), per-clip volume,
   stereo pan, speed ramps, keyframes, transitions, titles with kinetic text
-  animation, SVG library, chroma key, AI background removal.
+  animation and twenty one-tap title styles, about sixty Google fonts grouped
+  by look (any other loads by name), SVG library, chroma key, AI background removal.
 - Audio: a mixer with track faders, pan, mute / solo and meters; submix buses;
   clip gain; effect chains (EQ, filters, compressor, limiter, gate, delay,
   reverb, distortion, stereo width, pitch shift) with presets and keyframed

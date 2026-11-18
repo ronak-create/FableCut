@@ -289,9 +289,10 @@ big operation (cutting silences, snapping to the beat, reframing), and every
 
 **Text**
 
-- **Title styles** — one-tap cohesive looks (Impact, Elegant, Kinetic cut, Neon,
-  Handwritten, Luxury, and more); new titles vary the font, placement and animation
-  automatically instead of defaulting to one flat style
+- **Title styles** — twenty one-tap cohesive looks (Impact, Elegant, Kinetic cut, Neon,
+  Luxury, Comic, Typewriter, Sticker, Cinematic, and more); new titles vary the font,
+  placement and animation automatically instead of defaulting to one flat style. The
+  font picker groups about sixty Google fonts by look, and any other loads by name
 - Kinetic captions: typewriter, word-pop, word-slide, karaoke, **letter-pop**,
   **wave**, **bounce**, **shake**, **clip-reveal**, **zoom-in**, **font-cut**
   (rhythmic typeface cuts), **rise-mask**

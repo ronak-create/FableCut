@@ -477,10 +477,22 @@ dropdown + Shuffle), or reproduce it from an agent by writing the same props:
 | `subtitle` | Roboto | small, bottom, bg pill, `karaoke` |
 | `boldRise` | Archivo Black | uppercase, lower third, `rise-mask` |
 | `luxury` | Cinzel | uppercase, cream→gold gradient, wide `letterSpacing`, `clip-reveal` |
+| `popOutline` | Montserrat 900 | uppercase, gold with a dark outline, `letter-pop` |
+| `boxed` | Inter 800 | dark text on a white box, lower third, `word-slide` |
+| `headline` | Montserrat 900 | uppercase, outlined, the word being said in pink (`highlight`) |
+| `comic` | Bangers | yellow with a thick outline, tilted −3°, `bounce` |
+| `typewriter` | Special Elite | cream, lower-left, `typewriter` |
+| `minimal` | Inter 300 | uppercase, very wide `letterSpacing`, no shadow, `rise-mask` |
+| `script` | Great Vibes | white→blush gradient, `clip-reveal` |
+| `retro` | Monoton | uppercase, pink `glow`, `letter-pop` |
+| `sticker` | Fredoka 700 | white on a violet box, tilted −2°, lower third, `word-pop` |
+| `glitch` | Russo One | uppercase, red `glow`, `shake` |
+| `cinematic` | Cormorant Garamond 500 | uppercase, wide `letterSpacing`, `rise-mask` |
 
 **Rule for agents: vary the font per title — never reuse one font across a whole
-edit.** Any Google Font name auto-loads; the display faces above ship in
-`library/fonts/`. Placement props (`x`/`y`) are canvas-aware in the styles
+edit.** Any Google Font name auto-loads; some display faces ship in
+`library/fonts/`. The font picker lists about sixty Google fonts by look
+(Display, Sans, Serif, Script & hand, Retro & mono) and loads one on first use. Placement props (`x`/`y`) are canvas-aware in the styles
 (lower third ≈ `y: height*0.30`).
 
 Switching the style on an **existing** title (inspector dropdown/Shuffle) only
