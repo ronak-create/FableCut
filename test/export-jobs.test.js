@@ -134,7 +134,8 @@ test("an export request's name reaches the tab's ticket; only the name — the p
   const post = (body) => fetch(base + "/api/export/request", { method: "POST", body: JSON.stringify({ where: "tab", ...body }) }).then(async (r) => ({ status: r.status, body: await r.json() }));
   // no tab is open: where:"tab" is refused before a job exists, so ask with auto and read the ticket
   const r = await post({ where: "auto", profile: "hq", name: "salon promo" });
-  if (r.status !== 200) { t.skip("no browser to run the job: " + r.body.error); return; }
+  if (r.status === 409 && /FABLECUT_CHROME/.test(r.body.error || "")) { t.skip("no browser to run the job: " + r.body.error); return; }
+  assert.equal(r.status, 200, r.body.error);
   const ticket = await fetch(base + "/api/export/job/ticket?id=" + r.body.id).then((x) => x.json());
   assert.equal(ticket.name, "salon promo");
   assert.equal(ticket.profile, "hq");

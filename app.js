@@ -479,6 +479,7 @@ const DEFAULT_SETTINGS = {
   useProxies: true, // play proxies (when a file has one) while editing; export always reads the original
   exportAsk: true, // Export opens its dialog (name + settings) first; false = render straight away
   exportEngine: null, // "fast" | "second" — what the last export used ("Don't ask again" reuses it)
+  exportChoice: null, // the Export dialog's preset / profile last used ("d:<preset>" | "p:<profile>"), reused with it
 };
 let settings = { ...DEFAULT_SETTINGS };
 function loadSettings() {
@@ -16478,6 +16479,7 @@ function exportNameExt() {
   const engine = chosenExportEngine(), c = selectedExportChoice();
   if (engine === "fast" && c.kind === "delivery" && dlvSpec) return Delivery.CONTAINERS[dlvSpec.container].ext;
   if (engine === "recorder") return (pickMime() || "").startsWith("video/mp4") ? ".mp4" : ".webm";
+  if (engine === "fast" && c.kind === "profile") return encodeProfiles.profiles[c.id]?.extension || ".mp4";
   return ".mp4";
 }
 function syncExportName() {
@@ -16492,16 +16494,24 @@ function syncExportName() {
   note.textContent = chosenExportEngine() === "recorder"
     ? "→ the browser downloads " + file
     : "→ exports/" + file + " · a number is added if that name is taken";
+  // (the browser download names its own copies when the name is taken)
 }
 /** The typed name (file-safe), or null for the default. */
 function exportName() {
   const v = exportNameTyped ? ($("exportName")?.value || "").trim() : "";
-  const safe = v.replace(/\.(mp4|mov|mkv|webm|mxf)$/i, "").replace(/[^\w\- ()\[\].]+/g, "_").replace(/^[.\s]+/, "").slice(0, 120);
+  const safe = v.replace(/\.(mp4|mov|m4v|mkv|webm|mxf)$/i, "").replace(/[^\w\- ()\[\].]+/g, "_").replace(/^[.\s]+/, "").slice(0, 120);
   return safe || null;
 }
 let exportSetupOpening = false;   // one Export click at a time, while the dialog's lists load
+/* An export getting ready (its players, fonts, encoder check) holds the canvas before
+   state.exporting is set: every engine, the queue and agent jobs wait for both. */
+let exportStarting = false;
+function exportBusy() { return state.exporting || exportStarting; }
+/** Which timeline an Export click was for: a project or sequence opened meanwhile isn't it. */
+function exportContext() { return (runtime.projectId || "") + "|" + (project.sequence || ""); }
 async function openExportSetup() {
-  if (state.exporting || exportSetupOpening) return;
+  if (exportBusy() || exportSetupOpening) return;
+  const ctx = exportContext();
   // the dialog already open is being refreshed (a setting changed): keep what was typed in it
   const fresh = els.exportSetup.classList.contains("hidden");
   if (!project.clips.length) { alert("Timeline is empty — add some clips first."); return; }
@@ -16571,6 +16581,7 @@ async function openExportSetup() {
   syncExportRangeUi();
   syncExportProfileVisibility();
   Promise.all([fetchEncodeProfiles(), fetchDeliveryInfo()]).then(() => {
+    if (exportContext() !== ctx) { toast("Another timeline opened — click Export again"); return; }
     populateExportProfileSelect();
     syncExportProfileVisibility();
     renderBatchList();
@@ -16586,13 +16597,23 @@ async function openExportSetup() {
       // if that engine can't run now, ask after all rather than switch engines silently
       const last = getSetting("exportEngine");
       const radio = last === "second" ? els.engineRealtime : last === "fast" ? els.engineFast : null;
-      if (!radio || !radio.disabled) {
+      // ...and the last preset or profile picked, when it is still in the list
+      const choice = getSetting("exportChoice");
+      const choiceOk = !choice || [...els.exportProfileSel.options].some((o) => o.value === choice);
+      if ((!radio || !radio.disabled) && choiceOk && exportRange().frames >= 1) {
+        if (choice && els.exportProfileSel.value !== choice) {
+          els.exportProfileSel.value = choice;
+          els.exportProfileSel.dispatchEvent(new Event("change"));
+          const lastDlv = getSetting("delivery");
+          if (choice.startsWith("d:") && lastDlv?.preset === choice.slice(2)) dlvSpec = normalizeDelivery(lastDlv).spec;
+        }
         if (radio) { els.engineFast.checked = radio === els.engineFast; els.engineRealtime.checked = radio === els.engineRealtime; syncExportName(); }
         toast(`Exporting “${defaultExportName()}” — Settings → Ask before exporting brings the dialog back`);
         startChosenExport();
         return;
       }
-      toast("The last export's engine isn't available — pick one");
+      toast(exportRange().frames < 1 ? "The export range is empty — pick one"
+        : !choiceOk ? "The last export's preset isn't there any more — pick one" : "The last export's engine isn't available — pick one");
     }
     els.exportSetup.classList.remove("hidden");
     // aria-modal hides what is behind — focus has to come inside
@@ -16623,6 +16644,7 @@ function startChosenExport() {
   const name = exportName();
   if ($("exportSkipAsk")?.checked) setSetting("exportAsk", false);
   setSetting("exportEngine", useFast ? "fast" : "second");
+  setSetting("exportChoice", els.exportProfileSel?.value || null);
   closeExportSetup();
   if (useFast) {
     const c = selectedExportChoice();
@@ -17540,7 +17562,7 @@ async function prepareFrameAssets(t) {
  *  opts.silent: no overlay, alert or download (the export queue shows it);
  *  opts.onProgress(0…1). Resolves {outputs:[{file, ok, src?, error?}]} or {error, cancelled}. */
 async function fastExport(opts = {}) {
-  if (state.exporting) return { error: "an export is already running" };
+  if (exportBusy()) return { error: "an export is already running" };
   const job = opts.job || null;
   pause();
   state.exporting = true; state.rendering = true; renderCancelled = false;
@@ -17786,7 +17808,7 @@ function renderQueueProgress() {
   }
 }
 async function runQueue() {
-  if (queueRunning || state.exporting) return;
+  if (queueRunning || exportBusy()) return;
   if (!(state.connected && state.ffmpeg)) { alert("The export queue needs the server and ffmpeg (Fast export)."); return; }
   queueRunning = true; queueStop = false;
   renderQueue();
@@ -17907,7 +17929,7 @@ async function reportExportJob(id, body, force = false) {
   } catch { }
 }
 async function runExportJob(ticket) {
-  if (!ticket?.id || state.exporting) return; // a busy tab leaves it for another
+  if (!ticket?.id || exportBusy()) return; // a busy tab leaves it for another
   const claimed = await fetch("/api/export/job/claim?id=" + encodeURIComponent(ticket.id), { method: "POST" })
     .then((r) => r.ok).catch(() => false);
   if (!claimed) return;
@@ -18235,8 +18257,10 @@ function waitEncodeQueue(encoder, max = 2, { signal, getError } = {}) {
   });
 }
 async function webCodecsExport(name) {
+  if (exportBusy()) return;
+  exportStarting = true;
+  try { await detectWebCodecs(); } finally { exportStarting = false; }
   if (state.exporting) return;
-  await detectWebCodecs();
   if (!state.webCodecs) { startExport(name); return; }
   pause();
   state.exporting = true; state.rendering = true; renderCancelled = false;
@@ -18384,13 +18408,13 @@ function pickMime() {
   ];
   return cands.find((m) => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || "";
 }
-let recStarting = false;   // a MediaRecorder export getting ready: a second start waits its turn
 async function startExport(name) {
-  if (state.exporting || recStarting) return;
+  if (exportBusy()) return;
   if (!project.clips.length) { alert("Timeline is empty — add some clips first."); return; }
   const mime = pickMime();
   if (!mime) { alert("MediaRecorder is not supported in this browser."); return; }
-  recStarting = true;
+  exportStarting = true;
+  let stream = null;
   try {
     ensureAudio();
     await runtime.audio.ctx.resume();
@@ -18401,18 +18425,21 @@ async function startExport(name) {
     seekMediaWhilePaused();
     await new Promise((r) => setTimeout(r, 350)); // let first frames decode
     await loadProjectFonts();
+    stream = els.preview.captureStream(projectFps());
+    for (const tr of runtime.audio.recDest.stream.getAudioTracks()) stream.addTrack(tr);
+    recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 10_000_000 });
   } catch (e) {
-    recStarting = false;
+    exportStarting = false;
+    // the canvas track was made for this attempt; the audio track is shared, so it stays
+    for (const tr of stream?.getVideoTracks() || []) tr.stop();
+    recorder = null;
     releaseOriginalPlayers();
     endExportWindow();
     toast("Export couldn't start: " + (e.message || e));
     return;
   }
-  recStarting = false;
-  const stream = els.preview.captureStream(projectFps());
-  for (const tr of runtime.audio.recDest.stream.getAudioTracks()) stream.addTrack(tr);
+  exportStarting = false;
   recChunks = []; recDiscard = false;
-  recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 10_000_000 });
   recorder.ondataavailable = (e) => { if (e.data.size) recChunks.push(e.data); };
   recorder.onstop = () => {
     els.exportOverlay.classList.add("hidden");
@@ -18428,7 +18455,16 @@ async function startExport(name) {
   els.exportOverlay.classList.remove("hidden");
   els.exportProgress.style.width = "0%";
   state.exporting = true;
-  recorder.start(250);
+  try { recorder.start(250); }
+  catch (e) {
+    state.exporting = false;
+    for (const tr of stream.getVideoTracks()) tr.stop();
+    els.exportOverlay.classList.add("hidden");
+    releaseOriginalPlayers();
+    endExportWindow();
+    toast("Export couldn't start: " + (e.message || e));
+    return;
+  }
   pauseSource();
   setMonitorMode("program");
   state.playing = true;

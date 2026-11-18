@@ -994,8 +994,9 @@ const server = http.createServer(async (req, res) => {
       let revision = null;
       try { revision = JSON.parse(fs.readFileSync(PROJECT_FILE, "utf8").replace(/^\uFEFF/, "")).revision ?? null; } catch {}
       if (opts.name != null && typeof opts.name !== "string") { sendJSON(res, 400, { error: "name is a string" }); return; }
-      if (opts.name && deliveries) { sendJSON(res, 400, { error: "name goes with one file, not with outputs (give each output its own filename)" }); return; }
-      const job = exportJobs.request({ range: opts.range, profile: opts.profile, delivery: deliveries ? null : delivery, deliveries, name: opts.name || null, where: opts.where, revision });
+      const name = opts.name?.trim() || null;   // blank = the default name
+      if (name && deliveries) { sendJSON(res, 400, { error: "name goes with one file, not with outputs (give each output its own filename)" }); return; }
+      const job = exportJobs.request({ range: opts.range, profile: opts.profile, delivery: deliveries ? null : delivery, deliveries, name, where: opts.where, revision });
       sendJSON(res, 200, deliveries ? { ...job, delivery: `${deliveries.length} outputs from one render`, notes: outNotes }
         : delivery ? { ...job, delivery: Delivery.describe(delivery), notes } : job);
     } catch (e) {

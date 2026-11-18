@@ -2515,10 +2515,12 @@ cannot produce a one-frame black file.
 
 **Save as** at the top of the dialog names the file. It starts as the name the
 export would get (the preset's filename pattern, `{project}_…`); type over it
-and that name is used for this export (blank goes back to the default, and a
-number is added when the name is taken). Enter renders. **Don't ask again**
-beside the buttons makes the Export button render straight away with the last
-settings under the default name; **Settings → Ask before exporting** brings the
+and that name is used for this export (blank goes back to the default). Fast and
+WebCodecs exports add a number when the name is taken in `exports/`; a Realtime
+export is a browser download, which the browser names. Enter renders. **Don't ask
+again** beside the buttons makes the Export button render straight away with the
+last engine and preset under the default name (the dialog opens instead when one
+of them is gone or the range is empty); **Settings → Ask before exporting** brings the
 dialog back (stored in this browser).
 
 **Agents export with `fablecut_export`** (or `POST /api/export/request`). It is
