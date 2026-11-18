@@ -11,8 +11,9 @@
    Every typed word has to be found in the item's label, group or keywords:
    at the start of a word (best), inside a word, or as letters in order
    from the start of a word in the label ("rpdl" finds "Ripple delete",
-   weakest). Case, accents and punctuation
-   don't matter. An empty query matches everything, in the order given. */
+   weakest). Case, accents and punctuation don't matter; letters of any script
+   count ("猫" finds "猫.mp4"). A query of symbols only (";") matches items
+   whose `keys` hold it. An empty query matches everything, in the order given. */
 (function (root, factory) {
   const api = factory();
   if (typeof module === "object" && module.exports) module.exports = api;
@@ -21,7 +22,7 @@
   "use strict";
 
   const fold = (s) => String(s == null ? "" : s).toLowerCase().normalize("NFD")
-    .replace(/\p{M}/gu, "").replace(/[^a-z0-9]+/g, " ").trim();
+    .replace(/\p{M}/gu, "").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
   const words = (s) => fold(s).split(" ").filter(Boolean);
 
   /** How well one typed word matches a text (folded, its words given): 0 when it doesn't.
@@ -39,7 +40,14 @@
     }
     return 0;
   }
+  /** A query with no letters or digits: the items whose `keys` hold exactly that. */
+  const symbolOnly = (query) => !words(query).length && String(query || "").trim() !== "";
+  const symbolScore = (query, item) => {
+    const q = String(query).trim();
+    return (item.keys || []).some((k) => String(k).split(/[\s/,+·]+/).includes(q) || String(k).trim() === q) ? 10 : 0;
+  };
   function score(query, item) {
+    if (symbolOnly(query)) return symbolScore(query, item);
     const q = words(query);
     if (!q.length) return 1;
     const label = fold(item.label), lp = label.split(" ");
@@ -56,7 +64,7 @@
     return total - Math.min(label.length, 60) / 100;    // a shorter label wins a tie
   }
   function rank(query, items, limit = 50) {
-    if (!words(query).length) return items.slice(0, limit);
+    if (!words(query).length && !symbolOnly(query)) return items.slice(0, limit);
     return items.map((it, i) => ({ it, i, s: score(query, it) }))
       .filter((x) => x.s > 0)
       .sort((a, b) => b.s - a.s || a.i - b.i)

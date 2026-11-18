@@ -13754,6 +13754,7 @@ els.preview.addEventListener("pointerdown", (e) => {
 }, true);
 window.addEventListener("keydown", (e) => {
   if (e.key !== "Escape" || (!trackUi.run && trackUi.tool !== "point")) return;
+  if (!$("cmdkOverlay").classList.contains("hidden")) return;   // Esc belongs to Search while it is open
   e.preventDefault(); e.stopImmediatePropagation();
   if (trackUi.run) trackUi.run.cancel = true;
   else { trackUi.tool = null; renderInspector(); }
@@ -18595,7 +18596,7 @@ function cmdkFlash(el) {
 function cmdkCollect() {
   const items = [], seen = new Set();
   const add = (it) => {
-    const key = it.group + "|" + it.label;
+    const key = it.key || it.group + "|" + it.label;   // media and clips by id: two of one name both show
     if (!it.label || seen.has(key)) return;
     seen.add(key);
     items.push(it);
@@ -18612,7 +18613,12 @@ function cmdkCollect() {
   // the selected clip's Inspector sections
   for (const h of document.querySelectorAll("#inspector .insp-section > h3")) {
     const name = h.textContent.replace(/\s+/g, " ").trim();
-    add({ label: name, group: "Inspector", keywords: ["inspector", "section", "clip"], run: () => { setSideTab("inspector"); cmdkFlash(h.closest(".insp-section")); } });
+    add({ label: name, group: "Inspector", keywords: ["inspector", "section", "clip"], run: () => {
+      setSideTab("inspector");
+      // the tab rebuilds the Inspector: find the section in the new one
+      const live = [...document.querySelectorAll("#inspector .insp-section > h3")].find((x) => x.textContent.replace(/\s+/g, " ").trim() === name);
+      if (live) cmdkFlash(live.closest(".insp-section"));
+    } });
   }
   // Settings
   for (const row of document.querySelectorAll("#settingsDialog .settings-row")) {
@@ -18622,11 +18628,18 @@ function cmdkCollect() {
   }
   // media in the bin, clips on the timeline
   for (const m of project.media || []) {
-    add({ label: m.name, group: "Media", hint: m.kind, keywords: [m.kind, ...(m.tags || [])], run: () => revealInProject({ kind: m.kind, mediaId: m.id }) });
+    add({ key: "m:" + m.id, label: m.name, group: "Media", hint: m.kind, keywords: [m.kind, ...(m.tags || [])], run: () => revealInProject({ kind: m.kind, mediaId: m.id }) });
   }
   for (const c of project.clips || []) {
     const name = c.kind === "text" ? (c.props?.text || "Title").split("\n")[0].slice(0, 60) : c.name || getMedia(c.mediaId)?.name || c.kind;
-    add({ label: name, group: "Clip", hint: `${c.track} · ${fmt(c.start)}`, keywords: [c.kind, c.track], run: () => { selectClip(c.id); setTime(c.start); } });
+    add({ key: "c:" + c.id, label: name, group: "Clip", hint: `${c.track} · ${fmt(c.start)}`, keywords: [c.kind, c.track], run: () => {
+      // where the clip is now (an edit may have arrived while Search was open)
+      const cur = project.clips.find((x) => x.id === c.id);
+      if (!cur) { toast("That clip isn't on the timeline any more"); return; }
+      if (isSourceMode()) setMonitorMode("program");
+      selectClip(cur.id);
+      setTime(cur.start);
+    } });
   }
   // keyboard shortcuts: Enter opens the list, filtered to that one
   for (const tr of document.querySelectorAll("#helpKeys tr")) {
@@ -18635,7 +18648,7 @@ function cmdkCollect() {
     const keys = cells[0].textContent.replace(/\s+/g, " ").trim(), what = cells[1].textContent.replace(/\s+/g, " ").trim();
     const label = what.split(/ — |; |\. /)[0].slice(0, 70);
     const section = tr.closest(".keys-sec")?.querySelector("h3")?.textContent || "";
-    add({ label, group: "Shortcut", hint: keys, keywords: [section, keys, what], run: () => {
+    add({ label, group: "Shortcut", hint: keys, keys: [keys], keywords: [section, keys, what], run: () => {
       $("helpOverlay").classList.remove("hidden");
       $("helpFilter").value = label.split(/\s+/).slice(0, 3).join(" ");
       filterHelp();
@@ -18674,13 +18687,23 @@ function closeCmdk(refocus = true) {
 function runCmdk(i) {
   const it = cmdk.shown[i];
   if (!it) return;
+  const back = cmdk.back;
   closeCmdk(false);
   // after the box has gone, so the action sees the editor as it was
-  setTimeout(() => { try { it.run(); } catch (e) { toast(String(e.message || e)); } }, 0);
+  setTimeout(() => {
+    // an export (an agent's too) may have taken the timeline meanwhile
+    if (state.exporting) { toast("Wait for the export to finish"); return; }
+    try { it.run(); } catch (e) { toast(String(e.message || e)); }
+    // an action that puts focus nowhere hands it back to where it was before Search
+    const a = document.activeElement;
+    if ((!a || a === document.body || a === $("cmdkInput")) && back && document.contains(back)) back.focus();
+  }, 0);
 }
+const cmdkOpen = () => !$("cmdkOverlay").classList.contains("hidden");
 $("btnSearch")?.addEventListener("click", openCmdk);
 $("cmdkInput").addEventListener("input", () => { cmdk.active = 0; cmdkRender(); });
 $("cmdkInput").addEventListener("keydown", (e) => {
+  if (e.isComposing || e.keyCode === 229) return;   // the IME is choosing a word
   if (e.key === "ArrowDown" || e.key === "ArrowUp") {
     e.preventDefault();
     const n = cmdk.shown.length;
@@ -18706,7 +18729,26 @@ $("cmdkList").addEventListener("click", (e) => {
   const li = e.target.closest(".cmdk-item");
   if (li) runCmdk(+li.dataset.i);
 });
-$("cmdkOverlay").addEventListener("mousedown", (e) => { if (e.target === $("cmdkOverlay")) closeCmdk(); });
+$("cmdkOverlay").addEventListener("mousedown", (e) => {
+  if (e.target === $("cmdkOverlay")) closeCmdk();
+  else if (e.target !== $("cmdkInput")) e.preventDefault();   // a click on the list or footer keeps the focus in the box
+});
+/* Ctrl/Cmd+K, before any field's own key handling (the bin's search stops its keys): one
+   toggle per press. While Search is open, the editor's other shortcuts wait; the box keeps
+   its own keys. */
+window.addEventListener("keydown", (e) => {
+  const k = e.key;
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (k === "k" || k === "K")) {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (e.repeat) return;
+    if (cmdkOpen()) closeCmdk();
+    // another dialog keeps the keyboard until it closes
+    else if (![...document.querySelectorAll(".overlay")].some((o) => o.id !== "cmdkOverlay" && !o.classList.contains("hidden"))) openCmdk();
+    return;
+  }
+  if (cmdkOpen() && e.target !== $("cmdkInput")) { e.stopImmediatePropagation(); return; }
+}, true);
 function settingsFocusables() {
   const root = $("settingsDialog");
   if (!root) return [];
@@ -19233,6 +19275,7 @@ els.exportFrameOverlay?.querySelector(".ef-handle")?.addEventListener("keydown",
 
 window.addEventListener("keydown", (e) => {
   const k = e.key;
+  if (!$("cmdkOverlay").classList.contains("hidden")) return;   // Search has the keyboard (its box handles its own keys)
   if ((k === "Delete" || k === "Backspace") && !e.ctrlKey && !e.metaKey && !e.altKey) {
     if (!isTypingTarget(document.activeElement) && clearFocusedTransition()) {
       e.preventDefault();
@@ -19245,12 +19288,7 @@ window.addEventListener("keydown", (e) => {
     if (!e.repeat && $("btnProjectsDash") && !$("btnProjectsDash").classList.contains("hidden")) saveVersionNow();   // holding the keys makes one
     return;
   }
-  // Ctrl/Cmd+K: the command search (works from a text field too; the browser's own Ctrl+K stays out)
-  if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (k === "k" || k === "K")) {
-    e.preventDefault();
-    if ($("cmdkOverlay").classList.contains("hidden")) openCmdk(); else closeCmdk();
-    return;
-  }
+  // (Ctrl/Cmd+K, the command search, is handled before this, by its own listener)
   // Ctrl/Cmd+O: the Projects dashboard (where the editor server has projects)
   if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (k === "o" || k === "O") && $("btnProjectsDash") && !$("btnProjectsDash").classList.contains("hidden")) {
     e.preventDefault();

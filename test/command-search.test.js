@@ -39,3 +39,13 @@ test("an empty query keeps the given order, and the limit caps the list", () => 
   assert.equal(S.score("", items[0]), 1);
   assert.equal(S.fold("  Ripple—Délete! "), "ripple delete");
 });
+
+test("letters of any script count; a symbol-only query matches only the keys that hold it", () => {
+  const items = [{ label: "猫.mp4", group: "Media" }, { label: "犬.mp4", group: "Media" }, { label: "Café intro", group: "Clip" },
+    { label: "Lift", group: "Shortcut", keys: [";"] }, { label: "Extract", group: "Shortcut", keys: ["'"] }];
+  assert.deepEqual(S.rank("猫", items).map((x) => x.label), ["猫.mp4"]);
+  assert.deepEqual(S.rank("cafe", items).map((x) => x.label), ["Café intro"]);
+  assert.deepEqual(S.rank(";", items).map((x) => x.label), ["Lift"]);
+  assert.deepEqual(S.rank("@@", items), [], "no match runs nothing");
+  assert.equal(S.rank("  ", items).length, items.length, "a blank query still lists everything");
+});

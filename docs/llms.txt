@@ -121,6 +121,9 @@ about 150 ms. A human and an agent can work the same timeline at once.
 - Delivery checks: loudness normalization (two-pass loudnorm, true-peak
   ceiling) and a report on every exported file — size, frame rate, frames,
   codecs, length, loudness, true peak and file size against what was asked.
+- Search (Ctrl/Cmd+K, or the magnifier in the top bar): one box that finds
+  toolbar actions, panels, Settings, the selected clip's Inspector sections,
+  media, clips and keyboard shortcuts; Enter runs the one picked.
 - Export: fast ffmpeg export via delivery presets or encoding profiles, WebCodecs hardware export
   (browser encodes H.264, server muxes), and a realtime MediaRecorder fallback.
   Agents can start an export themselves (`fablecut_export`), in the open editor
