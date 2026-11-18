@@ -89,13 +89,22 @@
       if (t && t.tagName === "INPUT" && t.type === "range") { dragging = t; dragPointer = e.pointerId; }
     }, { capture: true, passive: true });
     win.addEventListener("keydown", () => { byPointer = false; }, { capture: true, passive: true });
-    doc.addEventListener("focusin", (e) => noteFocus(e.target, !byPointer), true);
+    /** True when `t` is the element a recent mouse press landed on (or its label / control):
+        the focus or click on `t` comes from that press. Anything else (Tab, a screen reader's
+        virtual cursor, el.focus() / el.click() from code) is not from the mouse. */
+    const fromPress = (t) => byPointer && !!downOn && !!t && Date.now() - downAt < CLICK_MS &&
+      (downOn === t || (downOn.contains && downOn.contains(t)) || (t.contains && t.contains(downOn)) ||
+       (t.control && (t.control === downOn || (t.control.contains && t.control.contains(downOn)))) ||
+       (downOn.control && downOn.control === t) || pressedLabelOf(t));
+    // a press on the text inside a <label> focuses the label's control
+    const pressedLabelOf = (t) => {
+      const lab = downOn.closest && downOn.closest("label");
+      return !!lab && (lab.control === t || (lab.contains && lab.contains(t)));
+    };
+    doc.addEventListener("focusin", (e) => noteFocus(e.target, !fromPress(e.target)), true);
     // Bubble phase: the control's own click handler has run by now.
     win.addEventListener("click", (e) => {
-      const t0 = e.target;
-      const paired = byPointer && !!downOn && Date.now() - downAt < CLICK_MS &&
-        (downOn === t0 || (downOn.contains && downOn.contains(t0)) || (t0 && t0.contains && t0.contains(downOn)) ||
-         (t0 && t0.control && (t0.control === downOn || (t0.control.contains && t0.control.contains(downOn)))));
+      const paired = fromPress(e.target);
       downOn = null;
       if (!paired) return;   // a click with no mouse press (screen reader, el.click() in code): focus stays
       const el = doc.activeElement;

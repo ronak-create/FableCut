@@ -25,6 +25,7 @@ function el(tag, { type, attrs = {}, cls = "", parent = null } = {}) {
       for (let n = this; n; n = n.parent) {
         for (const s of list) {
           if (s.startsWith(".") && n.classList.has(s.slice(1))) return n;
+          if (/^[a-z]+$/.test(s) && n.tagName === s.toUpperCase()) return n;
           const role = /^\[role=(\w+)\]$/.exec(s);
           if (role && n.getAttribute("role") === role[1]) return n;
         }
@@ -139,6 +140,25 @@ test("install(): a clicked button gives focus back; Tab then click on a select m
   p.focus(markers);
   p.fire("click", { target: markers });
   assert.equal(markers.blurred, false, "a click with no pointerdown on it keeps focus");
+  assert.equal(F.spaceShouldPlay(markers), false, "and Space presses it: that focus didn't come from the mouse");
+  markers.blur();
+
+  // code focusing another control right after a mouse click: not a mouse focus
+  const opener = control("button"), next = control("button");
+  p.fire("pointerdown", { target: opener });
+  p.focus(opener);
+  p.fire("click", { target: opener });          // releases the clicked button
+  p.focus(next);                                 // its click handler moves focus on
+  assert.equal(F.spaceShouldPlay(next), false, "focus moved by code after a click keeps Space");
+
+  // a press on the text inside a <label> that focuses the label's checkbox: a mouse focus
+  const label = el("label"), text = el("span", { parent: label }), box = control("input", "checkbox");
+  label.control = box;
+  label.contains = (x) => x === text;
+  p.fire("pointerdown", { target: text });
+  p.focus(box);
+  assert.equal(F.spaceShouldPlay(box), true, "focus from a label press counts as the mouse");
+  box.blur();
 
   const fps = control("select");
   p.fire("keydown", { key: "Tab" });
