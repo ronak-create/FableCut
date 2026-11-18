@@ -3422,7 +3422,7 @@ function pjNewHtml() {
 async function pjOpenProject(id) {
   const p = pj.list.find((x) => x.id === id);
   if (!p || p.active || pj.busy) return;
-  if (state.exporting) { toast("Wait for the export to finish before switching projects"); return; }
+  if (exportBusy()) { toast("Wait for the export to finish before switching projects"); return; }
   pj.busy = true;
   try {
     if (!(await flushSaveBeforeSwitch())) return;
@@ -3444,7 +3444,7 @@ async function pjAction(act, btn) {
   if (act === "new-cancel") { pj.mode = "detail"; renderProjects(); return; }
   if (act === "new-create") {
     if (pj.busy) return;
-    if (state.exporting) { toast("Wait for the export to finish before switching projects"); return; }
+    if (exportBusy()) { toast("Wait for the export to finish before switching projects"); return; }
     const name = ($("pjNewName")?.value || "").trim() || "Untitled Project";
     const fps = $("pjNewFps")?.value;
     pj.busy = true;
@@ -3621,7 +3621,7 @@ async function pjVersionRun(act, btn) {
       setTimeout(() => { if (btn.isConnected) { btn.dataset.armed = ""; btn.textContent = "Restore…"; } }, 3000);
       return;
     }
-    if (p.active && state.exporting) { toast("Wait for the export to finish before restoring"); return; }
+    if (p.active && exportBusy()) { toast("Wait for the export to finish before restoring"); return; }
     if (p.active && !(await flushSaveForVersion("nothing was restored"))) return;
     const out = await post({ action: "restore", version: v });
     if (!out) return;
@@ -11910,7 +11910,7 @@ function seqUndoPrint(d, withOthers) {
 }
 /** Open sequence `id` in the editor. False when it can't be opened now. */
 function openSequence(id) {
-  if (state.exporting) { toast("Wait for the export to finish before opening another sequence"); return false; }
+  if (exportBusy()) { toast("Wait for the export to finish before opening another sequence"); return false; }
   if (state.gesture) return false;
   if (state.compCtx) exitComp(state.compCtx.path.length);
   if (SeqLib.activeId(project) === id) return true;
@@ -11929,7 +11929,7 @@ function openSequence(id) {
 }
 /** Add a sequence ({name?, from?, width?, height?}) and open it. */
 function newSequence(opts, clips = null) {
-  if (state.exporting) { toast("Wait for the export to finish"); return; }
+  if (exportBusy()) { toast("Wait for the export to finish"); return; }
   if (state.compCtx) exitComp(state.compCtx.path.length);
   const doc = projectJSONHere();
   let s;
@@ -11950,7 +11950,7 @@ function renameSequence(id, name) {
 async function deleteSequence(id) {
   const r = seqRoot(), s = SeqLib.find(r, id);
   if (!s || SeqLib.entries(r).length < 2) return;
-  if (state.exporting) { toast("Wait for the export to finish"); return; }
+  if (exportBusy()) { toast("Wait for the export to finish"); return; }
   if (state.compCtx) exitComp(state.compCtx.path.length);
   let kept = null;
   if (state.connected) {
@@ -11965,7 +11965,7 @@ async function deleteSequence(id) {
     if (!kept) { toast(`Couldn't keep a version of the project, so “${s.name}” was not deleted. Try again in a moment.`); return; }
   }
   // the editor may have moved on while the version was saved
-  if (state.exporting) { toast("Wait for the export to finish"); return; }
+  if (exportBusy()) { toast("Wait for the export to finish"); return; }
   if (state.compCtx) exitComp(state.compCtx.path.length);
   if (!SeqLib.find(project, id) || SeqLib.entries(project).length < 2) return;   // deleted or changed meanwhile (another tab, an agent)
   const wasOpen = SeqLib.activeId(project) === id;
@@ -13409,7 +13409,7 @@ async function readHighlightSource(c, cancelled, onFrame) {
 async function makeHighlights(clips, { duration = 30, shot, size = null, follow = false, progress, cancelled: stop } = {}) {
   if (!Highlights) { toast("Highlights module missing — reload the editor"); return null; }
   if (highlightRun.busy) { toast("Already making highlights — wait for it, or Cancel"); return null; }
-  if (state.exporting) { toast("Wait for the export to finish"); return null; }
+  if (exportBusy()) { toast("Wait for the export to finish"); return null; }
   const { take, skip } = Highlights.sourcesOf({ clips: project.clips, disabledTracks: [...state.disabledTracks] }, clips && clips.map((c) => c.id));
   if (!take.length) { toast(skip.length ? `Nothing to look at: ${skip[0].id} is ${skip[0].why}` : "Put video on the timeline first"); return null; }
   Object.assign(highlightRun, { busy: true, cancel: false });
@@ -16499,7 +16499,9 @@ function syncExportName() {
 /** The typed name (file-safe), or null for the default. */
 function exportName() {
   const v = exportNameTyped ? ($("exportName")?.value || "").trim() : "";
-  const safe = v.replace(/\.(mp4|mov|m4v|mkv|webm|mxf)$/i, "").replace(/[^\w\- ()\[\].]+/g, "_").replace(/^[.\s]+/, "").slice(0, 120);
+  const ext = exportNameExt().toLowerCase();
+  const base = ext && v.toLowerCase().endsWith(ext) ? v.slice(0, -ext.length) : v;
+  const safe = base.replace(/\.(mp4|mov|m4v|mkv|webm|mxf)$/i, "").replace(/[^\w\- ()\[\].]+/g, "_").replace(/^[.\s]+/, "").slice(0, 120);
   return safe || null;
 }
 let exportSetupOpening = false;   // one Export click at a time, while the dialog's lists load
@@ -16508,7 +16510,7 @@ let exportSetupOpening = false;   // one Export click at a time, while the dialo
 let exportStarting = false;
 function exportBusy() { return state.exporting || exportStarting; }
 /** Which timeline an Export click was for: a project or sequence opened meanwhile isn't it. */
-function exportContext() { return (runtime.projectId || "") + "|" + (project.sequence || ""); }
+function exportContext() { return (runtime.projectId || "") + "|" + (project.sequence || "") + "|" + (state.compCtx ? state.compCtx.path.join("/") : ""); }
 async function openExportSetup() {
   if (exportBusy() || exportSetupOpening) return;
   const ctx = exportContext();
@@ -16599,20 +16601,28 @@ async function openExportSetup() {
       const radio = last === "second" ? els.engineRealtime : last === "fast" ? els.engineFast : null;
       // ...and the last preset or profile picked, when it is still in the list
       const choice = getSetting("exportChoice");
-      const choiceOk = !choice || [...els.exportProfileSel.options].some((o) => o.value === choice);
-      if ((!radio || !radio.disabled) && choiceOk && exportRange().frames >= 1) {
-        if (choice && els.exportProfileSel.value !== choice) {
+      // (a raw profile has to still be on the server: a deleted one can linger in the list as a placeholder)
+      const choiceOk = !choice || (choice.startsWith("p:") ? Object.hasOwn(encodeProfiles.profiles, choice.slice(2))
+        : [...els.exportProfileSel.options].some((o) => o.value === choice));
+      if (choiceOk && choice) {
+        if (els.exportProfileSel.value !== choice) {
           els.exportProfileSel.value = choice;
           els.exportProfileSel.dispatchEvent(new Event("change"));
-          const lastDlv = getSetting("delivery");
-          if (choice.startsWith("d:") && lastDlv?.preset === choice.slice(2)) dlvSpec = normalizeDelivery(lastDlv).spec;
         }
-        if (radio) { els.engineFast.checked = radio === els.engineFast; els.engineRealtime.checked = radio === els.engineRealtime; syncExportName(); }
+        // the delivery as last exported (its size, codec…), even when the project pins the same preset
+        const lastDlv = getSetting("delivery");
+        if (choice.startsWith("d:") && lastDlv?.preset === choice.slice(2)) dlvSpec = normalizeDelivery(lastDlv).spec;
+      }
+      if (radio) { els.engineFast.checked = radio === els.engineFast && !radio.disabled; els.engineRealtime.checked = radio === els.engineRealtime && !radio.disabled; }
+      // the range counted in frames of what will be written (a delivery may have its own frame rate)
+      const outFps = chosenExportEngine() === "fast" && selectedExportChoice().kind === "delivery" && dlvSpec?.fps || projectFps();
+      if ((!radio || !radio.disabled) && choiceOk && exportRange(outFps).frames >= 1) {
+        syncExportName();
         toast(`Exporting “${defaultExportName()}” — Settings → Ask before exporting brings the dialog back`);
         startChosenExport();
         return;
       }
-      toast(exportRange().frames < 1 ? "The export range is empty — pick one"
+      toast(exportRange(outFps).frames < 1 ? "The export range is empty — pick one"
         : !choiceOk ? "The last export's preset isn't there any more — pick one" : "The last export's engine isn't available — pick one");
     }
     els.exportSetup.classList.remove("hidden");
@@ -17562,7 +17572,7 @@ async function prepareFrameAssets(t) {
  *  opts.silent: no overlay, alert or download (the export queue shows it);
  *  opts.onProgress(0…1). Resolves {outputs:[{file, ok, src?, error?}]} or {error, cancelled}. */
 async function fastExport(opts = {}) {
-  if (exportBusy()) return { error: "an export is already running" };
+  if (exportBusy()) return { error: "an export is already running in this tab", busy: true };
   const job = opts.job || null;
   pause();
   state.exporting = true; state.rendering = true; renderCancelled = false;
@@ -17928,8 +17938,23 @@ async function reportExportJob(id, body, force = false) {
     if (r?.cancel) { renderCancelled = true; exportAbort?.abort(); }
   } catch { }
 }
+let skippedTicket = null, skippedTimer = 0;
 async function runExportJob(ticket) {
-  if (!ticket?.id || exportBusy()) return; // a busy tab leaves it for another
+  if (!ticket?.id) return;
+  if (exportBusy()) {
+    // a busy tab leaves it for another, but tries again when it is free (the server's claim
+    // decides: a ticket another tab took, or one the agent cancelled, is refused)
+    skippedTicket = ticket;
+    clearInterval(skippedTimer);
+    const until = Date.now() + 30000;
+    skippedTimer = setInterval(() => {
+      if (exportBusy() && Date.now() < until) return;
+      clearInterval(skippedTimer);
+      const t = skippedTicket; skippedTicket = null;
+      if (t && !exportBusy()) runExportJob(t);
+    }, 500);
+    return;
+  }
   const claimed = await fetch("/api/export/job/claim?id=" + encodeURIComponent(ticket.id), { method: "POST" })
     .then((r) => r.ok).catch(() => false);
   if (!claimed) return;
@@ -17963,7 +17988,7 @@ async function runExportJob(ticket) {
       const specs = ticket.deliveries.map((d) => normalizeDelivery(d).spec);
       const groups = new Map();
       for (const sp of specs) { const k = sp.fps || projectFps(); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(sp); }
-      if (groups.size === 1) await fastExport({ job: ticket.id, deliveries: specs.map((delivery) => ({ delivery })) });
+      if (groups.size === 1) { const res = await fastExport({ job: ticket.id, deliveries: specs.map((delivery) => ({ delivery })) }); if (res?.busy) return fail(res.error); }
       else {
         const all = [];
         let i = 0;
@@ -17971,6 +17996,7 @@ async function runExportJob(ticket) {
           const res = await fastExport({ deliveries: group.map((delivery) => ({ delivery })), silent: true,
             onProgress: (f) => reportExportJob(ticket.id, { progress: (i + f) / groups.size }) });
           i++;
+          if (res?.busy) return fail(res.error);
           if (res && res.cancelled) return reportExportJob(ticket.id, { status: "failed", error: "cancelled" }, true);
           if (res && res.outputs) all.push(...res.outputs);
           else all.push(...group.map((sp) => ({ file: deliveryFileName(sp), ok: false, error: (res && res.error) || "export failed" })));
@@ -17979,7 +18005,11 @@ async function runExportJob(ticket) {
         if (!ok) return fail(all.map((o) => o.error).join(" · "));
         await reportExportJob(ticket.id, { status: "done", src: ok.src, result: { outputs: all } }, true);
       }
-    } else await fastExport(want ? { job: ticket.id, delivery: normalizeDelivery(want).spec, name: ticket.name || null } : { job: ticket.id, profile: ticket.profile, name: ticket.name || null });
+    } else {
+      const res = await fastExport(want ? { job: ticket.id, delivery: normalizeDelivery(want).spec, name: ticket.name || null } : { job: ticket.id, profile: ticket.profile, name: ticket.name || null });
+      // another export took the tab while this job was getting ready: say so rather than leave it running
+      if (res?.busy) return fail(res.error);
+    }
   } finally {
     exportRangeForced = null;
   }
@@ -18261,6 +18291,7 @@ async function webCodecsExport(name) {
   exportStarting = true;
   try { await detectWebCodecs(); } finally { exportStarting = false; }
   if (state.exporting) return;
+  // no encoder: the recorder takes over at once, so nothing slips in between
   if (!state.webCodecs) { startExport(name); return; }
   pause();
   state.exporting = true; state.rendering = true; renderCancelled = false;

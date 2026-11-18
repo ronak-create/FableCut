@@ -141,6 +141,12 @@ test("an export request's name reaches the tab's ticket; only the name — the p
   assert.equal(ticket.profile, "hq");
   assert.equal(ticket.delivery, null, "no delivery invented for the name");
   await fetch(base + "/api/export/job/cancel?id=" + r.body.id, { method: "POST" });
+});
+
+test("an export request refuses a name that isn't text, and a name with outputs (before any browser is looked for)", async (t) => {
+  const dir = makeDataDir(t, seedProject());
+  const { base } = await startServer(t, dir, { FABLECUT_NO_FS_WATCH: "1" });
+  const post = (body) => fetch(base + "/api/export/request", { method: "POST", body: JSON.stringify(body) }).then(async (r) => ({ status: r.status, body: await r.json() }));
   assert.equal((await post({ where: "auto", outputs: [{ preset: "master" }], name: "x" })).status, 400);
   assert.equal((await post({ where: "auto", name: 7 })).status, 400);
 });
