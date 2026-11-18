@@ -483,7 +483,7 @@ Three equivalent control surfaces:
 
    Tools: `fablecut_status` (auto-starts the editor), `fablecut_docs`,
    `fablecut_get_project`, `fablecut_set_project`, `fablecut_patch_project`,
-   `fablecut_import_media`, `fablecut_analyze_reference`, `fablecut_frame`,
+   `fablecut_import_media`, `fablecut_files`, `fablecut_analyze_reference`, `fablecut_frame`,
    `fablecut_encode_profiles`, `fablecut_normalize_audio`, `fablecut_auto_duck`,
    `fablecut_denoise`, `fablecut_silence`, `fablecut_beats`, `fablecut_reframe`, `fablecut_highlights`, `fablecut_transcribe`, `fablecut_captions`, `fablecut_export`, `fablecut_scopes`, `fablecut_track`.
 
