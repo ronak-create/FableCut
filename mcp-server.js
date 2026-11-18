@@ -1379,7 +1379,8 @@ async function filesTool(args) {
   }
   if (action === "mkdir") return `Made media/${b.dir}/`;
   if (action === "move") {
-    if (!b.moved.length) return "Nothing moved (it is already there).";
+    if (b.from === b.to) return "Nothing moved (it is already there).";
+    if (!b.moved.length) return `Moved ${name(b.from)}/ → ${name(b.to)}/ (an empty folder)`;
     const lines = [`Moved ${b.moved.length} file${b.moved.length === 1 ? "" : "s"}:`, ...b.moved.slice(0, 20).map((m) => `  ${name(m.from)} → ${name(m.to)}`)];
     if (b.moved.length > 20) lines.push(`  … +${b.moved.length - 20} more`);
     lines.push(b.repointed.length ? "Media entries repointed: " + b.repointed.map((x) => `${x.media} in ${x.open ? "the open project" : `"${x.project}"`}`).join(", ") : "No project used them.");

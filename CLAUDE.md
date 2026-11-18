@@ -1716,19 +1716,22 @@ proxy only changes how smoothly the preview runs, never the result.
 entries in `project.json`; the files themselves sit in `media/` and may live
 in subfolders. `fablecut_files` works on those (or `POST /api/files`):
 
-- `{}` or `{action:"list", dir?}` lists one folder: its subfolders and files with
+- `{action:"list", dir?}` (an empty call to the MCP tool lists too) lists one folder: its subfolders and files with
   sizes and srcs. Dot-folders (`media/.trash/`) are left out.
 - `{action:"mkdir", dir:"b-roll/day 1"}` makes a folder (and its parents).
 - `{action:"move", from, to}` moves a file or folder into an existing folder,
-  or to a new path (a rename). Every project's media entries that point at a
-  moved file are repointed (the open project gets a new revision, so the editor
+  or to a new path (a rename); `to` is required (`"/media/"` is the top of
+  `media/`). Every project's media entries that point at a moved file are repointed (the open project gets a new revision, so the editor
   reloads), a media name that was the old file name follows it, and the file's
-  transcript goes with it. Nothing goes offline. A name that is taken is refused.
-- `{action:"trash", paths:[…]}` moves files or folders into `media/.trash/<id>/`
+  transcript goes with it. Nothing goes offline: if a project can't be written,
+  the move is undone. A name that is taken, and links inside `media/`, are refused.
+- `{action:"trash", paths:[…]}` moves files or folders into `media/.trash/<id>/files/`
   with a note of where they were; nothing is deleted. A file a project still
   uses is refused (the reply names the project and how many clips place it):
   `removeMedia` it first, or `force:true` to trash it anyway, and it shows as
-  offline there until it is restored. `{action:"trash-list"}` lists the trash,
+  offline there until it is restored. A project whose `project.json` can't be
+  read counts as possibly using it, so the same applies. One call can't list a
+  folder and something inside it. `{action:"trash-list"}` lists the trash,
   `{action:"restore", id}` puts one back where it was (refused while something
   else has that name).
 - Move, rename and trash only when the user asked: they change the user's
@@ -2224,7 +2227,7 @@ obvious cuts were missed, raise it if motion is being misread as cuts.
   `POST /api/projects {action:"import", project:<the backup>}`). SSE event `versions` (`{project, action}`). See "Versions".
 - `POST /api/files {action, …}` — the files in `media/`: `list {dir?}` → `{dir, folders, files:[{name, src, size}]}` ·
   `mkdir {dir}` · `move {from, to}` → `{moved:[{from, to}], repointed:[{project, open, media}]}` ·
-  `trash {paths, force?}` → `{trashed:[{id, src}], offline}` (409 while a project uses one) ·
+  `trash {paths, force?}` → `{trashed:[{id, src}], offline}` (409 while a project uses one or can't be read, unless `force:true`) ·
   `trash-list` → `{items}` · `restore {id}`. See "Media management".
 - `GET  /api/library?dir=sfx|elements|svg|fonts|presets|templates` — list library assets
 - `GET  /api/presets` · `GET /api/templates` — the saved presets / templates, validated (bad files skipped);

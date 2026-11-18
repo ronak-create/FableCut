@@ -134,3 +134,54 @@ test("POST /api/files and fablecut_files: a move repoints every project and keep
   const bad = await mcp.callTool("fablecut_files", { action: "move", from: "../project.json", to: "x.json" });
   assert.equal(bad.isError, true);
 });
+
+test("trash keeps a file named item.json intact, refuses overlaps and links; move needs a destination; an empty folder's move is reported", (t) => {
+  const root = mediaDir(t);
+  put(root, "item.json", "the user's own file");
+  put(root, "shoot/a.mp4");
+  put(root, "media/b.mp4");
+  fs.mkdirSync(path.join(root, "empty"));
+  const F = createMediaFiles({ mediaDir: root });
+
+  const { trashed: [it] } = F.trash(["item.json"]);
+  F.restore(it.id);
+  assert.equal(fs.readFileSync(path.join(root, "item.json"), "utf8"), "the user's own file", "the payload and the note never share a name");
+
+  assert.throws(() => F.trash(["shoot", "shoot/a.mp4"]), /inside "shoot"/);
+  assert.throws(() => F.trash(["shoot", "shoot"]), /listed twice/);
+  assert.ok(fs.existsSync(path.join(root, "shoot", "a.mp4")), "nothing moved");
+
+  assert.throws(() => F.move("shoot/a.mp4"), /say where to move it/);
+  assert.equal(F.move("shoot/a.mp4", "/media/").to, "/media/a.mp4", "\"/media/\" is the top of media/");
+  const empty = F.move("empty", "still-empty");
+  assert.deepEqual([empty.from, empty.to, empty.moved.length], ["/media/empty", "/media/still-empty", 0]);
+
+  // a folder literally named "media" restores to itself, not to the top
+  const { trashed: [m] } = F.trash(["/media/media"]);
+  assert.deepEqual(F.restore(m.id).restored, { id: m.id, src: "/media/media" });
+  assert.ok(fs.existsSync(path.join(root, "media", "b.mp4")));
+
+  let linked = false;
+  try { fs.symlinkSync(os.tmpdir(), path.join(root, "out"), "junction"); linked = true; } catch { }
+  if (linked) {
+    assert.throws(() => F.move("out/anything", "x"), /is a link/);
+    assert.throws(() => F.mkdir("out/new"), /is a link/);
+    assert.ok(!F.list().folders.includes("out"), "links aren't listed");
+  }
+});
+
+test("POST /api/files: force must be true, and a project that can't be read blocks an unforced trash", async (t) => {
+  const dir = makeDataDir(t, seedProject({ media: [] }));
+  fs.mkdirSync(path.join(dir, "media"));
+  fs.writeFileSync(path.join(dir, "media", "x.mp4"), "x");
+  fs.mkdirSync(path.join(dir, "projects", "p_0000000002"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "projects", "p_0000000002", "meta.json"), JSON.stringify({ id: "p_0000000002" }));
+  fs.writeFileSync(path.join(dir, "projects", "p_0000000002", "project.json"), "{ not json");
+  const { base } = await startServer(t, dir, { FABLECUT_NO_FS_WATCH: "1" });
+  const post = (body) => fetch(base + "/api/files", { method: "POST", body: JSON.stringify(body) }).then(async (r) => ({ status: r.status, body: await r.json() }));
+  assert.equal((await post({ action: "trash", paths: ["x.mp4"], force: "false" })).status, 400);
+  const r = await post({ action: "trash", paths: ["x.mp4"] });
+  assert.equal(r.status, 409);
+  assert.match(r.body.error, /can't check project p_0000000002/);
+  assert.equal((await post({ action: "trash", paths: ["x.mp4"], force: true })).status, 200);
+});
