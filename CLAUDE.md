@@ -718,8 +718,9 @@ edit. Find matches whole words and ignores case, accents, punctuation and spacin
 
 In the editor, the **Transcript** tab beside the Inspector:
 
-- **Transcribe** works on the selected clips' files, else on every file on the
-  timeline that has no transcript yet; once every file has one (an agent may
+- **Transcribe** works on the selected clips' files (a selection with no speech,
+  such as a title, transcribes nothing), else on every file on the timeline that
+  has no transcript yet; once every file has one (an agent may
   have made them), it reads **Transcribe again** and redoes them all. The model
   and the language are beside it. Progress shows below (the first time, the
   model download), with **Cancel**. A line above the words says which model and
