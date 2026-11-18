@@ -46,6 +46,7 @@ const Templates = require("./templates");
 const { probeFile } = require("./media-probe");
 const MediaLib = require("./media-lib");
 const { createProxies } = require("./proxy");
+const { createMediaFiles } = require("./media-files");
 const { createTranscripts } = require("./transcripts");
 const Delivery = require("./delivery");
 const { createProjects } = require("./projects");
@@ -127,6 +128,64 @@ function broadcast(event = "change", data = event) {
 const proxies = createProxies({ dir: PROXIES_DIR, resolveSrc, probe: probeFile, broadcast: (ev, data) => broadcast(ev, data) });
 /* Word transcripts, one per version of a file (fablecut_transcribe, the Transcript tab). */
 const transcripts = createTranscripts({ dir: path.join(ANALYSIS_DIR, "transcripts"), resolveSrc });
+const mediaFiles = createMediaFiles({ mediaDir: MEDIA_DIR });
+/* A /media/… src → its absolute path (whether or not the file is there now). */
+function srcFile(src) {
+  if (!src || !String(src).startsWith("/media/")) return null;
+  let rel; try { rel = decodeURIComponent(String(src).slice(7)); } catch { return null; }
+  const f = path.normalize(path.join(MEDIA_DIR, rel));
+  return f.startsWith(path.normalize(MEDIA_DIR + path.sep)) ? f : null;
+}
+const srcKey = (s) => { try { return decodeURIComponent(String(s || "").split("?")[0]); } catch { return String(s || ""); } };
+/* Every project's document: the open one (./project.json) and the parked ones. */
+function projectDocs() {
+  const out = [];
+  const active = projects.peekActive();
+  try { out.push({ id: active, file: PROJECT_FILE, open: true, doc: JSON.parse(fs.readFileSync(PROJECT_FILE, "utf8").replace(/^﻿/, "")) }); } catch { }
+  let ids = [];
+  try { ids = fs.readdirSync(projects.DIR); } catch { }
+  for (const id of ids) {
+    if (id === active) continue;
+    const file = path.join(projects.DIR, id, "project.json");
+    try { out.push({ id, file, open: false, doc: JSON.parse(fs.readFileSync(file, "utf8")) }); } catch { }
+  }
+  return out;
+}
+/* Media entries (in any project) that use these /media/… srcs, with how many clips place each. */
+function mediaUses(srcs) {
+  const want = new Set(srcs.map(srcKey));
+  const out = [];
+  for (const d of projectDocs()) {
+    const text = JSON.stringify(d.doc);
+    for (const m of d.doc.media || []) {
+      if (!want.has(srcKey(m.src))) continue;
+      const clips = text.split(`"mediaId":${JSON.stringify(m.id)}`).length - 1;
+      out.push({ project: d.doc.name || d.id, open: d.open, media: m.id, name: m.name, src: m.src, clips });
+    }
+  }
+  return out;
+}
+/* Point media entries at files that moved ([{from, to}] srcs); a name that was the old file name follows it. */
+function repointMedia(moved) {
+  const map = new Map(moved.filter((m) => m.from && m.to).map((m) => [srcKey(m.from), m.to]));
+  const changed = [];
+  for (const d of projectDocs()) {
+    let n = 0;
+    for (const m of d.doc.media || []) {
+      const to = map.get(srcKey(m.src));
+      if (!to) continue;
+      if (m.name === path.basename(srcKey(m.src))) m.name = path.basename(srcKey(to));
+      m.src = to; n++;
+    }
+    if (!n) continue;
+    if (d.open) d.doc.revision = (d.doc.revision || 0) + 1;
+    const tmp = d.file + ".files.tmp";
+    fs.writeFileSync(tmp, JSON.stringify(d.doc, null, 2));
+    fs.renameSync(tmp, d.file);
+    changed.push({ project: d.doc.name || d.id, open: d.open, media: n });
+  }
+  return changed;
+}
 let debounce = null;
 let profilesDebounce = null;
 function onFsChange() {
@@ -787,6 +846,47 @@ const server = http.createServer(async (req, res) => {
           .filter((f) => f.score > 0).sort((a, b) => b.score - a.score || a.name.localeCompare(b.name)).slice(0, 5);
       }
       sendJSON(res, 200, { candidates });
+    } catch (e) { sendJSON(res, 400, { error: String(e.message || e) }); }
+    return;
+  }
+
+  /* API: files in media/ (media-files.js) — folders, moves and a trash; nothing is deleted.
+       POST /api/files {action:"list", dir?}      → {dir, folders, files:[{name, src, size}]}
+                       {action:"mkdir", dir}      → {dir}
+                       {action:"move", from, to}  → {moved:[{from, to}], repointed:[{project, open, media}]}
+                       {action:"trash", paths, force?} → {trashed:[{id, src}], offline:[…uses]}  (409 while a project uses one, unless force)
+                       {action:"trash-list"}      → {items:[{id, src, kind, size, trashed}]}
+                       {action:"restore", id}     → {restored:{id, src}}
+     A move repoints every project's media entries at the new place (the open one gets a new
+     revision, so editor tabs reload) and takes the file's transcript with it. */
+  if (p === "/api/files" && req.method === "POST") {
+    try {
+      const opts = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+      const a = opts.action;
+      if (a === "list") { sendJSON(res, 200, mediaFiles.list(opts.dir)); return; }
+      if (a === "mkdir") { sendJSON(res, 200, mediaFiles.mkdir(opts.dir)); return; }
+      if (a === "trash-list") { sendJSON(res, 200, { items: mediaFiles.trashList() }); return; }
+      if (a === "move") {
+        const r = mediaFiles.move(opts.from, opts.to);
+        for (const m of r.moved) { const f = srcFile(m.from), t = srcFile(m.to); if (f && t) transcripts.follow(f, t); }
+        sendJSON(res, 200, { moved: r.moved, repointed: repointMedia(r.moved) });
+        return;
+      }
+      if (a === "trash") {
+        const paths = Array.isArray(opts.paths) ? opts.paths : [opts.paths];
+        const files = paths.flatMap((x) => mediaFiles.filesOf(x));
+        const uses = mediaUses(files);
+        if (uses.length && !opts.force) {
+          sendJSON(res, 409, { error: "in use — " + uses.map((u) => `"${u.name}" in ${u.open ? "the open project" : `project "${u.project}"`} (${u.clips} clip${u.clips === 1 ? "" : "s"})`).join("; ") +
+            ". Take it out of those projects first (removeMedia), or pass force to trash it anyway (it goes offline there until restored)", uses });
+          return;
+        }
+        const r = mediaFiles.trash(paths);
+        sendJSON(res, 200, { trashed: r.trashed, offline: uses });
+        return;
+      }
+      if (a === "restore") { const r = mediaFiles.restore(opts.id); sendJSON(res, 200, { restored: r.restored }); return; }
+      sendJSON(res, 400, { error: "action is list, mkdir, move, trash, trash-list or restore" });
     } catch (e) { sendJSON(res, 400, { error: String(e.message || e) }); }
     return;
   }

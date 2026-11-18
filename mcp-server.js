@@ -232,6 +232,22 @@ const TOOLS = [
     },
   },
   {
+    name: "fablecut_files",
+    description: "The project's files on disk, inside ./media/ (the folder fablecut_import_media copies into): list a folder, make folders, move or rename files and folders, and throw away what isn't needed. Nothing is deleted: trash moves a file into media/.trash/ and restore puts it back. A move repoints every project's media entries at the new place, so no clip goes offline, and the file keeps its transcript. Trash refuses a file a project still uses (removeMedia it first, or force:true to trash it anyway: it goes offline there until restored). The media bin's folders (folderId) are separate: they organize entries, these are the real folders. Paths are relative to media/ ('b-roll/day 1/a.mp4') or /media/… srcs. Move, rename and trash only when the user asked for it.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["list", "mkdir", "move", "trash", "trash-list", "restore"], description: "list (default) · mkdir · move (also renames) · trash · trash-list · restore" },
+        dir: { type: "string", description: "list: the folder (default media/ itself) · mkdir: the folder to make (parents too)" },
+        from: { type: "string", description: "move: the file or folder" },
+        to: { type: "string", description: "move: an existing folder to move it into, or the new path (a rename)" },
+        paths: { type: "array", items: { type: "string" }, description: "trash: files or folders" },
+        force: { type: "boolean", description: "trash: even files a project still uses (they go offline until restored)" },
+        id: { type: "string", description: "restore: a trashed item's id (trash-list shows them)" },
+      },
+    },
+  },
+  {
     name: "fablecut_encode_profiles",
     description: "List what fablecut_export can make. DELIVERY PRESETS (structured settings, the Export dialog's Preset list): youtube, youtube-shorts, instagram-reels, tiktok, x, linkedin, master (project size), broadcast (ProRes 422 HQ), web (720p), archive (lossless FFV1), custom — plus presets the user saved — each a spec of resolution, fps, codec (h264, hevc, av1, vp9, prores, dnxhr, mpeg2 XDCAM, ffv1), rate control (crf / vbr / cbr), keyframe interval, pixel format, color, container, audio, a file-name template and metadata. {preset:'youtube'} returns one preset's full spec; the encoders this ffmpeg can use are listed (hardware ones only when they work on this machine). ENCODING PROFILES (encoding-profiles.json): raw ffmpeg argument lists plus jpegQuality, extension and color, for anything the presets do not cover; edit the file on disk (hot-reloaded); {profile:'hq'} returns one, detail:true includes every args array. Both are dry-run against ffmpeg when an export starts, so bad settings are refused before rendering.",
     inputSchema: {
@@ -1345,6 +1361,43 @@ async function proxyTool(args) {
   };
   return list.map(line).join("\n") + (busy() ? "\nStill working — call fablecut_proxy again (without create) to check." : "");
 }
+/* ── Files in media/ (fablecut_files) ── */
+async function filesTool(args) {
+  if (!(await ensureUIServer())) throw new Error(`the editor server is not running and could not be started on port ${PORT}`);
+  const action = args.action || "list";
+  const body = { action, dir: args.dir, from: args.from, to: args.to, paths: args.paths, force: args.force, id: args.id };
+  const r = await apiJSON("POST", "/api/files", body);
+  if (r.status !== 200) throw new Error(r.body?.error || `files request failed (${r.status})`);
+  const b = r.body;
+  const name = (src) => { try { return decodeURIComponent(String(src).replace(/^\/media\//, "")); } catch { return src; } };
+  const kb = (n) => n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB";
+  if (action === "list") {
+    const lines = [`media/${b.dir ? b.dir + "/" : ""} — ${b.folders.length} folder${b.folders.length === 1 ? "" : "s"}, ${b.files.length} file${b.files.length === 1 ? "" : "s"}`];
+    for (const f of b.folders) lines.push(`  ${f}/`);
+    for (const f of b.files) lines.push(`  ${f.name}  ${kb(f.size)}  ${f.src}`);
+    return lines.join("\n");
+  }
+  if (action === "mkdir") return `Made media/${b.dir}/`;
+  if (action === "move") {
+    if (!b.moved.length) return "Nothing moved (it is already there).";
+    const lines = [`Moved ${b.moved.length} file${b.moved.length === 1 ? "" : "s"}:`, ...b.moved.slice(0, 20).map((m) => `  ${name(m.from)} → ${name(m.to)}`)];
+    if (b.moved.length > 20) lines.push(`  … +${b.moved.length - 20} more`);
+    lines.push(b.repointed.length ? "Media entries repointed: " + b.repointed.map((x) => `${x.media} in ${x.open ? "the open project" : `"${x.project}"`}`).join(", ") : "No project used them.");
+    return lines.join("\n");
+  }
+  if (action === "trash") {
+    const lines = b.trashed.map((t) => `Trashed ${name(t.src)} (id ${t.id} — restore with {action:"restore", id:"${t.id}"})`);
+    if (b.offline.length) lines.push("Now OFFLINE: " + b.offline.map((u) => `"${u.name}" in ${u.open ? "the open project" : `"${u.project}"`}`).join(", "));
+    return lines.join("\n");
+  }
+  if (action === "trash-list") {
+    if (!b.items.length) return "The trash is empty.";
+    return b.items.map((t) => `${t.id}  ${name(t.src)}${t.kind === "folder" ? `/ (${t.size} files)` : "  " + kb(t.size)}  trashed ${t.trashed}`).join("\n");
+  }
+  if (action === "restore") return `Restored ${name(b.restored.src)}`;
+  return JSON.stringify(b);
+}
+
 async function exportTool(args) {
   if (!(await ensureUIServer())) throw new Error(`the editor server is not running and could not be started on port ${PORT}`);
   let startNote = "";
@@ -1911,6 +1964,8 @@ async function callTool(name, args, attempt = 0) {
         `REMAKE RECIPE: 1) set project width/height/fps to ${bp.width}x${bp.height} @ ${bp.fps} — 2) write beats[] into project markers — 3) extracted music on A1 — 4) one clip per shots[] entry at the same start/duration on V1 (hard cuts; footage energy should track each shot's energy value) — 5) biggest moment on drop (${bp.drop}s)${bp.bpm ? ` — tempo ${bp.bpm} BPM` : ""}. Full recipe: fablecut_docs → "Remake a reference video".`,
       ].join("\n");
     }
+    case "fablecut_files":
+      return filesTool(args);
     case "fablecut_import_media": {
       const src = args.path;
       if (!src) throw new Error("path is required");
