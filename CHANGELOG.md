@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **More title styles and fonts.** Eleven new title styles — Pop outline, Boxed,
+  Headline, Comic, Typewriter, Minimal, Script, Retro, Sticker, Glitch and
+  Cinematic — beside the nine there were, and new titles rotate through more of
+  them. The font picker now offers about sixty Google fonts grouped by look
+  (Display, Sans, Serif, Script & hand, Retro & mono). Switching style clears
+  the weight, outline colour and highlight colour the last style set.
+
 ### Changed
 - **Node 22 or newer is now required** (was Node 18). CI runs the test suite on
   Node 22, 24 and 26. (#64)
