@@ -478,6 +478,7 @@ const DEFAULT_SETTINGS = {
   snapTargets: { clips: true, playhead: true, markers: true, inout: true, keyframes: false, frames: true },
   useProxies: true, // play proxies (when a file has one) while editing; export always reads the original
   exportAsk: true, // Export opens its dialog (name + settings) first; false = render straight away
+  exportEngine: null, // "fast" | "second" — what the last export used ("Don't ask again" reuses it)
 };
 let settings = { ...DEFAULT_SETTINGS };
 function loadSettings() {
@@ -16459,26 +16460,38 @@ function webCodecsBitrate(w, h, fps) {
   // ~0.1 bit/pixel/frame, clamped — same heuristic as before
   return Math.min(20_000_000, Math.max(2_000_000, Math.round(w * h * fps * 0.1)));
 }
-/* The Export dialog's "Save as" name. Filled with the name the export would get;
-   once typed in, that name is used for this export (blank = back to the default). */
+/* The Export dialog's "Save as" name. The field shows the name the export would get;
+   once typed in, that name is used for this export (cleared = the default, shown greyed). */
 let exportNameTyped = false;
+/** The engine the dialog's choices lead to, as startChosenExport picks it. */
+function chosenExportEngine() {
+  if (els.engineFast.checked && !els.engineFast.disabled) return "fast";
+  if (!els.engineRealtime.checked || els.engineRealtime.disabled) return null;
+  return state.connected && state.ffmpeg && state.webCodecs && !getExportFrame() ? "webcodecs" : "recorder";
+}
 function defaultExportName() {
   const c = selectedExportChoice();
-  if (c.kind === "delivery" && dlvSpec) return deliveryFileName(dlvSpec);
+  if (chosenExportEngine() === "fast" && c.kind === "delivery" && dlvSpec) return deliveryFileName(dlvSpec);
   return project.name.replace(/[^\w\- ]+/g, "").trim() || "export";
 }
 function exportNameExt() {
-  const c = selectedExportChoice();
-  if (c.kind === "delivery" && dlvSpec) return Delivery.CONTAINERS[dlvSpec.container].ext;
+  const engine = chosenExportEngine(), c = selectedExportChoice();
+  if (engine === "fast" && c.kind === "delivery" && dlvSpec) return Delivery.CONTAINERS[dlvSpec.container].ext;
+  if (engine === "recorder") return (pickMime() || "").startsWith("video/mp4") ? ".mp4" : ".webm";
   return ".mp4";
 }
 function syncExportName() {
   const el = $("exportName");
   if (!el) return;
-  if (!exportNameTyped || !el.value.trim()) { exportNameTyped = false; el.value = defaultExportName(); }
+  const def = defaultExportName();
+  el.placeholder = def;
+  if (!exportNameTyped) el.value = def;
   const note = $("exportNameNote");
-  if (note) note.textContent = "→ exports/" + (exportName() || defaultExportName()) + exportNameExt() +
-    " · a number is added if that name is taken";
+  if (!note) return;
+  const file = (exportName() || def) + exportNameExt();
+  note.textContent = chosenExportEngine() === "recorder"
+    ? "→ the browser downloads " + file
+    : "→ exports/" + file + " · a number is added if that name is taken";
 }
 /** The typed name (file-safe), or null for the default. */
 function exportName() {
@@ -16486,10 +16499,14 @@ function exportName() {
   const safe = v.replace(/\.(mp4|mov|mkv|webm|mxf)$/i, "").replace(/[^\w\- ()\[\].]+/g, "_").replace(/^[.\s]+/, "").slice(0, 120);
   return safe || null;
 }
+let exportSetupOpening = false;   // one Export click at a time, while the dialog's lists load
 async function openExportSetup() {
-  if (state.exporting) return;
+  if (state.exporting || exportSetupOpening) return;
+  // the dialog already open is being refreshed (a setting changed): keep what was typed in it
+  const fresh = els.exportSetup.classList.contains("hidden");
   if (!project.clips.length) { alert("Timeline is empty — add some clips first."); return; }
-  await detectWebCodecs();
+  exportSetupOpening = true;
+  try { await detectWebCodecs(); } catch { }
   const ef = getExportFrame();
   const fastOk = state.connected && state.ffmpeg;
   // WebCodecs and MediaRecorder encode the full canvas — only Fast crops.
@@ -16558,20 +16575,29 @@ async function openExportSetup() {
     syncExportProfileVisibility();
     renderBatchList();
     renderQueue();
-    exportNameTyped = false;
+    if (fresh) {
+      exportNameTyped = false;
+      const skip = $("exportSkipAsk");
+      if (skip) skip.checked = false;
+    }
     syncExportName();
-    const skip = $("exportSkipAsk");
-    if (skip) skip.checked = false;
-    if (!getSetting("exportAsk")) {
-      // "Don't ask again": render with the last settings under the default name
-      toast(`Exporting “${defaultExportName()}” — Settings → Ask before exporting brings the dialog back`);
-      startChosenExport();
-      return;
+    if (fresh && !getSetting("exportAsk")) {
+      // "Don't ask again": render with the last engine and settings under the default name;
+      // if that engine can't run now, ask after all rather than switch engines silently
+      const last = getSetting("exportEngine");
+      const radio = last === "second" ? els.engineRealtime : last === "fast" ? els.engineFast : null;
+      if (!radio || !radio.disabled) {
+        if (radio) { els.engineFast.checked = radio === els.engineFast; els.engineRealtime.checked = radio === els.engineRealtime; syncExportName(); }
+        toast(`Exporting “${defaultExportName()}” — Settings → Ask before exporting brings the dialog back`);
+        startChosenExport();
+        return;
+      }
+      toast("The last export's engine isn't available — pick one");
     }
     els.exportSetup.classList.remove("hidden");
     // aria-modal hides what is behind — focus has to come inside
     if (!els.exportSetup.contains(document.activeElement)) $("exportRangeSel")?.focus();
-  });
+  }).finally(() => { exportSetupOpening = false; });
 }
 function closeExportSetup() {
   els.exportSetup.classList.add("hidden");
@@ -16596,6 +16622,7 @@ function startChosenExport() {
   }
   const name = exportName();
   if ($("exportSkipAsk")?.checked) setSetting("exportAsk", false);
+  setSetting("exportEngine", useFast ? "fast" : "second");
   closeExportSetup();
   if (useFast) {
     const c = selectedExportChoice();
@@ -17930,7 +17957,7 @@ async function runExportJob(ticket) {
         if (!ok) return fail(all.map((o) => o.error).join(" · "));
         await reportExportJob(ticket.id, { status: "done", src: ok.src, result: { outputs: all } }, true);
       }
-    } else await fastExport(want ? { job: ticket.id, delivery: normalizeDelivery(want).spec } : { job: ticket.id, profile: ticket.profile });
+    } else await fastExport(want ? { job: ticket.id, delivery: normalizeDelivery(want).spec, name: ticket.name || null } : { job: ticket.id, profile: ticket.profile, name: ticket.name || null });
   } finally {
     exportRangeForced = null;
   }
@@ -18210,7 +18237,7 @@ function waitEncodeQueue(encoder, max = 2, { signal, getError } = {}) {
 async function webCodecsExport(name) {
   if (state.exporting) return;
   await detectWebCodecs();
-  if (!state.webCodecs) { startExport(); return; }
+  if (!state.webCodecs) { startExport(name); return; }
   pause();
   state.exporting = true; state.rendering = true; renderCancelled = false;
   exportAbort = new AbortController();
@@ -18357,20 +18384,31 @@ function pickMime() {
   ];
   return cands.find((m) => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || "";
 }
+let recStarting = false;   // a MediaRecorder export getting ready: a second start waits its turn
 async function startExport(name) {
-  if (state.exporting) return;
+  if (state.exporting || recStarting) return;
   if (!project.clips.length) { alert("Timeline is empty — add some clips first."); return; }
   const mime = pickMime();
   if (!mime) { alert("MediaRecorder is not supported in this browser."); return; }
-  ensureAudio();
-  await runtime.audio.ctx.resume();
-  pause();
-  const { start } = beginExportWindow();
-  state.time = start;
-  await useOriginalPlayers();   // proxies are for editing — export reads the originals
-  seekMediaWhilePaused();
-  await new Promise((r) => setTimeout(r, 350)); // let first frames decode
-  await loadProjectFonts();
+  recStarting = true;
+  try {
+    ensureAudio();
+    await runtime.audio.ctx.resume();
+    pause();
+    const { start } = beginExportWindow();
+    state.time = start;
+    await useOriginalPlayers();   // proxies are for editing — export reads the originals
+    seekMediaWhilePaused();
+    await new Promise((r) => setTimeout(r, 350)); // let first frames decode
+    await loadProjectFonts();
+  } catch (e) {
+    recStarting = false;
+    releaseOriginalPlayers();
+    endExportWindow();
+    toast("Export couldn't start: " + (e.message || e));
+    return;
+  }
+  recStarting = false;
   const stream = els.preview.captureStream(projectFps());
   for (const tr of runtime.audio.recDest.stream.getAudioTracks()) stream.addTrack(tr);
   recChunks = []; recDiscard = false;
@@ -18444,8 +18482,10 @@ $("btnExport").addEventListener("click", openExportSetup);
 $("btnStartExport").addEventListener("click", startChosenExport);
 $("exportName")?.addEventListener("input", () => { exportNameTyped = true; syncExportName(); });
 $("exportName")?.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && !$("btnStartExport").disabled) { e.preventDefault(); startChosenExport(); }
+  if (e.key === "Enter" && !e.isComposing && !$("btnStartExport").disabled) { e.preventDefault(); startChosenExport(); }
 });
+els.engineFast?.addEventListener("change", syncExportName);
+els.engineRealtime?.addEventListener("change", syncExportName);
 els.exportSetup?.addEventListener("change", (e) => {
   if (e.target.name === "engine") {
     syncExportProfileVisibility();

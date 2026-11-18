@@ -2538,8 +2538,9 @@ agent last wrote, so an export right after a patch includes that patch.
   is used when set, else `project.encodeProfile`, else the server's default profile.
 - `name:"salon-promo-15s"` names the file (no extension), the answer the Export dialog asks
   the user for. Without it the preset's pattern starts with the project's name, so name the
-  file after what it is whenever the project holds more than this one video. It goes over
-  `delivery` / `preset`, else over `project.delivery` (else Master); not with `profile` or `outputs`.
+  file after what it is whenever the project holds more than this one video. Only the name
+  changes — the preset, delivery or encoding profile the export uses stays the same; not with
+  `outputs` (each output has its own `filename`).
 - `outputs:true` exports the project's checked batch outputs; `outputs:[{preset:"master"},
   {preset:"youtube"}, {preset:"instagram-reels"}, …]` exports a list. One render per
   frame rate; the reply lists every file (or why one failed).

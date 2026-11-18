@@ -375,8 +375,12 @@ big operation (cutting silences, snapping to the beat, reframing), and every
 - Realtime MediaRecorder fallback when ffmpeg or WebCodecs isn't available
 - Agents export too: `fablecut_export` runs the Fast export in the open editor,
   or in a headless Chrome / Edge the server starts, and returns the file path;
-  `preset` and `delivery` pick and adjust a delivery preset; `outputs` makes
-  several files in one go
+  `preset` and `delivery` pick and adjust a delivery preset; `name` names the
+  file (only the name changes; not with `outputs`); `outputs` makes several
+  files in one go
+- **Save as** at the top of the Export dialog names the file; **Don't ask again**
+  makes the Export button render straight away with the last settings
+  (Settings → Ask before exporting brings the dialog back)
 - Export **Range** dropdown: Entire timeline or IN–OUT (defaults to IN–OUT when
   markers are set). Effective IN/OUT export bounds are clamped to `projDur()`.
 
