@@ -30,6 +30,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Node 22 or newer is now required** (was Node 18). CI runs the test suite on
   Node 22, 24 and 26. (#64)
 
+### Fixed
+- **Transcribe after an agent transcribed.** Once every file on the timeline had
+  a transcript, the Transcript tab's button sat greyed out as **Transcribe**, so
+  clicking it seemed to do nothing. It now reads **Transcribe again** and redoes
+  them all with the model and language picked beside it. A line above the words
+  says which model and language made them, and to pick the language spoken and
+  the Small model when the words look wrong.
+
 ## [1.18.0] - 2026-10-28
 
 ### Added

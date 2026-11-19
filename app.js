@@ -8906,6 +8906,8 @@ function cutSilences() {
 const TRANSCRIBE_KEY = "fablecut-transcribe";
 const trState = { open: false, built: false, busy: null, sig: "", words: [], sel: null, anchor: null, drag: false, query: "", hits: [], now: -1 };
 const transcriptCache = new Map();   // src → validated transcript | false (none) | Promise while asking the server
+const transcriptHeld = new Map();    // src → the last transcript (or false) shown, kept while a refresh is pending
+const transcriptStale = new Set();   // srcs whose shown transcript the server hasn't confirmed (a failed read or save)
 let transcriptGen = 0;               // bumps whenever a transcript arrives or changes: the tab redraws
 function transcribeSettings() {
   let o = {};
@@ -8928,16 +8930,34 @@ function transcriptOf(src) {
 function loadTranscript(src, force = false) {
   const have = transcriptCache.get(src);
   if (!force && have !== undefined) return have instanceof Promise ? have : Promise.resolve(have);
-  const p = fetch("/api/transcript?src=" + encodeURIComponent(src)).then((r) => (r.ok ? r.json() : null))
+  return readTranscript(src).then((r) => r.doc);
+}
+/** One read from the server → {doc, ok}: ok only when this read answered (a transcript, or that
+   there is none) and no later read has replaced it. A read that fails (a server error, no network,
+   a document that doesn't validate) keeps what was shown, marked unconfirmed. */
+function readTranscript(src) {
+  let p = null;
+  const read = fetch("/api/transcript?src=" + encodeURIComponent(src))
+    .then((r) => (r.ok ? r.json() : r.status === 404 ? { transcript: null } : Promise.reject(new Error("HTTP " + r.status))))
     .then((j) => {
-      let d = false;
-      try { d = j && j.transcript ? FableCutTranscribe.validate(j.transcript) : false; } catch { }
-      if (transcriptCache.get(src) === p) { transcriptCache.set(src, d); transcriptGen++; }
-      return d;
+      const d = j && j.transcript ? FableCutTranscribe.validate(j.transcript) : false;
+      const latest = transcriptCache.get(src) === p;
+      if (latest) { setTranscript(src, d); transcriptStale.delete(src); }
+      return { doc: d, ok: latest };
     })
-    .catch(() => { if (transcriptCache.get(src) === p) transcriptCache.set(src, false); return false; });
+    .catch(() => {
+      const d = transcriptHeld.get(src) || false;
+      if (transcriptCache.get(src) === p) { setTranscript(src, d); transcriptStale.add(src); }
+      return { doc: d, ok: false };
+    });
+  p = read.then((r) => r.doc);
   transcriptCache.set(src, p);
-  return p;
+  return read;
+}
+function setTranscript(src, d) {
+  transcriptCache.set(src, d);
+  transcriptHeld.set(src, d);
+  transcriptGen++;
 }
 function onTranscriptEvent(data) {
   let src = null;
@@ -9016,8 +9036,8 @@ async function transcribeFile(src, { model, language, onProgress, cancelled }) {
   const doc = T.validate({ src, model, language: language || "auto", duration, created: new Date().toISOString(), words });
   let saved = false;
   try { saved = (await fetch("/api/transcript?src=" + encodeURIComponent(src), { method: "POST", body: JSON.stringify(doc) })).ok; } catch { }
-  transcriptCache.set(src, doc);
-  transcriptGen++;
+  setTranscript(src, doc);
+  if (saved) transcriptStale.delete(src); else transcriptStale.add(src);
   return { doc, saved };
 }
 /** Transcribe files one after another. `beat(fraction)` hears about progress (an agent's job). */
@@ -9077,14 +9097,23 @@ function transcriptWords() {
 /** What Transcribe works on: the selected clips' files, else every file on the timeline without a transcript. */
 function transcribeTargets() {
   const groups = transcriptGroups();
+  // a selected clip picks the file its speech group is heard from (a picture's sound may come
+  // from denoised stems, another file): the group counts when it or a clip linked to it is selected
   const picked = new Set();
-  for (const id of state.selIds) {
-    const c = getClip(id);
-    if (c && (c.kind === "video" || c.kind === "audio")) { const m = getMedia(c.mediaId); if (m) picked.add(m.src); }
+  for (const g of groups) {
+    const ids = new Set(withLinked(g).map((c) => c.id));
+    if ([...ids].some((id) => state.selIds.has(id))) picked.add(getMedia(g[0].mediaId).src);
   }
   const srcs = [...new Set(groups.map((g) => getMedia(g[0].mediaId).src))];
   const sel = srcs.filter((s) => picked.has(s));
-  return sel.length ? { srcs: sel, selected: true } : { srcs: srcs.filter((s) => transcriptCache.get(s) === false), selected: false };
+  if (sel.length) return { srcs: sel, selected: true };
+  // a selection with no speech in it (a title) never turns into a timeline-wide action
+  if (state.selIds.size) return { srcs: [], selected: false, none: true };
+  const missing = srcs.filter((s) => transcriptCache.get(s) === false);
+  // every file has a transcript already (an agent may have made them): the button offers them all again
+  if (!missing.length && srcs.length && srcs.every((s) => transcriptCache.get(s) && !(transcriptCache.get(s) instanceof Promise)))
+    return { srcs, selected: false, again: true };
+  return { srcs: missing, selected: false };
 }
 /** What the words' places depend on: the timeline and the transcripts. */
 function transcriptWordsSig() {
@@ -9219,15 +9248,32 @@ function renderTranscript(force = false) {
   const words = trState.words = transcriptWords();
   trState.wsig = transcriptWordsSig();
   const tgt = transcribeTargets();
-  E.go.textContent = tgt.selected ? `Transcribe selected (${tgt.srcs.length})` : tgt.srcs.length ? `Transcribe ${tgt.srcs.length} file${tgt.srcs.length === 1 ? "" : "s"}` : "Transcribe";
+  E.go.textContent = tgt.selected ? `Transcribe selected (${tgt.srcs.length})` : tgt.again ? `Transcribe again (${tgt.srcs.length})`
+    : tgt.srcs.length ? `Transcribe ${tgt.srcs.length} file${tgt.srcs.length === 1 ? "" : "s"}` : "Transcribe";
   E.go.disabled = !!trState.busy || !tgt.srcs.length;
-  E.go.title = tgt.srcs.length ? "Turn the speech into words, in this browser (the model downloads once). Select clips to transcribe just those, or again"
-    : groups.length ? "Every file on the timeline has a transcript — select clips to transcribe them again" : "Put clips with speech on the timeline first";
+  E.go.title = tgt.again ? "Every file on the timeline has a transcript. Transcribe them all again, with the model and language picked here (or select clips to redo just those)"
+    : tgt.srcs.length ? "Turn the speech into words, in this browser (the model downloads once). Select clips to transcribe just those, or again"
+    : tgt.none ? "The selected clips have no speech. Select clips with speech to transcribe those, or clear the selection to transcribe the timeline's files"
+    : "Put clips with speech on the timeline first";
   const missing = [...new Set(groups.map((g) => getMedia(g[0].mediaId)).filter((m) => transcriptCache.get(m.src) === false).map((m) => m.name || m.src))];
   let html = "";
   if (!groups.length) html = `<div class="tr-empty">Put clips with speech on the timeline, then transcribe them here. Speech becomes words in this browser; your audio never leaves it.</div>`;
   else {
     if (missing.length) html += `<div class="tr-note">No transcript yet: ${missing.slice(0, 6).map(escapeHtml).join(", ")}${missing.length > 6 ? ` +${missing.length - 6} more` : ""}</div>`;
+    // which model and language made these words, so wrong words point at the fix
+    const docs = groups.map((g) => transcriptCache.get(getMedia(g[0].mediaId).src)).filter((d) => d && d.words);
+    const made = new Map();
+    for (const d of docs) made.set(JSON.stringify([d.model ?? null, d.language ?? null]), d);
+    if (made.size) {
+      const said = [...made.values()].map((d) => {
+        const model = d.model == null ? "an unknown model" : T.MODELS[d.model]?.label || d.model;
+        const lang = d.language == null ? "an unknown language" : d.language === "" || d.language === "auto" ? "auto-detected" : T.LANGUAGES[d.language] || d.language;
+        return `${escapeHtml(model)}, ${escapeHtml(lang)}`;
+      });
+      // with some files still untranscribed the button does those, so redoing others takes a selection
+      const how = tgt.selected ? "then Transcribe selected" : tgt.again ? "then Transcribe again" : "select those clips, then Transcribe selected";
+      html += `<div class="tr-note tr-made">Transcribed with ${said.join("; ")}. Words look wrong? Pick the language spoken and the Small model above, ${how}.</div>`;
+    }
     if (!words.length && !missing.length) html += `<div class="tr-empty">${[...transcriptCache.values()].some((v) => v instanceof Promise) ? "Loading…" : "No words in these clips."}</div>`;
     for (const s of T.segments(words)) {
       let p = "";
@@ -9333,10 +9379,32 @@ function copyTranscript() {
   navigator.clipboard.writeText(lines.join("\n")).then(() => toast(`Copied ${lines.length} line${lines.length === 1 ? "" : "s"}`), () => toast("Couldn't copy — the browser refused"));
 }
 async function transcribeFromTab() {
-  const { srcs } = transcribeTargets();
-  if (!srcs.length) { toast("Put a clip with speech on the timeline first"); return; }
+  // what the click meant is taken now (its files, its model and language); a selection already names its files
+  let tgt = transcribeTargets();
+  const opts = transcribeSettings();
+  if (!tgt.selected && !tgt.none) {
+    // transcripts being re-read (another tab saved one) decide which files are left: wait for
+    // those of this timeline's files (a few seconds at most), then take the targets again,
+    // unless the timeline or the selection changed meanwhile
+    const at = silenceSig() + "|" + [...state.selIds].join(",");
+    const srcs = new Set(transcriptGroups().map((g) => getMedia(g[0].mediaId).src));
+    const loading = [...transcriptCache].filter(([s, v]) => srcs.has(s) && v instanceof Promise).map(([, v]) => v);
+    if (loading.length) {
+      await Promise.race([Promise.allSettled(loading), new Promise((r) => setTimeout(r, 5000))]);
+      if (silenceSig() + "|" + [...state.selIds].join(",") !== at) { renderTranscript(true); toast("The timeline changed — check the button and click again"); return; }
+      // the same action as clicked: "Transcribe N files" drops files whose transcript just arrived
+      // (it never turns into a rerun of everything); "Transcribe again" stays a rerun
+      if (!tgt.srcs.length) tgt = transcribeTargets();   // the button hadn't caught up: what it offers now
+      else if (!tgt.again) {
+        tgt = { ...tgt, srcs: tgt.srcs.filter((s) => transcriptCache.get(s) === false) };
+        if (!tgt.srcs.length) { renderTranscript(true); toast("Those files have transcripts now"); return; }
+      }
+    }
+  }
+  const { srcs } = tgt;
+  if (!srcs.length) { toast(tgt.none ? "The selected clips have no speech — select clips with speech, or clear the selection" : "Put a clip with speech on the timeline first"); return; }
   let out;
-  try { out = await transcribeSrcs(srcs); } catch (e) { toast(e.message); return; }
+  try { out = await transcribeSrcs(srcs, opts); } catch (e) { toast(e.message); return; }
   const unsaved = out.done.filter((d) => !d.saved).length;
   const words = out.done.reduce((n, d) => n + d.words, 0);
   toast(out.cancelled ? `Stopped — ${out.done.length} file${out.done.length === 1 ? "" : "s"} transcribed`
@@ -9440,7 +9508,11 @@ async function runTranscribeJob(ticket, fail) {
   if (trState.busy) return fail("this editor tab is already transcribing — wait for it, or cancel it there");
   const srcs = [], skipped = [];
   for (const src of spec.srcs || []) {
-    if (!spec.again && await loadTranscript(src, true)) { skipped.push(src); continue; }
+    // a transcript only counts as there when the server just confirmed it (a failed read is no proof)
+    if (!spec.again) {
+      const r = await readTranscript(src);
+      if (r.ok && r.doc) { skipped.push(src); continue; }
+    }
     srcs.push(src);
   }
   const report = (body, force) => fetch("/api/export/job/report?id=" + encodeURIComponent(ticket.id), { method: "POST", body: JSON.stringify(body) })
