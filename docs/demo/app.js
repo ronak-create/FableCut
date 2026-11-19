@@ -16740,6 +16740,12 @@ async function openExportSetup() {
     if (!els.exportSetup.contains(document.activeElement)) $("exportRangeSel")?.focus();
   }).finally(() => { exportSetupOpening = false; });
 }
+/* The progress overlay takes focus: left on the Export button, Space would
+   play the timeline under a running export (focus.js) instead of pressing Cancel. */
+function showExportOverlay() {
+  els.exportOverlay.classList.remove("hidden");
+  $("btnCancelExport")?.focus();
+}
 function closeExportSetup() {
   els.exportSetup.classList.add("hidden");
   $("btnExport")?.focus();
@@ -17689,7 +17695,7 @@ async function fastExport(opts = {}) {
   state.exporting = true; state.rendering = true; renderCancelled = false;
   exportAbort = new AbortController();
   const signal = exportAbort.signal;
-  if (!opts.silent) els.exportOverlay.classList.remove("hidden");
+  if (!opts.silent) showExportOverlay();
   els.exportProgress.style.width = "0%";
   els.exportNote.textContent = "Rendering frames → ffmpeg. You can switch tabs; export continues.";
   restoreExportVideoState();
@@ -18422,7 +18428,7 @@ async function webCodecsExport(name) {
   state.exporting = true; state.rendering = true; renderCancelled = false;
   exportAbort = new AbortController();
   const signal = exportAbort.signal;
-  els.exportOverlay.classList.remove("hidden");
+  showExportOverlay();
   els.exportProgress.style.width = "0%";
   els.exportNote.textContent = "Encoding with WebCodecs → ffmpeg mux. You can switch tabs; export continues.";
   restoreExportVideoState();
@@ -18608,7 +18614,7 @@ async function startExport(name) {
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 30_000);
   };
-  els.exportOverlay.classList.remove("hidden");
+  showExportOverlay();
   els.exportProgress.style.width = "0%";
   state.exporting = true;
   try { recorder.start(250); }

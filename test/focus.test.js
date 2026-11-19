@@ -120,7 +120,12 @@ function page() {
 }
 const control = (tag, type) => Object.assign(el(tag, { type }), { contains(t) { return t === this; } });
 
-test("install(): a clicked button gives focus back; Tab then click on a select makes Space play; a dragged slider lets go", async () => {
+test("install(): a clicked button gives focus back; Tab then click on a select makes Space play; a dragged slider lets go", async (t) => {
+  // a clock of our own: a press pairs with its click for 1.5 s, and a slow CI box mustn't decide that
+  const realNow = Date.now;
+  let now = 1e6;
+  Date.now = () => now;
+  t.after(() => { Date.now = realNow; });
   const p = page();
   F.install(p.win, p.doc);
 
@@ -160,6 +165,53 @@ test("install(): a clicked button gives focus back; Tab then click on a select m
   assert.equal(F.spaceShouldPlay(box), true, "focus from a label press counts as the mouse");
   box.blur();
 
+  // Chromium: the label's own click reaches the window before the label passes focus and a click on
+  // to its checkbox. The press must still count for that forwarded focus and click.
+  const lab2 = el("label"), text2 = el("span", { parent: lab2 }), box2 = control("input", "checkbox");
+  lab2.control = box2;
+  lab2.contains = (x) => x === text2;
+  p.fire("pointerdown", { target: text2 });
+  p.fire("click", { target: text2 });
+  p.focus(box2);
+  assert.equal(F.spaceShouldPlay(box2), true, "a label click: the checkbox's focus is the mouse's");
+  p.fire("click", { target: box2 });
+  assert.equal(box2.blurred, true, "and the forwarded click releases it");
+
+  // a press held past the pairing window: its click is left to the keyboard path
+  const slow = control("button");
+  p.fire("pointerdown", { target: slow });
+  now += 2000;
+  p.focus(slow);
+  p.fire("click", { target: slow });
+  assert.equal(slow.blurred, false, "an expired press doesn't release focus");
+  assert.equal(F.spaceShouldPlay(slow), false);
+  slow.blur();
+
+  // right-click on a Tab-focused control: still a keyboard focus once the menu is dismissed
+  const tabbedBtn = control("button");
+  p.fire("keydown", { key: "Tab" });
+  p.focus(tabbedBtn);
+  p.fire("pointerdown", { target: tabbedBtn, button: 2 });
+  assert.equal(F.spaceShouldPlay(tabbedBtn), false, "a right-click doesn't make it a mouse focus");
+  tabbedBtn.blur();
+
+  // a touch that became a scroll, then el.click() from code: not paired with that touch
+  const scrolled = control("button");
+  p.fire("pointerdown", { target: scrolled, pointerId: 4 });
+  p.fire("pointercancel", { pointerId: 4 });
+  p.focus(scrolled);                            // el.focus() and el.click() from code, moments later
+  p.fire("click", { target: scrolled });
+  assert.equal(scrolled.blurred, false, "a cancelled press doesn't pair with a later click");
+  scrolled.blur();
+
+  // a value picked with the mouse while Shift is held: the select still lets go
+  const shifty = control("select");
+  p.fire("pointerdown", { target: shifty });
+  p.focus(shifty);
+  p.fire("keydown", { key: "Shift" });
+  p.fire("change", { target: shifty });
+  assert.equal(shifty.blurred, true, "released on change after a mouse focus, Shift held or not");
+
   const fps = control("select");
   p.fire("keydown", { key: "Tab" });
   p.focus(fps);
@@ -172,6 +224,7 @@ test("install(): a clicked button gives focus back; Tab then click on a select m
   p.fire("pointerdown", { target: slider, pointerId: 1 });
   p.focus(slider);
   p.fire("keydown", { key: "Shift" });   // a key pressed mid-drag
+  assert.equal(F.spaceShouldPlay(slider), false, "Space mid-drag leaves the slider held (the editor plays anyway)");
   p.fire("pointerup", { pointerId: 1 });
   await tick();
   assert.equal(slider.blurred, true, "released when the drag ends, even after a key mid-drag");

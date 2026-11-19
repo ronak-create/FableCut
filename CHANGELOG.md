@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Space plays after you click a button.** A button, checkbox, slider or
+  dropdown kept keyboard focus after a click, so Space pressed it again
+  (toggling Snap back, say) instead of playing the timeline, and ←/→ moved the
+  last slider instead of the playhead. A control used with the mouse now gives
+  focus back to the editor, and Space on one that still has it plays. Dialogs
+  and popovers, and controls reached with Tab, keep working from the keyboard
+  as before. (thanks @mrbeandev, #152)
+
 ## [1.19.0] - 2026-11-19
 
 ### Added
@@ -45,15 +54,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   them all with the model and language picked beside it. A line above the words
   says which model and language made them, and to pick the language spoken and
   the Small model when the words look wrong.
-
-### Fixed
-- **Space plays after you click a button.** A button, checkbox, slider or
-  dropdown kept keyboard focus after a click, so Space pressed it again
-  (toggling Snap back, say) instead of playing the timeline, and ←/→ moved the
-  last slider instead of the playhead. A control used with the mouse now gives
-  focus back to the editor, and Space on one that still has it plays. Dialogs
-  and popovers, and controls reached with Tab, keep working from the keyboard
-  as before.
 
 ## [1.18.0] - 2026-10-28
 
