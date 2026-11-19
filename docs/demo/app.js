@@ -110,9 +110,19 @@ const FILTER_PRESETS = {
 };
 const SYSTEM_FONTS = ["Segoe UI", "Arial", "Georgia", "Impact", "Courier New",
   "Trebuchet MS", "Verdana", "Times New Roman", "Comic Sans MS", "Consolas"];
-const GOOGLE_FONTS = ["Anton", "Archivo Black", "Abril Fatface", "Barlow", "Bebas Neue",
-  "Caveat", "Inter", "Lobster", "Montserrat", "Oswald", "Pacifico", "Permanent Marker",
-  "Playfair Display", "Poppins", "Roboto", "Roboto Condensed", "Teko"];
+/* Google fonts offered in the font picker, by look. Any other Google Font loads by name too. */
+const GOOGLE_FONT_GROUPS = {
+  Display: ["Anton", "Archivo Black", "Bebas Neue", "Bangers", "Bungee", "Oswald", "Teko", "Russo One",
+    "Alfa Slab One", "Black Ops One", "Righteous", "Fjalla One", "Unbounded", "Syne"],
+  Sans: ["Inter", "Montserrat", "Poppins", "Roboto", "Roboto Condensed", "Barlow", "Lato", "Open Sans", "Raleway",
+    "Nunito", "Work Sans", "DM Sans", "Rubik", "Kanit", "Lexend", "Outfit", "Sora", "Space Grotesk", "Josefin Sans", "Fredoka"],
+  Serif: ["Playfair Display", "Abril Fatface", "Cinzel", "Cormorant Garamond", "Lora", "Merriweather",
+    "DM Serif Display", "Libre Baskerville", "Marcellus"],
+  "Script & hand": ["Caveat", "Pacifico", "Lobster", "Permanent Marker", "Dancing Script", "Great Vibes",
+    "Satisfy", "Shadows Into Light", "Kalam"],
+  "Retro & mono": ["Monoton", "Press Start 2P", "Special Elite", "Space Mono", "VT323", "Courier Prime"],
+};
+const GOOGLE_FONTS = Object.values(GOOGLE_FONT_GROUPS).flat();
 
 /* ── Title styles: cohesive one-tap looks. Each bundles a DIFFERENT font,
    placement and animation, so titles vary instead of all looking basic.
@@ -121,7 +131,7 @@ const FONT_CUT_DEFAULT = ["Anton", "Bebas Neue", "Archivo Black", "Oswald", "Imp
 const STYLE_RESET = {   // decorative props a style owns; reset before applying
   color2: "", glow: 0, glowColor: "", strokeWidth: 0, bgColor: "#000000", bgOpacity: 0,
   rotation: 0, letterSpacing: 0, uppercase: false, italic: false, textShadow: 12,
-  fontCutSet: undefined, align: "center",
+  fontCutSet: undefined, align: "center", weight: 0, strokeColor: "#000000", highlightColor: "#ffd166",
 };
 const TITLE_STYLES = {
   plain: { label: "Plain", place: "center", props: { font: "Segoe UI", fontSize: 72, bold: true, color: "#ffffff", textAnim: "none" } },
@@ -134,8 +144,20 @@ const TITLE_STYLES = {
   subtitle: { label: "Subtitle", place: "lower", props: { font: "Roboto", fontSize: 52, bold: false, color: "#ffffff", bgColor: "#000000", bgOpacity: 0.5, textAnim: "karaoke" } },
   boldRise: { label: "Bold rise", place: "lower", props: { font: "Archivo Black", fontSize: 92, bold: false, uppercase: true, color: "#ffffff", textAnim: "rise-mask" } },
   luxury: { label: "Luxury", place: "center", props: { font: "Cinzel", fontSize: 88, bold: false, uppercase: true, color: "#faf0dc", color2: "#c9a227", letterSpacing: 6, textAnim: "clip-reveal" } },
+  popOutline: { label: "Pop outline", place: "center", props: { font: "Montserrat", fontSize: 100, bold: false, weight: 900, uppercase: true, color: "#ffd166", strokeWidth: 6, strokeColor: "#111111", textShadow: 0, textAnim: "letter-pop" } },
+  boxed: { label: "Boxed", place: "lower", props: { font: "Inter", fontSize: 60, bold: false, weight: 800, color: "#111111", bgColor: "#ffffff", bgOpacity: 0.95, textShadow: 0, textAnim: "word-slide" } },
+  headline: { label: "Headline", place: "center", props: { font: "Montserrat", fontSize: 92, bold: false, weight: 900, uppercase: true, color: "#ffffff", highlightColor: "#ff4d6d", strokeWidth: 4, strokeColor: "#000000", textShadow: 0, textAnim: "highlight" } },
+  comic: { label: "Comic", place: "center", props: { font: "Bangers", fontSize: 112, bold: false, color: "#ffe14d", strokeWidth: 8, strokeColor: "#1a1a1a", rotation: -3, letterSpacing: 2, textShadow: 0, textAnim: "bounce" } },
+  typewriter: { label: "Typewriter", place: "lower-left", props: { font: "Special Elite", fontSize: 64, bold: false, color: "#f5f0e6", textShadow: 6, textAnim: "typewriter" } },
+  minimal: { label: "Minimal", place: "center", props: { font: "Inter", fontSize: 60, bold: false, weight: 300, uppercase: true, color: "#ffffff", letterSpacing: 12, textShadow: 0, textAnim: "rise-mask" } },
+  script: { label: "Script", place: "center", props: { font: "Great Vibes", fontSize: 120, bold: false, color: "#ffffff", color2: "#f9c5d1", textShadow: 10, textAnim: "clip-reveal" } },
+  retro: { label: "Retro", place: "center", props: { font: "Monoton", fontSize: 96, bold: false, uppercase: true, color: "#ff6ec7", glow: 40, glowColor: "#ff6ec7", textAnim: "letter-pop" } },
+  sticker: { label: "Sticker", place: "lower", props: { font: "Fredoka", fontSize: 80, bold: false, weight: 700, color: "#ffffff", bgColor: "#7b6cff", bgOpacity: 1, rotation: -2, textShadow: 0, textAnim: "word-pop" } },
+  glitch: { label: "Glitch", place: "center", props: { font: "Russo One", fontSize: 100, bold: false, uppercase: true, color: "#e8f9ff", glow: 30, glowColor: "#ff2e63", letterSpacing: 2, textAnim: "shake" } },
+  cinematic: { label: "Cinematic", place: "center", props: { font: "Cormorant Garamond", fontSize: 84, bold: false, weight: 500, uppercase: true, color: "#f2efe9", letterSpacing: 14, textShadow: 8, textAnim: "rise-mask" } },
 };
-const STYLE_CYCLE = ["impact", "elegant", "kinetic", "neon", "handwritten", "serifDrop", "boldRise", "luxury"];
+const STYLE_CYCLE = ["impact", "elegant", "kinetic", "neon", "handwritten", "serifDrop", "boldRise", "luxury",
+  "popOutline", "boxed", "comic", "typewriter", "script", "sticker", "cinematic"];
 const AUDIO_EXT = /\.(mp3|wav|ogg|m4a|aac|flac|mpeg)$/i;
 const VIDEO_EXT = /\.(mp4|webm|mov|mkv|m4v)$/i;
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|avif)$/i;
@@ -6851,7 +6873,8 @@ function renderInspector(lite) {
       ${row("Family", `<select data-k="font">
         ${fontGroup("System", SYSTEM_FONTS)}
         ${fontGroup("Library fonts", runtime.customFonts)}
-        ${fontGroup("Google fonts", [...new Set([...GOOGLE_FONTS, ...runtime.googleLoaded])])}
+        ${Object.entries(GOOGLE_FONT_GROUPS).map(([g, list]) => fontGroup("Google · " + g, list)).join("")}
+        ${fontGroup("Google · loaded by name", [...runtime.googleLoaded].filter((f) => !GOOGLE_FONTS.includes(f)))}
         ${known.includes(p.font) ? "" : `<option selected>${p.font}</option>`}
       </select>`, "", "font")}
       ${row("Google font", `<input type="text" data-gfont placeholder="Type any Google Font name…">
