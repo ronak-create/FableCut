@@ -58,6 +58,9 @@ big operation (cutting silences, snapping to the beat, reframing), and every
 - Video + audio tracks (default 3+4; add more with **+V** / **+A** in the track
   header; right-click an empty header → **Remove track**), drag/trim/split/snap,
   undo/redo
+- **Search** (**Ctrl/Cmd+K**, or the magnifier in the top bar) — one box that finds
+  toolbar actions, panels, Settings, the selected clip's Inspector sections, media,
+  clips and keyboard shortcuts; Enter runs the one you picked
 - **Settings** (cog in the top bar) — optional prefs stored in this browser via
   `localStorage`. Enable **Link timeline and Project bin selection** so picking a
   timeline clip highlights its media in Project, and clicking a Project item
