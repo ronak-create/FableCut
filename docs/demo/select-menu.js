@@ -178,7 +178,7 @@
       });
       list.addEventListener("click", (e) => {
         const d = e.target.closest(".fc-select-opt");
-        if (d && !d.classList.contains("disabled")) pick(+d.dataset.i);
+        if (d && !d.classList.contains("disabled")) pick(+d.dataset.i, true);
       });
     }
     /** Close the open list, if any, and reset its select's open state. */
@@ -194,7 +194,7 @@
       sel.removeAttribute("aria-activedescendant");
     }
     /** Choose item `i`: select its option, fire input + change when it changed, then close the list. */
-    function pick(i) {
+    function pick(i, byMouse) {
       if (!open) return;
       const { sel, items } = open;
       const it = items[i];
@@ -210,7 +210,9 @@
         sel.dispatchEvent(new Event("input", { bubbles: true }));
         sel.dispatchEvent(new Event("change", { bubbles: true }));
       }
-      // a keyboard pick keeps focus on the select (Space / ↓ reopen it); a mouse pick never took it
+      // a keyboard pick keeps focus on the select (Space / ↓ reopen it). A mouse pick from a list the
+      // keyboard opened hands focus back, as every mouse pick does, so Space and Ctrl+Z reach the editor
+      if (byMouse && doc.activeElement === sel && win.FableCutFocus) win.FableCutFocus.release(sel);
     }
 
     // Mouse: open the list without focusing the select (and without the native popup).
