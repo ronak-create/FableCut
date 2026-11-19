@@ -16740,6 +16740,12 @@ async function openExportSetup() {
     if (!els.exportSetup.contains(document.activeElement)) $("exportRangeSel")?.focus();
   }).finally(() => { exportSetupOpening = false; });
 }
+/* The progress overlay takes focus: left on the Export button, Space would
+   play the timeline under a running export (focus.js) instead of pressing Cancel. */
+function showExportOverlay() {
+  els.exportOverlay.classList.remove("hidden");
+  $("btnCancelExport")?.focus();
+}
 function closeExportSetup() {
   els.exportSetup.classList.add("hidden");
   $("btnExport")?.focus();
@@ -17689,7 +17695,7 @@ async function fastExport(opts = {}) {
   state.exporting = true; state.rendering = true; renderCancelled = false;
   exportAbort = new AbortController();
   const signal = exportAbort.signal;
-  if (!opts.silent) els.exportOverlay.classList.remove("hidden");
+  if (!opts.silent) showExportOverlay();
   els.exportProgress.style.width = "0%";
   els.exportNote.textContent = "Rendering frames → ffmpeg. You can switch tabs; export continues.";
   restoreExportVideoState();
@@ -18422,7 +18428,7 @@ async function webCodecsExport(name) {
   state.exporting = true; state.rendering = true; renderCancelled = false;
   exportAbort = new AbortController();
   const signal = exportAbort.signal;
-  els.exportOverlay.classList.remove("hidden");
+  showExportOverlay();
   els.exportProgress.style.width = "0%";
   els.exportNote.textContent = "Encoding with WebCodecs → ffmpeg mux. You can switch tabs; export continues.";
   restoreExportVideoState();
@@ -18608,7 +18614,7 @@ async function startExport(name) {
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 30_000);
   };
-  els.exportOverlay.classList.remove("hidden");
+  showExportOverlay();
   els.exportProgress.style.width = "0%";
   state.exporting = true;
   try { recorder.start(250); }
@@ -19623,8 +19629,24 @@ window.addEventListener("keydown", (e) => {
     closeImportUrl();
     return;
   }
+  // Space on a button / select / slider still focused from a mouse click plays
+  // instead of pressing that control again (focus.js)
+  if (k === " " && !e.ctrlKey && !e.metaKey && !e.altKey && typeof FableCutFocus !== "undefined") {
+    const el = document.activeElement;
+    if (FableCutFocus.spaceShouldPlay(el)) {
+      e.preventDefault();
+      FableCutFocus.release(el);
+      if (!e.repeat) toggleTransportPlay();
+      return;
+    }
+    // reached with Tab, or in a dialog / popover: Space presses the control as usual.
+    // A slider has nothing for Space to press, so outside dialogs it still plays.
+    const slider = el && el.tagName === "INPUT" && el.type === "range";
+    if (FableCutFocus.isClickControl(el) && !(slider && !FableCutFocus.inKeyboardScope(el))) return;
+  }
   if (isTypingTarget(document.activeElement)) return;
-  if (k === " ") { e.preventDefault(); toggleTransportPlay(); }
+  // holding Space plays or pauses once, not on every key repeat
+  if (k === " ") { e.preventDefault(); if (!e.repeat) toggleTransportPlay(); }
   // JKL shuttle — bare keys only, so Cmd/Ctrl+J/K/L stay with the browser.
   // K stops; hold K and tap J / L to step a frame, hold both to crawl.
   else if ((k === "k" || k === "K") && !e.ctrlKey && !e.metaKey && !e.altKey) {
