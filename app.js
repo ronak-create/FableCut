@@ -6924,6 +6924,8 @@ function renderInspector(lite) {
     const k = input.dataset.k;
     input.addEventListener("input", (e) => {
       if (!input.isConnected) return;
+      // a dropdown pick is a whole edit: one undo step each (a field or slider takes one per focus, below)
+      if (input.tagName === "SELECT") pushUndo();
       if (input.type === "range" && (e.ctrlKey || e.metaKey)) return;
       let v = input.type === "checkbox" ? input.checked
         : input.type === "range" || input.type === "number" ? parseFloat(input.value)
@@ -6978,7 +6980,7 @@ function renderInspector(lite) {
       if (ANIMATABLE.includes(k)) syncInspectorPlayhead();
     });
     input.addEventListener("focus", () => {
-      pushUndo();
+      if (input.tagName !== "SELECT") pushUndo();
       if (ANIMATABLE.includes(k) && state.playing) pause();
     }, { once: true });
   });
