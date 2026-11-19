@@ -8879,8 +8879,8 @@ function cutSilences() {
 const TRANSCRIBE_KEY = "fablecut-transcribe";
 const trState = { open: false, built: false, busy: null, sig: "", words: [], sel: null, anchor: null, drag: false, query: "", hits: [], now: -1 };
 const transcriptCache = new Map();   // src → validated transcript | false (none) | Promise while asking the server
-const transcriptLast = new Map();    // src → the last transcript (or false) the server confirmed, kept while a refresh is pending
-const transcriptStale = new Set();   // srcs whose last refresh failed: what is shown is not known to be saved
+const transcriptHeld = new Map();    // src → the last transcript (or false) shown, kept while a refresh is pending
+const transcriptStale = new Set();   // srcs whose shown transcript the server hasn't confirmed (a failed read or save)
 let transcriptGen = 0;               // bumps whenever a transcript arrives or changes: the tab redraws
 function transcribeSettings() {
   let o = {};
@@ -8903,20 +8903,34 @@ function transcriptOf(src) {
 function loadTranscript(src, force = false) {
   const have = transcriptCache.get(src);
   if (!force && have !== undefined) return have instanceof Promise ? have : Promise.resolve(have);
-  // a refresh that fails (a server error, no network) keeps the transcript known before;
-  // only an answer that there is none (or that the file is gone) makes it "none"
-  const before = transcriptLast.get(src) || false;
-  const p = fetch("/api/transcript?src=" + encodeURIComponent(src))
+  return readTranscript(src).then((r) => r.doc);
+}
+/** One read from the server → {doc, ok}: ok only when this read answered (a transcript, or that
+   there is none) and no later read has replaced it. A read that fails (a server error, no network,
+   a document that doesn't validate) keeps what was shown, marked unconfirmed. */
+function readTranscript(src) {
+  let p = null;
+  const read = fetch("/api/transcript?src=" + encodeURIComponent(src))
     .then((r) => (r.ok ? r.json() : r.status === 404 ? { transcript: null } : Promise.reject(new Error("HTTP " + r.status))))
     .then((j) => {
-      let d = false;
-      try { d = j && j.transcript ? FableCutTranscribe.validate(j.transcript) : false; } catch { d = before; }
-      if (transcriptCache.get(src) === p) { transcriptCache.set(src, d); transcriptLast.set(src, d); transcriptStale.delete(src); transcriptGen++; }
-      return d;
+      const d = j && j.transcript ? FableCutTranscribe.validate(j.transcript) : false;
+      const latest = transcriptCache.get(src) === p;
+      if (latest) { setTranscript(src, d); transcriptStale.delete(src); }
+      return { doc: d, ok: latest };
     })
-    .catch(() => { if (transcriptCache.get(src) === p) { transcriptCache.set(src, before); transcriptStale.add(src); transcriptGen++; } return before; });
+    .catch(() => {
+      const d = transcriptHeld.get(src) || false;
+      if (transcriptCache.get(src) === p) { setTranscript(src, d); transcriptStale.add(src); }
+      return { doc: d, ok: false };
+    });
+  p = read.then((r) => r.doc);
   transcriptCache.set(src, p);
-  return p;
+  return read;
+}
+function setTranscript(src, d) {
+  transcriptCache.set(src, d);
+  transcriptHeld.set(src, d);
+  transcriptGen++;
 }
 function onTranscriptEvent(data) {
   let src = null;
@@ -8995,9 +9009,8 @@ async function transcribeFile(src, { model, language, onProgress, cancelled }) {
   const doc = T.validate({ src, model, language: language || "auto", duration, created: new Date().toISOString(), words });
   let saved = false;
   try { saved = (await fetch("/api/transcript?src=" + encodeURIComponent(src), { method: "POST", body: JSON.stringify(doc) })).ok; } catch { }
-  transcriptCache.set(src, doc);
-  if (saved) { transcriptLast.set(src, doc); transcriptStale.delete(src); } else transcriptStale.add(src);
-  transcriptGen++;
+  setTranscript(src, doc);
+  if (saved) transcriptStale.delete(src); else transcriptStale.add(src);
   return { doc, saved };
 }
 /** Transcribe files one after another. `beat(fraction)` hears about progress (an agent's job). */
@@ -9469,7 +9482,10 @@ async function runTranscribeJob(ticket, fail) {
   const srcs = [], skipped = [];
   for (const src of spec.srcs || []) {
     // a transcript only counts as there when the server just confirmed it (a failed read is no proof)
-    if (!spec.again && await loadTranscript(src, true) && !transcriptStale.has(src)) { skipped.push(src); continue; }
+    if (!spec.again) {
+      const r = await readTranscript(src);
+      if (r.ok && r.doc) { skipped.push(src); continue; }
+    }
     srcs.push(src);
   }
   const report = (body, force) => fetch("/api/export/job/report?id=" + encodeURIComponent(ticket.id), { method: "POST", body: JSON.stringify(body) })
