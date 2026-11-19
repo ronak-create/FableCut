@@ -6922,8 +6922,12 @@ function renderInspector(lite) {
   });
   els.inspector.querySelectorAll("[data-k]").forEach((input) => {
     const k = input.dataset.k;
+    let armed = null;   // the project as it was when a field / slider got focus; recorded on its first edit
     input.addEventListener("input", (e) => {
       if (!input.isConnected) return;
+      // a dropdown pick is a whole edit: one undo step each; a field or slider takes one per focus that edits
+      if (input.tagName === "SELECT") pushUndo();
+      else if (armed) { pushUndo(armed); armed = null; }
       if (input.type === "range" && (e.ctrlKey || e.metaKey)) return;
       let v = input.type === "checkbox" ? input.checked
         : input.type === "range" || input.type === "number" ? parseFloat(input.value)
@@ -6978,9 +6982,9 @@ function renderInspector(lite) {
       if (ANIMATABLE.includes(k)) syncInspectorPlayhead();
     });
     input.addEventListener("focus", () => {
-      pushUndo();
+      if (input.tagName !== "SELECT") armed = undoSnapshot();
       if (ANIMATABLE.includes(k) && state.playing) pause();
-    }, { once: true });
+    });
   });
   els.inspector.querySelectorAll("[data-action]").forEach((btn) => {
     btn.addEventListener("click", () => {

@@ -32,7 +32,10 @@
 
   /** Selects that get the themed list. */
   function isThemed(sel) {
-    return !!sel && sel.tagName === "SELECT" && !sel.multiple && !(sel.size > 1) && !sel.hasAttribute("data-native");
+    if (!sel || sel.tagName !== "SELECT" || sel.multiple || sel.hasAttribute("data-native")) return false;
+    // the attribute as the CSS reads it (no size, or size="1"), so the box and the list always agree
+    const size = sel.getAttribute("size");
+    return size === null || size === "1";
   }
   /** An option's label as shown in the list (its label, else its text), whitespace collapsed. */
   function optionText(o) {
@@ -159,7 +162,10 @@
       if (again || sel.disabled || !sel.isConnected) return;
       const { list, items } = draw(sel);
       doc.body.appendChild(list);
-      open = { sel, list, items, active: -1, byKey };
+      // the select taken out of the page (the Inspector rebuilt by an undo, say): the list goes with it
+      const gone = new MutationObserver(() => { if (open && !open.sel.isConnected) close(); });
+      gone.observe(doc.body, { childList: true, subtree: true });
+      open = { sel, list, items, active: -1, byKey, gone };
       sel.classList.add("fc-open");
       sel.setAttribute("aria-expanded", "true");
       sel.setAttribute("aria-controls", list.id);
@@ -172,14 +178,15 @@
       });
       list.addEventListener("click", (e) => {
         const d = e.target.closest(".fc-select-opt");
-        if (d && !d.classList.contains("disabled")) pick(+d.dataset.i);
+        if (d && !d.classList.contains("disabled")) pick(+d.dataset.i, true);
       });
     }
     /** Close the open list, if any, and reset its select's open state. */
     function close() {
       if (!open) return;
-      const { sel, list } = open;
+      const { sel, list, gone } = open;
       open = null;
+      gone.disconnect();
       typed = ""; typedAt = 0;   // type-to-find starts afresh in the next list
       list.remove();
       sel.classList.remove("fc-open");
@@ -187,7 +194,7 @@
       sel.removeAttribute("aria-activedescendant");
     }
     /** Choose item `i`: select its option, fire input + change when it changed, then close the list. */
-    function pick(i) {
+    function pick(i, byMouse) {
       if (!open) return;
       const { sel, items } = open;
       const it = items[i];
@@ -196,11 +203,16 @@
       const off = (o) => o.disabled || (o.parentNode && o.parentNode.tagName === "OPTGROUP" && o.parentNode.disabled);
       if (!it || it.disabled || off(it.option) || !sel.isConnected) return;
       if (!it.option.selected) {
+        // a mouse pick never focused the select, as a native one would have: send its focus event, so
+        // code that acts on focus (the Inspector's undo step before an edit) still runs. Focus doesn't move.
+        if (doc.activeElement !== sel) sel.dispatchEvent(new FocusEvent("focus"));
         it.option.selected = true;
         sel.dispatchEvent(new Event("input", { bubbles: true }));
         sel.dispatchEvent(new Event("change", { bubbles: true }));
       }
-      // a keyboard pick keeps focus on the select (Space / ↓ reopen it); a mouse pick never took it
+      // a keyboard pick keeps focus on the select (Space / ↓ reopen it). A mouse pick from a list the
+      // keyboard opened hands focus back, as every mouse pick does, so Space and Ctrl+Z reach the editor
+      if (byMouse && doc.activeElement === sel && win.FableCutFocus) win.FableCutFocus.release(sel);
     }
 
     // Mouse: open the list without focusing the select (and without the native popup).
@@ -223,8 +235,11 @@
       if (open && open.list.contains(e.target)) e.stopPropagation();
     }, true);
     win.addEventListener("keydown", (e) => {
+      if (open && !open.sel.isConnected) close();   // its select is gone: the key isn't the list's
       if (open) {
         const k = e.key, items = open.items;
+        // one held key mustn't open the list and then pick from it: repeats of Enter / Space do nothing here
+        if (e.repeat && (k === "Enter" || k === " ")) { e.preventDefault(); e.stopImmediatePropagation(); return; }
         let used = true;
         if (k === "Escape") close();   // only the list: not the dialog behind it
         else if (k === "Tab") { close(); used = false; }
@@ -254,6 +269,8 @@
       if (k === " " && win.FableCutFocus && win.FableCutFocus.spaceShouldPlay(sel)) return;
       if (k === " " || k === "Enter" || k === "ArrowDown" || k === "ArrowUp" || k === "F4") {
         e.preventDefault(); e.stopImmediatePropagation();
+        // the key held from the pick that just closed the list: don't open it again
+        if (e.repeat && (k === " " || k === "Enter")) return;
         show(sel, true);
       }
     }, true);
