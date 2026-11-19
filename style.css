@@ -4663,6 +4663,9 @@ input[type=checkbox]:indeterminate::before {
   width: 7px;
   height: 2px;
   background: #fff;
+  /* checked and indeterminate together: drop the tick's border and turn, so the bar stays flat */
+  border: 0;
+  transform: none;
 }
 input[type=checkbox]:hover:not(:disabled) { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
 input[type=checkbox]:disabled { opacity: .45; cursor: not-allowed; }
