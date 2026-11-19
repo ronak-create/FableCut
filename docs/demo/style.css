@@ -4233,7 +4233,8 @@ input[type="range"].cq-hue {
   padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px;
   background: var(--panel); font-size: 12px; min-width: 0;
 }
-.dlv-batch-list li.off { opacity: .55; }
+/* an output left out dims, but its checkbox doesn't: it is how you put the output back */
+.dlv-batch-list li.off > :not(input[type="checkbox"]) { opacity: .55; }
 .dlv-batch-list input[type="checkbox"] { accent-color: var(--accent); flex: none; }
 .dlv-batch-list .bo-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .dlv-batch-list .bo-main b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -4603,6 +4604,7 @@ select:focus-visible, .dlv-f select:focus-visible { outline: 2px solid var(--acc
 }
 .fc-select-group:not(:first-child) { margin-top: 3px; border-top: 1px solid var(--border); }
 .fc-select-empty { padding: 6px 10px; color: var(--dim); }
+
 /* touch: rows big enough for a finger (desktop stays compact) */
 @media (pointer: coarse) {
   .fc-select-opt { padding-top: 14px; padding-bottom: 14px; }
@@ -4614,6 +4616,163 @@ select:focus-visible, .dlv-f select:focus-visible { outline: 2px solid var(--acc
   .fc-select-opt.active.selected::before { background: HighlightText; }
   select:focus-visible, .dlv-f select:focus-visible { outline-color: Highlight; }
 }
+
+/* ── Form controls in the editor's theme ──
+   On/off settings draw as switches; checkboxes that pick items from a list
+   (export batch outputs, snap targets, dialog options) stay checkboxes in the
+   theme. Horizontal sliders get a thin track and a round accent thumb, and
+   text / number fields light their border with the accent while focused.
+   Pure CSS: the controls stay native inputs, so .checked / .value / input /
+   change behave as before. The vertical mixer faders keep the native look
+   (they rely on writing-mode). */
+
+/* Checkboxes everywhere: a themed box with a tick */
+input[type=checkbox] {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  flex: none;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  border-radius: 4px;
+  background: var(--well);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  vertical-align: middle;
+  transition: background .14s, border-color .14s;
+}
+input[type=checkbox]:checked { background: var(--accent); border-color: var(--accent); }
+input[type=checkbox]:checked::before {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 1px;
+  width: 4px;
+  height: 8px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+input[type=checkbox]:indeterminate { background: var(--accent); border-color: var(--accent); }
+input[type=checkbox]:indeterminate::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 6px;
+  width: 7px;
+  height: 2px;
+  background: #fff;
+  /* checked and indeterminate together: drop the tick's border and turn, so the bar stays flat */
+  border: 0;
+  transform: none;
+}
+input[type=checkbox]:hover:not(:disabled) { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
+input[type=checkbox]:disabled { opacity: .45; cursor: not-allowed; }
+/* an unchecked batch output: a border you can find on the dark panel (--border is ~1.4:1 there) */
+.dlv-batch-list input[type=checkbox]:not(:checked) { border-color: var(--dim); }
+input[type=checkbox]:focus { outline: none; }
+input[type=checkbox]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* On/off settings: a switch. Inspector props, the Settings dialog, an effect's
+   on / bypass, a qualifier's on. Same specificity as .insp-row input[type=checkbox]
+   (3380) and later in the file, so no !important. */
+:is(.insp-row, .settings-row, .fx-head, .cq-on) input[type=checkbox] {
+  width: 28px;
+  height: 16px;
+  border-radius: 999px;
+}
+:is(.insp-row, .settings-row, .fx-head, .cq-on) input[type=checkbox]::before,
+:is(.insp-row, .settings-row, .fx-head, .cq-on) input[type=checkbox]:checked::before,
+:is(.insp-row, .settings-row, .fx-head, .cq-on) input[type=checkbox]:indeterminate::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--dim);
+  transform: none;
+  transition: transform .14s ease, background .14s;
+}
+:is(.insp-row, .settings-row, .fx-head, .cq-on) input[type=checkbox]:checked::before { transform: translateX(12px); background: #fff; }
+:is(.insp-row, .settings-row, .fx-head, .cq-on) input[type=checkbox]:indeterminate::before { transform: translateX(6px); background: #fff; }
+
+input[type=range]:not(.mix-fader) {
+  appearance: none;
+  -webkit-appearance: none;
+  height: 18px;
+  background: transparent;
+  cursor: pointer;
+  min-width: 0;
+}
+input[type=range]:not(.mix-fader):focus { outline: none; }
+input[type=range]:not(.mix-fader):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+input[type=range]:not(.mix-fader)::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: var(--panel-2); }
+input[type=range]:not(.mix-fader)::-moz-range-track { height: 4px; border-radius: 2px; background: var(--panel-2); }
+input[type=range]:not(.mix-fader)::-moz-range-progress { height: 4px; border-radius: 2px; background: var(--accent); }
+input[type=range]:not(.mix-fader)::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  margin-top: -4px;
+  border-radius: 50%;
+  background: #e8e6ff;
+  border: 2px solid var(--accent);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .5);
+  transition: transform .1s;
+}
+input[type=range]:not(.mix-fader)::-moz-range-thumb {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #e8e6ff;
+  border: 2px solid var(--accent);
+}
+input[type=range]:not(.mix-fader):hover::-webkit-slider-thumb,
+input[type=range]:not(.mix-fader):active::-webkit-slider-thumb { transform: scale(1.2); }
+input[type=range]:not(.mix-fader):focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 40%, transparent); }
+input[type=range]:not(.mix-fader):disabled { opacity: .45; cursor: not-allowed; }
+/* the qualifier's hue slider shows the hue wheel as its track (the rule above
+   would otherwise replace its gradient: same specificity, later in the file) */
+input[type="range"].cq-hue:not(.mix-fader) {
+  background: linear-gradient(90deg, #f33, #ff3, #3f3, #3ff, #33f, #f3f, #f33);
+  border-radius: 3px;
+  height: 6px;
+}
+input[type="range"].cq-hue::-webkit-slider-runnable-track { background: transparent; }
+input[type="range"].cq-hue::-moz-range-track { background: transparent; }
+input[type="range"].cq-hue::-moz-range-progress { background: transparent; }
+
+input[type=number], input[type=text], input[type=search], input[type=url] { color-scheme: dark; }
+input[type=number]:focus, input[type=text]:focus, input[type=search]:focus, input[type=url]:focus, textarea:focus {
+  border-color: var(--accent) !important;
+}
+input[type=number]:focus:not(:focus-visible), input[type=text]:focus:not(:focus-visible), input[type=search]:focus:not(:focus-visible),
+input[type=url]:focus:not(:focus-visible), textarea:focus:not(:focus-visible) { outline: none; }
+
+/* Windows High Contrast / forced colours: the system repaints backgrounds, so
+   give the switch knob and the focus rings system colours that stay visible */
+@media (forced-colors: active) {
+  input[type=checkbox] { border-color: CanvasText; }
+  input[type=checkbox]:checked, input[type=checkbox]:indeterminate { background: Highlight; border-color: Highlight; }
+  input[type=checkbox]:checked::before { border-color: HighlightText; forced-color-adjust: none; }
+  input[type=checkbox]:indeterminate::before { background: HighlightText; forced-color-adjust: none; }
+  :is(.insp-row, .settings-row, .fx-head, .cq-on) input[type=checkbox]::before { background: CanvasText; forced-color-adjust: none; }
+  :is(.insp-row, .settings-row, .fx-head, .cq-on) input[type=checkbox]:checked::before,
+  :is(.insp-row, .settings-row, .fx-head, .cq-on) input[type=checkbox]:indeterminate::before { background: HighlightText; }
+  input[type=checkbox]:focus-visible,
+  input[type=range]:not(.mix-fader):focus-visible { outline-color: Highlight; }
+  /* the track's fill is replaced by the canvas colour: outline it so it stays visible.
+     Separate rules: a browser drops a whole rule with a pseudo-element it doesn't know */
+  input[type=range]:not(.mix-fader)::-webkit-slider-runnable-track { border: 1px solid CanvasText; }
+  input[type=range]:not(.mix-fader)::-moz-range-track { border: 1px solid CanvasText; }
+  input[type=number]:focus, input[type=text]:focus, input[type=search]:focus, input[type=url]:focus, textarea:focus { outline: 2px solid Highlight; }
+}
+input[type=number]::-webkit-inner-spin-button { opacity: .35; }
+input[type=number]:hover::-webkit-inner-spin-button { opacity: .8; }
 
 /* ── Command search (Ctrl/Cmd+K) ── */
 #cmdkOverlay { align-items: flex-start; padding-top: 12vh; }

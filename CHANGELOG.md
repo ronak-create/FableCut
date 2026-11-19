@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with the mouse leaves keyboard focus with the editor (a text field you were
   typing in lets go too), so Space plays right after. Multi-select lists keep
   the browser's control. (thanks @mrbeandev, #154)
+- **Switches, sliders and fields in the editor's theme.** On/off settings
+  (Inspector, Settings, an effect's on / bypass) draw as switches; checkboxes
+  that pick items from a list, like the export batch outputs, are themed
+  checkboxes. Sliders have a thin track with a round accent thumb, and text
+  and number fields light up in the accent colour while you type. The vertical
+  mixer faders and the export engine's radio buttons are unchanged. (thanks
+  @mrbeandev, #153)
 
 ### Fixed
 - **Space plays after you click a button.** A button, checkbox, slider or
