@@ -8879,6 +8879,8 @@ function cutSilences() {
 const TRANSCRIBE_KEY = "fablecut-transcribe";
 const trState = { open: false, built: false, busy: null, sig: "", words: [], sel: null, anchor: null, drag: false, query: "", hits: [], now: -1 };
 const transcriptCache = new Map();   // src → validated transcript | false (none) | Promise while asking the server
+const transcriptLast = new Map();    // src → the last transcript (or false) the server confirmed, kept while a refresh is pending
+const transcriptStale = new Set();   // srcs whose last refresh failed: what is shown is not known to be saved
 let transcriptGen = 0;               // bumps whenever a transcript arrives or changes: the tab redraws
 function transcribeSettings() {
   let o = {};
@@ -8903,16 +8905,16 @@ function loadTranscript(src, force = false) {
   if (!force && have !== undefined) return have instanceof Promise ? have : Promise.resolve(have);
   // a refresh that fails (a server error, no network) keeps the transcript known before;
   // only an answer that there is none (or that the file is gone) makes it "none"
-  const before = have && !(have instanceof Promise) ? have : false;
+  const before = transcriptLast.get(src) || false;
   const p = fetch("/api/transcript?src=" + encodeURIComponent(src))
     .then((r) => (r.ok ? r.json() : r.status === 404 ? { transcript: null } : Promise.reject(new Error("HTTP " + r.status))))
     .then((j) => {
       let d = false;
       try { d = j && j.transcript ? FableCutTranscribe.validate(j.transcript) : false; } catch { d = before; }
-      if (transcriptCache.get(src) === p) { transcriptCache.set(src, d); transcriptGen++; }
+      if (transcriptCache.get(src) === p) { transcriptCache.set(src, d); transcriptLast.set(src, d); transcriptStale.delete(src); transcriptGen++; }
       return d;
     })
-    .catch(() => { if (transcriptCache.get(src) === p) { transcriptCache.set(src, before); transcriptGen++; } return before; });
+    .catch(() => { if (transcriptCache.get(src) === p) { transcriptCache.set(src, before); transcriptStale.add(src); transcriptGen++; } return before; });
   transcriptCache.set(src, p);
   return p;
 }
@@ -8994,6 +8996,7 @@ async function transcribeFile(src, { model, language, onProgress, cancelled }) {
   let saved = false;
   try { saved = (await fetch("/api/transcript?src=" + encodeURIComponent(src), { method: "POST", body: JSON.stringify(doc) })).ok; } catch { }
   transcriptCache.set(src, doc);
+  if (saved) { transcriptLast.set(src, doc); transcriptStale.delete(src); } else transcriptStale.add(src);
   transcriptGen++;
   return { doc, saved };
 }
@@ -9465,7 +9468,8 @@ async function runTranscribeJob(ticket, fail) {
   if (trState.busy) return fail("this editor tab is already transcribing — wait for it, or cancel it there");
   const srcs = [], skipped = [];
   for (const src of spec.srcs || []) {
-    if (!spec.again && await loadTranscript(src, true)) { skipped.push(src); continue; }
+    // a transcript only counts as there when the server just confirmed it (a failed read is no proof)
+    if (!spec.again && await loadTranscript(src, true) && !transcriptStale.has(src)) { skipped.push(src); continue; }
     srcs.push(src);
   }
   const report = (body, force) => fetch("/api/export/job/report?id=" + encodeURIComponent(ticket.id), { method: "POST", body: JSON.stringify(body) })
