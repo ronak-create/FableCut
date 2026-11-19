@@ -16560,6 +16560,7 @@ function webCodecsBitrate(w, h, fps) {
 /* The Export dialog's "Save as" name. The field shows the name the export would get;
    once typed in, that name is used for this export (cleared = the default, shown greyed). */
 let exportNameTyped = false;
+let exportNameShown = "";   // the default the Save as field shows (a {time} in it is the time it was filled in)
 /** The engine the dialog's choices lead to, as startChosenExport picks it. */
 function chosenExportEngine() {
   if (els.engineFast.checked && !els.engineFast.disabled) return "fast";
@@ -16581,7 +16582,7 @@ function exportNameExt() {
 function syncExportName() {
   const el = $("exportName");
   if (!el) return;
-  const def = defaultExportName();
+  const def = exportNameShown = defaultExportName();
   el.placeholder = def;
   if (!exportNameTyped) el.value = def;
   const note = $("exportNameNote");
@@ -16714,7 +16715,11 @@ async function openExportSetup() {
           refreshDeliveryNotes();
         }
       }
-      if (radio) { els.engineFast.checked = radio === els.engineFast && !radio.disabled; els.engineRealtime.checked = radio === els.engineRealtime && !radio.disabled; }
+      if (radio) {
+        els.engineFast.checked = radio === els.engineFast && !radio.disabled; els.engineRealtime.checked = radio === els.engineRealtime && !radio.disabled;
+        // the dialog, if it opens, shows the engine's own controls
+        syncExportProfileVisibility(); syncExportWcOpts();
+      }
       // the range counted in frames of what will be written (a delivery may have its own frame rate)
       const outFps = chosenExportEngine() === "fast" && selectedExportChoice().kind === "delivery" && dlvSpec?.fps || projectFps();
       const engineOk = !radio || (!radio.disabled && (last === "second" || last === "fast" || chosenExportEngine() === last));
@@ -16754,7 +16759,7 @@ function startChosenExport() {
     return;
   }
   // the name shown now (a default with {time} must not tick over while the audio mixes)
-  const name = exportName() || defaultExportName();
+  const name = exportName() || exportNameShown || defaultExportName();
   if ($("exportSkipAsk")?.checked) setSetting("exportAsk", false);
   setSetting("exportEngine", chosenExportEngine());
   setSetting("exportChoice", els.exportProfileSel?.value || null);
