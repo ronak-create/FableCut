@@ -4547,7 +4547,8 @@ select:not([multiple]):not([data-native]):is(:not([size]), [size="1"]):hover:not
 select.fc-open { border-color: var(--accent) !important; }
 select:disabled { cursor: not-allowed; }
 select:focus { outline: none; }
-select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* the keyboard outline wins over panels that drop the outline on :focus (.dlv-f in Export) */
+select:focus-visible, .dlv-f select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .fc-select-list {
   position: fixed;
@@ -4602,6 +4603,17 @@ select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 }
 .fc-select-group:not(:first-child) { margin-top: 3px; border-top: 1px solid var(--border); }
 .fc-select-empty { padding: 6px 10px; color: var(--dim); }
+/* touch: rows big enough for a finger (desktop stays compact) */
+@media (pointer: coarse) {
+  .fc-select-opt { padding-top: 14px; padding-bottom: 14px; }
+}
+/* forced colours: the keyboard's row (what Enter picks) stands apart from the current choice */
+@media (forced-colors: active) {
+  .fc-select-opt.active { outline: 2px solid Highlight; outline-offset: -2px; background: Highlight; color: HighlightText; }
+  .fc-select-opt.selected::before { background: CanvasText; }
+  .fc-select-opt.active.selected::before { background: HighlightText; }
+  select:focus-visible, .dlv-f select:focus-visible { outline-color: Highlight; }
+}
 
 /* ── Command search (Ctrl/Cmd+K) ── */
 #cmdkOverlay { align-items: flex-start; padding-top: 12vh; }

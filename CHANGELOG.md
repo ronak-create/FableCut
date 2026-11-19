@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Keyboard: ↑ ↓ to move, type to jump, Enter to pick, Esc to close. Picking
   with the mouse leaves keyboard focus with the editor (a text field you were
   typing in lets go too), so Space plays right after. Multi-select lists keep
-  the browser's control.
+  the browser's control. (thanks @mrbeandev, #154)
 
 ### Fixed
 - **Space plays after you click a button.** A button, checkbox, slider or

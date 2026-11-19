@@ -43,6 +43,7 @@
     const out = [];
     for (const child of sel.children) {
       if (child.tagName === "OPTGROUP") {
+        if (child.hidden) continue;
         out.push({ group: child.label || "", disabled: !!child.disabled });
         for (const o of child.children)
           if (o.tagName === "OPTION" && !o.hidden) out.push({ option: o, inGroup: true, disabled: !!(o.disabled || child.disabled) });
@@ -54,6 +55,16 @@
   function step(items, from, dir) {
     for (let i = from + dir; i >= 0 && i < items.length; i += dir) if (!items[i].disabled) return i;
     return from;
+  }
+  /** PageUp / PageDown: `n` items on in direction `dir`, landing on an enabled one
+      (the next one on, else the nearest one back); `from` when there is none. */
+  function pageStep(items, from, dir, n) {
+    const i = Math.max(0, Math.min(items.length - 1, from + dir * n));
+    if (!items[i] || !items[i].disabled) return i;
+    const on = step(items, i, dir);
+    if (on !== i) return on;
+    const back = step(items, i, -dir);
+    return back !== i ? back : from;
   }
   /** Type-to-find: the first enabled item from `start` (wrapping) whose text starts with `q`; -1 if none. */
   function findMatch(items, start, q) {
@@ -80,13 +91,14 @@
     install.done = true;
     let open = null;   // { sel, list, items, active, byKey }
     let typed = "", typedAt = 0;
+    let lists = 0;   // numbers the lists of selects with no id, so aria-controls always has a target
 
     /** Build the list element for `sel`: group headings and one row per visible option. Returns { list, items }. */
     function draw(sel) {
       const list = doc.createElement("div");
       list.className = "fc-select-list";
       list.setAttribute("role", "listbox");
-      if (sel.id) list.id = sel.id + "-list";
+      list.id = (sel.id || "fc-select-" + ++lists) + "-list";
       const items = [];
       for (const r of rows(sel)) {
         const d = doc.createElement("div");
@@ -100,7 +112,8 @@
           d.setAttribute("aria-selected", String(o.selected));
           if (r.disabled) d.setAttribute("aria-disabled", "true");
           d.textContent = optionText(o) || "\u00a0";
-          if (o.title) d.title = o.title;
+          // long names (two takes that differ only at the end) show whole on hover
+          d.title = o.title || optionText(o);
           if (sel.dataset.k === "font" && o.value) d.style.fontFamily = `"${o.value}", system-ui, sans-serif`;   // preview each font
           d.dataset.i = items.length;
           items.push({ el: d, option: o, disabled: r.disabled });
@@ -135,7 +148,7 @@
       open.active = i;
       const el = open.items[i].el;
       el.classList.add("active");
-      if (el.id === "") el.id = "fc-opt-" + i;
+      if (el.id === "") el.id = open.list.id + "-" + i;
       open.sel.setAttribute("aria-activedescendant", el.id);
       if (scroll) el.scrollIntoView({ block: "nearest" });
     }
@@ -149,7 +162,7 @@
       open = { sel, list, items, active: -1, byKey };
       sel.classList.add("fc-open");
       sel.setAttribute("aria-expanded", "true");
-      if (list.id) sel.setAttribute("aria-controls", list.id);
+      sel.setAttribute("aria-controls", list.id);
       place();
       const cur = items.findIndex((x) => x.option.selected);
       activate(cur >= 0 ? cur : step(items, -1, 1));
@@ -167,6 +180,7 @@
       if (!open) return;
       const { sel, list } = open;
       open = null;
+      typed = ""; typedAt = 0;   // type-to-find starts afresh in the next list
       list.remove();
       sel.classList.remove("fc-open");
       sel.setAttribute("aria-expanded", "false");
@@ -175,17 +189,18 @@
     /** Choose item `i`: select its option, fire input + change when it changed, then close the list. */
     function pick(i) {
       if (!open) return;
-      const { sel, items, byKey } = open;
+      const { sel, items } = open;
       const it = items[i];
       close();
-      if (!it || it.disabled || !sel.isConnected) return;
+      // re-checked now: code may have disabled the option while the list was open
+      const off = (o) => o.disabled || (o.parentNode && o.parentNode.tagName === "OPTGROUP" && o.parentNode.disabled);
+      if (!it || it.disabled || off(it.option) || !sel.isConnected) return;
       if (!it.option.selected) {
         it.option.selected = true;
         sel.dispatchEvent(new Event("input", { bubbles: true }));
         sel.dispatchEvent(new Event("change", { bubbles: true }));
       }
-      // picked with the keys outside a dialog: hand the keys back to the editor (focus.js)
-      if (byKey && doc.activeElement === sel && win.FableCutFocus) win.FableCutFocus.release(sel);
+      // a keyboard pick keeps focus on the select (Space / ↓ reopen it); a mouse pick never took it
     }
 
     // Mouse: open the list without focusing the select (and without the native popup).
@@ -217,8 +232,8 @@
         else if (k === "ArrowUp") activate(step(items, open.active, -1));
         else if (k === "Home") activate(step(items, -1, 1));
         else if (k === "End") activate(step(items, items.length, -1));
-        else if (k === "PageDown") activate(Math.min(items.length - 1, open.active + PAGE));
-        else if (k === "PageUp") activate(Math.max(0, open.active - PAGE));
+        else if (k === "PageDown") activate(pageStep(items, open.active, 1, PAGE));
+        else if (k === "PageUp") activate(pageStep(items, open.active, -1, PAGE));
         else if (k === "Enter" || (k === " " && Date.now() - typedAt > 700)) pick(open.active);
         else if (k.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
           const now = Date.now();
@@ -232,6 +247,8 @@
       }
       const sel = e.target;
       if (!isThemed(sel) || sel.disabled || e.ctrlKey || e.metaKey) return;
+      // focus.js may have just let go of it (an arrow after a mouse-opened list closed): the key is the editor's
+      if (doc.activeElement !== sel) return;
       const k = e.key;
       // a select still focused from a mouse click (its list closed without a pick): Space plays (focus.js)
       if (k === " " && win.FableCutFocus && win.FableCutFocus.spaceShouldPlay(sel)) return;
@@ -245,7 +262,9 @@
     win.addEventListener("wheel", outside, { capture: true, passive: true });
     win.addEventListener("resize", () => { if (open) open.sel.isConnected ? place() : close(); });
     win.addEventListener("blur", close);
+    // focus moved somewhere else (code focusing a text field, say): the list mustn't keep the keys
+    doc.addEventListener("focusin", (e) => { if (open && e.target !== open.sel && !open.list.contains(e.target)) close(); }, true);
   }
 
-  return { isThemed, optionText, rows, step, findMatch, placement, install };
+  return { isThemed, optionText, rows, step, pageStep, findMatch, placement, install };
 });
