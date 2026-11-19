@@ -117,3 +117,36 @@ test("refusals: a bad style, a locked caption, a missing file", async (t) => {
   const file = out.text.match(/to (.+\.srt) /)[1];
   assert.equal((fs.readFileSync(file, "utf8").match(/-->/g) || []).length, 3, "only the captions that show");
 });
+
+test("M1 styles via MCP: clean, bold, and editorial editable scenes with SRT round-trip", async (t) => {
+  const { dir, mcp } = await boot(t);
+
+  const clean = await mcp.callTool("fablecut_captions", { style: "clean" });
+  assert.equal(clean.isError, false, clean.text);
+  assert.match(clean.text, /Clean/);
+  assert.ok(caps(dir).every((c) => c.props.captionStyle === "clean" && c.props.wordTimesEstimated == null));
+
+  const bold = await mcp.callTool("fablecut_captions", { style: "bold" });
+  assert.equal(bold.isError, false, bold.text);
+  assert.match(bold.text, /Bold kinetic/);
+  assert.ok(caps(dir).every((c) => c.props.captionStyle === "bold"));
+
+  const ed = await mcp.callTool("fablecut_captions", { style: "editorial" });
+  assert.equal(ed.isError, false, ed.text);
+  assert.match(ed.text, /Editorial mixed/);
+  assert.match(ed.text, /across \d+ editable clips/);
+  const edClips = caps(dir);
+  assert.ok(edClips.length > 3, "editorial splits multi-word cues into editable layers");
+  assert.ok(edClips.some((c) => c.props.captionRole === "hero" && c.props.font === "Archivo Black"));
+
+  // Exporting SRT from multi-clip editorial scenes produces clean merged cues (not duplicated per layer)
+  const srt = await mcp.callTool("fablecut_captions", { export: "srt" });
+  assert.equal(srt.isError, false, srt.text);
+  const file = srt.text.match(/to (.+\.srt) /)[1];
+  assert.equal((fs.readFileSync(file, "utf8").match(/-->/g) || []).length, 3, "3 merged cues in SRT");
+
+  // Importing SRT marks wordTimesEstimated: true
+  const imp = await mcp.callTool("fablecut_captions", { import: file, style: "clean" });
+  assert.equal(imp.isError, false, imp.text);
+  assert.ok(caps(dir).every((c) => c.props.wordTimesEstimated === true), "imported SRT marks wordTimes as estimated");
+});

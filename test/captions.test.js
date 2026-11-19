@@ -129,3 +129,47 @@ test("fromClips leaves out captions on a disabled track", () => {
   assert.equal(C.fromClips(clips).length, 2);
 });
 
+test("M1 motion caption styles: clean, bold, editorial and wordTimesEstimated flag", () => {
+  assert.equal(C.style("clean"), "clean");
+  assert.equal(C.style("bold"), "bold");
+  assert.equal(C.style("editorial"), "editorial");
+
+  const exactCue = {
+    start: 1.0, end: 3.0, text: "Twoje SŁOWA w ruchu.",
+    words: [{ w: "Twoje", s: 1.0, e: 1.4 }, { w: "SŁOWA", s: 1.5, e: 2.0 }, { w: "w", s: 2.0, e: 2.2 }, { w: "ruchu.", s: 2.2, e: 2.8 }],
+  };
+  const cleanClip = C.clip(exactCue, { style: "clean", width: 1080, height: 1920, track: "V2" });
+  assert.equal(cleanClip.props.captionStyle, "clean");
+  assert.equal(cleanClip.props.font, "Inter");
+  assert.equal(cleanClip.props.wordTimesEstimated, undefined, "exact transcript words are not marked estimated");
+
+  const srtCue = { start: 1.0, end: 3.0, text: "Imported line" };
+  const srtClip = C.clip(srtCue, { style: "bold", width: 1080, height: 1920, track: "V2" });
+  assert.equal(srtClip.props.captionStyle, "bold");
+  assert.equal(srtClip.props.wordTimesEstimated, true, "SRT import marks wordTimes as estimated");
+});
+
+test("editorial sceneClips splits into editable mixed-type layers and merges cleanly in fromClips", () => {
+  const cue = {
+    start: 6.0, end: 8.8, text: "Twoje SŁOWA w ruchu.",
+    words: [{ w: "Twoje", s: 6.0, e: 6.6 }, { w: "SŁOWA", s: 6.7, e: 7.5 }, { w: "w", s: 7.5, e: 7.8 }, { w: "ruchu.", s: 7.8, e: 8.6 }],
+  };
+  const layers = C.sceneClips(cue, { style: "editorial", width: 1080, height: 1920, track: "V2", sceneId: "cs_ed_1" });
+  assert.equal(layers.length, 3, "lead + hero + tail");
+  assert.deepEqual(layers.map((c) => c.props.captionRole), ["lead", "hero", "tail"]);
+  assert.deepEqual(layers.map((c) => c.props.text), ["Twoje", "SŁOWA", "w ruchu."]);
+  assert.equal(layers[0].props.italic, true);
+  assert.equal(layers[1].props.font, "Archivo Black");
+  assert.equal(layers[1].props.color, "#e5bc70");
+  assert.equal(layers[1].start, 6.7, "hero enters when spoken");
+  assert.ok(layers[0].props.y < layers[1].props.y && layers[1].props.y < layers[2].props.y, "stacked vertically without overlap");
+  assert.ok(layers.every((c) => c.props.captionSceneId === "cs_ed_1" && c.props.caption === true));
+
+  // fromClips re-merges the editorial scene into a single SRT/VTT cue
+  const merged = C.fromClips(layers);
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].text, "Twoje SŁOWA w ruchu.");
+  assert.equal(merged[0].start, 6.0);
+  assert.equal(merged[0].end, 8.8);
+});
+

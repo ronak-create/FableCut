@@ -1,8 +1,8 @@
 # Motion Captions Studio
 
-AI Evolution Polska development fork of FableCut (MIT). Stage: foundation audit.
+AI Evolution Polska development fork of FableCut (MIT). Stage: **M1 — Editable Motion Caption Styles & Scenes** (`clean`, `bold`, `editorial` mixed-type, shared across GUI & MCP).
 
-[Project plan](docs/PLAN.md) | [Setup](docs/MOTION_CAPTIONS.md) | [Verified results and limitations](docs/M0_AUDIT.md)
+[Project plan](docs/PLAN.md) | [Setup & M1 fixture](docs/MOTION_CAPTIONS.md) | [M0 audit & limitations](docs/M0_AUDIT.md)
 
 The original FableCut documentation follows. Upstream authorship and license are preserved.
 

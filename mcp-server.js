@@ -361,11 +361,11 @@ const TOOLS = [
   },
   {
     name: "fablecut_captions",
-    description: "Captions from what is said: makes caption clips on the timeline from the clips' transcripts (transcribing first when there is none, like fablecut_transcribe), each one a text clip with `wordTimes` so its words follow the speech. Captions are cut at pauses and sentences, one or two lines as wide as the canvas allows. Styles: subtitle (plain, on a dark bar), karaoke (words light up as they are said), highlight (bold, the word being said in a colour — the reel look), pop (one to three big words at a time, each popping in). They go on the lane captions are already on, else the top video lane, else a new lane above it, and replace the captions there (replace:false keeps them). export:\"srt\"|\"vtt\" writes the timeline's captions to a subtitle file in exports/; import: a path to an SRT / WebVTT file (or its text) places its captions instead of the transcript's. remove:true deletes the captions. Captions are text clips: restyle them with updateClip, and make them after the cutting is done (a cut through a caption doesn't re-time its words — run this again). The same as the Transcript tab's Captions row.",
+    description: "Captions from what is said: makes caption clips on the timeline from the clips' transcripts (transcribing first when there is none, like fablecut_transcribe), each one a text clip with `wordTimes` so its words follow the speech. Captions are cut at pauses and sentences, one or two lines as wide as the canvas allows. Styles: subtitle (plain, on a dark bar), karaoke (words light up as they are said), highlight (bold, the word being said in a colour — the reel look), pop (one to three big words at a time, each popping in), clean (minimal modern Inter typography with rise-mask), bold (high-impact uppercase kinetic short-form captions), editorial (editable mixed-type caption scenes: italic serif lead/tail + bold display hero word, linked via captionSceneId and still individually editable). They go on the lane captions are already on, else the top video lane, else a new lane above it, and replace the captions there (replace:false keeps them). export:\"srt\"|\"vtt\" writes the timeline's captions to a subtitle file in exports/; import: a path to an SRT / WebVTT file (or its text) places its captions instead of the transcript's (marking wordTimesEstimated:true since SRT lacks word-level timing). remove:true deletes the captions. Captions are text clips: restyle them with updateClip, and make them after the cutting is done (a cut through a caption doesn't re-time its words — run this again). The same as the Transcript tab's Captions row.",
     inputSchema: {
       type: "object",
       properties: {
-        style: { type: "string", enum: ["subtitle", "karaoke", "highlight", "pop"], description: "The look (default subtitle)" },
+        style: { type: "string", enum: ["subtitle", "karaoke", "highlight", "pop", "clean", "bold", "editorial"], description: "The look (default subtitle)" },
         clipIds: { type: "array", items: { type: "string" }, description: "Caption only these clips' speech (default: every clip with sound)" },
         from: { type: "number", description: "Only speech from this time on (timeline seconds)" },
         to: { type: "number", description: "Only speech before this time" },
@@ -1115,16 +1115,20 @@ async function captionsTool(args) {
   if (args.track && !(proj.tracks || C.DEFAULT_TRACKS).some((t) => t.id === lane.track)) lane.add = true;
   if (Array.isArray(proj.lockedTracks) && proj.lockedTracks.includes(lane.track) && args.force !== true) throw new Error(`${lane.track} is locked — pick another track, or unlock it`);
   if (lane.add) proj.tracks = [{ id: lane.track, kind: "video" }, ...(Array.isArray(proj.tracks) && proj.tracks.length ? proj.tracks : C.DEFAULT_TRACKS)];
+  const generated = list.flatMap((cue, idx) =>
+    C.sceneClips(cue, { style: st, width: proj.width, height: proj.height, track: lane.track, scale: args.size, sceneId: `cs_${readRev + 1}_${idx}` })
+  );
   const ops = [
     ...old.map((c) => ({ op: "removeClip", id: c.id, ...(args.force === true ? { force: true } : {}) })),
-    ...list.map((cue) => ({ op: "addClip", clip: C.clip(cue, { style: st, width: proj.width, height: proj.height, track: lane.track, scale: args.size }), ...(args.force === true ? { force: true } : {}) })),
+    ...generated.map((clip) => ({ op: "addClip", clip, ...(args.force === true ? { force: true } : {}) })),
   ];
   ProjectOps.applyPatch(proj, ops, { savedItems });
   proj.revision = readRev + 1;
   writeProject(proj);
   lastReadRevision = proj.revision;
   const sample = list.slice(0, 3).map((c) => `  [${fmtClock(c.start)}] ${c.text.replace(/\n/g, " / ")}`);
-  return note + `Added ${list.length} caption${list.length === 1 ? "" : "s"} (${C.STYLES[st].label}, ${m.fontSize} px) on ${lane.track}${lane.add ? " (a new lane)" : ""}, ${fmtClock(from)} → ${fmtClock(to)}` +
+  const clipNote = generated.length !== list.length ? ` across ${generated.length} editable clips` : "";
+  return note + `Added ${list.length} caption${list.length === 1 ? "" : "s"}${clipNote} (${C.STYLES[st].label}, ${m.fontSize} px) on ${lane.track}${lane.add ? " (a new lane)" : ""}, ${fmtClock(from)} → ${fmtClock(to)}` +
     (old.length ? `, replacing ${old.length}` : "") + ` (revision ${proj.revision}). UI hot-reloaded.\n` + sample.join("\n") +
     (list.length > 3 ? `\n  … ${list.length - 3} more` : "") + "\nfablecut_frame {time} shows how one looks; export:\"srt\" writes a subtitle file.";
 }

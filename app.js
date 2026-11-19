@@ -9089,7 +9089,7 @@ function buildTranscriptPage() {
       </div>
       <div class="tr-row">
         <span class="tr-lbl">Captions</span>
-        <select data-tr-cap-style title="The look: subtitle on a dark bar, karaoke (words light up as said), highlight (the word being said in colour), word pop (a few big words at a time)">${Object.entries(FableCutCaptions.STYLES).map(([k, st]) =>
+        <select data-tr-cap-style title="The look: subtitle, karaoke, highlight, word pop, clean (minimal Inter), bold kinetic (impact short-form), or editorial mixed (multi-layer serif + display hero)">${Object.entries(FableCutCaptions.STYLES).map(([k, st]) =>
           `<option value="${k}" ${k === (set.captionStyle || FableCutCaptions.DEFAULT_STYLE) ? "selected" : ""}>${st.label}</option>`).join("")}</select>
         <button type="button" class="btn tiny" data-tr-cap-add title="Make captions from these words, timed word by word, on a video lane above the edit (replaces the captions there; one undo step)">Add captions</button>
         <button type="button" class="btn tiny" data-tr-cap-file="srt" title="Download the timeline's captions as a SubRip file">SRT</button>
@@ -9367,13 +9367,21 @@ function placeCaptions(list, styleKey, from) {
   project.clips = project.clips.filter((c) => !oldIds.has(c.id));
   for (const id of oldIds) state.selIds.delete(id);
   if (oldIds.has(state.selId)) state.selId = null;
-  for (const cue of list) project.clips.push({ ...C.clip(cue, { style: styleKey, width: project.width, height: project.height, track }), id: "c_" + uid() });
+  let added = 0;
+  list.forEach((cue, idx) => {
+    const sceneId = `cs_${Date.now()}_${idx}`;
+    for (const clip of C.sceneClips(cue, { style: styleKey, width: project.width, height: project.height, track, sceneId })) {
+      project.clips.push({ ...clip, id: "c_" + uid() });
+      added++;
+    }
+  });
   pushUndo(snap);
   pruneSelection();
   state.dirtyTimeline = true;
   scheduleSave();
   renderInspector();
-  toast(`${list.length} caption${list.length === 1 ? "" : "s"} on ${track}${from ? " " + from : ""}${old.length ? ` · replaced ${old.length}` : ""}`);
+  const extra = added !== list.length ? ` (${added} editable clips)` : "";
+  toast(`${list.length} caption${list.length === 1 ? "" : "s"}${extra} on ${track}${from ? " " + from : ""}${old.length ? ` · replaced ${old.length}` : ""}`);
 }
 /** A cut, split or trim that shortens a caption leaves its words timed to the old cut: say so, for a moment. */
 const capWatch = { durs: null, at: 0, said: 0 };

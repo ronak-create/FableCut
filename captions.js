@@ -36,6 +36,20 @@
       label: "Word pop", lines: 1, size: 0.085, y: 0.18, maxDur: 2, words: 3, glyph: 0.55,
       props: { font: "Anton", color: "#ffffff", uppercase: true, strokeWidth: 10, strokeColor: "#000000", textShadow: 14, textAnim: "word-pop" },
     },
+    clean: {
+      label: "Clean", lines: 2, size: 0.052, y: 0.28, maxDur: 4, words: 7, glyph: 0.56,
+      props: { font: "Inter", weight: 600, color: "#f8fafc", textShadow: 14, textAnim: "rise-mask" },
+    },
+    bold: {
+      label: "Bold kinetic", lines: 1, size: 0.088, y: 0.14, maxDur: 2.2, words: 3, glyph: 0.72,
+      props: { font: "Archivo Black", color: "#ffffff", highlightColor: "#ffd166", uppercase: true, strokeWidth: 8, strokeColor: "#111318", textShadow: 14, textAnim: "word-pop" },
+    },
+    editorial: {
+      label: "Editorial mixed", lines: 2, size: 0.068, y: 0.12, maxDur: 3.5, words: 5, glyph: 0.62, scene: "editorial",
+      props: { font: "Playfair Display", italic: true, weight: 500, color: "#f3eee5", textShadow: 12, textAnim: "rise-mask" },
+      heroProps: { font: "Archivo Black", italic: false, weight: 900, uppercase: true, color: "#e5bc70", strokeWidth: 6, strokeColor: "#111318", textShadow: 14, textAnim: "zoom-in" },
+      tailProps: { font: "Playfair Display", italic: true, weight: 500, color: "#f3eee5", textShadow: 12, textAnim: "word-slide" },
+    },
   };
   const DEFAULT_STYLE = "subtitle";
   /** An average glyph's width as a fraction of the font size, when a style doesn't give its own. */
@@ -136,6 +150,12 @@
     });
   }
 
+  /** True when the cue carries exact per-word speech timestamps (e.g. Whisper), false for SRT/VTT estimates. */
+  function hasExactWordTimes(cue) {
+    const ws = String(cue && cue.text || "").split(/\s+/).filter(Boolean);
+    return !!(cue && Array.isArray(cue.words) && cue.words.length === ws.length && ws.length > 0);
+  }
+
   /** Each word's [start, end], seconds from the cue's start: from the words when they are
    *  there (a transcript), else spread over the cue by length (a subtitle file). */
   function wordTimes(cue) {
@@ -148,23 +168,130 @@
     return ws.map((w, i) => { const a = t; t += dur * weight[i] / total; return [r4(a), r4(t)]; });
   }
 
+  const STOP_WORDS = new Set([
+    "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "in", "is", "it", "of", "on", "or", "that", "the", "to", "with",
+    "i", "w", "z", "na", "do", "od", "po", "za", "ze", "o", "u", "a", "ale", "lub", "czy", "to", "ten", "ta", "te", "sie", "się", "jest", "jak", "nie",
+  ]);
+
+  /** Pick the most impactful word index for editorial mixed-type emphasis (PL/EN friendly). */
+  function pickHeroWordIndex(words) {
+    if (!Array.isArray(words) || words.length <= 1) return 0;
+    let bestIdx = 0, bestScore = -1;
+    for (let i = 0; i < words.length; i++) {
+      const raw = String(words[i] || "");
+      const clean = raw.replace(/[^\p{L}\p{N}]/gu, "");
+      if (!clean) continue;
+      const isAllCaps = clean.length >= 2 && clean === clean.toUpperCase() && clean !== clean.toLowerCase();
+      const isStop = STOP_WORDS.has(clean.toLowerCase());
+      const score = clean.length + (isAllCaps ? 8 : 0) + (isStop ? -4 : 2) + (i === words.length - 1 ? 0.25 : 0);
+      if (score >= bestScore) { bestScore = score; bestIdx = i; }
+    }
+    return bestIdx;
+  }
+
   /** A caption clip (for addClip) for a cue: the style on this canvas, `y` placed by the style. */
   function clip(cue, { style: st, width, height, track, id, scale } = {}) {
     const k = style(st), S = STYLES[k], m = metrics(k, width || 1920, height || 1080, { scale });
+    const estimated = !hasExactWordTimes(cue);
     const props = Object.assign({}, S.props, {
       text: cue.text, fontSize: m.fontSize, y: Math.round((height || 1080) * S.y),
       wordTimes: wordTimes(cue), caption: true, captionStyle: k,
+      ...(estimated ? { wordTimesEstimated: true } : {}),
     });
     return { ...(id ? { id } : {}), kind: "text", mediaId: null, track: track || "V2", start: r4(cue.start), duration: r4(cue.end - cue.start), name: "Caption", props };
   }
 
+  /** Editable caption scene clip(s) for a cue. Single-clip styles return [clip(...)];
+   *  `editorial` splits a cue into editable mixed-type layers (lead serif, hero display, tail serif)
+   *  bound by `captionSceneId` so both GUI and MCP produce the exact same editable timeline clips. */
+  function sceneClips(cue, opts = {}) {
+    const k = style(opts.style), S = STYLES[k];
+    if (S.scene !== "editorial") return [clip(cue, opts)];
+    const w = opts.width || 1920, h = opts.height || 1080, track = opts.track || "V2";
+    const m = metrics(k, w, h, { scale: opts.scale });
+    const words = String(cue.text || "").split(/\s+/).filter(Boolean);
+    if (!words.length) return [];
+    const wt = wordTimes(cue);
+    const estimated = !hasExactWordTimes(cue);
+    const sceneId = opts.sceneId || `cs_${Math.round((+cue.start || 0) * 1000)}_${words.length}`;
+    const heroIdx = pickHeroWordIndex(words);
+    const segments = [];
+    if (heroIdx > 0) segments.push({ role: "lead", words: words.slice(0, heroIdx), from: 0, to: heroIdx });
+    segments.push({ role: "hero", words: [words[heroIdx]], from: heroIdx, to: heroIdx + 1 });
+    if (heroIdx + 1 < words.length) segments.push({ role: "tail", words: words.slice(heroIdx + 1), from: heroIdx + 1, to: words.length });
+
+    const baseY = Math.round(h * S.y);
+    const heroSize = Math.round(m.fontSize * 1.4);
+    const step = Math.round(m.fontSize * 1.5);
+    const centerIdx = (segments.length - 1) / 2;
+    const cueEnd = r4(cue.end);
+
+    return segments.map((seg, idx) => {
+      const firstRel = wt[seg.from] ? wt[seg.from][0] : 0;
+      const segStart = idx === 0 ? r4(cue.start) : r4(Math.min(cueEnd - 0.05, Math.max(cue.start, cue.start + firstRel)));
+      const segDur = r4(Math.max(0.05, cueEnd - segStart));
+      const shift = segStart - cue.start;
+      const segWordTimes = wt.slice(seg.from, seg.to).map(([a, b]) => [
+        r4(Math.max(0, a - shift)),
+        r4(Math.min(segDur, Math.max(0, b - shift))),
+      ]);
+      const roleProps = seg.role === "hero" ? S.heroProps : (seg.role === "tail" ? S.tailProps : S.props);
+      const fontSize = seg.role === "hero" ? heroSize : m.fontSize;
+      const y = Math.round(baseY + (idx - centerIdx) * step);
+      const text = seg.words.join(" ");
+      const id = opts.id ? `${opts.id}_${seg.role}` : undefined;
+      return {
+        ...(id ? { id } : {}),
+        kind: "text",
+        mediaId: null,
+        track,
+        start: segStart,
+        duration: segDur,
+        name: `Caption (${seg.role})`,
+        props: Object.assign({}, roleProps, {
+          text,
+          fontSize,
+          y,
+          wordTimes: segWordTimes,
+          caption: true,
+          captionStyle: k,
+          captionSceneId: sceneId,
+          captionRole: seg.role,
+          captionSceneOrder: idx,
+          captionSceneText: String(cue.text || "").replace(/\s+/g, " ").trim(),
+          ...(estimated ? { wordTimesEstimated: true } : {}),
+        }),
+      };
+    });
+  }
+
   /** Cues of the caption clips in a clip list (props.caption), in time order — the ones that show:
-   *  not disabled, and not on a track in `disabledTracks`. */
+   *  not disabled, and not on a track in `disabledTracks`. Multi-clip scenes sharing a `captionSceneId`
+   *  are merged back into a single cue so SRT/VTT exports stay clean. */
   function fromClips(clips, disabledTracks = []) {
     const off = new Set(disabledTracks || []);
-    return (clips || []).filter((c) => c && c.kind === "text" && c.props && c.props.caption === true && c.disabled !== true && !off.has(c.track))
-      .map((c) => ({ start: +c.start || 0, end: (+c.start || 0) + (+c.duration || 0), text: String(c.props.text || "") }))
-      .filter((c) => c.text.trim() && c.end > c.start).sort((a, b) => a.start - b.start);
+    const visible = (clips || []).filter((c) => c && c.kind === "text" && c.props && c.props.caption === true && c.disabled !== true && !off.has(c.track));
+    const scenes = new Map();
+    const out = [];
+    for (const c of visible) {
+      const start = +c.start || 0, end = start + (+c.duration || 0), text = String(c.props.text || "");
+      if (!text.trim() || !(end > start)) continue;
+      const sid = c.props.captionSceneId;
+      if (sid) {
+        let g = scenes.get(sid);
+        if (!g) { g = { start, end, parts: [] }; scenes.set(sid, g); }
+        g.start = Math.min(g.start, start);
+        g.end = Math.max(g.end, end);
+        g.parts.push({ order: c.props.captionSceneOrder != null ? +c.props.captionSceneOrder : g.parts.length, text: text.trim() });
+      } else {
+        out.push({ start, end, text });
+      }
+    }
+    for (const g of scenes.values()) {
+      g.parts.sort((a, b) => a.order - b.order);
+      out.push({ start: g.start, end: g.end, text: g.parts.map((p) => p.text).join(" ") });
+    }
+    return out.sort((a, b) => a.start - b.start);
   }
 
   function stamp(t, sep) {
@@ -223,5 +350,5 @@
     return { track: "V" + n, add: true };
   }
 
-  return { STYLES, DEFAULT_STYLE, DEFAULT_TRACKS, style, metrics, wrap, fit, cues, wordTimes, clip, fromClips, toSRT, toVTT, parse, readStamp, isCaption, trackFor };
+  return { STYLES, DEFAULT_STYLE, DEFAULT_TRACKS, style, metrics, wrap, fit, cues, hasExactWordTimes, wordTimes, pickHeroWordIndex, clip, sceneClips, fromClips, toSRT, toVTT, parse, readStamp, isCaption, trackFor };
 });

@@ -2,11 +2,17 @@
 
 Development based on FableCut (MIT). Upstream commit: 579b08ec1a789baec5cbf06d7430373460508d09.
 
-See PLAN.md for milestones. Current stage: M0 foundation audit, not a finished product.
+See PLAN.md for milestones. Current stage: M1 caption styles & editable scenes (`clean`, `bold`, `editorial`).
 
 Local test data is kept in ../local-data, outside this repository. Never publish source clips, masks, credentials or exports.
 
-## Prepare the test project
+## Prepare a clean M1 fixture (no external video needed)
+
+`node scripts/prepare-m1.cjs` (pass `--force` to overwrite an existing `../local-data/project.json`)
+
+Generates a clean 9-second 1080×1920/30 fps vertical video with audio via FFmpeg and seeds three editable caption scenes (`clean`, `bold`, `editorial` mixed-type) on `V2`.
+
+## Prepare the M0 reference fixture
 
 `node scripts/prepare-m0.cjs <absolute-path-to-reference-video>`
 
