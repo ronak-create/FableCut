@@ -16611,7 +16611,11 @@ async function openExportSetup() {
         }
         // the delivery as last exported (its size, codec…), even when the project pins the same preset
         const lastDlv = getSetting("delivery");
-        if (choice.startsWith("d:") && lastDlv?.preset === choice.slice(2)) dlvSpec = normalizeDelivery(lastDlv).spec;
+        if (choice.startsWith("d:") && lastDlv?.preset === choice.slice(2)) {
+          dlvSpec = normalizeDelivery(lastDlv).spec;
+          fillDeliveryControls();   // the dialog, if it opens, shows what Render will write
+          refreshDeliveryNotes();
+        }
       }
       if (radio) { els.engineFast.checked = radio === els.engineFast && !radio.disabled; els.engineRealtime.checked = radio === els.engineRealtime && !radio.disabled; }
       // the range counted in frames of what will be written (a delivery may have its own frame rate)
@@ -17963,6 +17967,9 @@ async function runExportJob(ticket) {
   for (let i = 0; i < 150 && ticket.revision != null && (project.revision || 0) < ticket.revision; i++)
     await new Promise((r) => setTimeout(r, 100));
   if (ticket.revision != null && (project.revision || 0) < ticket.revision) await syncFromServer();
+  // a ticket that waited here while the tab switched projects must not render the other one
+  if (ticket.project && runtime.projectId && ticket.project !== runtime.projectId && ticket.kind !== "transcribe")
+    return fail("another project was opened before this job could start — open the project again and retry");
   if (ticket.kind === "scopes") return runScopesJob(ticket, fail);
   if (ticket.kind === "track") return runTrackJob(ticket, fail);
   if (ticket.kind === "transcribe") return runTranscribeJob(ticket, fail);

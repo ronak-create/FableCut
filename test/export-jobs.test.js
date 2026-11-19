@@ -140,6 +140,7 @@ test("an export request's name reaches the tab's ticket; only the name — the p
   assert.equal(ticket.name, "salon promo");
   assert.equal(ticket.profile, "hq");
   assert.equal(ticket.delivery, null, "no delivery invented for the name");
+  assert.ok("project" in ticket, "the ticket names the project it was asked for (the tab refuses another)");
   await fetch(base + "/api/export/job/cancel?id=" + r.body.id, { method: "POST" });
 });
 
