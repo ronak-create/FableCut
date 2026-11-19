@@ -30,6 +30,7 @@ test("rows: optgroups become headings, hidden options are left out, a disabled g
     opt("secret", { hidden: true }),
     group("Kind", [opt("Video"), opt("Audio", { disabled: true })]),
     group("Tags", [opt("#day 1")], { disabled: true }),
+    group("Old", [opt("gone")], { hidden: true }),
   ]);
   const r = S.rows(sel);
   assert.deepEqual(r.map((x) => x.group !== undefined ? `[${x.group}]` : S.optionText(x.option) + (x.disabled ? " (off)" : "")),
@@ -49,6 +50,16 @@ test("arrow keys step over disabled options and stop at the ends", () => {
   assert.equal(S.step(items, 2, -1), 0);
   assert.equal(S.step(items, -1, 1), 0, "Home");
   assert.equal(S.step(items, items.length, -1), 2, "End");
+});
+
+test("PageUp / PageDown land on an enabled row", () => {
+  const d = (...off) => Array.from({ length: 12 }, (_, i) => ({ disabled: off.includes(i) }));
+  assert.equal(S.pageStep(d(), 0, 1, 8), 8);
+  assert.equal(S.pageStep(d(8), 0, 1, 8), 9, "disabled landing row: the next one on");
+  assert.equal(S.pageStep(d(8, 9, 10, 11), 0, 1, 8), 7, "none on: the nearest one back");
+  assert.equal(S.pageStep(d(0), 9, -1, 8), 1);
+  assert.equal(S.pageStep(d(0), 3, -1, 8), 1, "clamped to the top, which is disabled");
+  assert.equal(S.pageStep(d(0, 1, 2), 3, -1, 8), 3, "nothing enabled that way: stay");
 });
 
 test("type-to-find wraps around and skips disabled options", () => {

@@ -110,9 +110,19 @@ const FILTER_PRESETS = {
 };
 const SYSTEM_FONTS = ["Segoe UI", "Arial", "Georgia", "Impact", "Courier New",
   "Trebuchet MS", "Verdana", "Times New Roman", "Comic Sans MS", "Consolas"];
-const GOOGLE_FONTS = ["Anton", "Archivo Black", "Abril Fatface", "Barlow", "Bebas Neue",
-  "Caveat", "Inter", "Lobster", "Montserrat", "Oswald", "Pacifico", "Permanent Marker",
-  "Playfair Display", "Poppins", "Roboto", "Roboto Condensed", "Teko"];
+/* Google fonts offered in the font picker, by look. Any other Google Font loads by name too. */
+const GOOGLE_FONT_GROUPS = {
+  Display: ["Anton", "Archivo Black", "Bebas Neue", "Bangers", "Bungee", "Oswald", "Teko", "Russo One",
+    "Alfa Slab One", "Black Ops One", "Righteous", "Fjalla One", "Unbounded", "Syne"],
+  Sans: ["Inter", "Montserrat", "Poppins", "Roboto", "Roboto Condensed", "Barlow", "Lato", "Open Sans", "Raleway",
+    "Nunito", "Work Sans", "DM Sans", "Rubik", "Kanit", "Lexend", "Outfit", "Sora", "Space Grotesk", "Josefin Sans", "Fredoka"],
+  Serif: ["Playfair Display", "Abril Fatface", "Cinzel", "Cormorant Garamond", "Lora", "Merriweather",
+    "DM Serif Display", "Libre Baskerville", "Marcellus"],
+  "Script & hand": ["Caveat", "Pacifico", "Lobster", "Permanent Marker", "Dancing Script", "Great Vibes",
+    "Satisfy", "Shadows Into Light", "Kalam"],
+  "Retro & mono": ["Monoton", "Press Start 2P", "Special Elite", "Space Mono", "VT323", "Courier Prime"],
+};
+const GOOGLE_FONTS = Object.values(GOOGLE_FONT_GROUPS).flat();
 
 /* ── Title styles: cohesive one-tap looks. Each bundles a DIFFERENT font,
    placement and animation, so titles vary instead of all looking basic.
@@ -121,7 +131,7 @@ const FONT_CUT_DEFAULT = ["Anton", "Bebas Neue", "Archivo Black", "Oswald", "Imp
 const STYLE_RESET = {   // decorative props a style owns; reset before applying
   color2: "", glow: 0, glowColor: "", strokeWidth: 0, bgColor: "#000000", bgOpacity: 0,
   rotation: 0, letterSpacing: 0, uppercase: false, italic: false, textShadow: 12,
-  fontCutSet: undefined, align: "center",
+  fontCutSet: undefined, align: "center", weight: 0, strokeColor: "#000000", highlightColor: "#ffd166",
 };
 const TITLE_STYLES = {
   plain: { label: "Plain", place: "center", props: { font: "Segoe UI", fontSize: 72, bold: true, color: "#ffffff", textAnim: "none" } },
@@ -134,8 +144,20 @@ const TITLE_STYLES = {
   subtitle: { label: "Subtitle", place: "lower", props: { font: "Roboto", fontSize: 52, bold: false, color: "#ffffff", bgColor: "#000000", bgOpacity: 0.5, textAnim: "karaoke" } },
   boldRise: { label: "Bold rise", place: "lower", props: { font: "Archivo Black", fontSize: 92, bold: false, uppercase: true, color: "#ffffff", textAnim: "rise-mask" } },
   luxury: { label: "Luxury", place: "center", props: { font: "Cinzel", fontSize: 88, bold: false, uppercase: true, color: "#faf0dc", color2: "#c9a227", letterSpacing: 6, textAnim: "clip-reveal" } },
+  popOutline: { label: "Pop outline", place: "center", props: { font: "Montserrat", fontSize: 100, bold: false, weight: 900, uppercase: true, color: "#ffd166", strokeWidth: 6, strokeColor: "#111111", textShadow: 0, textAnim: "letter-pop" } },
+  boxed: { label: "Boxed", place: "lower", props: { font: "Inter", fontSize: 60, bold: false, weight: 800, color: "#111111", bgColor: "#ffffff", bgOpacity: 0.95, textShadow: 0, textAnim: "word-slide" } },
+  headline: { label: "Headline", place: "center", props: { font: "Montserrat", fontSize: 92, bold: false, weight: 900, uppercase: true, color: "#ffffff", highlightColor: "#ff4d6d", strokeWidth: 4, strokeColor: "#000000", textShadow: 0, textAnim: "highlight" } },
+  comic: { label: "Comic", place: "center", props: { font: "Bangers", fontSize: 112, bold: false, color: "#ffe14d", strokeWidth: 8, strokeColor: "#1a1a1a", rotation: -3, letterSpacing: 2, textShadow: 0, textAnim: "bounce" } },
+  typewriter: { label: "Typewriter", place: "lower-left", props: { font: "Special Elite", fontSize: 64, bold: false, color: "#f5f0e6", textShadow: 6, textAnim: "typewriter" } },
+  minimal: { label: "Minimal", place: "center", props: { font: "Inter", fontSize: 60, bold: false, weight: 300, uppercase: true, color: "#ffffff", letterSpacing: 12, textShadow: 0, textAnim: "rise-mask" } },
+  script: { label: "Script", place: "center", props: { font: "Great Vibes", fontSize: 120, bold: false, color: "#ffffff", color2: "#f9c5d1", textShadow: 10, textAnim: "clip-reveal" } },
+  retro: { label: "Retro", place: "center", props: { font: "Monoton", fontSize: 96, bold: false, uppercase: true, color: "#ff6ec7", glow: 40, glowColor: "#ff6ec7", textAnim: "letter-pop" } },
+  sticker: { label: "Sticker", place: "lower", props: { font: "Fredoka", fontSize: 80, bold: false, weight: 700, color: "#ffffff", bgColor: "#7b6cff", bgOpacity: 1, rotation: -2, textShadow: 0, textAnim: "word-pop" } },
+  glitch: { label: "Glitch", place: "center", props: { font: "Russo One", fontSize: 100, bold: false, uppercase: true, color: "#e8f9ff", glow: 30, glowColor: "#ff2e63", letterSpacing: 2, textAnim: "shake" } },
+  cinematic: { label: "Cinematic", place: "center", props: { font: "Cormorant Garamond", fontSize: 84, bold: false, weight: 500, uppercase: true, color: "#f2efe9", letterSpacing: 14, textShadow: 8, textAnim: "rise-mask" } },
 };
-const STYLE_CYCLE = ["impact", "elegant", "kinetic", "neon", "handwritten", "serifDrop", "boldRise", "luxury"];
+const STYLE_CYCLE = ["impact", "elegant", "kinetic", "neon", "handwritten", "serifDrop", "boldRise", "luxury",
+  "popOutline", "boxed", "comic", "typewriter", "script", "sticker", "cinematic"];
 const AUDIO_EXT = /\.(mp3|wav|ogg|m4a|aac|flac|mpeg)$/i;
 const VIDEO_EXT = /\.(mp4|webm|mov|mkv|m4v)$/i;
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|avif)$/i;
@@ -477,6 +499,9 @@ const DEFAULT_SETTINGS = {
   webCodecsBitrateMode: "variable", // "variable" | "constant"
   snapTargets: { clips: true, playhead: true, markers: true, inout: true, keyframes: false, frames: true },
   useProxies: true, // play proxies (when a file has one) while editing; export always reads the original
+  exportAsk: true, // Export opens its dialog (name + settings) first; false = render straight away
+  exportEngine: null, // "fast" | "second" — what the last export used ("Don't ask again" reuses it)
+  exportChoice: null, // the Export dialog's preset / profile last used ("d:<preset>" | "p:<profile>"), reused with it
 };
 let settings = { ...DEFAULT_SETTINGS };
 function loadSettings() {
@@ -1746,6 +1771,8 @@ async function syncFromServer(force) {
     // another project was opened (the dashboard, another tab, an agent)
     const pid = res.headers.get("X-FableCut-Project");
     const switched = !!(pid && runtime.projectId && pid !== runtime.projectId);
+    if (switched && runtime.jobHold) { runtime.pendingSync = true; return false; }   // an agent's job is rendering this project
+    if (pid && pid !== runtime.projectId && cmdk.pid && cmdkOpen()) closeCmdk(false);   // its results were for the other project
     if (pid) runtime.projectId = pid;
     if (switched) {
       onProjectSwitched();
@@ -3419,7 +3446,7 @@ function pjNewHtml() {
 async function pjOpenProject(id) {
   const p = pj.list.find((x) => x.id === id);
   if (!p || p.active || pj.busy) return;
-  if (state.exporting) { toast("Wait for the export to finish before switching projects"); return; }
+  if (exportBusy()) { toast("Wait for the export to finish before switching projects"); return; }
   pj.busy = true;
   try {
     if (!(await flushSaveBeforeSwitch())) return;
@@ -3441,7 +3468,7 @@ async function pjAction(act, btn) {
   if (act === "new-cancel") { pj.mode = "detail"; renderProjects(); return; }
   if (act === "new-create") {
     if (pj.busy) return;
-    if (state.exporting) { toast("Wait for the export to finish before switching projects"); return; }
+    if (exportBusy()) { toast("Wait for the export to finish before switching projects"); return; }
     const name = ($("pjNewName")?.value || "").trim() || "Untitled Project";
     const fps = $("pjNewFps")?.value;
     pj.busy = true;
@@ -3618,7 +3645,7 @@ async function pjVersionRun(act, btn) {
       setTimeout(() => { if (btn.isConnected) { btn.dataset.armed = ""; btn.textContent = "Restore…"; } }, 3000);
       return;
     }
-    if (p.active && state.exporting) { toast("Wait for the export to finish before restoring"); return; }
+    if (p.active && exportBusy()) { toast("Wait for the export to finish before restoring"); return; }
     if (p.active && !(await flushSaveForVersion("nothing was restored"))) return;
     const out = await post({ action: "restore", version: v });
     if (!out) return;
@@ -6847,7 +6874,8 @@ function renderInspector(lite) {
       ${row("Family", `<select data-k="font">
         ${fontGroup("System", SYSTEM_FONTS)}
         ${fontGroup("Library fonts", runtime.customFonts)}
-        ${fontGroup("Google fonts", [...new Set([...GOOGLE_FONTS, ...runtime.googleLoaded])])}
+        ${Object.entries(GOOGLE_FONT_GROUPS).map(([g, list]) => fontGroup("Google · " + g, list)).join("")}
+        ${fontGroup("Google · loaded by name", [...runtime.googleLoaded].filter((f) => !GOOGLE_FONTS.includes(f)))}
         ${known.includes(p.font) ? "" : `<option selected>${p.font}</option>`}
       </select>`, "", "font")}
       ${row("Google font", `<input type="text" data-gfont placeholder="Type any Google Font name…">
@@ -8879,6 +8907,8 @@ function cutSilences() {
 const TRANSCRIBE_KEY = "fablecut-transcribe";
 const trState = { open: false, built: false, busy: null, sig: "", words: [], sel: null, anchor: null, drag: false, query: "", hits: [], now: -1 };
 const transcriptCache = new Map();   // src → validated transcript | false (none) | Promise while asking the server
+const transcriptHeld = new Map();    // src → the last transcript (or false) shown, kept while a refresh is pending
+const transcriptStale = new Set();   // srcs whose shown transcript the server hasn't confirmed (a failed read or save)
 let transcriptGen = 0;               // bumps whenever a transcript arrives or changes: the tab redraws
 function transcribeSettings() {
   let o = {};
@@ -8901,16 +8931,34 @@ function transcriptOf(src) {
 function loadTranscript(src, force = false) {
   const have = transcriptCache.get(src);
   if (!force && have !== undefined) return have instanceof Promise ? have : Promise.resolve(have);
-  const p = fetch("/api/transcript?src=" + encodeURIComponent(src)).then((r) => (r.ok ? r.json() : null))
+  return readTranscript(src).then((r) => r.doc);
+}
+/** One read from the server → {doc, ok}: ok only when this read answered (a transcript, or that
+   there is none) and no later read has replaced it. A read that fails (a server error, no network,
+   a document that doesn't validate) keeps what was shown, marked unconfirmed. */
+function readTranscript(src) {
+  let p = null;
+  const read = fetch("/api/transcript?src=" + encodeURIComponent(src))
+    .then((r) => (r.ok ? r.json() : r.status === 404 ? { transcript: null } : Promise.reject(new Error("HTTP " + r.status))))
     .then((j) => {
-      let d = false;
-      try { d = j && j.transcript ? FableCutTranscribe.validate(j.transcript) : false; } catch { }
-      if (transcriptCache.get(src) === p) { transcriptCache.set(src, d); transcriptGen++; }
-      return d;
+      const d = j && j.transcript ? FableCutTranscribe.validate(j.transcript) : false;
+      const latest = transcriptCache.get(src) === p;
+      if (latest) { setTranscript(src, d); transcriptStale.delete(src); }
+      return { doc: d, ok: latest };
     })
-    .catch(() => { if (transcriptCache.get(src) === p) transcriptCache.set(src, false); return false; });
+    .catch(() => {
+      const d = transcriptHeld.get(src) || false;
+      if (transcriptCache.get(src) === p) { setTranscript(src, d); transcriptStale.add(src); }
+      return { doc: d, ok: false };
+    });
+  p = read.then((r) => r.doc);
   transcriptCache.set(src, p);
-  return p;
+  return read;
+}
+function setTranscript(src, d) {
+  transcriptCache.set(src, d);
+  transcriptHeld.set(src, d);
+  transcriptGen++;
 }
 function onTranscriptEvent(data) {
   let src = null;
@@ -8989,8 +9037,8 @@ async function transcribeFile(src, { model, language, onProgress, cancelled }) {
   const doc = T.validate({ src, model, language: language || "auto", duration, created: new Date().toISOString(), words });
   let saved = false;
   try { saved = (await fetch("/api/transcript?src=" + encodeURIComponent(src), { method: "POST", body: JSON.stringify(doc) })).ok; } catch { }
-  transcriptCache.set(src, doc);
-  transcriptGen++;
+  setTranscript(src, doc);
+  if (saved) transcriptStale.delete(src); else transcriptStale.add(src);
   return { doc, saved };
 }
 /** Transcribe files one after another. `beat(fraction)` hears about progress (an agent's job). */
@@ -9050,14 +9098,23 @@ function transcriptWords() {
 /** What Transcribe works on: the selected clips' files, else every file on the timeline without a transcript. */
 function transcribeTargets() {
   const groups = transcriptGroups();
+  // a selected clip picks the file its speech group is heard from (a picture's sound may come
+  // from denoised stems, another file): the group counts when it or a clip linked to it is selected
   const picked = new Set();
-  for (const id of state.selIds) {
-    const c = getClip(id);
-    if (c && (c.kind === "video" || c.kind === "audio")) { const m = getMedia(c.mediaId); if (m) picked.add(m.src); }
+  for (const g of groups) {
+    const ids = new Set(withLinked(g).map((c) => c.id));
+    if ([...ids].some((id) => state.selIds.has(id))) picked.add(getMedia(g[0].mediaId).src);
   }
   const srcs = [...new Set(groups.map((g) => getMedia(g[0].mediaId).src))];
   const sel = srcs.filter((s) => picked.has(s));
-  return sel.length ? { srcs: sel, selected: true } : { srcs: srcs.filter((s) => transcriptCache.get(s) === false), selected: false };
+  if (sel.length) return { srcs: sel, selected: true };
+  // a selection with no speech in it (a title) never turns into a timeline-wide action
+  if (state.selIds.size) return { srcs: [], selected: false, none: true };
+  const missing = srcs.filter((s) => transcriptCache.get(s) === false);
+  // every file has a transcript already (an agent may have made them): the button offers them all again
+  if (!missing.length && srcs.length && srcs.every((s) => transcriptCache.get(s) && !(transcriptCache.get(s) instanceof Promise)))
+    return { srcs, selected: false, again: true };
+  return { srcs: missing, selected: false };
 }
 /** What the words' places depend on: the timeline and the transcripts. */
 function transcriptWordsSig() {
@@ -9192,15 +9249,32 @@ function renderTranscript(force = false) {
   const words = trState.words = transcriptWords();
   trState.wsig = transcriptWordsSig();
   const tgt = transcribeTargets();
-  E.go.textContent = tgt.selected ? `Transcribe selected (${tgt.srcs.length})` : tgt.srcs.length ? `Transcribe ${tgt.srcs.length} file${tgt.srcs.length === 1 ? "" : "s"}` : "Transcribe";
+  E.go.textContent = tgt.selected ? `Transcribe selected (${tgt.srcs.length})` : tgt.again ? `Transcribe again (${tgt.srcs.length})`
+    : tgt.srcs.length ? `Transcribe ${tgt.srcs.length} file${tgt.srcs.length === 1 ? "" : "s"}` : "Transcribe";
   E.go.disabled = !!trState.busy || !tgt.srcs.length;
-  E.go.title = tgt.srcs.length ? "Turn the speech into words, in this browser (the model downloads once). Select clips to transcribe just those, or again"
-    : groups.length ? "Every file on the timeline has a transcript — select clips to transcribe them again" : "Put clips with speech on the timeline first";
+  E.go.title = tgt.again ? "Every file on the timeline has a transcript. Transcribe them all again, with the model and language picked here (or select clips to redo just those)"
+    : tgt.srcs.length ? "Turn the speech into words, in this browser (the model downloads once). Select clips to transcribe just those, or again"
+    : tgt.none ? "The selected clips have no speech. Select clips with speech to transcribe those, or clear the selection to transcribe the timeline's files"
+    : "Put clips with speech on the timeline first";
   const missing = [...new Set(groups.map((g) => getMedia(g[0].mediaId)).filter((m) => transcriptCache.get(m.src) === false).map((m) => m.name || m.src))];
   let html = "";
   if (!groups.length) html = `<div class="tr-empty">Put clips with speech on the timeline, then transcribe them here. Speech becomes words in this browser; your audio never leaves it.</div>`;
   else {
     if (missing.length) html += `<div class="tr-note">No transcript yet: ${missing.slice(0, 6).map(escapeHtml).join(", ")}${missing.length > 6 ? ` +${missing.length - 6} more` : ""}</div>`;
+    // which model and language made these words, so wrong words point at the fix
+    const docs = groups.map((g) => transcriptCache.get(getMedia(g[0].mediaId).src)).filter((d) => d && d.words);
+    const made = new Map();
+    for (const d of docs) made.set(JSON.stringify([d.model ?? null, d.language ?? null]), d);
+    if (made.size) {
+      const said = [...made.values()].map((d) => {
+        const model = d.model == null ? "an unknown model" : T.MODELS[d.model]?.label || d.model;
+        const lang = d.language == null ? "an unknown language" : d.language === "" || d.language === "auto" ? "auto-detected" : T.LANGUAGES[d.language] || d.language;
+        return `${escapeHtml(model)}, ${escapeHtml(lang)}`;
+      });
+      // with some files still untranscribed the button does those, so redoing others takes a selection
+      const how = tgt.selected ? "then Transcribe selected" : tgt.again ? "then Transcribe again" : "select those clips, then Transcribe selected";
+      html += `<div class="tr-note tr-made">Transcribed with ${said.join("; ")}. Words look wrong? Pick the language spoken and the Small model above, ${how}.</div>`;
+    }
     if (!words.length && !missing.length) html += `<div class="tr-empty">${[...transcriptCache.values()].some((v) => v instanceof Promise) ? "Loading…" : "No words in these clips."}</div>`;
     for (const s of T.segments(words)) {
       let p = "";
@@ -9306,10 +9380,32 @@ function copyTranscript() {
   navigator.clipboard.writeText(lines.join("\n")).then(() => toast(`Copied ${lines.length} line${lines.length === 1 ? "" : "s"}`), () => toast("Couldn't copy — the browser refused"));
 }
 async function transcribeFromTab() {
-  const { srcs } = transcribeTargets();
-  if (!srcs.length) { toast("Put a clip with speech on the timeline first"); return; }
+  // what the click meant is taken now (its files, its model and language); a selection already names its files
+  let tgt = transcribeTargets();
+  const opts = transcribeSettings();
+  if (!tgt.selected && !tgt.none) {
+    // transcripts being re-read (another tab saved one) decide which files are left: wait for
+    // those of this timeline's files (a few seconds at most), then take the targets again,
+    // unless the timeline or the selection changed meanwhile
+    const at = silenceSig() + "|" + [...state.selIds].join(",");
+    const srcs = new Set(transcriptGroups().map((g) => getMedia(g[0].mediaId).src));
+    const loading = [...transcriptCache].filter(([s, v]) => srcs.has(s) && v instanceof Promise).map(([, v]) => v);
+    if (loading.length) {
+      await Promise.race([Promise.allSettled(loading), new Promise((r) => setTimeout(r, 5000))]);
+      if (silenceSig() + "|" + [...state.selIds].join(",") !== at) { renderTranscript(true); toast("The timeline changed — check the button and click again"); return; }
+      // the same action as clicked: "Transcribe N files" drops files whose transcript just arrived
+      // (it never turns into a rerun of everything); "Transcribe again" stays a rerun
+      if (!tgt.srcs.length) tgt = transcribeTargets();   // the button hadn't caught up: what it offers now
+      else if (!tgt.again) {
+        tgt = { ...tgt, srcs: tgt.srcs.filter((s) => transcriptCache.get(s) === false) };
+        if (!tgt.srcs.length) { renderTranscript(true); toast("Those files have transcripts now"); return; }
+      }
+    }
+  }
+  const { srcs } = tgt;
+  if (!srcs.length) { toast(tgt.none ? "The selected clips have no speech — select clips with speech, or clear the selection" : "Put a clip with speech on the timeline first"); return; }
   let out;
-  try { out = await transcribeSrcs(srcs); } catch (e) { toast(e.message); return; }
+  try { out = await transcribeSrcs(srcs, opts); } catch (e) { toast(e.message); return; }
   const unsaved = out.done.filter((d) => !d.saved).length;
   const words = out.done.reduce((n, d) => n + d.words, 0);
   toast(out.cancelled ? `Stopped — ${out.done.length} file${out.done.length === 1 ? "" : "s"} transcribed`
@@ -9413,7 +9509,11 @@ async function runTranscribeJob(ticket, fail) {
   if (trState.busy) return fail("this editor tab is already transcribing — wait for it, or cancel it there");
   const srcs = [], skipped = [];
   for (const src of spec.srcs || []) {
-    if (!spec.again && await loadTranscript(src, true)) { skipped.push(src); continue; }
+    // a transcript only counts as there when the server just confirmed it (a failed read is no proof)
+    if (!spec.again) {
+      const r = await readTranscript(src);
+      if (r.ok && r.doc) { skipped.push(src); continue; }
+    }
     srcs.push(src);
   }
   const report = (body, force) => fetch("/api/export/job/report?id=" + encodeURIComponent(ticket.id), { method: "POST", body: JSON.stringify(body) })
@@ -11907,7 +12007,7 @@ function seqUndoPrint(d, withOthers) {
 }
 /** Open sequence `id` in the editor. False when it can't be opened now. */
 function openSequence(id) {
-  if (state.exporting) { toast("Wait for the export to finish before opening another sequence"); return false; }
+  if (exportBusy()) { toast("Wait for the export to finish before opening another sequence"); return false; }
   if (state.gesture) return false;
   if (state.compCtx) exitComp(state.compCtx.path.length);
   if (SeqLib.activeId(project) === id) return true;
@@ -11926,7 +12026,7 @@ function openSequence(id) {
 }
 /** Add a sequence ({name?, from?, width?, height?}) and open it. */
 function newSequence(opts, clips = null) {
-  if (state.exporting) { toast("Wait for the export to finish"); return; }
+  if (exportBusy()) { toast("Wait for the export to finish"); return; }
   if (state.compCtx) exitComp(state.compCtx.path.length);
   const doc = projectJSONHere();
   let s;
@@ -11947,7 +12047,7 @@ function renameSequence(id, name) {
 async function deleteSequence(id) {
   const r = seqRoot(), s = SeqLib.find(r, id);
   if (!s || SeqLib.entries(r).length < 2) return;
-  if (state.exporting) { toast("Wait for the export to finish"); return; }
+  if (exportBusy()) { toast("Wait for the export to finish"); return; }
   if (state.compCtx) exitComp(state.compCtx.path.length);
   let kept = null;
   if (state.connected) {
@@ -11962,7 +12062,7 @@ async function deleteSequence(id) {
     if (!kept) { toast(`Couldn't keep a version of the project, so “${s.name}” was not deleted. Try again in a moment.`); return; }
   }
   // the editor may have moved on while the version was saved
-  if (state.exporting) { toast("Wait for the export to finish"); return; }
+  if (exportBusy()) { toast("Wait for the export to finish"); return; }
   if (state.compCtx) exitComp(state.compCtx.path.length);
   if (!SeqLib.find(project, id) || SeqLib.entries(project).length < 2) return;   // deleted or changed meanwhile (another tab, an agent)
   const wasOpen = SeqLib.activeId(project) === id;
@@ -13406,7 +13506,7 @@ async function readHighlightSource(c, cancelled, onFrame) {
 async function makeHighlights(clips, { duration = 30, shot, size = null, follow = false, progress, cancelled: stop } = {}) {
   if (!Highlights) { toast("Highlights module missing — reload the editor"); return null; }
   if (highlightRun.busy) { toast("Already making highlights — wait for it, or Cancel"); return null; }
-  if (state.exporting) { toast("Wait for the export to finish"); return null; }
+  if (exportBusy()) { toast("Wait for the export to finish"); return null; }
   const { take, skip } = Highlights.sourcesOf({ clips: project.clips, disabledTracks: [...state.disabledTracks] }, clips && clips.map((c) => c.id));
   if (!take.length) { toast(skip.length ? `Nothing to look at: ${skip[0].id} is ${skip[0].why}` : "Put video on the timeline first"); return null; }
   Object.assign(highlightRun, { busy: true, cancel: false });
@@ -13754,6 +13854,7 @@ els.preview.addEventListener("pointerdown", (e) => {
 }, true);
 window.addEventListener("keydown", (e) => {
   if (e.key !== "Escape" || (!trackUi.run && trackUi.tool !== "point")) return;
+  if (!$("cmdkOverlay").classList.contains("hidden")) return;   // Esc belongs to Search while it is open
   e.preventDefault(); e.stopImmediatePropagation();
   if (trackUi.run) trackUi.run.cancel = true;
   else { trackUi.tool = null; renderInspector(); }
@@ -14176,6 +14277,7 @@ els.preview.addEventListener("dblclick", (e) => {
   maskUi.pt = -1; scheduleSave(); renderInspector();
 }, true);
 window.addEventListener("keydown", (e) => {
+  if (!$("cmdkOverlay").classList.contains("hidden")) return;   // keys belong to Search while it is open
   if (e.key === "Escape" && colorState.maskDraw) {   // the Color tab's Draw
     e.preventDefault(); e.stopImmediatePropagation();
     colorState.maskDraw = false; colorState.maskStroke = null; state.dirtyTimeline = true; renderColorPage(true);
@@ -16379,6 +16481,7 @@ function refreshDeliveryNotes() {
   $("dlvSummary").textContent = `${Delivery.describe(sp, { width: fr.outW, height: fr.outH, fps })}` +
     (size ? ` · about ${Delivery.fmtBytes(size)}` : "");
   $("dlvFilePreview").textContent = "→ exports/" + deliveryFileName(sp, fps) + Delivery.CONTAINERS[sp.container].ext;
+  syncExportName();
   const cv = deliveryCanvas();
   const warn = [...dlvNotes.map((n) => n[0].toUpperCase() + n.slice(1)),
     ...Delivery.checks(sp, { duration: range.dur, fps, canvasW: cv.w, canvasH: cv.h, region: cv.region })];
@@ -16457,10 +16560,65 @@ function webCodecsBitrate(w, h, fps) {
   // ~0.1 bit/pixel/frame, clamped — same heuristic as before
   return Math.min(20_000_000, Math.max(2_000_000, Math.round(w * h * fps * 0.1)));
 }
+/* The Export dialog's "Save as" name. The field shows the name the export would get;
+   once typed in, that name is used for this export (cleared = the default, shown greyed). */
+let exportNameTyped = false;
+let exportNameShown = "";   // the default the Save as field shows (a {time} in it is the time it was filled in)
+/** The engine the dialog's choices lead to, as startChosenExport picks it. */
+function chosenExportEngine() {
+  if (els.engineFast.checked && !els.engineFast.disabled) return "fast";
+  if (!els.engineRealtime.checked || els.engineRealtime.disabled) return null;
+  return state.connected && state.ffmpeg && state.webCodecs && !getExportFrame() ? "webcodecs" : "recorder";
+}
+function defaultExportName() {
+  const c = selectedExportChoice();
+  if (chosenExportEngine() === "fast" && c.kind === "delivery" && dlvSpec) return deliveryFileName(dlvSpec);
+  return project.name.replace(/[^\w\- ]+/g, "").trim() || "export";
+}
+function exportNameExt() {
+  const engine = chosenExportEngine(), c = selectedExportChoice();
+  if (engine === "fast" && c.kind === "delivery" && dlvSpec) return Delivery.CONTAINERS[dlvSpec.container].ext;
+  if (engine === "recorder") return (pickMime() || "").startsWith("video/mp4") ? ".mp4" : ".webm";
+  if (engine === "fast" && c.kind === "profile") return encodeProfiles.profiles[c.id]?.extension || ".mp4";
+  return ".mp4";
+}
+function syncExportName() {
+  const el = $("exportName");
+  if (!el) return;
+  const def = exportNameShown = defaultExportName();
+  el.placeholder = def;
+  if (!exportNameTyped) el.value = def;
+  const note = $("exportNameNote");
+  if (!note) return;
+  const file = (exportName() || def) + exportNameExt();
+  note.textContent = chosenExportEngine() === "recorder"
+    ? "→ the browser downloads " + file
+    : "→ exports/" + file + " · a number is added if that name is taken";
+  // (the browser download names its own copies when the name is taken)
+}
+/** The typed name (file-safe), or null for the default. */
+function exportName() {
+  const v = exportNameTyped ? ($("exportName")?.value || "").trim() : "";
+  const ext = exportNameExt().toLowerCase();
+  const base = ext && v.toLowerCase().endsWith(ext) ? v.slice(0, -ext.length) : v;
+  const safe = base.replace(/\.(mp4|mov|m4v|mkv|webm|mxf)$/i, "").replace(/[^\w\- ()\[\].]+/g, "_").replace(/^[.\s]+/, "").slice(0, 120);
+  return safe || null;
+}
+let exportSetupOpening = false;   // one Export click at a time, while the dialog's lists load
+/* An export getting ready (its players, fonts, encoder check) holds the canvas before
+   state.exporting is set: every engine, the queue and agent jobs wait for both. */
+let exportStarting = false;
+function exportBusy() { return state.exporting || exportStarting; }
+/** Which timeline an Export click was for: a project or sequence opened meanwhile isn't it. */
+function exportContext() { return (runtime.projectId || "") + "|" + (project.sequence || "") + "|" + (state.compCtx ? state.compCtx.path.join("/") : ""); }
 async function openExportSetup() {
-  if (state.exporting) return;
+  if (exportBusy() || exportSetupOpening) return;
+  const ctx = exportContext();
+  // the dialog already open is being refreshed (a setting changed): keep what was typed in it
+  const fresh = els.exportSetup.classList.contains("hidden");
   if (!project.clips.length) { alert("Timeline is empty — add some clips first."); return; }
-  await detectWebCodecs();
+  exportSetupOpening = true;
+  try { await detectWebCodecs(); } catch { }
   const ef = getExportFrame();
   const fastOk = state.connected && state.ffmpeg;
   // WebCodecs and MediaRecorder encode the full canvas — only Fast crops.
@@ -16525,14 +16683,68 @@ async function openExportSetup() {
   syncExportRangeUi();
   syncExportProfileVisibility();
   Promise.all([fetchEncodeProfiles(), fetchDeliveryInfo()]).then(() => {
+    if (exportContext() !== ctx) { toast("Another timeline opened — click Export again"); return; }
     populateExportProfileSelect();
     syncExportProfileVisibility();
     renderBatchList();
     renderQueue();
+    if (fresh) {
+      exportNameTyped = false;
+      const skip = $("exportSkipAsk");
+      if (skip) skip.checked = false;
+    }
+    syncExportName();
+    if (fresh && !getSetting("exportAsk")) {
+      // "Don't ask again": render with the last engine and settings under the default name;
+      // if that engine can't run now, ask after all rather than switch engines silently
+      const last = getSetting("exportEngine");
+      // (older settings say "second" for either real-time encoder)
+      const radio = last === "fast" ? els.engineFast : last === "second" || last === "webcodecs" || last === "recorder" ? els.engineRealtime : null;
+      // ...and the last preset or profile picked, when it is still in the list
+      const choice = getSetting("exportChoice");
+      // (a raw profile has to still be on the server: a deleted one can linger in the list as a placeholder)
+      const choiceOk = !choice || (choice.startsWith("p:") ? Object.hasOwn(encodeProfiles.profiles, choice.slice(2))
+        : [...els.exportProfileSel.options].some((o) => o.value === choice));
+      if (choiceOk && choice) {
+        if (els.exportProfileSel.value !== choice) {
+          els.exportProfileSel.value = choice;
+          els.exportProfileSel.dispatchEvent(new Event("change"));
+        }
+        // the delivery as last exported (its size, codec…), even when the project pins the same preset
+        const lastDlv = getSetting("delivery");
+        if (choice.startsWith("d:") && lastDlv?.preset === choice.slice(2)) {
+          dlvSpec = normalizeDelivery(lastDlv).spec;
+          fillDeliveryControls();   // the dialog, if it opens, shows what Render will write
+          refreshDeliveryNotes();
+        }
+      }
+      if (radio) {
+        els.engineFast.checked = radio === els.engineFast && !radio.disabled; els.engineRealtime.checked = radio === els.engineRealtime && !radio.disabled;
+        // the dialog, if it opens, shows the engine's own controls
+        syncExportProfileVisibility(); syncExportWcOpts();
+      }
+      // the range counted in frames of what will be written (a delivery may have its own frame rate)
+      const outFps = chosenExportEngine() === "fast" && selectedExportChoice().kind === "delivery" && dlvSpec?.fps || projectFps();
+      const engineOk = !radio || (!radio.disabled && (last === "second" || last === "fast" || chosenExportEngine() === last));
+      if (engineOk && choiceOk && exportRange(outFps).frames >= 1) {
+        syncExportName();
+        toast(`Exporting “${defaultExportName()}” — Settings → Ask before exporting brings the dialog back`);
+        startChosenExport();
+        return;
+      }
+      toast(exportRange(outFps).frames < 1 ? "The export range is empty — pick one"
+        : !choiceOk ? "The last export's preset isn't there any more — pick one" : "The last export's engine isn't available — pick one");
+    }
     els.exportSetup.classList.remove("hidden");
     // aria-modal hides what is behind — focus has to come inside
     if (!els.exportSetup.contains(document.activeElement)) $("exportRangeSel")?.focus();
-  });
+  }).finally(() => { exportSetupOpening = false; });
+}
+/* The progress overlay takes focus: left on the Export button, Space would
+   play the timeline under a running export (focus.js) instead of pressing Cancel. */
+function showExportOverlay() {
+  els.exportOverlay.classList.remove("hidden");
+  $("btnCancelExport")?.focus();
 }
 function closeExportSetup() {
   els.exportSetup.classList.add("hidden");
@@ -16555,17 +16767,22 @@ function startChosenExport() {
     alert("Export range is empty — IN/OUT is at or past the end of the timeline. Choose Entire timeline, or move the markers.");
     return;
   }
+  // the name shown now (a default with {time} must not tick over while the audio mixes)
+  const name = exportName() || exportNameShown || defaultExportName();
+  if ($("exportSkipAsk")?.checked) setSetting("exportAsk", false);
+  setSetting("exportEngine", chosenExportEngine());
+  setSetting("exportChoice", els.exportProfileSel?.value || null);
   closeExportSetup();
   if (useFast) {
     const c = selectedExportChoice();
     setSetting("exportKind", c.kind);
     if (c.kind === "delivery") {
       setSetting("delivery", dlvSpec);
-      fastExport({ delivery: dlvSpec });
-    } else fastExport({ profile: c.id });
+      fastExport({ delivery: dlvSpec, name });
+    } else fastExport({ profile: c.id, name });
   }
-  else if (useSecond && state.connected && state.ffmpeg && state.webCodecs && !getExportFrame()) webCodecsExport();
-  else startExport();
+  else if (useSecond && state.connected && state.ffmpeg && state.webCodecs && !getExportFrame()) webCodecsExport(name);
+  else startExport(name);
 }
 
 /* Keep Range's IN–OUT option in sync with marker presence without clobbering
@@ -17472,17 +17689,17 @@ async function prepareFrameAssets(t) {
  *  opts.silent: no overlay, alert or download (the export queue shows it);
  *  opts.onProgress(0…1). Resolves {outputs:[{file, ok, src?, error?}]} or {error, cancelled}. */
 async function fastExport(opts = {}) {
-  if (state.exporting) return { error: "an export is already running" };
+  if (exportBusy()) return { error: "an export is already running in this tab", busy: true };
   const job = opts.job || null;
   pause();
   state.exporting = true; state.rendering = true; renderCancelled = false;
   exportAbort = new AbortController();
   const signal = exportAbort.signal;
-  if (!opts.silent) els.exportOverlay.classList.remove("hidden");
+  if (!opts.silent) showExportOverlay();
   els.exportProgress.style.width = "0%";
   els.exportNote.textContent = "Rendering frames → ffmpeg. You can switch tabs; export continues.";
   restoreExportVideoState();
-  const deliveries = opts.deliveries || (opts.delivery ? [{ delivery: opts.delivery }] : null);
+  const deliveries = opts.deliveries || (opts.delivery ? [{ delivery: opts.delivery, name: opts.name || undefined }] : null);
   const delivery = deliveries ? deliveries[0].delivery : null;
   const fps = (delivery && delivery.fps) || projectFps();
   let result = null;
@@ -17504,7 +17721,7 @@ async function fastExport(opts = {}) {
         canvasW: cv.w, canvasH: cv.h, region: cv.region, hasAudio: !!wav,
       } : {
         fps,
-        name: project.name.replace(/[^\w\- ]+/g, "") || "export",
+        name: opts.name || project.name.replace(/[^\w\- ]+/g, "") || "export",
         profile: profileId,
         hasAudio: !!wav,
       }),
@@ -17718,7 +17935,7 @@ function renderQueueProgress() {
   }
 }
 async function runQueue() {
-  if (queueRunning || state.exporting) return;
+  if (queueRunning || exportBusy()) return;
   if (!(state.connected && state.ffmpeg)) { alert("The export queue needs the server and ffmpeg (Fast export)."); return; }
   queueRunning = true; queueStop = false;
   renderQueue();
@@ -17838,8 +18055,23 @@ async function reportExportJob(id, body, force = false) {
     if (r?.cancel) { renderCancelled = true; exportAbort?.abort(); }
   } catch { }
 }
+let skippedTicket = null, skippedTimer = 0;
 async function runExportJob(ticket) {
-  if (!ticket?.id || state.exporting) return; // a busy tab leaves it for another
+  if (!ticket?.id) return;
+  if (exportBusy()) {
+    // a busy tab leaves it for another, but tries again when it is free (the server's claim
+    // decides: a ticket another tab took, or one the agent cancelled, is refused)
+    skippedTicket = ticket;
+    clearInterval(skippedTimer);
+    const until = Date.now() + 30000;
+    skippedTimer = setInterval(() => {
+      if (exportBusy() && Date.now() < until) return;
+      clearInterval(skippedTimer);
+      const t = skippedTicket; skippedTicket = null;
+      if (t && !exportBusy()) runExportJob(t);
+    }, 500);
+    return;
+  }
   const claimed = await fetch("/api/export/job/claim?id=" + encodeURIComponent(ticket.id), { method: "POST" })
     .then((r) => r.ok).catch(() => false);
   if (!claimed) return;
@@ -17848,9 +18080,20 @@ async function runExportJob(ticket) {
   for (let i = 0; i < 150 && ticket.revision != null && (project.revision || 0) < ticket.revision; i++)
     await new Promise((r) => setTimeout(r, 100));
   if (ticket.revision != null && (project.revision || 0) < ticket.revision) await syncFromServer();
+  // a ticket that waited here while the tab switched projects must not render the other one
+  if (ticket.project && runtime.projectId && ticket.project !== runtime.projectId && ticket.kind !== "transcribe")
+    return fail("another project was opened before this job could start — open the project again and retry");
+  if (ticket.kind === "transcribe") return runTranscribeJob(ticket, fail);
+  // from here until the job ends, a project opened elsewhere waits: the job renders the one it was asked for
+  runtime.jobHold = (runtime.jobHold || 0) + 1;
+  try { return await runHeldJob(ticket, fail); } finally {
+    runtime.jobHold--;
+    if (!runtime.jobHold && runtime.pendingSync) syncFromServer();
+  }
+}
+async function runHeldJob(ticket, fail) {
   if (ticket.kind === "scopes") return runScopesJob(ticket, fail);
   if (ticket.kind === "track") return runTrackJob(ticket, fail);
-  if (ticket.kind === "transcribe") return runTranscribeJob(ticket, fail);
   if (!state.ffmpeg) {
     const j = await fetch("/api/export/ffmpeg").then((r) => r.json()).catch(() => ({}));
     state.ffmpeg = !!j.available;
@@ -17873,7 +18116,7 @@ async function runExportJob(ticket) {
       const specs = ticket.deliveries.map((d) => normalizeDelivery(d).spec);
       const groups = new Map();
       for (const sp of specs) { const k = sp.fps || projectFps(); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(sp); }
-      if (groups.size === 1) await fastExport({ job: ticket.id, deliveries: specs.map((delivery) => ({ delivery })) });
+      if (groups.size === 1) { const res = await fastExport({ job: ticket.id, deliveries: specs.map((delivery) => ({ delivery })) }); if (res?.busy) return fail(res.error); }
       else {
         const all = [];
         let i = 0;
@@ -17881,6 +18124,7 @@ async function runExportJob(ticket) {
           const res = await fastExport({ deliveries: group.map((delivery) => ({ delivery })), silent: true,
             onProgress: (f) => reportExportJob(ticket.id, { progress: (i + f) / groups.size }) });
           i++;
+          if (res?.busy) return fail(res.error);
           if (res && res.cancelled) return reportExportJob(ticket.id, { status: "failed", error: "cancelled" }, true);
           if (res && res.outputs) all.push(...res.outputs);
           else all.push(...group.map((sp) => ({ file: deliveryFileName(sp), ok: false, error: (res && res.error) || "export failed" })));
@@ -17889,7 +18133,11 @@ async function runExportJob(ticket) {
         if (!ok) return fail(all.map((o) => o.error).join(" · "));
         await reportExportJob(ticket.id, { status: "done", src: ok.src, result: { outputs: all } }, true);
       }
-    } else await fastExport(want ? { job: ticket.id, delivery: normalizeDelivery(want).spec } : { job: ticket.id, profile: ticket.profile });
+    } else {
+      const res = await fastExport(want ? { job: ticket.id, delivery: normalizeDelivery(want).spec, name: ticket.name || null } : { job: ticket.id, profile: ticket.profile, name: ticket.name || null });
+      // another export took the tab while this job was getting ready: say so rather than leave it running
+      if (res?.busy) return fail(res.error);
+    }
   } finally {
     exportRangeForced = null;
   }
@@ -17970,7 +18218,10 @@ async function runTrackJob(ticket, fail) {
     if (state.connected) {
       clearTimeout(runtime.saveTimer); runtime.saveTimer = null;
       project.revision++;
-      const res = await fetch("/api/project", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(projectJSON(), null, 2) });
+      // the project this job tracked in: a project opened elsewhere meanwhile refuses the save (409)
+      const headers = { "Content-Type": "application/json" };
+      if (runtime.projectId) headers["X-FableCut-Project"] = runtime.projectId;
+      const res = await fetch("/api/project", { method: "PUT", headers, body: JSON.stringify(projectJSON(), null, 2) });
       if (!res.ok) {
         project.revision--;
         // put back only the clips this job changed (edits elsewhere since stay), and drop its undo step
@@ -18166,15 +18417,18 @@ function waitEncodeQueue(encoder, max = 2, { signal, getError } = {}) {
     tick();
   });
 }
-async function webCodecsExport() {
+async function webCodecsExport(name) {
+  if (exportBusy()) return;
+  exportStarting = true;
+  try { await detectWebCodecs(); } finally { exportStarting = false; }
   if (state.exporting) return;
-  await detectWebCodecs();
-  if (!state.webCodecs) { startExport(); return; }
+  // no encoder: the recorder takes over at once, so nothing slips in between
+  if (!state.webCodecs) { startExport(name); return; }
   pause();
   state.exporting = true; state.rendering = true; renderCancelled = false;
   exportAbort = new AbortController();
   const signal = exportAbort.signal;
-  els.exportOverlay.classList.remove("hidden");
+  showExportOverlay();
   els.exportProgress.style.width = "0%";
   els.exportNote.textContent = "Encoding with WebCodecs → ffmpeg mux. You can switch tabs; export continues.";
   restoreExportVideoState();
@@ -18195,7 +18449,7 @@ async function webCodecsExport() {
       method: "POST",
       body: JSON.stringify({
         fps,
-        name: project.name.replace(/[^\w\- ]+/g, "") || "export",
+        name: name || project.name.replace(/[^\w\- ]+/g, "") || "export",
         mode: "annexb",
         hasAudio: !!wav,
       }),
@@ -18316,24 +18570,38 @@ function pickMime() {
   ];
   return cands.find((m) => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || "";
 }
-async function startExport() {
-  if (state.exporting) return;
+async function startExport(name) {
+  if (exportBusy()) return;
   if (!project.clips.length) { alert("Timeline is empty — add some clips first."); return; }
   const mime = pickMime();
   if (!mime) { alert("MediaRecorder is not supported in this browser."); return; }
-  ensureAudio();
-  await runtime.audio.ctx.resume();
-  pause();
-  const { start } = beginExportWindow();
-  state.time = start;
-  await useOriginalPlayers();   // proxies are for editing — export reads the originals
-  seekMediaWhilePaused();
-  await new Promise((r) => setTimeout(r, 350)); // let first frames decode
-  await loadProjectFonts();
-  const stream = els.preview.captureStream(projectFps());
-  for (const tr of runtime.audio.recDest.stream.getAudioTracks()) stream.addTrack(tr);
+  exportStarting = true;
+  let stream = null;
+  try {
+    ensureAudio();
+    await runtime.audio.ctx.resume();
+    pause();
+    const { start } = beginExportWindow();
+    state.time = start;
+    await useOriginalPlayers();   // proxies are for editing — export reads the originals
+    seekMediaWhilePaused();
+    await new Promise((r) => setTimeout(r, 350)); // let first frames decode
+    await loadProjectFonts();
+    stream = els.preview.captureStream(projectFps());
+    for (const tr of runtime.audio.recDest.stream.getAudioTracks()) stream.addTrack(tr);
+    recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 10_000_000 });
+  } catch (e) {
+    exportStarting = false;
+    // the canvas track was made for this attempt; the audio track is shared, so it stays
+    for (const tr of stream?.getVideoTracks() || []) tr.stop();
+    recorder = null;
+    releaseOriginalPlayers();
+    endExportWindow();
+    toast("Export couldn't start: " + (e.message || e));
+    return;
+  }
+  exportStarting = false;
   recChunks = []; recDiscard = false;
-  recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 10_000_000 });
   recorder.ondataavailable = (e) => { if (e.data.size) recChunks.push(e.data); };
   recorder.onstop = () => {
     els.exportOverlay.classList.add("hidden");
@@ -18342,14 +18610,23 @@ async function startExport() {
     const blob = new Blob(recChunks, { type: mime.split(";")[0] });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = (project.name.replace(/[^\w\- ]+/g, "") || "export") + "." + ext;
+    a.download = (name || project.name.replace(/[^\w\- ]+/g, "") || "export") + "." + ext;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 30_000);
   };
-  els.exportOverlay.classList.remove("hidden");
+  showExportOverlay();
   els.exportProgress.style.width = "0%";
   state.exporting = true;
-  recorder.start(250);
+  try { recorder.start(250); }
+  catch (e) {
+    state.exporting = false;
+    for (const tr of stream.getVideoTracks()) tr.stop();
+    els.exportOverlay.classList.add("hidden");
+    releaseOriginalPlayers();
+    endExportWindow();
+    toast("Export couldn't start: " + (e.message || e));
+    return;
+  }
   pauseSource();
   setMonitorMode("program");
   state.playing = true;
@@ -18401,6 +18678,12 @@ $("btnRippleDelete").addEventListener("click", () => {
 });
 $("btnExport").addEventListener("click", openExportSetup);
 $("btnStartExport").addEventListener("click", startChosenExport);
+$("exportName")?.addEventListener("input", () => { exportNameTyped = true; syncExportName(); });
+$("exportName")?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.isComposing && !$("btnStartExport").disabled) { e.preventDefault(); startChosenExport(); }
+});
+els.engineFast?.addEventListener("change", syncExportName);
+els.engineRealtime?.addEventListener("change", syncExportName);
 els.exportSetup?.addEventListener("change", (e) => {
   if (e.target.name === "engine") {
     syncExportProfileVisibility();
@@ -18413,6 +18696,7 @@ els.exportProfileSel?.addEventListener("change", () => {
   if (c.kind === "profile" && !project.encodeProfile)
     setSetting("encodeProfile", c.id === encodeProfiles.default ? null : c.id);
   syncExportChoiceUi("preset");
+  syncExportName();
 });
 $("dlvBody")?.addEventListener("change", onDeliveryControl);
 $("dlvBody")?.addEventListener("input", onDeliveryControl);
@@ -18544,7 +18828,9 @@ $("btnHelp").addEventListener("click", () => {
 });
 $("btnCloseHelp").addEventListener("click", () => $("helpOverlay").classList.add("hidden"));
 /** Keyboard shortcuts filter: keeps the rows (and whole sections, by heading) that match every typed word. */
-function filterHelp() {
+/** `only` (a row of the list) shows just that one: what Search opened. */
+function filterHelp(only) {
+  const row = only instanceof HTMLElement ? only : null;
   const words = $("helpFilter").value.toLowerCase().split(/\s+/).filter(Boolean);
   let any = false;
   for (const sec of $("helpKeys").querySelectorAll(".keys-sec")) {
@@ -18552,7 +18838,7 @@ function filterHelp() {
     let shown = 0;
     for (const tr of sec.querySelectorAll("tr")) {
       const text = head + " " + tr.textContent.toLowerCase();
-      const hit = words.every((w) => text.includes(w));
+      const hit = row ? tr === row : words.every((w) => text.includes(w));
       tr.classList.toggle("hidden", !hit);
       if (hit) shown++;
     }
@@ -18569,6 +18855,226 @@ $("helpFilter").addEventListener("keydown", (e) => {
   if ($("helpFilter").value) { $("helpFilter").value = ""; filterHelp(); }
   else $("helpOverlay").classList.add("hidden");
 });
+/* ── Command search (Ctrl/Cmd+K) ──
+   One box that finds what the editor can do: toolbar actions, panels and
+   tabs, Settings, the selected clip's Inspector sections, media in the bin,
+   clips on the timeline and the keyboard shortcuts. The items are read from
+   the page each time it opens, so a new button or setting turns up without a
+   list to keep; command-search.js ranks them. */
+const cmdk = { items: [], shown: [], active: 0, back: null };
+/** A control's name: its aria-label, else the start of its title, else its text. */
+function cmdkName(el) {
+  const text = (el.textContent || "").replace(/\s+/g, " ").trim();
+  const title = (el.getAttribute("aria-label") || el.title || "").replace(/\s+/g, " ").trim();
+  const short = title.split(/ — |: |\. | \(/)[0];
+  // icons and single symbols (▶ ⊡ ?) say little; a title does
+  return /[a-z]{3}/i.test(text) && text.length <= 32 ? text.replace(/^[^\w(]+/, "") : short || text;
+}
+const cmdkShown = (el) => !el.disabled && !el.closest(".hidden") && el.getClientRects().length > 0;
+function cmdkFlash(el) {
+  if (!el) return;
+  el.scrollIntoView({ block: "nearest" });
+  el.classList.remove("cmdk-flash");
+  void el.offsetWidth;
+  el.classList.add("cmdk-flash");
+}
+function cmdkCollect() {
+  const items = [], seen = new Set();
+  const add = (it) => {
+    const key = it.key || it.group + "|" + it.label;   // media and clips by id: two of one name both show
+    if (!it.label || seen.has(key)) return;
+    seen.add(key);
+    items.push(it);
+  };
+  // panels and tabs
+  // (the Color workspace and the Color side tab share a name: where each lives tells them apart)
+  const panelWhere = { sideTabs: "Side panel", binTabs: "Bin", wsSwitch: "Workspace" };
+  for (const b of document.querySelectorAll("#sideTabs [data-side], #binTabs [data-tab], #wsSwitch [data-ws]")) {
+    const where = panelWhere[b.parentElement.id] || "", title = (b.title || "").split(/ — |: /)[0] === cmdkName(b) ? "" : b.title;
+    add({ key: "Panel|" + b.parentElement.id + "|" + cmdkName(b), label: cmdkName(b), group: "Panel", hint: [where, title].filter(Boolean).join(" · "),
+      keywords: ["tab", "show", "open", where], run: () => { if (b.closest("#binTabs")) cmdkShowBin(); b.click(); } });
+  }
+  // toolbar actions: every named button outside dialogs, menus and the Inspector (and the timeline's edit tools)
+  const actions = [];
+  for (const b of document.querySelectorAll("button[id], button[data-edit-tool]")) {
+    if (b.closest(".overlay, .ctx-menu, .style-menu, #inspector, #sideTabs, #binTabs, #wsSwitch") || b.id === "btnSearch") continue;
+    if (!cmdkShown(b)) continue;
+    actions.push(b);
+  }
+  // two buttons of one name (the monitor's Fit and the timeline's) go by their titles instead
+  const named = new Map();
+  for (const b of actions) named.set(cmdkName(b), (named.get(cmdkName(b)) || 0) + 1);
+  for (const b of actions) {
+    const title = (b.title || "").replace(/\s+/g, " ").trim(), short = title.split(/ — |: |\. | \(/)[0];
+    const label = named.get(cmdkName(b)) > 1 && short ? short : cmdkName(b);
+    add({ key: "a:" + (b.id || "tool-" + b.dataset.editTool), label, group: "Action", hint: title && title !== label ? title : "", run: () => b.click() });
+  }
+  // the selected clip's Inspector sections
+  for (const h of document.querySelectorAll("#inspector .insp-section > h3")) {
+    const name = h.textContent.replace(/\s+/g, " ").trim();
+    add({ label: name, group: "Inspector", keywords: ["inspector", "section", "clip"], run: () => {
+      setSideTab("inspector");
+      // the tab rebuilds the Inspector: find the section in the new one
+      const live = [...document.querySelectorAll("#inspector .insp-section > h3")].find((x) => x.textContent.replace(/\s+/g, " ").trim() === name);
+      if (live) cmdkFlash(live.closest(".insp-section"));
+    } });
+  }
+  // Settings
+  for (const row of document.querySelectorAll("#settingsDialog .settings-row")) {
+    const name = row.querySelector(".settings-label")?.textContent.trim();
+    const hint = row.querySelector(".settings-hint")?.textContent.trim() || "";
+    add({ label: name, group: "Setting", hint, keywords: ["settings", "preference", "option"], run: () => { openSettings(); const inp = row.querySelector("input, select"); inp?.focus(); cmdkFlash(row); } });
+  }
+  // media in the bin, clips on the timeline
+  for (const m of project.media || []) {
+    // the bin folder it sits in tells two files of one name apart
+    const folders = [];
+    for (let f = m.folderId && getFolder(m.folderId), n = 0; f && n < 16; f = f.parentId && getFolder(f.parentId), n++) folders.unshift(f.name);
+    add({ key: "m:" + m.id, label: m.name, group: "Media", hint: folders.length ? `${m.kind} · ${folders.join(" / ")}` : m.kind, keywords: [m.kind, ...(m.tags || [])], run: () => { cmdkShowBin(); revealInProject({ kind: m.kind, mediaId: m.id }); } });
+  }
+  for (const c of project.clips || []) {
+    const name = c.kind === "text" ? (c.props?.text || "Title").split("\n")[0].slice(0, 60) : c.name || getMedia(c.mediaId)?.name || c.kind;
+    add({ key: "c:" + c.id, label: name, group: "Clip", hint: `${c.track} · ${fmt(c.start)}`, keywords: [c.kind, c.track], run: () => {
+      // where the clip is now (an edit may have arrived while Search was open)
+      const cur = project.clips.find((x) => x.id === c.id);
+      if (!cur) { toast("That clip isn't on the timeline any more"); return; }
+      if (isSourceMode()) setMonitorMode("program");
+      selectClip(cur.id);
+      setTime(cur.start);
+      revealTime(cur.start);
+    } });
+  }
+  // keyboard shortcuts: Enter opens the list, filtered to that one
+  for (const tr of document.querySelectorAll("#helpKeys tr")) {
+    const cells = tr.querySelectorAll("td");
+    if (cells.length < 2) continue;
+    const keys = cells[0].textContent.replace(/\s+/g, " ").trim(), what = cells[1].textContent.replace(/\s+/g, " ").trim();
+    const label = what.split(/ — |; |\. /)[0].slice(0, 70);
+    const section = tr.closest(".keys-sec")?.querySelector("h3")?.textContent || "";
+    add({ label, group: "Shortcut", hint: keys, keys: [keys], keywords: [section, keys, what], run: () => {
+      $("helpOverlay").classList.remove("hidden");
+      // the row itself, not every row its first words also start
+      $("helpFilter").value = label;
+      filterHelp(tr);
+      $("helpFilter").focus();
+    } });
+  }
+  return items;
+}
+function cmdkRender() {
+  const list = $("cmdkList");
+  cmdk.shown = FableCutSearch.rank($("cmdkInput").value, cmdk.items, 60);
+  cmdk.active = Math.min(cmdk.active, Math.max(0, cmdk.shown.length - 1));
+  list.innerHTML = cmdk.shown.length
+    ? cmdk.shown.map((it, i) => `<li class="cmdk-item${i === cmdk.active ? " active" : ""}" role="option" id="cmdk-${i}" data-i="${i}" aria-selected="${i === cmdk.active}">` +
+      `<span class="cmdk-label">${escapeHtml(it.label)}</span>${it.hint ? `<span class="cmdk-hint">${escapeHtml(it.hint)}</span>` : ""}` +
+      `<span class="cmdk-group">${it.group}</span></li>`).join("")
+    : `<li class="cmdk-empty">Nothing matches — try another word.</li>`;
+  $("cmdkInput").setAttribute("aria-activedescendant", cmdk.shown.length ? "cmdk-" + cmdk.active : "");
+  list.querySelector(".cmdk-item.active")?.scrollIntoView({ block: "nearest" });
+}
+function openCmdk() {
+  if (state.exporting) return;
+  cmdk.pid = runtime.projectId;   // results belong to this project
+  cmdk.back = document.activeElement;
+  cmdk.items = cmdkCollect();
+  cmdk.active = 0;
+  $("cmdkInput").value = "";
+  $("cmdkOverlay").classList.remove("hidden");
+  cmdkRender();
+  $("cmdkInput").focus();
+}
+/** Another dialog is open over the editor (Export setup finishing its load, …). */
+const cmdkOtherOverlay = () => [...document.querySelectorAll(".overlay")].some((o) => o.id !== "cmdkOverlay" && !o.classList.contains("hidden"));
+/** The Color workspace hides the bin: a result that shows the bin goes back to Edit first. */
+function cmdkShowBin() {
+  if (colorState.ws === "color") setWorkspace("edit");
+}
+function closeCmdk(refocus = true) {
+  $("cmdkOverlay").classList.add("hidden");
+  if (refocus && cmdk.back && document.contains(cmdk.back)) cmdk.back.focus();
+  cmdk.back = null;
+}
+function runCmdk(i) {
+  const it = cmdk.shown[i];
+  if (!it) return;
+  const back = cmdk.back, pid = cmdk.pid;
+  closeCmdk(false);
+  if (pid !== runtime.projectId) { toast("Another project opened — search again"); return; }
+  // after the box has gone, so the action sees the editor as it was
+  setTimeout(() => {
+    // an export (an agent's too) may have taken the timeline meanwhile
+    if (state.exporting) { toast("Wait for the export to finish"); return; }
+    if (pid !== runtime.projectId) { toast("Another project opened — search again"); return; }
+    if (cmdkOtherOverlay()) return;   // a dialog that opened meanwhile keeps the screen
+    try { it.run(); } catch (e) { toast(String(e.message || e)); }
+    // an action that puts focus nowhere hands it back to where it was before Search
+    const a = document.activeElement;
+    if ((!a || a === document.body || a === $("cmdkInput")) && back && document.contains(back)) back.focus();
+  }, 0);
+}
+const cmdkOpen = () => !$("cmdkOverlay").classList.contains("hidden");
+$("btnSearch")?.addEventListener("click", openCmdk);
+$("cmdkInput").addEventListener("input", () => { cmdk.active = 0; cmdkRender(); });
+$("cmdkInput").addEventListener("keydown", (e) => {
+  if (e.isComposing || e.keyCode === 229) return;   // the IME is choosing a word
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    const n = cmdk.shown.length;
+    if (n) cmdk.active = (cmdk.active + (e.key === "ArrowDown" ? 1 : n - 1)) % n;
+    cmdkRender();
+  } else if (e.key === "Enter") {
+    e.preventDefault();
+    runCmdk(cmdk.active);
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    e.stopPropagation();
+    if ($("cmdkInput").value) { $("cmdkInput").value = ""; cmdk.active = 0; cmdkRender(); }
+    else closeCmdk();
+  } else if (e.key === "Tab") e.preventDefault();   // the box is the dialog's only control
+});
+$("cmdkList").addEventListener("mousemove", (e) => {
+  const li = e.target.closest(".cmdk-item");
+  if (!li || +li.dataset.i === cmdk.active) return;
+  cmdk.active = +li.dataset.i;
+  cmdkRender();
+});
+$("cmdkList").addEventListener("click", (e) => {
+  const li = e.target.closest(".cmdk-item");
+  if (li) runCmdk(+li.dataset.i);
+});
+$("cmdkOverlay").addEventListener("mousedown", (e) => {
+  if (e.target === $("cmdkOverlay")) closeCmdk();
+  else if (e.target !== $("cmdkInput")) e.preventDefault();   // a click on the list or footer keeps the focus in the box
+});
+/* Ctrl/Cmd+K, before any field's own key handling (the bin's search stops its keys): one
+   toggle per press. While Search is open, the editor's other shortcuts wait; the box keeps
+   its own keys. */
+window.addEventListener("keydown", (e) => {
+  const k = e.key;
+  // e.code: the K key on any layout (a Cyrillic one reports "л")
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (k === "k" || k === "K" || e.code === "KeyK")) {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (e.repeat) return;
+    // (focus stays with a dialog that opened over Search)
+    if (cmdkOpen()) closeCmdk(!cmdkOtherOverlay());
+    // another dialog keeps the keyboard until it closes
+    else if (!cmdkOtherOverlay()) openCmdk();
+    return;
+  }
+  if (!cmdkOpen()) return;
+  // a dialog that opened meanwhile (Export setup finishing its load) takes the keyboard over
+  if (cmdkOtherOverlay()) { closeCmdk(false); return; }
+  if (e.target !== $("cmdkInput")) { e.stopImmediatePropagation(); return; }
+  // Esc is Search's (before any picker or tool listening for it): clear the box, then close
+  if (k === "Escape" && !e.isComposing) {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if ($("cmdkInput").value) { $("cmdkInput").value = ""; cmdk.active = 0; cmdkRender(); }
+    else closeCmdk();
+  }
+}, true);
 function settingsFocusables() {
   const root = $("settingsDialog");
   if (!root) return [];
@@ -18591,6 +19097,8 @@ function onSettingsTabTrap(e) {
 function openSettings() {
   const cb = $("setLinkSelect");
   if (cb) cb.checked = !!getSetting("linkSelect");
+  const ask = $("setExportAsk");
+  if (ask) ask.checked = getSetting("exportAsk") !== false;
   const overlay = $("settingsOverlay");
   overlay.classList.remove("hidden");
   overlay.addEventListener("keydown", onSettingsTabTrap);
@@ -18608,6 +19116,7 @@ $("btnCloseSettings").addEventListener("click", closeSettings);
 $("settingsOverlay").addEventListener("click", (e) => {
   if (e.target === $("settingsOverlay")) closeSettings();
 });
+$("setExportAsk")?.addEventListener("change", (e) => setSetting("exportAsk", !!e.target.checked));
 $("setLinkSelect").addEventListener("change", (e) => {
   setSetting("linkSelect", !!e.target.checked);
   if (!getSetting("linkSelect")) {
@@ -19095,6 +19604,7 @@ els.exportFrameOverlay?.querySelector(".ef-handle")?.addEventListener("keydown",
 
 window.addEventListener("keydown", (e) => {
   const k = e.key;
+  if (!$("cmdkOverlay").classList.contains("hidden")) return;   // Search has the keyboard (its box handles its own keys)
   if ((k === "Delete" || k === "Backspace") && !e.ctrlKey && !e.metaKey && !e.altKey) {
     if (!isTypingTarget(document.activeElement) && clearFocusedTransition()) {
       e.preventDefault();
@@ -19107,6 +19617,7 @@ window.addEventListener("keydown", (e) => {
     if (!e.repeat && $("btnProjectsDash") && !$("btnProjectsDash").classList.contains("hidden")) saveVersionNow();   // holding the keys makes one
     return;
   }
+  // (Ctrl/Cmd+K, the command search, is handled before this, by its own listener)
   // Ctrl/Cmd+O: the Projects dashboard (where the editor server has projects)
   if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (k === "o" || k === "O") && $("btnProjectsDash") && !$("btnProjectsDash").classList.contains("hidden")) {
     e.preventDefault();

@@ -58,6 +58,9 @@ big operation (cutting silences, snapping to the beat, reframing), and every
 - Video + audio tracks (default 3+4; add more with **+V** / **+A** in the track
   header; right-click an empty header → **Remove track**), drag/trim/split/snap,
   undo/redo
+- **Search** (**Ctrl/Cmd+K**, or the magnifier in the top bar) — one box that finds
+  toolbar actions, panels, Settings, the selected clip's Inspector sections, media,
+  clips and keyboard shortcuts; Enter runs the one you picked
 - **Settings** (cog in the top bar) — optional prefs stored in this browser via
   `localStorage`. Enable **Link timeline and Project bin selection** so picking a
   timeline clip highlights its media in Project, and clicking a Project item
@@ -289,9 +292,10 @@ big operation (cutting silences, snapping to the beat, reframing), and every
 
 **Text**
 
-- **Title styles** — one-tap cohesive looks (Impact, Elegant, Kinetic cut, Neon,
-  Handwritten, Luxury, and more); new titles vary the font, placement and animation
-  automatically instead of defaulting to one flat style
+- **Title styles** — twenty one-tap cohesive looks (Impact, Elegant, Kinetic cut, Neon,
+  Luxury, Comic, Typewriter, Sticker, Cinematic, and more); new titles vary the font,
+  placement and animation automatically instead of defaulting to one flat style. The
+  font picker groups about sixty Google fonts by look, and any other loads by name
 - Kinetic captions: typewriter, word-pop, word-slide, karaoke, **letter-pop**,
   **wave**, **bounce**, **shake**, **clip-reveal**, **zoom-in**, **font-cut**
   (rhythmic typeface cuts), **rise-mask**
@@ -375,8 +379,12 @@ big operation (cutting silences, snapping to the beat, reframing), and every
 - Realtime MediaRecorder fallback when ffmpeg or WebCodecs isn't available
 - Agents export too: `fablecut_export` runs the Fast export in the open editor,
   or in a headless Chrome / Edge the server starts, and returns the file path;
-  `preset` and `delivery` pick and adjust a delivery preset; `outputs` makes
-  several files in one go
+  `preset` and `delivery` pick and adjust a delivery preset; `name` names the
+  file (only the name changes; not with `outputs`); `outputs` makes several
+  files in one go
+- **Save as** at the top of the Export dialog names the file; **Don't ask again**
+  makes the Export button render straight away with the last settings
+  (Settings → Ask before exporting brings the dialog back)
 - Export **Range** dropdown: Entire timeline or IN–OUT (defaults to IN–OUT when
   markers are set). Effective IN/OUT export bounds are clamped to `projDur()`.
 
@@ -483,7 +491,7 @@ Three equivalent control surfaces:
 
    Tools: `fablecut_status` (auto-starts the editor), `fablecut_docs`,
    `fablecut_get_project`, `fablecut_set_project`, `fablecut_patch_project`,
-   `fablecut_import_media`, `fablecut_analyze_reference`, `fablecut_frame`,
+   `fablecut_import_media`, `fablecut_files`, `fablecut_analyze_reference`, `fablecut_frame`,
    `fablecut_encode_profiles`, `fablecut_normalize_audio`, `fablecut_auto_duck`,
    `fablecut_denoise`, `fablecut_silence`, `fablecut_beats`, `fablecut_reframe`, `fablecut_highlights`, `fablecut_transcribe`, `fablecut_captions`, `fablecut_export`, `fablecut_scopes`, `fablecut_track`.
 

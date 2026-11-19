@@ -3048,6 +3048,27 @@ body.track-size-s .clip.c-comp .comp-open-hint {
   font-size: 12px;
 }
 
+.export-name {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+.export-skip {
+  margin-right: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--dim);
+  cursor: pointer;
+}
+
 .export-profile-note,
 .export-profile-hint {
   margin: 6px 0 0;
@@ -4526,7 +4547,8 @@ select:not([multiple]):not([data-native]):is(:not([size]), [size="1"]):hover:not
 select.fc-open { border-color: var(--accent) !important; }
 select:disabled { cursor: not-allowed; }
 select:focus { outline: none; }
-select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* the keyboard outline wins over panels that drop the outline on :focus (.dlv-f in Export) */
+select:focus-visible, .dlv-f select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .fc-select-list {
   position: fixed;
@@ -4581,6 +4603,18 @@ select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 }
 .fc-select-group:not(:first-child) { margin-top: 3px; border-top: 1px solid var(--border); }
 .fc-select-empty { padding: 6px 10px; color: var(--dim); }
+
+/* touch: rows big enough for a finger (desktop stays compact) */
+@media (pointer: coarse) {
+  .fc-select-opt { padding-top: 14px; padding-bottom: 14px; }
+}
+/* forced colours: the keyboard's row (what Enter picks) stands apart from the current choice */
+@media (forced-colors: active) {
+  .fc-select-opt.active { outline: 2px solid Highlight; outline-offset: -2px; background: Highlight; color: HighlightText; }
+  .fc-select-opt.selected::before { background: CanvasText; }
+  .fc-select-opt.active.selected::before { background: HighlightText; }
+  select:focus-visible, .dlv-f select:focus-visible { outline-color: Highlight; }
+}
 
 /* ── Form controls in the editor's theme ──
    On/off settings draw as switches; checkboxes that pick items from a list
@@ -4733,3 +4767,55 @@ input[type=url]:focus:not(:focus-visible), textarea:focus:not(:focus-visible) { 
 }
 input[type=number]::-webkit-inner-spin-button { opacity: .35; }
 input[type=number]:hover::-webkit-inner-spin-button { opacity: .8; }
+
+/* ── Command search (Ctrl/Cmd+K) ── */
+#cmdkOverlay { align-items: flex-start; padding-top: 12vh; }
+.cmdk {
+  width: min(620px, calc(100vw - 32px));
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, .5);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.cmdk-input {
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
+  padding: 14px 16px;
+  outline: none;
+}
+.cmdk-list { list-style: none; margin: 0; padding: 4px; max-height: 52vh; overflow-y: auto; }
+.cmdk-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.cmdk-item.active { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.cmdk-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmdk-hint { color: var(--dim); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40%; }
+.cmdk-group {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--dim);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  flex: none;
+}
+.cmdk-empty { padding: 14px 12px; color: var(--dim); font-size: 13px; }
+.cmdk-foot { font-size: 11px; padding: 7px 12px; border-top: 1px solid var(--border); }
+.cmdk-flash { animation: bin-flash 1.2s ease-out; }
+@media (forced-colors: active) {
+  .cmdk-item.active { outline: 2px solid Highlight; background: Highlight; color: HighlightText; }
+}

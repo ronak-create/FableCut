@@ -2,7 +2,7 @@
   "manifest_version": "0.2",
   "name": "fablecut",
   "display_name": "FableCut",
-  "version": "1.18.0",
+  "version": "1.19.0",
   "description": "Zero-dependency browser video editor that AI agents can drive — JSON timeline, MCP tools, live-reloading UI.",
   "long_description": "FableCut is a Premiere-style non-linear video editor that runs in the browser with zero npm dependencies. An AI agent edits video by patching a single project.json timeline (clips, keyframes, transitions, text animations, filters, speed ramps, adjustment layers) through MCP tools, with color grading, masks and tracking, an audio mixer with effects, motion graphics (shape layers, compositions, animation presets and templates), and media management with offline relink and proxies; the open editor UI live-reloads within ~150 ms and exports through ffmpeg with delivery presets (YouTube, Reels, TikTok, Broadcast ProRes, lossless archive…), batch outputs from one render, loudness normalization and a check of every file. Includes reference-video analysis (shot cuts, beats, BPM, energy, drop) so agents can remake an edit with new footage.",
   "author": {
@@ -32,6 +32,7 @@
     { "name": "fablecut_set_project", "description": "Replace the timeline JSON with optimistic-concurrency conflict detection" },
     { "name": "fablecut_patch_project", "description": "Apply targeted, merge-safe ops (add/update/remove clip or media, set project fields, track levels, submix buses, audio effects and their automation, color grades and secondaries, clip masks, track mattes) and timeline edits (split, ripple delete, lift/extract, insert/overwrite, ripple/roll/slip/slide, crossfade)" },
     { "name": "fablecut_import_media", "description": "Copy a local file into the project's media folder and register it" },
+    { "name": "fablecut_files", "description": "List, make folders in, move, rename and trash files in the media folder (trash is restorable)" },
     { "name": "fablecut_analyze_reference", "description": "Analyze a reference video into an edit blueprint: shot cuts, beats, BPM, energy curve, drop; extracts its music" },
     { "name": "fablecut_frame", "description": "Look at the footage: one JPEG frame of a source clip at a timestamp, an N-up contact sheet across a clip, or the composed timeline rendered and graded at a moment - returned inline as an image the agent can see" },
     { "name": "fablecut_encode_profiles", "description": "List the delivery presets (YouTube, Reels, Broadcast…) and ffmpeg encoding profiles available for export" },
