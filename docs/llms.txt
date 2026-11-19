@@ -30,7 +30,8 @@ about 150 ms. A human and an agent can work the same timeline at once.
   direct edits to `project.json` with live reload over server-sent events.
 - Editing: multi-track video and audio (up to 16 per kind), per-clip volume,
   stereo pan, speed ramps, keyframes, transitions, titles with kinetic text
-  animation, SVG library, chroma key, AI background removal.
+  animation and twenty one-tap title styles, about sixty Google fonts grouped
+  by look (any other loads by name), SVG library, chroma key, AI background removal.
 - Audio: a mixer with track faders, pan, mute / solo and meters; submix buses;
   clip gain; effect chains (EQ, filters, compressor, limiter, gate, delay,
   reverb, distortion, stereo width, pitch shift) with presets and keyframed
@@ -81,6 +82,9 @@ about 150 ms. A human and an agent can work the same timeline at once.
   `relinkMedia` and `replaceMedia` patch ops.
 - Proxies: light H.264 copies of heavy footage played while editing; export,
   scopes and frame grabs always use the originals. Agents use `fablecut_proxy`.
+- Files on disk: agents list the real folders in media/, make folders, move and
+  rename files (every project's media entries follow) and trash what isn't
+  needed into a restorable media/.trash/ with `fablecut_files`; nothing is deleted.
 - Projects: one install keeps many projects (./project.json is the open one); a
   dashboard opens, creates from canvas presets or saved templates, duplicates,
   renames, tags, annotates, archives and deletes them. Agents use
@@ -121,6 +125,9 @@ about 150 ms. A human and an agent can work the same timeline at once.
 - Delivery checks: loudness normalization (two-pass loudnorm, true-peak
   ceiling) and a report on every exported file — size, frame rate, frames,
   codecs, length, loudness, true peak and file size against what was asked.
+- Search (Ctrl/Cmd+K, or the magnifier in the top bar): one box that finds
+  toolbar actions, panels, Settings, the selected clip's Inspector sections,
+  media, clips and keyboard shortcuts; Enter runs the one picked.
 - Export: fast ffmpeg export via delivery presets or encoding profiles, WebCodecs hardware export
   (browser encodes H.264, server muxes), and a realtime MediaRecorder fallback.
   Agents can start an export themselves (`fablecut_export`), in the open editor

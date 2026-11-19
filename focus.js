@@ -53,11 +53,14 @@
   /* The element that last got focus from the keyboard (Tab) or from code, not a click.
      :focus-visible can't tell: Chrome turns it on for a focused <select> as soon as a key is pressed. */
   let keyFocused = null;
+  /* The slider a pointer is dragging right now (set by install). */
+  let dragHeld = null;
   /** Record how `el` got focus: true = keyboard / code, false = pointer. */
   function noteFocus(el, byKeyboard) { keyFocused = byKeyboard ? el : null; }
   /** Space with focus on `el` should play the timeline, not press `el`. */
   function spaceShouldPlay(el) {
-    return isClickControl(el) && !inKeyboardScope(el) && el !== keyFocused;
+    // a slider still under the pointer keeps its focus: released mid-drag, playback would move its thumb under the pointer
+    return isClickControl(el) && !inKeyboardScope(el) && el !== keyFocused && el !== dragHeld;
   }
   /** Give focus back to the page when `el` is a click control outside a dialog. */
   function release(el) {
@@ -80,14 +83,18 @@
     let downOn = null, downAt = 0;
     const CLICK_MS = 1500;   // a press held longer than this isn't paired (the click is left to the keyboard path)
     win.addEventListener("pointerdown", (e) => {
+      // only the primary button: a right-click opens a menu, it doesn't use the control
+      if (e.button > 0) return;
       byPointer = true;
       downOn = e.target; downAt = Date.now();
       // clicking a control that already had keyboard focus (no new focusin): it is now a mouse focus
       if (keyFocused && (e.target === keyFocused || (keyFocused.contains && keyFocused.contains(e.target)))) keyFocused = null;
       const t = e.target;
       if (dragging) return;   // another pointer is already dragging a slider
-      if (t && t.tagName === "INPUT" && t.type === "range") { dragging = t; dragPointer = e.pointerId; }
+      if (t && t.tagName === "INPUT" && t.type === "range") { dragging = dragHeld = t; dragPointer = e.pointerId; }
     }, { capture: true, passive: true });
+    // a press the browser cancelled (a touch that became a scroll) clicks nothing
+    win.addEventListener("pointercancel", () => { downOn = null; }, { capture: true, passive: true });
     win.addEventListener("keydown", () => { byPointer = false; }, { capture: true, passive: true });
     /** True when `t` is the element a recent mouse press landed on (or its label / control):
         the focus or click on `t` comes from that press. Anything else (Tab, a screen reader's
@@ -105,7 +112,11 @@
     // Bubble phase: the control's own click handler has run by now.
     win.addEventListener("click", (e) => {
       const paired = fromPress(e.target);
-      downOn = null;
+      // A click on a label is passed on to its control (focus, then a click of its own)
+      // after this listener has run: keep the press for that one.
+      const lab = paired && e.target && e.target.closest && e.target.closest("label");
+      const passesOn = !!(lab && lab.control && lab.control !== e.target && !(lab.control.contains && lab.control.contains(e.target)));
+      if (!passesOn) downOn = null;
       if (!paired) return;   // a click with no mouse press (screen reader, el.click() in code): focus stays
       const el = doc.activeElement;
       // a <select> stays focused while its list is open; a text field is typed into
@@ -119,14 +130,15 @@
     const endDrag = (e) => {
       if (!dragging || e.pointerId !== dragPointer) return;
       const el = dragging;
-      dragging = null; dragPointer = null;
+      dragging = dragHeld = null; dragPointer = null;
       setTimeout(() => { if (doc.activeElement === el) release(el); }, 0);
     };
     win.addEventListener("pointerup", endDrag, true);
     win.addEventListener("pointercancel", endDrag, true);
     win.addEventListener("change", (e) => {
       const el = e.target;
-      if (byPointer && el === doc.activeElement && el.tagName === "SELECT") release(el);
+      // picked from a select the mouse focused (a key held meanwhile, Shift say, doesn't change that)
+      if (el === doc.activeElement && el.tagName === "SELECT" && el !== keyFocused) release(el);
     });
     // A native select picker closed without a change (Esc, a click outside, the
     // same option) leaves the select focused, and ←/→ would change its value

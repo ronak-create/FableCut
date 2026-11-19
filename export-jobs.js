@@ -112,7 +112,7 @@ function createExportJobs(opts) {
      *  kind "transcribe" turns files' speech into words and saves them (fablecut_transcribe).
      *  A scopes job's `image` flag also returns that still as a JPEG data URL,
      *  which is how fablecut_frame shows an agent the composed program picture. */
-    request({ kind = "export", range, profile, delivery = null, deliveries = null, time, revision, where = "auto", matte = null, mask = null, track = null, transcribe = null, image = false }) {
+    request({ kind = "export", range, profile, delivery = null, deliveries = null, name = null, time, revision, project = null, where = "auto", matte = null, mask = null, track = null, transcribe = null, image = false }) {
       if (!["auto", "tab", "headless"].includes(where)) throw Object.assign(new Error("where must be auto, tab or headless"), { code: 400 });
       if (!["export", "scopes", "track", "transcribe"].includes(kind)) throw Object.assign(new Error("kind must be export, scopes, track or transcribe"), { code: 400 });
       if (time != null && !(Number.isFinite(time) && time >= 0)) throw Object.assign(new Error("time must be seconds ≥ 0"), { code: 400 });
@@ -125,7 +125,9 @@ function createExportJobs(opts) {
       const j = {
         id: "x_" + Math.random().toString(36).slice(2, 10), kind, status: "pending", progress: 0,
         range: range || null, profile: profile || null, delivery: kind === "export" && delivery ? delivery : null,
+        name: kind === "export" && typeof name === "string" && name.trim() ? name.trim().slice(0, 120) : null,
         deliveries: kind === "export" && Array.isArray(deliveries) && deliveries.length ? deliveries : null, time: time ?? null, revision: Number.isFinite(revision) ? revision : null,
+        project: typeof project === "string" && project ? project : null,   // the project it was asked for
         matte: kind === "scopes" && matte ? { clip: String(matte.clip), layer: matte.layer } : null,
         mask: kind === "scopes" && mask ? { clip: String(mask.clip) } : null,
         track: kind === "track" && track ? track : null,
@@ -142,7 +144,7 @@ function createExportJobs(opts) {
     },
     get(id) { const j = jobs.get(id); return j ? view(j) : null; },
     /** What a tab needs to run the job (headless pages fetch it by id). */
-    ticket(id) { const j = jobs.get(id); return j ? { id: j.id, kind: j.kind, range: j.range, profile: j.profile, delivery: j.delivery || null, deliveries: j.deliveries || null, time: j.time, revision: j.revision, matte: j.matte || null, mask: j.mask || null, track: j.track || null, transcribe: j.transcribe || null, image: !!j.image, status: j.status } : null; },
+    ticket(id) { const j = jobs.get(id); return j ? { id: j.id, kind: j.kind, range: j.range, profile: j.profile, delivery: j.delivery || null, deliveries: j.deliveries || null, name: j.name || null, time: j.time, revision: j.revision, project: j.project || null, matte: j.matte || null, mask: j.mask || null, track: j.track || null, transcribe: j.transcribe || null, image: !!j.image, status: j.status } : null; },
     /** First tab to claim a pending job runs it. */
     claim(id) {
       const j = jobs.get(id);

@@ -8,8 +8,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
-- **Node 22 or newer is now required** (was Node 18). CI runs the test suite on
-  Node 22, 24 and 26. (#64)
 - **Dropdowns match the editor.** The editor's dropdowns open a list in its
   dark theme instead of the browser's own popup, with optgroup headings, the
   current choice marked, and each font previewed in its face in the font menu.
@@ -25,7 +23,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   last slider instead of the playhead. A control used with the mouse now gives
   focus back to the editor, and Space on one that still has it plays. Dialogs
   and popovers, and controls reached with Tab, keep working from the keyboard
-  as before.
+  as before. (thanks @mrbeandev, #152)
+
+## [1.19.0] - 2026-11-19
+
+### Added
+- **Name the file before it renders.** The Export dialog opens with **Save as**:
+  the file's name, filled with the default (the preset's pattern) and yours to
+  change for this export. **Don't ask again** makes the Export button render
+  straight away with the last settings; **Settings → Ask before exporting**
+  turns the dialog back on. Agents pass `name` to `fablecut_export`.
+- **Search everything with Ctrl/Cmd+K.** A box over the editor (or the
+  magnifier in the top bar) finds toolbar actions, panels and tabs, Settings,
+  the selected clip's Inspector sections, media in the bin, clips on the
+  timeline and keyboard shortcuts. Type a few letters of each word (“rip del”
+  finds Ripple delete); Enter runs it: a panel opens, a setting is shown, a clip
+  is selected and the playhead goes to it, a shortcut opens in the list.
+- **More title styles and fonts.** Eleven new title styles — Pop outline, Boxed,
+  Headline, Comic, Typewriter, Minimal, Script, Retro, Sticker, Glitch and
+  Cinematic — beside the nine there were, and new titles rotate through more of
+  them. The font picker now offers about sixty Google fonts grouped by look
+  (Display, Sans, Serif, Script & hand, Retro & mono). Switching style clears
+  the weight, outline colour and highlight colour the last style set.
+- **Agents can tidy the media folder.** `fablecut_files` lists the real folders
+  in `media/`, makes folders, moves and renames files and folders, and throws
+  away what isn't needed into `media/.trash/`, where it can be restored —
+  nothing is deleted. A move repoints every project's media entries at the new
+  place, so no clip goes offline, and the file keeps its transcript. Trashing a
+  file a project still uses is refused unless forced.
+
+### Changed
+- **Node 22 or newer is now required** (was Node 18). CI runs the test suite on
+  Node 22, 24 and 26. (thanks @Mind-alia, #155)
+
+### Fixed
+- **Transcribe after an agent transcribed.** Once every file on the timeline had
+  a transcript, the Transcript tab's button sat greyed out as **Transcribe**, so
+  clicking it seemed to do nothing. It now reads **Transcribe again** and redoes
+  them all with the model and language picked beside it. A line above the words
+  says which model and language made them, and to pick the language spoken and
+  the Small model when the words look wrong.
 
 ## [1.18.0] - 2026-10-28
 
@@ -1010,7 +1047,8 @@ the report in [#1](https://github.com/ronak-create/FableCut/issues/1) — thanks
 - Three control surfaces for AI agents: **MCP server**, direct `project.json`
   editing, and a **REST API** with live-reload over server-sent events.
 
-[Unreleased]: https://github.com/ronak-create/FableCut/compare/v1.18.0...HEAD
+[Unreleased]: https://github.com/ronak-create/FableCut/compare/v1.19.0...HEAD
+[1.19.0]: https://github.com/ronak-create/FableCut/compare/v1.18.0...v1.19.0
 [1.18.0]: https://github.com/ronak-create/FableCut/compare/v1.17.0...v1.18.0
 [1.17.0]: https://github.com/ronak-create/FableCut/compare/v1.16.0...v1.17.0
 [1.16.0]: https://github.com/ronak-create/FableCut/compare/v1.15.0...v1.16.0
