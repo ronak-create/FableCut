@@ -14178,6 +14178,7 @@ els.preview.addEventListener("dblclick", (e) => {
   maskUi.pt = -1; scheduleSave(); renderInspector();
 }, true);
 window.addEventListener("keydown", (e) => {
+  if (!$("cmdkOverlay").classList.contains("hidden")) return;   // keys belong to Search while it is open
   if (e.key === "Escape" && colorState.maskDraw) {   // the Color tab's Draw
     e.preventDefault(); e.stopImmediatePropagation();
     colorState.maskDraw = false; colorState.maskStroke = null; state.dirtyTimeline = true; renderColorPage(true);
@@ -18699,6 +18700,7 @@ function runCmdk(i) {
   setTimeout(() => {
     // an export (an agent's too) may have taken the timeline meanwhile
     if (state.exporting) { toast("Wait for the export to finish"); return; }
+    if (pid !== runtime.projectId) { toast("Another project opened — search again"); return; }
     try { it.run(); } catch (e) { toast(String(e.message || e)); }
     // an action that puts focus nowhere hands it back to where it was before Search
     const a = document.activeElement;
