@@ -268,7 +268,8 @@ function readBody(req) {
 /** Claim final + sibling `.part` paths with exclusive create (`wx`) so concurrent
  *  exports cannot pick the same free name before either file exists. */
 function reserveExportPaths(dir, baseName, ext) {
-  const base = baseName.replace(/\.(mp4|mov|m4v|mkv|webm)$/i, "");
+  // as the Export dialog does: no extension typed twice, no leading dot (a dotfile isn't served)
+  const base = baseName.replace(/\.(mp4|mov|m4v|mkv|webm|mxf)$/i, "").replace(/^[.\s]+/, "") || "export";
   let i = 0;
   for (;;) {
     const stem = i === 0 ? base : `${base}_${i}`;
@@ -1195,7 +1196,10 @@ const server = http.createServer(async (req, res) => {
       }
       let revision = null;
       try { revision = JSON.parse(fs.readFileSync(PROJECT_FILE, "utf8").replace(/^\uFEFF/, "")).revision ?? null; } catch {}
-      const job = exportJobs.request({ range: opts.range, profile: opts.profile, delivery: deliveries ? null : delivery, deliveries, where: opts.where, revision });
+      if (opts.name != null && typeof opts.name !== "string") { sendJSON(res, 400, { error: "name is a string" }); return; }
+      const name = opts.name?.trim() || null;   // blank = the default name
+      if (name && deliveries) { sendJSON(res, 400, { error: "name goes with one file, not with outputs (give each output its own filename)" }); return; }
+      const job = exportJobs.request({ range: opts.range, profile: opts.profile, delivery: deliveries ? null : delivery, deliveries, name, where: opts.where, revision, project: projects.peekActive() });
       sendJSON(res, 200, deliveries ? { ...job, delivery: `${deliveries.length} outputs from one render`, notes: outNotes }
         : delivery ? { ...job, delivery: Delivery.describe(delivery), notes } : job);
     } catch (e) {
@@ -1222,7 +1226,7 @@ const server = http.createServer(async (req, res) => {
       if (mk != null && (typeof mk !== "object" || typeof mk.clip !== "string")) {
         sendJSON(res, 400, { error: "mask must be {clip: \"<clip id>\"}" }); return;
       }
-      sendJSON(res, 200, exportJobs.request({ kind: "scopes", time, where: opts.where, revision, matte: m || null, mask: mk || null, image: opts.image === true }));
+      sendJSON(res, 200, exportJobs.request({ kind: "scopes", time, where: opts.where, revision, project: projects.peekActive(), matte: m || null, mask: mk || null, image: opts.image === true }));
     } catch (e) {
       sendJSON(res, e.code === 409 || e.code === 400 ? e.code : 500, { error: String(e.message || e) });
     }
@@ -1239,7 +1243,7 @@ const server = http.createServer(async (req, res) => {
       if (!t || typeof t !== "object" || Array.isArray(t) || typeof t.clip !== "string") { sendJSON(res, 400, { error: "track must be {clip: \"<clip id>\", …}" }); return; }
       const body = JSON.stringify(t);
       if (body.length > 8192) { sendJSON(res, 400, { error: "track spec too large" }); return; }
-      sendJSON(res, 200, exportJobs.request({ kind: "track", where: opts.where, revision, track: JSON.parse(body) }));
+      sendJSON(res, 200, exportJobs.request({ kind: "track", where: opts.where, revision, project: projects.peekActive(), track: JSON.parse(body) }));
     } catch (e) {
       sendJSON(res, e.code === 409 || e.code === 400 ? e.code : 500, { error: String(e.message || e) });
     }

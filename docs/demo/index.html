@@ -306,6 +306,11 @@
   <div class="dialog export-dialog" role="dialog" aria-modal="true" aria-labelledby="exportSetupTitle">
     <h2 id="exportSetupTitle">Export</h2>
     <div class="export-body">
+    <div class="export-profile-row" id="exportNameRow">
+      <label class="export-profile-label" for="exportName">Save as</label>
+      <input type="text" class="export-name" id="exportName" maxlength="120" spellcheck="false" aria-describedby="exportNameNote">
+      <p class="dim export-profile-note" id="exportNameNote"></p>
+    </div>
     <div class="export-profile-row" id="exportRangeRow">
       <label class="export-profile-label" for="exportRangeSel">Range</label>
       <select class="export-profile-sel" id="exportRangeSel" aria-describedby="exportRangeNote">
@@ -446,6 +451,7 @@
     <div class="export-track-warn hidden" id="exportTrackWarn" role="status"></div>
     </div>
     <div class="dialog-actions">
+      <label class="export-skip" title="The Export button then renders straight away with these settings. Settings brings this dialog back."><input type="checkbox" id="exportSkipAsk"> Don't ask again</label>
       <button class="btn dlv-queue-open" id="btnOpenQueue" title="Show the export queue">Queue</button>
       <button class="btn" id="btnCancelSetup">Cancel</button>
       <button class="btn" id="btnBatchExport" title="Queue every checked batch output and start">Export checked</button>
@@ -491,6 +497,16 @@
         <span>
           <span class="settings-label">Link timeline and Project bin selection</span>
           <span class="settings-hint">Selecting a timeline clip highlights its media in Project, and the reverse. Off by default.</span>
+        </span>
+      </label>
+    </div>
+    <div class="settings-section">
+      <h3>Export</h3>
+      <label class="settings-row">
+        <input type="checkbox" id="setExportAsk">
+        <span>
+          <span class="settings-label">Ask before exporting</span>
+          <span class="settings-hint">Export opens a dialog to name the file and check the settings before it renders. Off: Export renders straight away with the last settings. On by default.</span>
         </span>
       </label>
     </div>

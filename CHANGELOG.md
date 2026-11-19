@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Name the file before it renders.** The Export dialog opens with **Save as**:
+  the file's name, filled with the default (the preset's pattern) and yours to
+  change for this export. **Don't ask again** makes the Export button render
+  straight away with the last settings; **Settings → Ask before exporting**
+  turns the dialog back on. Agents pass `name` to `fablecut_export`.
 - **Search everything with Ctrl/Cmd+K.** A box over the editor (or the
   magnifier in the top bar) finds toolbar actions, panels and tabs, Settings,
   the selected clip's Inspector sections, media in the bin, clips on the
