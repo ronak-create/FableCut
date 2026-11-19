@@ -232,6 +232,22 @@ const TOOLS = [
     },
   },
   {
+    name: "fablecut_files",
+    description: "The project's files on disk, inside ./media/ (the folder fablecut_import_media copies into): list a folder, make folders, move or rename files and folders, and throw away what isn't needed. Nothing is deleted: trash moves a file into media/.trash/ and restore puts it back. A move repoints every project's media entries at the new place, so no clip goes offline, and the file keeps its transcript. Trash refuses a file a project still uses (removeMedia it first, or force:true to trash it anyway: it goes offline there until restored). The media bin's folders (folderId) are separate: they organize entries, these are the real folders. Paths are relative to media/ ('b-roll/day 1/a.mp4') or /media/… srcs. Move, rename and trash only when the user asked for it.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["list", "mkdir", "move", "trash", "trash-list", "restore"], description: "list (default) · mkdir · move (also renames) · trash · trash-list · restore" },
+        dir: { type: "string", description: "list: the folder (default media/ itself) · mkdir: the folder to make (parents too)" },
+        from: { type: "string", description: "move: the file or folder" },
+        to: { type: "string", description: "move: an existing folder to move it into, or the new path (a rename)" },
+        paths: { type: "array", items: { type: "string" }, description: "trash: files or folders" },
+        force: { type: "boolean", description: "trash: even files a project still uses (they go offline until restored); move: even while a project can't be read (the file goes offline there)" },
+        id: { type: "string", description: "restore: a trashed item's id (trash-list shows them)" },
+      },
+    },
+  },
+  {
     name: "fablecut_encode_profiles",
     description: "List what fablecut_export can make. DELIVERY PRESETS (structured settings, the Export dialog's Preset list): youtube, youtube-shorts, instagram-reels, tiktok, x, linkedin, master (project size), broadcast (ProRes 422 HQ), web (720p), archive (lossless FFV1), custom — plus presets the user saved — each a spec of resolution, fps, codec (h264, hevc, av1, vp9, prores, dnxhr, mpeg2 XDCAM, ffv1), rate control (crf / vbr / cbr), keyframe interval, pixel format, color, container, audio, a file-name template and metadata. {preset:'youtube'} returns one preset's full spec; the encoders this ffmpeg can use are listed (hardware ones only when they work on this machine). ENCODING PROFILES (encoding-profiles.json): raw ffmpeg argument lists plus jpegQuality, extension and color, for anything the presets do not cover; edit the file on disk (hot-reloaded); {profile:'hq'} returns one, detail:true includes every args array. Both are dry-run against ffmpeg when an export starts, so bad settings are refused before rendering.",
     inputSchema: {
@@ -455,6 +471,7 @@ const TOOLS = [
       type: "object",
       properties: {
         range: { type: "string", enum: ["entire", "in-out"], description: "Whole timeline, or the project's inPoint→outPoint (default: in-out when either is set)" },
+        name: { type: "string", description: "The file's name, without the extension. Default: a delivery preset's filename pattern, which starts with the project's name (with an encoding profile, the project's name) — so name the file after what it is (e.g. 'salon-promo-15s') whenever the project holds more than this one video. The editor's own Export dialog asks the user for a name; this is that answer. Only the name changes: the preset, delivery or encoding profile the export uses stays the same. Not with outputs" },
         preset: { type: "string", description: "Delivery preset: youtube, youtube-shorts, instagram-reels, tiktok, x, linkedin, master, broadcast, web, archive, custom, or a saved preset's id (fablecut_encode_profiles lists them). The output is reframed to the preset's size — cropped from the middle (or from the project's exportFrame), or padded with reframe:'fit'" },
         delivery: { type: "object", description: "Delivery settings over the preset (or over custom): {width, height (null = the picture's size), fps (null = the project's), reframe:'fill'|'fit'|'stretch', container:'mp4'|'mov'|'mkv'|'webm'|'mxf', video:{codec:'h264'|'hevc'|'av1'|'vp9'|'prores'|'dnxhr'|'mpeg2'|'ffv1', encoder?, rate:'crf'|'vbr'|'cbr', crf, bitrate (kb/s), maxrate (kb/s), keyint (s), pixFmt, speed:'fast'|'balanced'|'best', profile (prores: proxy|lt|standard|hq|4444|4444xq · dnxhr: lb|sq|hq|hqx|444)}, audio:{codec:'aac'|'opus'|'mp3'|'pcm16'|'pcm24'|'flac'|'none', bitrate (kb/s), sampleRate, channels, loudness (LUFS target: -14 streaming/social, -16 podcast, -23 EBU R128, -24 ATSC; null = as mixed), truePeak (dBTP ceiling, default -1)}, color:'bt709'|'bt709-full'|'bt601-625'|'bt601-525', filename:'{project}_{preset}_{res}' (tokens {project} {preset} {res} {w} {h} {fps} {codec} {date} {time} {range} {n}), metadata:{title, artist, description, copyright, date, keywords}}. Anything left out comes from the preset; impossible combinations are corrected and the reply says how. Every finished file is checked against what was asked (size, fps, frames, codecs, length, loudness, true peak, file size) and the reply lists the checks" },
         outputs: { description: "Several files, rendered once per frame rate (up to 8 outputs per render): true = the project's checked batch outputs (project.outputs, set with setProject {outputs:[…]}), or a list like [{preset:'master'}, {preset:'youtube'}, {preset:'instagram-reels'}, {preset:'custom', width:1080, height:1080, filename:'{project}_square_{res}'}, {preset:'web', filename:'{project}_preview_{res}'}]. Outputs with the same fps share one render; the reply lists every file", anyOf: [{ type: "boolean" }, { type: "array", items: { anyOf: [{ type: "string" }, { type: "object" }] } }] },
@@ -1345,6 +1362,51 @@ async function proxyTool(args) {
   };
   return list.map(line).join("\n") + (busy() ? "\nStill working — call fablecut_proxy again (without create) to check." : "");
 }
+/* ── Files in media/ (fablecut_files) ── */
+async function filesTool(args) {
+  if (!(await ensureUIServer())) throw new Error(`the editor server is not running and could not be started on port ${PORT}`);
+  const action = args.action || "list";
+  const body = { action, dir: args.dir, from: args.from, to: args.to, paths: args.paths, force: args.force, id: args.id };
+  const r = await apiJSON("POST", "/api/files", body);
+  const name = (src) => { try { return decodeURIComponent(String(src).replace(/^\/media\//, "")); } catch { return src; } };
+  const restoreWith = (t) => `Trashed ${name(t.src)} (id ${t.id} — restore with {action:"restore", id:"${t.id}"})${t.warning ? ` — ${t.warning}` : ""}`;
+  if (r.status !== 200) {
+    // a trash that stopped part-way: the ones that went still need their ids
+    if (r.body?.trashed?.length) throw new Error(r.body.error + "\n" + r.body.trashed.map(restoreWith).join("\n"));
+    throw new Error(r.body?.error || `files request failed (${r.status})`);
+  }
+  const b = r.body;
+  const kb = (n) => n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB";
+  if (action === "list") {
+    const lines = [`media/${b.dir ? b.dir + "/" : ""} — ${b.folders.length} folder${b.folders.length === 1 ? "" : "s"}, ${b.files.length} file${b.files.length === 1 ? "" : "s"}`];
+    for (const f of b.folders) lines.push(`  ${f}/`);
+    for (const f of b.files) lines.push(`  ${f.name}  ${kb(f.size)}  ${f.src}`);
+    return lines.join("\n");
+  }
+  if (action === "mkdir") return `Made media/${b.dir}/`;
+  if (action === "move") {
+    if (b.from === b.to) return "Nothing moved (it is already there).";
+    if (!b.moved.length) return `Moved ${name(b.from)}/ → ${name(b.to)}/ (an empty folder)`;
+    const lines = [`Moved ${b.moved.length} file${b.moved.length === 1 ? "" : "s"}:`, ...b.moved.slice(0, 20).map((m) => `  ${name(m.from)} → ${name(m.to)}`)];
+    if (b.moved.length > 20) lines.push(`  … +${b.moved.length - 20} more`);
+    lines.push(b.repointed.length ? "Media entries repointed: " + b.repointed.map((x) => `${x.media} in ${x.open ? "the open project" : `"${x.project}"`}`).join(", ") : "No project used them.");
+    if (b.warning) lines.push("Warning: " + b.warning);
+    return lines.join("\n");
+  }
+  if (action === "trash") {
+    const lines = b.trashed.map(restoreWith);
+    if (b.stillThere?.length) lines.push("Still playing (part of the original stayed): " + b.stillThere.map((u) => `"${u.name}"`).join(", "));
+    if (b.offline.length) lines.push("Now OFFLINE: " + b.offline.map((u) => `"${u.name}" in ${u.open ? "the open project" : `"${u.project}"`}`).join(", "));
+    return lines.join("\n");
+  }
+  if (action === "trash-list") {
+    if (!b.items.length) return "The trash is empty.";
+    return b.items.map((t) => `${t.id}  ${name(t.src)}${t.kind === "folder" ? `/ (${t.size} files)` : "  " + kb(t.size)}  trashed ${t.trashed}`).join("\n");
+  }
+  if (action === "restore") return `Restored ${name(b.restored.src)}` + (b.restored.warning ? ` — ${b.restored.warning}` : "");
+  return JSON.stringify(b);
+}
+
 async function exportTool(args) {
   if (!(await ensureUIServer())) throw new Error(`the editor server is not running and could not be started on port ${PORT}`);
   let startNote = "";
@@ -1359,7 +1421,10 @@ async function exportTool(args) {
     if (r.status !== 200) throw new Error(r.body?.error || "no such export job");
     job = r.body;
   } else {
-    const r = await apiJSON("POST", "/api/export/request", { range: args.range, profile: args.profile, preset: args.preset, delivery: args.delivery, outputs: args.outputs, where: args.where || "auto" });
+    if (args.name != null && typeof args.name !== "string") throw new Error("name is a string: the file's name, without the extension");
+    const name = args.name?.trim() || undefined;
+    if (name && args.outputs) throw new Error("name goes with one file, not with outputs (give each output its own filename)");
+    const r = await apiJSON("POST", "/api/export/request", { range: args.range, profile: args.profile, preset: args.preset, delivery: args.delivery, outputs: args.outputs, name, where: args.where || "auto" });
     if (r.status !== 200) throw new Error(r.body?.error || `export request failed (${r.status})`);
     job = r.body;
     if (job.notes && job.notes.length) startNote = `Settings adjusted: ${job.notes.join("; ")}\n`;
@@ -1911,6 +1976,8 @@ async function callTool(name, args, attempt = 0) {
         `REMAKE RECIPE: 1) set project width/height/fps to ${bp.width}x${bp.height} @ ${bp.fps} — 2) write beats[] into project markers — 3) extracted music on A1 — 4) one clip per shots[] entry at the same start/duration on V1 (hard cuts; footage energy should track each shot's energy value) — 5) biggest moment on drop (${bp.drop}s)${bp.bpm ? ` — tempo ${bp.bpm} BPM` : ""}. Full recipe: fablecut_docs → "Remake a reference video".`,
       ].join("\n");
     }
+    case "fablecut_files":
+      return filesTool(args);
     case "fablecut_import_media": {
       const src = args.path;
       if (!src) throw new Error("path is required");
@@ -2013,7 +2080,7 @@ async function handle(msg) {
         result: {
           protocolVersion: negotiateProtocolVersion(params?.protocolVersion),
           capabilities: { tools: {} },
-          serverInfo: { name: "fablecut", version: "1.18.0" },
+          serverInfo: { name: "fablecut", version: "1.19.0" },
         },
       });
     }

@@ -24,6 +24,8 @@ Every Claude Code session then has these tools:
   set project fields, add and open sequences) without round-tripping the document. **Prefer this for edits.**
 - `fablecut_import_media` — copy a local file (or download an `https://` URL)
   into `./media/` and register it. The stored `src` is always `/media/…`.
+- `fablecut_files` — the real folders in `./media/`: list one, make folders, move or rename
+  files and folders, trash and restore (nothing is deleted). See "Media management" below.
 - `fablecut_analyze_reference` — turn a reference video into an edit blueprint
   (shots, beats, BPM, energy, drop) + extract its music. See "Remake a reference video".
 - `fablecut_frame` — **look at** a moment and get back an actual image.
@@ -475,10 +477,22 @@ dropdown + Shuffle), or reproduce it from an agent by writing the same props:
 | `subtitle` | Roboto | small, bottom, bg pill, `karaoke` |
 | `boldRise` | Archivo Black | uppercase, lower third, `rise-mask` |
 | `luxury` | Cinzel | uppercase, cream→gold gradient, wide `letterSpacing`, `clip-reveal` |
+| `popOutline` | Montserrat 900 | uppercase, gold with a dark outline, `letter-pop` |
+| `boxed` | Inter 800 | dark text on a white box, lower third, `word-slide` |
+| `headline` | Montserrat 900 | uppercase, outlined, the word being said in pink (`highlight`) |
+| `comic` | Bangers | yellow with a thick outline, tilted −3°, `bounce` |
+| `typewriter` | Special Elite | cream, lower-left, `typewriter` |
+| `minimal` | Inter 300 | uppercase, very wide `letterSpacing`, no shadow, `rise-mask` |
+| `script` | Great Vibes | white→blush gradient, `clip-reveal` |
+| `retro` | Monoton | uppercase, pink `glow`, `letter-pop` |
+| `sticker` | Fredoka 700 | white on a violet box, tilted −2°, lower third, `word-pop` |
+| `glitch` | Russo One | uppercase, red `glow`, `shake` |
+| `cinematic` | Cormorant Garamond 500 | uppercase, wide `letterSpacing`, `rise-mask` |
 
 **Rule for agents: vary the font per title — never reuse one font across a whole
-edit.** Any Google Font name auto-loads; the display faces above ship in
-`library/fonts/`. Placement props (`x`/`y`) are canvas-aware in the styles
+edit.** Any Google Font name auto-loads; some display faces ship in
+`library/fonts/`. The font picker lists about sixty Google fonts by look
+(Display, Sans, Serif, Script & hand, Retro & mono) and loads one on first use. Placement props (`x`/`y`) are canvas-aware in the styles
 (lower third ≈ `y: height*0.30`).
 
 Switching the style on an **existing** title (inspector dropdown/Shuffle) only
@@ -718,9 +732,14 @@ edit. Find matches whole words and ignores case, accents, punctuation and spacin
 
 In the editor, the **Transcript** tab beside the Inspector:
 
-- **Transcribe** works on the selected clips' files, else on every file on the
-  timeline that has no transcript yet. The model and the language are beside it.
-  Progress shows below (the first time, the model download), with **Cancel**.
+- **Transcribe** works on the selected clips' files (a selection with no speech,
+  such as a title, transcribes nothing), else on every file on the timeline that
+  has no transcript yet; once every file has one (an agent may
+  have made them), it reads **Transcribe again** and redoes them all. The model
+  and the language are beside it. Progress shows below (the first time, the
+  model download), with **Cancel**. A line above the words says which model and
+  language made them: when the words look wrong, pick the language spoken and
+  the Small model, then Transcribe again.
 - The timeline's words, in paragraphs with timecodes. Click a word to go there;
   the word under the playhead is underlined and followed while playing. ⇧-click or
   drag to select a run of words, then press **Delete** (or **Cut**) to extract it.
@@ -1579,8 +1598,9 @@ it in every project; **titles that arrive and leave the same way** —
 ### Media management
 
 The Project bin knows each file's details and helps find, group and track
-footage. Everything here is organization: none of it changes what plays or
-exports.
+footage. The bin's organizing (details, favorites, tags, collections, search)
+changes nothing that plays or exports; moving and trashing the files themselves
+("Files on disk" below) does what it says.
 
 **Metadata.** The editor reads every file in `media/` and `library/` with
 ffprobe (via `GET /api/media-info`) and writes what it finds onto the media
@@ -1709,6 +1729,39 @@ proxy only changes how smoothly the preview runs, never the result.
   clips keep their timing, trimmed to fit (the note says how many). `src` must
   be an existing file under `/media/` or `/library/` of the same kind (an
   audio entry may use a video container).
+
+**Files on disk.** The bin's folders (`folders`, `folderId`) only organize
+entries in `project.json`; the files themselves sit in `media/` and may live
+in subfolders. `fablecut_files` works on those (or `POST /api/files`):
+
+- `{action:"list", dir?}` (an empty call to the MCP tool lists too) lists one folder: its subfolders and files with
+  sizes and srcs. Dot-folders (`media/.trash/`) are left out.
+- `{action:"mkdir", dir:"b-roll/day 1"}` makes a folder (and its parents).
+- `{action:"move", from, to}` moves a file or folder into an existing folder,
+  or to a new path (a rename); `to` is required (`"/media/"` is the top of
+  `media/`). Every project's media entries that point at a moved file are repointed (the open project gets a new revision, so the editor
+  reloads), a media name that was the old file name follows it, and the file's
+  transcript goes with it (a `warning` says when one couldn't be). The move is
+  refused while a project can't be read (`force:true` moves anyway, and the file
+  goes offline there), and a project edited meanwhile stops it (CONFLICT, try
+  again). If a project can't be written, the move is undone; if undoing fails
+  too, the error says where the files are and which project couldn't be put
+  back: check them there and relink. A name that is taken (also one taken while
+  the move runs), and links inside `media/`, are refused, never replaced.
+- `{action:"trash", paths:[…]}` moves files or folders into `media/.trash/<id>/files/`
+  with a note of where they were; nothing is deleted. A file a project still
+  uses is refused (the reply names the project and how many clips place it):
+  `removeMedia` it first, or `force:true` to trash it anyway, and it shows as
+  offline there until it is restored. A project whose `project.json` can't be
+  read counts as possibly using it, so the same applies. One call can't list a
+  folder and something inside it. When one of several fails, the reply lists the
+  ones already trashed, with their ids, and the path it stopped at.
+  `{action:"trash-list"}` lists the trash, `{action:"restore", id}` puts one back
+  where it was (refused while something else has that name; a `warning` says
+  when its trash entry couldn't be cleaned up).
+- Move, rename and trash only when the user asked: they change the user's
+  folder. Versions keep the paths they were saved with, so restoring an old
+  version after a move may need **Relink**.
 
 ### Projects
 
@@ -2197,6 +2250,13 @@ obvious cuts were missed, raise it if motion is being misread as cuts.
   name?, note?, final?}` → `{version}` · `delete {version}` → `{deleted}`. `GET /api/versions/file?project=&version=`
   is that version's document; `GET /api/projects/backup?id=` a project with all its versions (import it with
   `POST /api/projects {action:"import", project:<the backup>}`). SSE event `versions` (`{project, action}`). See "Versions".
+- `POST /api/files {action, …}` — the files in `media/`: `list {dir?}` → `{dir, folders, files:[{name, src, size}]}` ·
+  `mkdir {dir}` · `move {from, to, force?}` → `{from, to, moved:[{from, to}], repointed:[{project, open, media}], warning?}`
+  (`from` / `to` are the item itself; `moved` lists each file in it, so it is empty for an empty folder or a no-op;
+  409 while a project can't be read, unless `force:true`) ·
+  `trash {paths, force?}` → `{trashed:[{id, src}], offline}` (409 while a project uses one or can't be read, unless `force:true`;
+  a batch that stops part-way answers 400 with `trashed` and `failed`; `stillThere` lists uses whose file is still in place) ·
+  `trash-list` → `{items}` · `restore {id}`. See "Media management".
 - `GET  /api/library?dir=sfx|elements|svg|fonts|presets|templates` — list library assets
 - `GET  /api/presets` · `GET /api/templates` — the saved presets / templates, validated (bad files skipped);
   `POST /api/presets {preset}` · `POST /api/templates {template}` — validate one and save it as
@@ -2513,6 +2573,16 @@ cannot produce a one-frame black file.
 3. IN–OUT, OUT only → from the start to `outPoint`
 4. IN–OUT, both → the range between them
 
+**Save as** at the top of the dialog names the file. It starts as the name the
+export would get (the preset's filename pattern, `{project}_…`); type over it
+and that name is used for this export (blank goes back to the default). Fast and
+WebCodecs exports add a number when the name is taken in `exports/`; a Realtime
+export is a browser download, which the browser names. Enter renders. **Don't ask
+again** beside the buttons makes the Export button render straight away with the
+last engine and preset under the default name (the dialog opens instead when one
+of them is gone or the range is empty); **Settings → Ask before exporting** brings the
+dialog back (stored in this browser).
+
 **Agents export with `fablecut_export`** (or `POST /api/export/request`). It is
 the same Fast export as the button — same compositor, audio mix and encoding
 profile — so it needs ffmpeg on PATH. The job goes to an open editor tab (the
@@ -2528,6 +2598,11 @@ agent last wrote, so an export right after a patch includes that patch.
   settings (`{preset:"youtube", delivery:{fps:60, video:{rate:"vbr", bitrate:16000}}}`).
   `profile:"hq"` picks a raw encoding profile instead. With neither, `project.delivery`
   is used when set, else `project.encodeProfile`, else the server's default profile.
+- `name:"salon-promo-15s"` names the file (no extension), the answer the Export dialog asks
+  the user for. Without it the preset's pattern starts with the project's name, so name the
+  file after what it is whenever the project holds more than this one video. Only the name
+  changes — the preset, delivery or encoding profile the export uses stays the same; not with
+  `outputs` (each output has its own `filename`).
 - `outputs:true` exports the project's checked batch outputs; `outputs:[{preset:"master"},
   {preset:"youtube"}, {preset:"instagram-reels"}, …]` exports a list. One render per
   frame rate; the reply lists every file (or why one failed).
