@@ -16694,7 +16694,8 @@ async function openExportSetup() {
       // "Don't ask again": render with the last engine and settings under the default name;
       // if that engine can't run now, ask after all rather than switch engines silently
       const last = getSetting("exportEngine");
-      const radio = last === "second" ? els.engineRealtime : last === "fast" ? els.engineFast : null;
+      // (older settings say "second" for either real-time encoder)
+      const radio = last === "fast" ? els.engineFast : last === "second" || last === "webcodecs" || last === "recorder" ? els.engineRealtime : null;
       // ...and the last preset or profile picked, when it is still in the list
       const choice = getSetting("exportChoice");
       // (a raw profile has to still be on the server: a deleted one can linger in the list as a placeholder)
@@ -16716,7 +16717,8 @@ async function openExportSetup() {
       if (radio) { els.engineFast.checked = radio === els.engineFast && !radio.disabled; els.engineRealtime.checked = radio === els.engineRealtime && !radio.disabled; }
       // the range counted in frames of what will be written (a delivery may have its own frame rate)
       const outFps = chosenExportEngine() === "fast" && selectedExportChoice().kind === "delivery" && dlvSpec?.fps || projectFps();
-      if ((!radio || !radio.disabled) && choiceOk && exportRange(outFps).frames >= 1) {
+      const engineOk = !radio || (!radio.disabled && (last === "second" || last === "fast" || chosenExportEngine() === last));
+      if (engineOk && choiceOk && exportRange(outFps).frames >= 1) {
         syncExportName();
         toast(`Exporting “${defaultExportName()}” — Settings → Ask before exporting brings the dialog back`);
         startChosenExport();
@@ -16751,9 +16753,10 @@ function startChosenExport() {
     alert("Export range is empty — IN/OUT is at or past the end of the timeline. Choose Entire timeline, or move the markers.");
     return;
   }
-  const name = exportName();
+  // the name shown now (a default with {time} must not tick over while the audio mixes)
+  const name = exportName() || defaultExportName();
   if ($("exportSkipAsk")?.checked) setSetting("exportAsk", false);
-  setSetting("exportEngine", useFast ? "fast" : "second");
+  setSetting("exportEngine", chosenExportEngine());
   setSetting("exportChoice", els.exportProfileSel?.value || null);
   closeExportSetup();
   if (useFast) {
@@ -18201,7 +18204,10 @@ async function runTrackJob(ticket, fail) {
     if (state.connected) {
       clearTimeout(runtime.saveTimer); runtime.saveTimer = null;
       project.revision++;
-      const res = await fetch("/api/project", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(projectJSON(), null, 2) });
+      // the project this job tracked in: a project opened elsewhere meanwhile refuses the save (409)
+      const headers = { "Content-Type": "application/json" };
+      if (runtime.projectId) headers["X-FableCut-Project"] = runtime.projectId;
+      const res = await fetch("/api/project", { method: "PUT", headers, body: JSON.stringify(projectJSON(), null, 2) });
       if (!res.ok) {
         project.revision--;
         // put back only the clips this job changed (edits elsewhere since stay), and drop its undo step
