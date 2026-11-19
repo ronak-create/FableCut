@@ -14,6 +14,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   timeline and keyboard shortcuts. Type a few letters of each word (“rip del”
   finds Ripple delete); Enter runs it: a panel opens, a setting is shown, a clip
   is selected and the playhead goes to it, a shortcut opens in the list.
+- **More title styles and fonts.** Eleven new title styles — Pop outline, Boxed,
+  Headline, Comic, Typewriter, Minimal, Script, Retro, Sticker, Glitch and
+  Cinematic — beside the nine there were, and new titles rotate through more of
+  them. The font picker now offers about sixty Google fonts grouped by look
+  (Display, Sans, Serif, Script & hand, Retro & mono). Switching style clears
+  the weight, outline colour and highlight colour the last style set.
+- **Agents can tidy the media folder.** `fablecut_files` lists the real folders
+  in `media/`, makes folders, moves and renames files and folders, and throws
+  away what isn't needed into `media/.trash/`, where it can be restored —
+  nothing is deleted. A move repoints every project's media entries at the new
+  place, so no clip goes offline, and the file keeps its transcript. Trashing a
+  file a project still uses is refused unless forced.
 
 ### Changed
 - **Node 22 or newer is now required** (was Node 18). CI runs the test suite on

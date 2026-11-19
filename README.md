@@ -292,9 +292,10 @@ big operation (cutting silences, snapping to the beat, reframing), and every
 
 **Text**
 
-- **Title styles** — one-tap cohesive looks (Impact, Elegant, Kinetic cut, Neon,
-  Handwritten, Luxury, and more); new titles vary the font, placement and animation
-  automatically instead of defaulting to one flat style
+- **Title styles** — twenty one-tap cohesive looks (Impact, Elegant, Kinetic cut, Neon,
+  Luxury, Comic, Typewriter, Sticker, Cinematic, and more); new titles vary the font,
+  placement and animation automatically instead of defaulting to one flat style. The
+  font picker groups about sixty Google fonts by look, and any other loads by name
 - Kinetic captions: typewriter, word-pop, word-slide, karaoke, **letter-pop**,
   **wave**, **bounce**, **shake**, **clip-reveal**, **zoom-in**, **font-cut**
   (rhythmic typeface cuts), **rise-mask**
@@ -486,7 +487,7 @@ Three equivalent control surfaces:
 
    Tools: `fablecut_status` (auto-starts the editor), `fablecut_docs`,
    `fablecut_get_project`, `fablecut_set_project`, `fablecut_patch_project`,
-   `fablecut_import_media`, `fablecut_analyze_reference`, `fablecut_frame`,
+   `fablecut_import_media`, `fablecut_files`, `fablecut_analyze_reference`, `fablecut_frame`,
    `fablecut_encode_profiles`, `fablecut_normalize_audio`, `fablecut_auto_duck`,
    `fablecut_denoise`, `fablecut_silence`, `fablecut_beats`, `fablecut_reframe`, `fablecut_highlights`, `fablecut_transcribe`, `fablecut_captions`, `fablecut_export`, `fablecut_scopes`, `fablecut_track`.
 
