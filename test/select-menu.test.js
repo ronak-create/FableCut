@@ -13,12 +13,16 @@ const S = require("../select-menu.js");
 
 const opt = (text, extra = {}) => ({ tagName: "OPTION", textContent: text, label: "", disabled: false, hidden: false, ...extra });
 const group = (label, children, extra = {}) => ({ tagName: "OPTGROUP", label, disabled: false, children, ...extra });
-const select = (children, extra = {}) => ({ tagName: "SELECT", multiple: false, size: 0, children, hasAttribute: (a) => !!(extra.attrs || {})[a], ...extra });
+const select = (children, extra = {}) => {
+  const attrs = extra.attrs || {};
+  return { tagName: "SELECT", multiple: false, size: 0, children, hasAttribute: (a) => Object.hasOwn(attrs, a),
+    getAttribute: (a) => (Object.hasOwn(attrs, a) ? String(attrs[a]) : null), ...extra };
+};
 
 test("plain selects get the themed list; multiple, size>1 and data-native keep the native one", () => {
   assert.equal(S.isThemed(select([])), true);
   assert.equal(S.isThemed(select([], { multiple: true })), false);
-  assert.equal(S.isThemed(select([], { size: 4 })), false);
+  assert.equal(S.isThemed(select([], { size: 4, attrs: { size: "4" } })), false);
   assert.equal(S.isThemed(select([], { attrs: { "data-native": true } })), false);
   assert.equal(S.isThemed({ tagName: "INPUT" }), false);
   assert.equal(S.isThemed(null), false);
@@ -102,5 +106,8 @@ test("the CSS themes the same selects as isThemed(): no size or size=\"1\", not 
   const css = fs.readFileSync(path.join(ROOT, "style.css"), "utf8");
   assert.match(css, /select:not\(\[multiple\]\):not\(\[data-native\]\):is\(:not\(\[size\]\), \[size="1"\]\) \{/);
   assert.ok(!/select:not\(\[multiple\]\):not\(\[size\]\)/.test(css), "no rule that skips size=\"1\"");
-  assert.equal(S.isThemed(select([], { size: 1 })), true, "size=1 is themed in JS too");
+  assert.equal(S.isThemed(select([], { size: 1, attrs: { size: "1" } })), true, "size=1 is themed in JS too");
+  // the CSS reads the attribute as written: a spelling it doesn't match keeps the native control in JS as well
+  assert.equal(S.isThemed(select([], { size: 1, attrs: { size: "01" } })), false, "size=\"01\" stays native, as the CSS leaves it");
+  assert.equal(S.isThemed(select([], { size: 0, attrs: { size: "" } })), false, "an empty size attribute too");
 });
