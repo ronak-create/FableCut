@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Dropdowns match the editor.** The editor's dropdowns open a list in its
+  dark theme instead of the browser's own popup, with optgroup headings, the
+  current choice marked, and each font previewed in its face in the font menu.
+  Keyboard: ↑ ↓ to move, type to jump, Enter to pick, Esc to close. Picking
+  with the mouse leaves keyboard focus with the editor (a text field you were
+  typing in lets go too), so Space plays right after. Multi-select lists keep
+  the browser's control. (thanks @mrbeandev, #154)
+
 ### Fixed
 - **Space plays after you click a button.** A button, checkbox, slider or
   dropdown kept keyboard focus after a click, so Space pressed it again
