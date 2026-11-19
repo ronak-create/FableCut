@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.19.0] - 2026-11-19
+
 ### Added
 - **Name the file before it renders.** The Export dialog opens with **Save as**:
   the file's name, filled with the default (the preset's pattern) and yours to
@@ -34,7 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **Node 22 or newer is now required** (was Node 18). CI runs the test suite on
-  Node 22, 24 and 26. (#64)
+  Node 22, 24 and 26. (thanks @Mind-alia, #155)
 
 ### Fixed
 - **Transcribe after an agent transcribed.** Once every file on the timeline had
@@ -1027,7 +1029,8 @@ the report in [#1](https://github.com/ronak-create/FableCut/issues/1) — thanks
 - Three control surfaces for AI agents: **MCP server**, direct `project.json`
   editing, and a **REST API** with live-reload over server-sent events.
 
-[Unreleased]: https://github.com/ronak-create/FableCut/compare/v1.18.0...HEAD
+[Unreleased]: https://github.com/ronak-create/FableCut/compare/v1.19.0...HEAD
+[1.19.0]: https://github.com/ronak-create/FableCut/compare/v1.18.0...v1.19.0
 [1.18.0]: https://github.com/ronak-create/FableCut/compare/v1.17.0...v1.18.0
 [1.17.0]: https://github.com/ronak-create/FableCut/compare/v1.16.0...v1.17.0
 [1.16.0]: https://github.com/ronak-create/FableCut/compare/v1.15.0...v1.16.0
