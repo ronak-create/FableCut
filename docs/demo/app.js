@@ -18642,7 +18642,9 @@ $("btnHelp").addEventListener("click", () => {
 });
 $("btnCloseHelp").addEventListener("click", () => $("helpOverlay").classList.add("hidden"));
 /** Keyboard shortcuts filter: keeps the rows (and whole sections, by heading) that match every typed word. */
-function filterHelp() {
+/** `only` (a row of the list) shows just that one: what Search opened. */
+function filterHelp(only) {
+  const row = only instanceof HTMLElement ? only : null;
   const words = $("helpFilter").value.toLowerCase().split(/\s+/).filter(Boolean);
   let any = false;
   for (const sec of $("helpKeys").querySelectorAll(".keys-sec")) {
@@ -18650,7 +18652,7 @@ function filterHelp() {
     let shown = 0;
     for (const tr of sec.querySelectorAll("tr")) {
       const text = head + " " + tr.textContent.toLowerCase();
-      const hit = words.every((w) => text.includes(w));
+      const hit = row ? tr === row : words.every((w) => text.includes(w));
       tr.classList.toggle("hidden", !hit);
       if (hit) shown++;
     }
@@ -18699,13 +18701,27 @@ function cmdkCollect() {
     items.push(it);
   };
   // panels and tabs
-  for (const b of document.querySelectorAll("#sideTabs [data-side], #binTabs [data-tab], #wsSwitch [data-ws]"))
-    add({ label: cmdkName(b), group: "Panel", hint: (b.title || "").split(/ — |: /)[0] === cmdkName(b) ? "" : b.title, keywords: ["tab", "show", "open"], run: () => b.click() });
-  // toolbar actions: every named button outside dialogs, menus and the Inspector
-  for (const b of document.querySelectorAll("button[id]")) {
+  // (the Color workspace and the Color side tab share a name: where each lives tells them apart)
+  const panelWhere = { sideTabs: "Side panel", binTabs: "Bin", wsSwitch: "Workspace" };
+  for (const b of document.querySelectorAll("#sideTabs [data-side], #binTabs [data-tab], #wsSwitch [data-ws]")) {
+    const where = panelWhere[b.parentElement.id] || "", title = (b.title || "").split(/ — |: /)[0] === cmdkName(b) ? "" : b.title;
+    add({ key: "Panel|" + b.parentElement.id + "|" + cmdkName(b), label: cmdkName(b), group: "Panel", hint: [where, title].filter(Boolean).join(" · "),
+      keywords: ["tab", "show", "open", where], run: () => { if (b.closest("#binTabs")) cmdkShowBin(); b.click(); } });
+  }
+  // toolbar actions: every named button outside dialogs, menus and the Inspector (and the timeline's edit tools)
+  const actions = [];
+  for (const b of document.querySelectorAll("button[id], button[data-edit-tool]")) {
     if (b.closest(".overlay, .ctx-menu, .style-menu, #inspector, #sideTabs, #binTabs, #wsSwitch") || b.id === "btnSearch") continue;
     if (!cmdkShown(b)) continue;
-    add({ label: cmdkName(b), group: "Action", hint: b.title && b.title !== cmdkName(b) ? b.title : "", run: () => b.click() });
+    actions.push(b);
+  }
+  // two buttons of one name (the monitor's Fit and the timeline's) go by their titles instead
+  const named = new Map();
+  for (const b of actions) named.set(cmdkName(b), (named.get(cmdkName(b)) || 0) + 1);
+  for (const b of actions) {
+    const title = (b.title || "").replace(/\s+/g, " ").trim(), short = title.split(/ — |: |\. | \(/)[0];
+    const label = named.get(cmdkName(b)) > 1 && short ? short : cmdkName(b);
+    add({ key: "a:" + (b.id || "tool-" + b.dataset.editTool), label, group: "Action", hint: title && title !== label ? title : "", run: () => b.click() });
   }
   // the selected clip's Inspector sections
   for (const h of document.querySelectorAll("#inspector .insp-section > h3")) {
@@ -18728,7 +18744,7 @@ function cmdkCollect() {
     // the bin folder it sits in tells two files of one name apart
     const folders = [];
     for (let f = m.folderId && getFolder(m.folderId), n = 0; f && n < 16; f = f.parentId && getFolder(f.parentId), n++) folders.unshift(f.name);
-    add({ key: "m:" + m.id, label: m.name, group: "Media", hint: folders.length ? `${m.kind} · ${folders.join(" / ")}` : m.kind, keywords: [m.kind, ...(m.tags || [])], run: () => revealInProject({ kind: m.kind, mediaId: m.id }) });
+    add({ key: "m:" + m.id, label: m.name, group: "Media", hint: folders.length ? `${m.kind} · ${folders.join(" / ")}` : m.kind, keywords: [m.kind, ...(m.tags || [])], run: () => { cmdkShowBin(); revealInProject({ kind: m.kind, mediaId: m.id }); } });
   }
   for (const c of project.clips || []) {
     const name = c.kind === "text" ? (c.props?.text || "Title").split("\n")[0].slice(0, 60) : c.name || getMedia(c.mediaId)?.name || c.kind;
@@ -18739,6 +18755,7 @@ function cmdkCollect() {
       if (isSourceMode()) setMonitorMode("program");
       selectClip(cur.id);
       setTime(cur.start);
+      revealTime(cur.start);
     } });
   }
   // keyboard shortcuts: Enter opens the list, filtered to that one
@@ -18750,8 +18767,9 @@ function cmdkCollect() {
     const section = tr.closest(".keys-sec")?.querySelector("h3")?.textContent || "";
     add({ label, group: "Shortcut", hint: keys, keys: [keys], keywords: [section, keys, what], run: () => {
       $("helpOverlay").classList.remove("hidden");
-      $("helpFilter").value = label.split(/\s+/).slice(0, 3).join(" ");
-      filterHelp();
+      // the row itself, not every row its first words also start
+      $("helpFilter").value = label;
+      filterHelp(tr);
       $("helpFilter").focus();
     } });
   }
@@ -18780,6 +18798,12 @@ function openCmdk() {
   cmdkRender();
   $("cmdkInput").focus();
 }
+/** Another dialog is open over the editor (Export setup finishing its load, …). */
+const cmdkOtherOverlay = () => [...document.querySelectorAll(".overlay")].some((o) => o.id !== "cmdkOverlay" && !o.classList.contains("hidden"));
+/** The Color workspace hides the bin: a result that shows the bin goes back to Edit first. */
+function cmdkShowBin() {
+  if (colorState.ws === "color") setWorkspace("edit");
+}
 function closeCmdk(refocus = true) {
   $("cmdkOverlay").classList.add("hidden");
   if (refocus && cmdk.back && document.contains(cmdk.back)) cmdk.back.focus();
@@ -18796,6 +18820,7 @@ function runCmdk(i) {
     // an export (an agent's too) may have taken the timeline meanwhile
     if (state.exporting) { toast("Wait for the export to finish"); return; }
     if (pid !== runtime.projectId) { toast("Another project opened — search again"); return; }
+    if (cmdkOtherOverlay()) return;   // a dialog that opened meanwhile keeps the screen
     try { it.run(); } catch (e) { toast(String(e.message || e)); }
     // an action that puts focus nowhere hands it back to where it was before Search
     const a = document.activeElement;
@@ -18846,14 +18871,15 @@ window.addEventListener("keydown", (e) => {
     e.preventDefault();
     e.stopImmediatePropagation();
     if (e.repeat) return;
-    if (cmdkOpen()) closeCmdk();
+    // (focus stays with a dialog that opened over Search)
+    if (cmdkOpen()) closeCmdk(!cmdkOtherOverlay());
     // another dialog keeps the keyboard until it closes
-    else if (![...document.querySelectorAll(".overlay")].some((o) => o.id !== "cmdkOverlay" && !o.classList.contains("hidden"))) openCmdk();
+    else if (!cmdkOtherOverlay()) openCmdk();
     return;
   }
   if (!cmdkOpen()) return;
   // a dialog that opened meanwhile (Export setup finishing its load) takes the keyboard over
-  if ([...document.querySelectorAll(".overlay")].some((o) => o.id !== "cmdkOverlay" && !o.classList.contains("hidden"))) { closeCmdk(false); return; }
+  if (cmdkOtherOverlay()) { closeCmdk(false); return; }
   if (e.target !== $("cmdkInput")) { e.stopImmediatePropagation(); return; }
   // Esc is Search's (before any picker or tool listening for it): clear the box, then close
   if (k === "Escape" && !e.isComposing) {
