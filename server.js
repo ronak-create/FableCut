@@ -173,7 +173,8 @@ function readBody(req) {
 /** Claim final + sibling `.part` paths with exclusive create (`wx`) so concurrent
  *  exports cannot pick the same free name before either file exists. */
 function reserveExportPaths(dir, baseName, ext) {
-  const base = baseName.replace(/\.(mp4|mov|m4v|mkv|webm)$/i, "");
+  // as the Export dialog does: no extension typed twice, no leading dot (a dotfile isn't served)
+  const base = baseName.replace(/\.(mp4|mov|m4v|mkv|webm|mxf)$/i, "").replace(/^[.\s]+/, "") || "export";
   let i = 0;
   for (;;) {
     const stem = i === 0 ? base : `${base}_${i}`;

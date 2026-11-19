@@ -1749,6 +1749,7 @@ async function syncFromServer(force) {
     // another project was opened (the dashboard, another tab, an agent)
     const pid = res.headers.get("X-FableCut-Project");
     const switched = !!(pid && runtime.projectId && pid !== runtime.projectId);
+    if (switched && runtime.jobHold) { runtime.pendingSync = true; return false; }   // an agent's job is rendering this project
     if (pid) runtime.projectId = pid;
     if (switched) {
       onProjectSwitched();
@@ -17970,9 +17971,17 @@ async function runExportJob(ticket) {
   // a ticket that waited here while the tab switched projects must not render the other one
   if (ticket.project && runtime.projectId && ticket.project !== runtime.projectId && ticket.kind !== "transcribe")
     return fail("another project was opened before this job could start — open the project again and retry");
+  if (ticket.kind === "transcribe") return runTranscribeJob(ticket, fail);
+  // from here until the job ends, a project opened elsewhere waits: the job renders the one it was asked for
+  runtime.jobHold = (runtime.jobHold || 0) + 1;
+  try { return await runHeldJob(ticket, fail); } finally {
+    runtime.jobHold--;
+    if (!runtime.jobHold && runtime.pendingSync) syncFromServer();
+  }
+}
+async function runHeldJob(ticket, fail) {
   if (ticket.kind === "scopes") return runScopesJob(ticket, fail);
   if (ticket.kind === "track") return runTrackJob(ticket, fail);
-  if (ticket.kind === "transcribe") return runTranscribeJob(ticket, fail);
   if (!state.ffmpeg) {
     const j = await fetch("/api/export/ffmpeg").then((r) => r.json()).catch(() => ({}));
     state.ffmpeg = !!j.available;
