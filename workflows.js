@@ -95,8 +95,9 @@ function fromFiles(entries) {
 /** After saving workflow `id` as <id>.json: the other files that held that id (an older or
  *  hand-written file under another name), to remove so one workflow stays one file. */
 function staleFiles(all, id) {
-  // compared without case: on Windows / macOS "PODCAST.JSON" is the file just written
-  return all.filter((w) => w.id === id && w.file && w.file.toLowerCase() !== (id + ".json").toLowerCase()).map((w) => w.file);
+  // exact names: "PODCAST.JSON" is a file of its own on a case-sensitive disk; removeStale
+  // checks the file's identity, so on Windows / macOS it is never the file just written
+  return all.filter((w) => w.id === id && w.file && w.file !== id + ".json").map((w) => w.file);
 }
 
 /** Remove the stale files of workflow `id` from `dir` (fs and path passed in, so this module
@@ -111,7 +112,7 @@ function removeStale(dir, all, id, fs, path) {
     const p = path.join(dir, path.basename(f));
     try {
       const st = fs.statSync(p);
-      if (destStat && st.ino === destStat.ino && st.dev === destStat.dev && st.ino !== 0) continue;
+      if (destStat && st.dev === destStat.dev && (st.ino !== 0 ? st.ino === destStat.ino : f.toLowerCase() === (id + ".json").toLowerCase())) continue;
       const w = normalizeWorkflow(JSON.parse(fs.readFileSync(p, "utf8").replace(/^﻿/, "")));
       if (w && w.id === id) fs.rmSync(p, { force: true });
     } catch { }

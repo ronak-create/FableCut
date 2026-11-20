@@ -162,13 +162,19 @@ test("stale-file cleanup: never the file just written (any case), never a file t
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fc-wf-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const put = (f, w) => fs.writeFileSync(path.join(dir, f), JSON.stringify(w));
-  // listed before the save: renamed.json and swapped.json both held "Podcast"
-  const all = W.fromFiles([{ file: "renamed.json", data: { name: "Podcast", steps: ["a"] } }, { file: "swapped.json", data: { name: "Podcast", steps: ["a"] } },
-    { file: "PODCAST.JSON", data: { name: "Podcast", steps: ["a"] } }]);
-  assert.deepEqual(W.staleFiles(all, "podcast"), ["renamed.json", "swapped.json"], "a case-only difference is the same file");
-  put("podcast.json", { name: "Podcast", steps: ["new"] });
-  put("renamed.json", { name: "Podcast", steps: ["a"] });
+  const old = { name: "Podcast", steps: ["old"] };
+  // listed before the save: three files held "Podcast"
+  const all = W.fromFiles([{ file: "renamed.json", data: old }, { file: "swapped.json", data: old }, { file: "PODCAST.JSON", data: old }]);
+  assert.deepEqual(W.staleFiles(all, "podcast"), ["renamed.json", "swapped.json", "PODCAST.JSON"]);
+  put("renamed.json", old);
+  put("PODCAST.JSON", old);
   put("swapped.json", { name: "Something else", steps: ["b"] });   // another process saved here meanwhile
+  put("podcast.json", { name: "Podcast", steps: ["new"] });        // the save (the same file as PODCAST.JSON on Windows / macOS)
   W.removeStale(dir, all, "podcast", fs, path);
-  assert.deepEqual(fs.readdirSync(dir).sort(), ["podcast.json", "swapped.json"]);
+  const left = fs.readdirSync(dir).sort();
+  assert.ok(left.includes("swapped.json"), "a file now holding another workflow stays");
+  assert.ok(!left.includes("renamed.json"));
+  const podcasts = left.filter((f) => /^podcast.json$/i.test(f));
+  assert.equal(podcasts.length, 1, "one podcast file: a distinct PODCAST.JSON is removed, an alias of the new one kept");
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, podcasts[0]), "utf8")).steps, ["new"]);
 });
