@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Workflows.** Save a routine you want repeated, such as a podcast clean-up
+  or the weekly reel, as steps in plain words plus the tool calls that did
+  them. An agent lists your workflows and follows one on the next project,
+  fitting each step to the new footage instead of replaying it blindly. Saved
+  in `library/workflows/` and shared by every project; agents use
+  `fablecut_workflows`, and `/api/workflows` serves them over REST.
+
 ### Changed
 - **Dropdowns match the editor.** The editor's dropdowns open a list in its
   dark theme instead of the browser's own popup, with optgroup headings, the

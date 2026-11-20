@@ -38,6 +38,7 @@ const Motion = require("./motion");
 const CompLib = require("./comp");
 const SeqLib = require("./sequences");
 const Templates = require("./templates");
+const Workflows = require("./workflows");
 const Delivery = require("./delivery");
 const { probeFile, infoForEntry } = require("./media-probe");
 const { findProxies } = require("./proxy");
@@ -446,6 +447,27 @@ const TOOLS = [
         name: { type: "string", description: "save / update: the version's name (default \"Version NN\")" },
         note: { type: "string", description: "save / update: what this version is (\"client cut, shorter intro\")" },
         final: { type: "boolean", description: "save / update: mark it the final cut (one per project)" },
+      },
+    },
+  },
+  {
+    name: "fablecut_workflows",
+    description: "Saved workflows: recipes the user wants repeated on other projects (\"my podcast clean-up\", \"the weekly reel\"). A workflow is a name, what it is for, and its steps in order; each step says in plain words what to do and may carry the tool call that did it last time. Actions: list (default) · show {id} — the steps, to follow now · save {workflow:{name, description?, tags?, steps:[{text, call?:{tool, args}}]}} — keep one (the same name updates it) · delete {id} (only when the user asks). To run one: show it, then do each step yourself on the open project, using judgement where the footage differs (which clips, where cuts land); a step's call is a worked example, not a script, so change its ids and times to fit. Save one when the user asks to keep or repeat what you just did: write the steps the way you would explain them to another editor, and attach the calls that worked. Saved in library/workflows/, shared by every project.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["list", "show", "save", "delete"], description: "What to do (default list)" },
+        id: { type: "string", description: "show / delete: the workflow's id or name" },
+        workflow: {
+          type: "object",
+          description: "save: {name, description?, tags?, steps:[{text, call?:{tool, args}}]} (a step may also be a plain string)",
+          properties: {
+            name: { type: "string" },
+            description: { type: "string" },
+            tags: { type: "array", items: { type: "string" } },
+            steps: { type: "array", items: { anyOf: [{ type: "string" }, { type: "object" }] } },
+          },
+        },
       },
     },
   },
@@ -1276,6 +1298,35 @@ async function projectsTool(args) {
   if (out.from) return `Opened ${describeProject(out.project)}\nThe editor switched to it (${out.from} was saved first). Read it with fablecut_get_project {compact:true} before editing.`;
   return describeProject(out.project);
 }
+/* fablecut_workflows: saved recipes in library/workflows/, read and written here directly
+   (like saved presets), so it works without the editor server. */
+function savedWorkflows() {
+  return Workflows.fromFiles(readSaved("workflows"));
+}
+function workflowsTool(args) {
+  const action = args.action || "list", all = savedWorkflows();
+  if (action === "list") return all.length
+    ? [`${all.length} saved workflow(s) — {action:"show", id} gives the steps:`, ...all.map(Workflows.workflowLine)].join("\n")
+    : "No saved workflows yet. When the user wants something you did kept for next time, save it: {action:\"save\", workflow:{name, description, steps:[{text, call?}]}}.";
+  if (action === "show" || action === "delete") {
+    const w = Workflows.findWorkflow(all, args.id);
+    if (!w) throw new Error(`no workflow "${args.id || ""}"` + (all.length ? ` — saved: ${all.map((x) => x.id).join(", ")}` : " — none saved yet"));
+    if (action === "show") return Workflows.describeWorkflow(w) +
+      "\n\nDo each step on the open project. A \"last time\" call is an example: fit its ids, times and values to this project.";
+    fs.rmSync(path.join(LIBRARY_DIR, "workflows", path.basename(w.file || w.id + ".json")), { force: true });
+    return `Deleted workflow "${w.name}" (${w.id}).`;
+  }
+  if (action === "save") {
+    const w = Workflows.normalizeWorkflow(args.workflow, true, TOOLS.map((t) => t.name));
+    const prev = all.find((x) => x.id === w.id), now = new Date().toISOString();
+    const item = { ...w, created: prev && prev.created || now, updated: now };
+    writeSaved("workflows", item.id, item);
+    Workflows.removeStale(path.join(LIBRARY_DIR, "workflows"), all, item.id, fs, path);
+    return `${prev ? "Updated" : "Saved"} workflow "${item.name}" (${item.id}), ${item.steps.length} step(s), in library/workflows/${item.id}.json. {action:"show", id:"${item.id}"} reads it back.`;
+  }
+  throw new Error(`unknown action "${action}" — list, show, save or delete`);
+}
+
 /* fablecut_versions: through the editor server, like fablecut_projects. */
 const KIND_LABEL = { manual: "", auto: " (auto)", agent: " (before agent edits)", restore: " (before a restore)" };
 function describeVersion(e) {
@@ -1665,6 +1716,8 @@ async function callTool(name, args, attempt = 0) {
       return projectsTool(args);
     case "fablecut_versions":
       return versionsTool(args);
+    case "fablecut_workflows":
+      return workflowsTool(args);
     case "fablecut_status": {
       const up = await ensureUIServer();
       const proj = readProject();
