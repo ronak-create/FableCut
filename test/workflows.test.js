@@ -132,3 +132,27 @@ test("REST checks calls against the real tools, and deletes a workflow saved und
   assert.equal((await post("/api/workflows/delete", { id: "Other name" })).status, 200);
   assert.ok(!fs.existsSync(path.join(wdir, "renamed.json")), "deleted by the file it came from");
 });
+
+test("updating a workflow kept under another file name leaves one file; deleting it then removes it for good", async (t) => {
+  const dir = makeDataDir(t);
+  const { base, port } = await startServer(t, dir, { FABLECUT_NO_FS_WATCH: "1" });
+  const post = (p, body) => fetch(base + p, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const wdir = path.join(dir, "library", "workflows");
+  fs.mkdirSync(wdir, { recursive: true });
+  const files = () => fs.readdirSync(wdir).sort();
+  fs.writeFileSync(path.join(wdir, "renamed.json"), JSON.stringify({ name: "Other name", steps: ["Old step"], created: "2026-01-01T00:00:00.000Z" }));
+  const up = await (await post("/api/workflows", { workflow: { name: "Other name", steps: ["New step"] } })).json();
+  assert.equal(up.created, "2026-01-01T00:00:00.000Z", "created kept");
+  assert.deepEqual(files(), ["other-name.json"], "the old file went with the update");
+  assert.equal((await post("/api/workflows/delete", { id: "other-name" })).status, 200);
+  assert.deepEqual(files(), []);
+  assert.deepEqual(await (await fetch(base + "/api/workflows")).json(), [], "the old steps don't come back");
+  // the same through MCP; and a normal id-named save stays one file
+  fs.writeFileSync(path.join(wdir, "renamed.json"), JSON.stringify({ name: "Other name", steps: ["Old step"] }));
+  const mcp = startMcp(t, dir, { FABLECUT_PORT: String(port), FABLECUT_NO_AUTOSTART: "1" });
+  await mcp.callTool("fablecut_workflows", { action: "save", workflow: { name: "Other name", steps: ["New step"] } });
+  await mcp.callTool("fablecut_workflows", { action: "save", workflow: { name: "Other name", steps: ["Newer step"] } });
+  assert.deepEqual(files(), ["other-name.json"]);
+  assert.match((await mcp.callTool("fablecut_workflows", { action: "delete", id: "other-name" })).content[0].text, /Deleted/);
+  assert.deepEqual(files(), []);
+});

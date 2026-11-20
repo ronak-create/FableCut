@@ -1321,6 +1321,7 @@ function workflowsTool(args) {
     const prev = all.find((x) => x.id === w.id), now = new Date().toISOString();
     const item = { ...w, created: prev && prev.created || now, updated: now };
     writeSaved("workflows", item.id, item);
+    for (const f of Workflows.staleFiles(all, item.id)) fs.rmSync(path.join(LIBRARY_DIR, "workflows", path.basename(f)), { force: true });
     return `${prev ? "Updated" : "Saved"} workflow "${item.name}" (${item.id}), ${item.steps.length} step(s), in library/workflows/${item.id}.json. {action:"show", id:"${item.id}"} reads it back.`;
   }
   throw new Error(`unknown action "${action}" — list, show, save or delete`);

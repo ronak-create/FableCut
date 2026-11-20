@@ -403,6 +403,7 @@ function saveWorkflow(input, all) {
   const now = new Date().toISOString();
   const item = { ...w, created: prev && prev.created || now, updated: now };
   writeSaved("workflows", item.id, item);
+  for (const f of Workflows.staleFiles(all, item.id)) fs.rmSync(path.join(LIBRARY_DIR, "workflows", path.basename(f)), { force: true });
   return item;
 }
 function savedDeliveryPresets() { return Delivery.savedPresets(readSaved("delivery")); }

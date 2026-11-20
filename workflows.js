@@ -92,6 +92,12 @@ function fromFiles(entries) {
   return out;
 }
 
+/** After saving workflow `id` as <id>.json: the other files that held that id (an older or
+ *  hand-written file under another name), to remove so one workflow stays one file. */
+function staleFiles(all, id) {
+  return all.filter((w) => w.id === id && w.file && w.file !== id + ".json").map((w) => w.file);
+}
+
 /** The tool names in a .mcpb manifest ({tools:[{name}]}), or null when it can't be read. */
 function manifestTools(manifest) {
   const t = manifest && Array.isArray(manifest.tools) ? manifest.tools.map((x) => x && x.name).filter((n) => typeof n === "string") : [];
@@ -123,4 +129,4 @@ function describeWorkflow(w) {
   return lines.join("\n");
 }
 
-module.exports = { LIMITS, slug, normalizeWorkflow, fromFiles, manifestTools, findWorkflow, workflowLine, describeWorkflow };
+module.exports = { LIMITS, slug, normalizeWorkflow, fromFiles, staleFiles, manifestTools, findWorkflow, workflowLine, describeWorkflow };
