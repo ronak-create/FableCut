@@ -19643,6 +19643,8 @@ window.addEventListener("keydown", (e) => {
       if (!e.repeat) toggleTransportPlay();
       return;
     }
+    // mid-drag, playing would move the slider's value under the pointer
+    if (FableCutFocus.isDragging(el)) { e.preventDefault(); return; }
     // reached with Tab, or in a dialog / popover: Space presses the control as usual.
     // A slider has nothing for Space to press, so outside dialogs it still plays.
     const slider = el && el.tagName === "INPUT" && el.type === "range";

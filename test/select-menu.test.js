@@ -111,3 +111,15 @@ test("the CSS themes the same selects as isThemed(): no size or size=\"1\", not 
   assert.equal(S.isThemed(select([], { size: 1, attrs: { size: "01" } })), false, "size=\"01\" stays native, as the CSS leaves it");
   assert.equal(S.isThemed(select([], { size: 0, attrs: { size: "" } })), false, "an empty size attribute too");
 });
+
+test("a pick is refused once the select is disabled or its option was removed or disabled", () => {
+  const a = opt("A"), b = opt("B");
+  const sel = select([a, b], { isConnected: true, disabled: false, options: [a, b] });
+  assert.equal(S.canPick(sel, a), true);
+  assert.equal(S.canPick({ ...sel, disabled: true }, a), false, "select disabled while the list was open");
+  assert.equal(S.canPick({ ...sel, isConnected: false }, a), false);
+  assert.equal(S.canPick({ ...sel, options: [b] }, a), false, "options rebuilt: the old one is gone");
+  assert.equal(S.canPick(sel, { ...a, disabled: true }), false);
+  const g = { tagName: "OPTGROUP", disabled: true }, inG = opt("C", { parentNode: g });
+  assert.equal(S.canPick({ ...sel, options: [inG] }, inG), false, "its group was disabled");
+});

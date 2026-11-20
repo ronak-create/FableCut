@@ -94,6 +94,8 @@ test("the editor's Space handler asks focus.js first, and the page loads it befo
   const typing = src.indexOf('if (k === " ") { e.preventDefault(); if (!e.repeat) toggleTransportPlay(); }');
   assert.ok(space > 0 && native > space && typing > native,
     "Space asks focus.js, then leaves Tab-focused / dialog controls to the browser, then plays");
+  const drag = src.indexOf("if (FableCutFocus.isDragging(el)) { e.preventDefault(); return; }");
+  assert.ok(drag > space && drag < native, "a slider mid-drag swallows Space before the slider-plays fallback");
   const block = src.slice(space, typing);
   assert.match(block, /if \(!e\.repeat\) toggleTransportPlay\(\)/, "a held Space doesn't toggle again on key repeat");
   const html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
@@ -224,10 +226,24 @@ test("install(): a clicked button gives focus back; Tab then click on a select m
   p.fire("pointerdown", { target: slider, pointerId: 1 });
   p.focus(slider);
   p.fire("keydown", { key: "Shift" });   // a key pressed mid-drag
-  assert.equal(F.spaceShouldPlay(slider), false, "Space mid-drag leaves the slider held (the editor plays anyway)");
+  assert.equal(F.spaceShouldPlay(slider), false, "Space mid-drag leaves the slider held");
+  assert.equal(F.isDragging(slider), true, "and the editor doesn't play either: the value would move under the pointer");
   p.fire("pointerup", { pointerId: 1 });
   await tick();
   assert.equal(slider.blurred, true, "released when the drag ends, even after a key mid-drag");
+  assert.equal(F.isDragging(slider), false);
+
+  // a new drag on the same slider before the last one's release runs: that release is dropped
+  const again = control("input", "range");
+  p.fire("pointerdown", { target: again, pointerId: 1 });
+  p.focus(again);
+  p.fire("pointerup", { pointerId: 1 });
+  p.fire("pointerdown", { target: again, pointerId: 1 });   // before the deferred release
+  await tick();
+  assert.equal(again.blurred, false, "the old release doesn't blur the new drag");
+  p.fire("pointerup", { pointerId: 1 });
+  await tick();
+  assert.equal(again.blurred, true, "the new drag lets go when it ends");
 
   const touch = control("input", "range");
   p.fire("pointerdown", { target: touch, pointerId: 7 });

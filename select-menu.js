@@ -31,6 +31,15 @@
   const PAGE = 8;      // items a PageUp / PageDown moves
 
   /** Selects that get the themed list. */
+  /** True when `option` can still be picked from `sel`: the select is connected and enabled, and the
+      option still belongs to it and isn't disabled itself or by its group (code may have changed any of
+      these while the list was open). */
+  function canPick(sel, option) {
+    if (!sel || !option || !sel.isConnected || sel.disabled) return false;
+    if (!Array.prototype.includes.call(sel.options, option)) return false;
+    return !(option.disabled || (option.parentNode && option.parentNode.tagName === "OPTGROUP" && option.parentNode.disabled));
+  }
+
   function isThemed(sel) {
     if (!sel || sel.tagName !== "SELECT" || sel.multiple || sel.hasAttribute("data-native")) return false;
     // the attribute as the CSS reads it (no size, or size="1"), so the box and the list always agree
@@ -199,9 +208,8 @@
       const { sel, items } = open;
       const it = items[i];
       close();
-      // re-checked now: code may have disabled the option while the list was open
-      const off = (o) => o.disabled || (o.parentNode && o.parentNode.tagName === "OPTGROUP" && o.parentNode.disabled);
-      if (!it || it.disabled || off(it.option) || !sel.isConnected) return;
+      // re-checked now: code may have disabled, removed or rebuilt things while the list was open
+      if (!it || it.disabled || !canPick(sel, it.option)) return;
       if (!it.option.selected) {
         // a mouse pick never focused the select, as a native one would have: send its focus event, so
         // code that acts on focus (the Inspector's undo step before an edit) still runs. Focus doesn't move.
@@ -283,5 +291,5 @@
     doc.addEventListener("focusin", (e) => { if (open && e.target !== open.sel && !open.list.contains(e.target)) close(); }, true);
   }
 
-  return { isThemed, optionText, rows, step, pageStep, findMatch, placement, install };
+  return { isThemed, canPick, optionText, rows, step, pageStep, findMatch, placement, install };
 });
