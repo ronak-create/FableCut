@@ -96,3 +96,39 @@ test("/api/workflows and fablecut_workflows: save, list, show, update keeps crea
   assert.match(await text({}), /No saved workflows yet/);
   assert.equal((await post("/api/workflows/delete", { id: "podcast-clean-up" })).status, 404);
 });
+
+test("slug is stable after the cut, odd field types are refused (or skipped when reading), files are remembered", () => {
+  const long = "a".repeat(59) + " b";
+  const id = W.slug(long);
+  assert.ok(!id.endsWith("-"), id);
+  assert.equal(W.slug(id), id, "a slug of the slug is the same slug");
+  const odd = { name: { toString: null }, steps: ["Inspect"] };
+  assert.throws(() => W.normalizeWorkflow(odd, true), /name is text/);
+  assert.equal(W.normalizeWorkflow(odd), null, "reading: skipped, not thrown");
+  assert.throws(() => W.normalizeWorkflow({ name: "x", steps: [{ text: { a: 1 } }] }, true), /step 1: text is text/);
+  assert.throws(() => W.normalizeWorkflow({ name: "x", tags: [{}], steps: ["a"] }, true), /tags are words/);
+  const list = W.fromFiles([{ file: "old-name.json", data: podcast }, { file: "odd.json", data: odd }, { file: "x.json", data: null }]);
+  assert.deepEqual(list.map((w) => w.id), ["podcast-clean-up"]);
+  assert.equal(list[0].file, "old-name.json");
+  assert.ok(!JSON.stringify(list[0]).includes("old-name"), "the file stays out of JSON");
+  assert.deepEqual(W.manifestTools({ tools: [{ name: "fablecut_export" }, {}] }), ["fablecut_export"]);
+  assert.equal(W.manifestTools({}), null);
+});
+
+test("REST checks calls against the real tools, and deletes a workflow saved under another file name", async (t) => {
+  const dir = makeDataDir(t);
+  const { base } = await startServer(t, dir, { FABLECUT_NO_FS_WATCH: "1" });
+  const post = (p, body) => fetch(base + p, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const nope = await post("/api/workflows", { workflow: { name: "x", steps: [{ text: "a", call: { tool: "fablecut_nope" } }] } });
+  assert.equal(nope.status, 400);
+  assert.match((await nope.json()).error, /not a FableCut tool/);
+  assert.equal((await post("/api/workflows", { workflow: { name: "y", steps: [{ text: "a", call: { tool: "fablecut_export" } }] } })).status, 200);
+  // a file whose name isn't its id (an older save, or written by hand)
+  const wdir = path.join(dir, "library", "workflows");
+  fs.writeFileSync(path.join(wdir, "hand-made.json"), JSON.stringify({ name: "Hand made", steps: ["Do it"] }));
+  assert.equal((await post("/api/workflows/delete", { id: "hand-made" })).status, 200);
+  assert.ok(!fs.existsSync(path.join(wdir, "hand-made.json")));
+  fs.writeFileSync(path.join(wdir, "renamed.json"), JSON.stringify({ name: "Other name", steps: ["Do it"] }));
+  assert.equal((await post("/api/workflows/delete", { id: "Other name" })).status, 200);
+  assert.ok(!fs.existsSync(path.join(wdir, "renamed.json")), "deleted by the file it came from");
+});

@@ -13,6 +13,7 @@
     "favicon.svg",
     "icons/",
     "encoding-profiles.json",
+    "manifest.json",
     "CLAUDE.md",
     "library/README.md",
     "library/elements/",

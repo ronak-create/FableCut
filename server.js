@@ -385,9 +385,20 @@ function deliveryEncoders() {
   return deliveryEncodersP;
 }
 /** Saved delivery presets: library/delivery/<id>.json, each a spec plus a label. */
+/* The tools a workflow step may call: the MCP server's, as manifest.json lists them
+   (the same list fablecut_workflows checks against). */
+let workflowTools;
+function workflowToolNames() {
+  if (workflowTools === undefined) {
+    try { workflowTools = Workflows.manifestTools(JSON.parse(fs.readFileSync(path.join(APP_DIR, "manifest.json"), "utf8"))); }
+    catch { workflowTools = null; }
+  }
+  return workflowTools || undefined;
+}
+const savedWorkflows = () => Workflows.fromFiles(readSaved("workflows"));
 /** Validate and save a workflow; one with the same id keeps its created date. */
 function saveWorkflow(input, all) {
-  const w = Workflows.normalizeWorkflow(input, true);
+  const w = Workflows.normalizeWorkflow(input, true, workflowToolNames());
   const prev = all.find((x) => x.id === w.id);
   const now = new Date().toISOString();
   const item = { ...w, created: prev && prev.created || now, updated: now };
@@ -1146,8 +1157,8 @@ const server = http.createServer(async (req, res) => {
        POST /api/workflows/delete {id} */
   if (p === "/api/workflows" || p === "/api/workflows/delete") {
     try {
-      const all = readSaved("workflows").map((x) => Workflows.normalizeWorkflow(x.data)).filter(Boolean);
       if (req.method === "GET" && p === "/api/workflows") {
+        const all = savedWorkflows();
         const id = url.searchParams.get("id");
         if (id == null) { sendJSON(res, 200, all); return; }
         const w = Workflows.findWorkflow(all, id);
@@ -1156,10 +1167,12 @@ const server = http.createServer(async (req, res) => {
       }
       if (req.method !== "POST") { sendJSON(res, 405, { error: "GET or POST" }); return; }
       const body = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+      // read now, after the body: another save may have landed while it arrived
+      const all = savedWorkflows();
       if (p === "/api/workflows/delete") {
         const w = Workflows.findWorkflow(all, body.id);
         if (!w) { sendJSON(res, 404, { error: `no workflow "${body.id}"` }); return; }
-        fs.rmSync(path.join(LIBRARY_DIR, "workflows", w.id + ".json"), { force: true });
+        fs.rmSync(path.join(LIBRARY_DIR, "workflows", path.basename(w.file || w.id + ".json")), { force: true });
         sendJSON(res, 200, { deleted: w.id });
         return;
       }

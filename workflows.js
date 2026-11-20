@@ -12,21 +12,30 @@
 "use strict";
 
 const LIMITS = { name: 80, description: 600, step: 1000, steps: 50, tags: 12, tag: 32, args: 20000 };
-const slug = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
-const clean = (s) => String(s == null ? "" : s).replace(/\r\n?/g, "\n").trim();
+// trimmed again after the cut, so a slug of a slug is the same slug (the file name is the id)
+const slug = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 60).replace(/^-+|-+$/g, "");
+/** A text field as a trimmed string; "" when absent; null when it isn't text at all. */
+const clean = (s) => (s == null ? "" : typeof s === "string" || typeof s === "number" ? String(s).replace(/\r\n?/g, "\n").trim() : null);
 
 /** A checked copy of a workflow. strict: throw on anything wrong (saving);
  *  otherwise return null (reading files, where a bad one is skipped).
  *  tools: the tool names a call may use (default: any fablecut_ tool but this one). */
 function normalizeWorkflow(w, strict, tools) {
+  if (strict) return checkWorkflow(w, true, tools);
+  // reading files: anything odd in one skips that file, never the whole listing
+  try { return checkWorkflow(w, false, tools); } catch { return null; }
+}
+function checkWorkflow(w, strict, tools) {
   const bad = (msg) => { if (strict) throw new Error("workflow: " + msg); return null; };
   if (!w || typeof w !== "object" || Array.isArray(w)) return bad("expected an object {name, steps}");
   const name = clean(w.name);
+  if (name === null) return bad("name is text");
   if (!name) return bad("name is required");
   if (name.length > LIMITS.name) return bad(`name is longer than ${LIMITS.name} characters`);
-  const id = slug(w.id || name);
+  const id = slug(typeof w.id === "string" && w.id ? w.id : name);
   if (!id) return bad("name needs a letter or digit");
   const description = clean(w.description);
+  if (description === null) return bad("description is text");
   if (description.length > LIMITS.description) return bad(`description is longer than ${LIMITS.description} characters`);
   if (!Array.isArray(w.steps) || !w.steps.length) return bad("steps: at least one step");
   if (w.steps.length > LIMITS.steps) return bad(`at most ${LIMITS.steps} steps`);
@@ -36,6 +45,7 @@ function normalizeWorkflow(w, strict, tools) {
     const at = `step ${i + 1}`;
     if (!s || typeof s !== "object") return bad(`${at}: expected {text, call?}`);
     const text = clean(s.text);
+    if (text === null) return bad(`${at}: text is text`);
     if (!text) return bad(`${at}: text is required (say what the step does)`);
     if (text.length > LIMITS.step) return bad(`${at}: text is longer than ${LIMITS.step} characters`);
     const step = { text };
@@ -56,6 +66,7 @@ function normalizeWorkflow(w, strict, tools) {
   if (description) out.description = description;
   if (w.tags != null) {
     if (!Array.isArray(w.tags)) return bad("tags is a list of words");
+    if (w.tags.some((t) => clean(t) === null)) return bad("tags are words");
     const tags = [...new Set(w.tags.map(clean).filter(Boolean))];
     if (tags.length > LIMITS.tags) return bad(`at most ${LIMITS.tags} tags`);
     if (tags.some((t) => t.length > LIMITS.tag)) return bad(`a tag is longer than ${LIMITS.tag} characters`);
@@ -65,6 +76,26 @@ function normalizeWorkflow(w, strict, tools) {
   if (typeof w.created === "string") out.created = w.created;
   if (typeof w.updated === "string") out.updated = w.updated;
   return out;
+}
+
+/** The workflows in readSaved("workflows") entries ({file, data}); bad files are skipped. Each
+ *  remembers the file it came from (not enumerable, so it never shows in JSON), so delete
+ *  removes that file even when its name isn't exactly the id. */
+function fromFiles(entries) {
+  const out = [];
+  for (const x of entries || []) {
+    const w = normalizeWorkflow(x && x.data);
+    if (!w) continue;
+    Object.defineProperty(w, "file", { value: x.file, enumerable: false });
+    out.push(w);
+  }
+  return out;
+}
+
+/** The tool names in a .mcpb manifest ({tools:[{name}]}), or null when it can't be read. */
+function manifestTools(manifest) {
+  const t = manifest && Array.isArray(manifest.tools) ? manifest.tools.map((x) => x && x.name).filter((n) => typeof n === "string") : [];
+  return t.length ? t : null;
 }
 
 /** Find a saved workflow by id or name (case-insensitive). */
@@ -92,4 +123,4 @@ function describeWorkflow(w) {
   return lines.join("\n");
 }
 
-module.exports = { LIMITS, slug, normalizeWorkflow, findWorkflow, workflowLine, describeWorkflow };
+module.exports = { LIMITS, slug, normalizeWorkflow, fromFiles, manifestTools, findWorkflow, workflowLine, describeWorkflow };

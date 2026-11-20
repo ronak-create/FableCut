@@ -1301,7 +1301,7 @@ async function projectsTool(args) {
 /* fablecut_workflows: saved recipes in library/workflows/, read and written here directly
    (like saved presets), so it works without the editor server. */
 function savedWorkflows() {
-  return readSaved("workflows").map((x) => Workflows.normalizeWorkflow(x.data)).filter(Boolean);
+  return Workflows.fromFiles(readSaved("workflows"));
 }
 function workflowsTool(args) {
   const action = args.action || "list", all = savedWorkflows();
@@ -1313,7 +1313,7 @@ function workflowsTool(args) {
     if (!w) throw new Error(`no workflow "${args.id || ""}"` + (all.length ? ` — saved: ${all.map((x) => x.id).join(", ")}` : " — none saved yet"));
     if (action === "show") return Workflows.describeWorkflow(w) +
       "\n\nDo each step on the open project. A \"last time\" call is an example: fit its ids, times and values to this project.";
-    fs.rmSync(path.join(LIBRARY_DIR, "workflows", w.id + ".json"), { force: true });
+    fs.rmSync(path.join(LIBRARY_DIR, "workflows", path.basename(w.file || w.id + ".json")), { force: true });
     return `Deleted workflow "${w.name}" (${w.id}).`;
   }
   if (action === "save") {

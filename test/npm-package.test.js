@@ -33,7 +33,7 @@ test("package.json exposes the command and ships the files it runs from", () => 
     (p.endsWith("/") && f.startsWith(p)));
   for (const [, f] of html.matchAll(/(?:src|href)="\/?([^"#:?]+)"/g))
     assert.ok(shipped(f), `index.html loads ${f}, which the npm package would not ship`);
-  for (const f of ["server.js", "mcp-server.js", "CLAUDE.md", "encoding-profiles.json"])
+  for (const f of ["server.js", "mcp-server.js", "CLAUDE.md", "encoding-profiles.json", "manifest.json"])
     assert.ok(shipped(f), `${f} must ship`);
 });
 
