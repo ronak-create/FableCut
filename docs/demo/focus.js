@@ -76,6 +76,8 @@
     // the slider a pointer is dragging and that pointer's id, until that same pointer
     // lifts or cancels (a key pressed mid-drag, or a second finger, doesn't end it)
     let dragging = null, dragPointer = null;
+    // bumped by each new drag, so a release left pending by the last one can't blur it
+    let dragGen = 0;
     // The pointerdown a click comes from. byPointer only says what the last input was;
     // a screen reader's virtual-cursor click fires `click` with no pointerdown, so a
     // click counts as a mouse click only when a pointerdown on that same element came
@@ -91,7 +93,7 @@
       if (keyFocused && (e.target === keyFocused || (keyFocused.contains && keyFocused.contains(e.target)))) keyFocused = null;
       const t = e.target;
       if (dragging) return;   // another pointer is already dragging a slider
-      if (t && t.tagName === "INPUT" && t.type === "range") { dragging = dragHeld = t; dragPointer = e.pointerId; }
+      if (t && t.tagName === "INPUT" && t.type === "range") { dragging = dragHeld = t; dragPointer = e.pointerId; dragGen++; }
     }, { capture: true, passive: true });
     // a press the browser cancelled (a touch that became a scroll) clicks nothing
     win.addEventListener("pointercancel", () => { downOn = null; }, { capture: true, passive: true });
@@ -131,7 +133,8 @@
       if (!dragging || e.pointerId !== dragPointer) return;
       const el = dragging;
       dragging = dragHeld = null; dragPointer = null;
-      setTimeout(() => { if (doc.activeElement === el) release(el); }, 0);
+      const gen = dragGen;
+      setTimeout(() => { if (gen === dragGen && doc.activeElement === el) release(el); }, 0);
     };
     win.addEventListener("pointerup", endDrag, true);
     win.addEventListener("pointercancel", endDrag, true);
@@ -155,5 +158,8 @@
     }, true);
   }
 
-  return { isClickControl, inKeyboardScope, spaceShouldPlay, noteFocus, release, install, KEYBOARD_SCOPE };
+  /** True while a pointer is dragging slider `el`: Space neither plays nor presses it then. */
+  function isDragging(el) { return el != null && el === dragHeld; }
+
+  return { isClickControl, inKeyboardScope, spaceShouldPlay, isDragging, noteFocus, release, install, KEYBOARD_SCOPE };
 });
