@@ -31,6 +31,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   focus back to the editor, and Space on one that still has it plays. Dialogs
   and popovers, and controls reached with Tab, keep working from the keyboard
   as before. (thanks @mrbeandev, #152)
+- **Long exports no longer stall.** Each frame sent to the encoder left memory
+  behind in the editor tab, so a timeline longer than a minute or two could stop
+  at "the editor stopped reporting progress". Frames now go up a way that leaves
+  far less behind, and 4:2:2 / 4:4:4 / 10-bit outputs (ProRes, DNxHR, FFV1)
+  take lossless PNG frames instead of raw pixels: the same picture, bit for bit,
+  at about a tenth of the size. A cancelled or failed export also stops its
+  ffmpeg right away and cleans up its files, instead of leaving it running.
+  (thanks @maikeruSan, #165)
 
 ## [1.19.0] - 2026-11-19
 

@@ -502,7 +502,7 @@
     return parts.join(",");
   }
 
-  /** One ffmpeg pass. o: {fps, input:"jpeg"|"rgba", canvasW, canvasH, frame
+  /** One ffmpeg pass. o: {fps, input:"jpeg"|"png"|"rgba", canvasW, canvasH, frame
    *  (from reframe), wavPath|null, outPath, duration (s, frames ÷ fps),
    *  loudnorm (pass-one measurement, when the spec has a loudness target), dry}. `dry` swaps stdin for a
    *  0.1 s synthetic picture of the canvas size, to check the settings
@@ -510,8 +510,11 @@
   function ffmpegArgs(spec, o) {
     const rate = fpsRational(o.fps);
     const args = ["-y", "-hide_banner"];
-    const rgba = o.input === "rgba";
-    if (o.dry) args.push("-f", "lavfi", "-i", `color=c=black:s=${o.canvasW}x${o.canvasH}:r=${rate}:d=0.1,format=${rgba ? "rgba" : "yuvj420p"}`);
+    const rgba = o.input === "rgba", png = o.input === "png";
+    // PNG and raw RGBA both arrive as full-range RGB
+    const rgb = rgba || png;
+    if (o.dry) args.push("-f", "lavfi", "-i", `color=c=black:s=${o.canvasW}x${o.canvasH}:r=${rate}:d=0.1,format=${rgb ? "rgba" : "yuvj420p"}`);
+    else if (png) args.push("-thread_queue_size", "64", "-f", "image2pipe", "-framerate", rate, "-c:v", "png", "-i", "-");
     else if (rgba) args.push("-thread_queue_size", "8", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", `${o.canvasW}x${o.canvasH}`, "-framerate", rate, "-i", "-");
     else args.push("-thread_queue_size", "64", "-f", "image2pipe", "-framerate", rate, "-c:v", "mjpeg", "-i", "-");
     const audio = spec.audio.codec !== "none" && (o.dry ? o.hasAudio !== false : !!o.wavPath);
@@ -521,7 +524,7 @@
     }
     args.push("-map", "0:v:0");
     if (audio) args.push("-map", "1:a:0");
-    args.push("-vf", videoFilter(spec, o.frame, rgba ? "bt709" : "bt601"));
+    args.push("-vf", videoFilter(spec, o.frame, rgb ? "bt709" : "bt601"));
     args.push(...videoArgs(spec, +o.fps));
     const c = COLORS[spec.color] || COLORS.bt709;
     args.push("-colorspace", c.matrix, "-color_primaries", c.primaries, "-color_trc", c.trc, "-color_range", c.range);
@@ -646,11 +649,13 @@
     return `${m}:${r < 10 ? "0" : ""}${r.toFixed(2)}`;
   }
 
-  /** How the browser should hand frames over: JPEG is 4:2:0 8-bit, so
-   *  anything that keeps more chroma or bit depth gets raw RGBA instead. */
+  /** How the browser should hand frames over: JPEG is 4:2:0 8-bit, so anything
+   *  that keeps more chroma or bit depth gets lossless PNG instead. The canvas is
+   *  8-bit RGB, so PNG carries exactly its pixels (as raw RGBA did) at about a
+   *  tenth of the bytes, and every byte uploaded costs the tab memory (#165). */
   function frameInput(spec) {
     const v = spec.video;
-    return v.codec === "ffv1" || /422|444|10le/.test(v.pixFmt) ? "rgba" : "jpeg";
+    return v.codec === "ffv1" || /422|444|10le/.test(v.pixFmt) ? "png" : "jpeg";
   }
   function jpegQuality(spec) {
     const v = spec.video;

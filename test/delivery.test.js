@@ -116,11 +116,14 @@ test("ffmpegArgs: the input side, the filter chain, rate control and the contain
   assert.ok(c.includes("-an"), "no wav → no audio");
 
   const pr = D.normalize("broadcast").spec;
-  assert.equal(D.frameInput(pr), "rgba", "ProRes 4:2:2 10-bit gets full-chroma frames");
+  assert.equal(D.frameInput(pr), "png", "ProRes 4:2:2 10-bit gets lossless frames");
   assert.equal(D.frameInput(yt), "jpeg");
   const p = D.ffmpegArgs(pr, { fps: 25, input: "rgba", canvasW: 1920, canvasH: 1080, frame: D.reframe(pr, 1920, 1080), outPath: "o.mov" });
   assert.equal(argAfter(p, "-pix_fmt"), "rgba");
   assert.equal(argAfter(p, "-profile:v"), "3");
+  const pp = D.ffmpegArgs(pr, { fps: 25, input: "png", canvasW: 1920, canvasH: 1080, frame: D.reframe(pr, 1920, 1080), outPath: "o.mov" });
+  assert.equal(argAfter(pp, "-c:v"), "png", "PNG frames come through image2pipe");
+  assert.match(argAfter(pp, "-vf"), /in_color_matrix=bt709/, "PNG is full-range RGB, like raw RGBA");
 
   const reel = D.normalize("tiktok").spec;
   const r = D.ffmpegArgs(reel, { fps: 30, input: "jpeg", canvasW: 1920, canvasH: 1080, frame: D.reframe(reel, 1920, 1080), outPath: "o.mp4" });
@@ -341,8 +344,8 @@ test("export/begin with several deliveries: one stream of frames, one file per o
   if (!ff.available) return;
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "fc-dlv-"));
   t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
-  const raw = path.join(tmp, "f.rgba");
-  execFileSync("ffmpeg", ["-y", "-v", "error", "-f", "lavfi", "-i", "color=c=green:s=320x180", "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgba", raw]);
+  const raw = path.join(tmp, "f.png");
+  execFileSync("ffmpeg", ["-y", "-v", "error", "-f", "lavfi", "-i", "color=c=green:s=320x180", "-frames:v", "1", "-f", "image2", "-c:v", "png", raw]);
   const frame = fs.readFileSync(raw);
 
   const begin = await post(base, "/api/export/begin", {
@@ -355,7 +358,7 @@ test("export/begin with several deliveries: one stream of frames, one file per o
   });
   const sess = await begin.json();
   assert.equal(begin.status, 200, sess.error);
-  assert.equal(sess.input, "rgba", "ProRes in the batch → every output reads RGBA");
+  assert.equal(sess.input, "png", "ProRes in the batch → every output reads lossless PNG frames");
   assert.equal(sess.outputs.length, 3);
   assert.deepEqual(sess.outputs.map((o) => o.file), ["wide.mp4", "tall.mp4", "master.mov"]);
   const up = await fetch(base + "/api/export/frame?id=" + sess.id, { method: "POST", body: Buffer.concat(Array(5).fill(frame)) });
@@ -469,4 +472,49 @@ test("a silent mix through the real ffmpeg measures as silence", (t) => {
     "-af", "ebur128=peak=true:framelog=quiet", "-f", "null", "-"], { encoding: "utf8" });
   if (r.error) return t.skip("no ffmpeg");
   assert.deepEqual(D.parseEbur128(r.stderr), { lufs: null, truePeak: null, silent: true });
+});
+
+test("PNG frames encode to exactly the pixels raw RGBA did (4:4:4 / 10-bit outputs)", (t) => {
+  try { execFileSync("ffmpeg", ["-version"], { stdio: "ignore" }); } catch { return; }
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "fc-png-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  // a few frames with detail and colour, as raw RGBA and as PNG
+  const raw = path.join(tmp, "f.rgba"), pngs = path.join(tmp, "f.png");
+  const src = ["-y", "-v", "error", "-f", "lavfi", "-i", "testsrc2=s=160x90:r=25:d=0.2"];
+  execFileSync("ffmpeg", [...src, "-f", "rawvideo", "-pix_fmt", "rgba", raw]);
+  execFileSync("ffmpeg", [...src, "-f", "image2pipe", "-c:v", "png", pngs]);
+  const spec = D.normalize({ preset: "custom", width: 160, height: 90, video: { codec: "ffv1" } }).spec;
+  const md5 = (input, file) => {
+    const out = path.join(tmp, input + ".mkv");
+    const args = D.ffmpegArgs(spec, { fps: 25, input, canvasW: 160, canvasH: 90, frame: D.reframe(spec, 160, 90), outPath: out });
+    execFileSync("ffmpeg", args, { input: fs.readFileSync(file), stdio: ["pipe", "ignore", "ignore"] });
+    return execFileSync("ffmpeg", ["-v", "error", "-i", out, "-map", "0:v", "-f", "framemd5", "-"]).toString()
+      .split(/\r?\n/).filter((l) => l && !l.startsWith("#")).map((l) => l.split(",").pop().trim());
+  };
+  const a = md5("rgba", raw), b = md5("png", pngs);
+  assert.equal(a.length, 5);
+  assert.deepEqual(b, a, "same decoded frames");
+  assert.ok(fs.statSync(pngs).size < fs.statSync(raw).size / 2, "and far fewer bytes to upload");
+});
+
+test("discarding an export mid-render stops its ffmpeg and leaves nothing in exports/", async (t) => {
+  const { dir, base } = await boot(t);
+  const ff = await (await fetch(base + "/api/export/ffmpeg")).json();
+  if (!ff.available) return;
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "fc-dis-"));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const png = path.join(tmp, "f.png");
+  execFileSync("ffmpeg", ["-y", "-v", "error", "-f", "lavfi", "-i", "color=c=blue:s=320x180", "-frames:v", "1", "-f", "image2", "-c:v", "png", png]);
+  const sess = await (await post(base, "/api/export/begin", {
+    fps: 25, hasAudio: false, duration: 10, canvasW: 320, canvasH: 180,
+    deliveries: [{ delivery: { preset: "custom", video: { codec: "prores", profile: "proxy" } }, name: "starved" }],
+  })).json();
+  assert.ok(sess.id, sess.error);
+  // one frame starts ffmpeg, which then waits on its input for frames that never come
+  assert.equal((await fetch(base + "/api/export/frame?id=" + sess.id, { method: "POST", body: fs.readFileSync(png) })).status, 200);
+  assert.equal((await fetch(base + "/api/export/end?id=" + sess.id + "&discard=1", { method: "POST" })).status, 200);
+  const exportsDir = path.join(dir, "exports");
+  const left = () => (fs.existsSync(exportsDir) ? fs.readdirSync(exportsDir) : []);
+  for (let i = 0; i < 50 && left().length; i++) await new Promise((r) => setTimeout(r, 100));
+  assert.deepEqual(left(), [], "no .part file or temp folder left behind");
 });
