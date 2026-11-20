@@ -156,3 +156,19 @@ test("updating a workflow kept under another file name leaves one file; deleting
   assert.match((await mcp.callTool("fablecut_workflows", { action: "delete", id: "other-name" })).content[0].text, /Deleted/);
   assert.deepEqual(files(), []);
 });
+
+test("stale-file cleanup: never the file just written (any case), never a file that now holds another workflow", (t) => {
+  const os = require("node:os");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fc-wf-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const put = (f, w) => fs.writeFileSync(path.join(dir, f), JSON.stringify(w));
+  // listed before the save: renamed.json and swapped.json both held "Podcast"
+  const all = W.fromFiles([{ file: "renamed.json", data: { name: "Podcast", steps: ["a"] } }, { file: "swapped.json", data: { name: "Podcast", steps: ["a"] } },
+    { file: "PODCAST.JSON", data: { name: "Podcast", steps: ["a"] } }]);
+  assert.deepEqual(W.staleFiles(all, "podcast"), ["renamed.json", "swapped.json"], "a case-only difference is the same file");
+  put("podcast.json", { name: "Podcast", steps: ["new"] });
+  put("renamed.json", { name: "Podcast", steps: ["a"] });
+  put("swapped.json", { name: "Something else", steps: ["b"] });   // another process saved here meanwhile
+  W.removeStale(dir, all, "podcast", fs, path);
+  assert.deepEqual(fs.readdirSync(dir).sort(), ["podcast.json", "swapped.json"]);
+});

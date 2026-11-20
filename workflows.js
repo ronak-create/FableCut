@@ -95,7 +95,27 @@ function fromFiles(entries) {
 /** After saving workflow `id` as <id>.json: the other files that held that id (an older or
  *  hand-written file under another name), to remove so one workflow stays one file. */
 function staleFiles(all, id) {
-  return all.filter((w) => w.id === id && w.file && w.file !== id + ".json").map((w) => w.file);
+  // compared without case: on Windows / macOS "PODCAST.JSON" is the file just written
+  return all.filter((w) => w.id === id && w.file && w.file.toLowerCase() !== (id + ".json").toLowerCase()).map((w) => w.file);
+}
+
+/** Remove the stale files of workflow `id` from `dir` (fs and path passed in, so this module
+ *  stays free of I/O). Each is read again first and removed only while it still holds that
+ *  workflow and is not the file just written: another process may have saved a different one
+ *  under that name since the listing was read. */
+function removeStale(dir, all, id, fs, path) {
+  const dest = path.join(dir, id + ".json");
+  let destStat = null;
+  try { destStat = fs.statSync(dest); } catch { }
+  for (const f of staleFiles(all, id)) {
+    const p = path.join(dir, path.basename(f));
+    try {
+      const st = fs.statSync(p);
+      if (destStat && st.ino === destStat.ino && st.dev === destStat.dev && st.ino !== 0) continue;
+      const w = normalizeWorkflow(JSON.parse(fs.readFileSync(p, "utf8").replace(/^﻿/, "")));
+      if (w && w.id === id) fs.rmSync(p, { force: true });
+    } catch { }
+  }
 }
 
 /** The tool names in a .mcpb manifest ({tools:[{name}]}), or null when it can't be read. */
@@ -129,4 +149,4 @@ function describeWorkflow(w) {
   return lines.join("\n");
 }
 
-module.exports = { LIMITS, slug, normalizeWorkflow, fromFiles, staleFiles, manifestTools, findWorkflow, workflowLine, describeWorkflow };
+module.exports = { LIMITS, slug, normalizeWorkflow, fromFiles, staleFiles, removeStale, manifestTools, findWorkflow, workflowLine, describeWorkflow };
