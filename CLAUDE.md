@@ -2715,7 +2715,7 @@ ones and starts.
   the compositor draws each frame once and every output's ffmpeg encodes it (up to 8 per
   render). Four 1080p files take about as long as one. Outputs at another frame rate get
   their own render. When any output needs full chroma (ProRes, 10-bit, lossless) the
-  frames go as RGBA to all of them.
+  frames go as lossless PNG to all of them.
 - **The export frame** is the picture for outputs of its own shape (and for the
   picture's own size). An output of another shape reframes the whole canvas — a project
   framed for 9:16 still makes a proper 16:9 file.
@@ -2725,7 +2725,8 @@ ones and starts.
   empties it. One output that fails does not stop the others in its render.
 - REST: `POST /api/export/begin {deliveries:[{delivery, name}, …], canvasW, canvasH,
   region?, duration, fps, hasAudio}` → `{id, input, jpegQuality, outputs:[{file, spec,
-  summary, notes, size}]}`; frames and audio as for one output; `/api/export/end` →
+  summary, notes, size}]}` (`input` is `"jpeg"` or `"png"`: post frames in that format,
+  PNG for full-chroma outputs); frames and audio as for one output; `/api/export/end` →
   `{src, outputs:[{file, ok, src, report:{ok, checks:[{ok, text}], line}, mixLoudness?} | {file, ok:false, error}]}`.
 
 ### Encoding profiles (`encoding-profiles.json`)
