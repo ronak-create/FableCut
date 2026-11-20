@@ -2668,7 +2668,8 @@ A spec (every key optional — what is left out comes from its `preset`):
   limit is passed, and estimates the file size where it can (bitrate and fixed-rate
   codecs; CRF cannot know).
 - Outputs that keep more than 4:2:0 8-bit (ProRes, DNxHR, FFV1, 10-bit, 4:2:2, 4:4:4)
-  get raw RGBA frames instead of JPEG, so no chroma is lost on the way. Slower to send.
+  get lossless PNG frames instead of JPEG, so no chroma is lost on the way: the canvas
+  is 8-bit RGB, so PNG carries exactly its pixels. Slower to encode than JPEG.
 - The audio is cut to exactly the frames' length.
 - **Loudness** (`audio.loudness`): the mix is measured and turned to the target with
   ffmpeg's two-pass `loudnorm` — one linear gain, and a true-peak limiter at `truePeak`.

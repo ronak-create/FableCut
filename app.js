@@ -16873,31 +16873,15 @@ function snapshotExportFrame() {
     return { kind: "rgba", data: img.data, w: src.width, h: src.height };
   } catch (e) { throw canvasTaintError(e); }
 }
-let exportRgbaOff = null, exportRgbaCtx = null;
-/** Raw RGBA of the frame, for outputs that keep more than JPEG's 4:2:0 8-bit
- *  (ProRes, DNxHR, FFV1, 10-bit, 4:2:2 / 4:4:4). */
-function snapshotExportRgba() {
-  const src = exportSourceCanvas();
-  try {
-    if (!exportRgbaOff || exportRgbaOff.width !== src.width || exportRgbaOff.height !== src.height) {
-      exportRgbaOff = typeof OffscreenCanvas === "function" ? new OffscreenCanvas(src.width, src.height)
-        : Object.assign(document.createElement("canvas"), { width: src.width, height: src.height });
-      exportRgbaCtx = exportRgbaOff.getContext("2d", { alpha: false, willReadFrequently: true });
-    }
-    exportRgbaCtx.drawImage(src, 0, 0);
-    const img = exportRgbaCtx.getImageData(0, 0, src.width, src.height);
-    return new Uint8Array(img.data.buffer, img.data.byteOffset, img.data.byteLength);
-  } catch (e) { throw canvasTaintError(e); }
-}
 const JPEG_WORKER_SRC = `"use strict";
 self.onmessage = async (e) => {
-  const { id, bmp, quality } = e.data;
+  const { id, bmp, quality, type } = e.data;
   try {
     const c = new OffscreenCanvas(bmp.width, bmp.height);
     const ctx = c.getContext("2d", { alpha: false });
     ctx.drawImage(bmp, 0, 0);
     bmp.close();
-    const blob = await c.convertToBlob({ type: "image/jpeg", quality: quality || 0.92 });
+    const blob = await c.convertToBlob(type === "image/png" ? { type } : { type: "image/jpeg", quality: quality || 0.92 });
     const buf = await blob.arrayBuffer();
     self.postMessage({ id, buf }, [buf]);
   } catch (err) {
@@ -16933,12 +16917,12 @@ function createJpegWorkers(n) {
     w.onerror = () => {};
   }
   return {
-    encode(bmp, quality) {
+    encode(bmp, quality, type) {
       const id = nextId++;
       const w = workers[rr++ % workers.length];
       return new Promise((resolve, reject) => {
         pending.set(id, { resolve, reject });
-        try { w.postMessage({ id, bmp, quality }, [bmp]); }
+        try { w.postMessage({ id, bmp, quality, type }, [bmp]); }
         catch (e) { pending.delete(id); reject(e); }
       });
     },
@@ -16949,7 +16933,7 @@ function createJpegWorkers(n) {
     },
   };
 }
-function jpegFromBitmap(bmp, quality) {
+function jpegFromBitmap(bmp, quality, type = "image/jpeg") {
   const c = document.createElement("canvas");
   c.width = bmp.width; c.height = bmp.height;
   c.getContext("2d", { alpha: false }).drawImage(bmp, 0, 0);
@@ -16959,7 +16943,7 @@ function jpegFromBitmap(bmp, quality) {
       c.toBlob((b) => {
         if (!b) return rej(new Error("frame encode failed"));
         b.arrayBuffer().then(res, rej);
-      }, "image/jpeg", quality);
+      }, type, quality);
     } catch (e) { rej(canvasTaintError(e)); }
   });
 }
@@ -17029,6 +17013,29 @@ async function armExportCors() {
   if (missing.length)
     toast("No CORS on " + missing.join(", ") + " — blank in the export. Import into the project or add Access-Control-Allow-Origin.");
 }
+/* One frame upload. XMLHttpRequest, not fetch: in Chromium each fetch body leaves
+   about twice its size of native memory behind for the life of the tab, an
+   XHR body about half that, and a long export runs the renderer out of memory
+   (#165). */
+function postFrames(url, body, signal) {
+  return new Promise((ok, bad) => {
+    if (signal && signal.aborted) return bad(new Error("cancelled"));
+    const xhr = new XMLHttpRequest();
+    const onAbort = () => xhr.abort();
+    const done = (fn) => { if (signal) signal.removeEventListener("abort", onAbort); fn(); };
+    xhr.open("POST", url, true);
+    xhr.onload = () => done(() => {
+      if (xhr.status >= 200 && xhr.status < 300) return ok();
+      let msg = "frame upload failed";
+      try { msg = JSON.parse(xhr.responseText).error || msg; } catch { }
+      bad(new Error(msg));
+    });
+    xhr.onerror = () => done(() => bad(new Error("frame upload failed")));
+    xhr.onabort = () => done(() => bad(new Error("cancelled")));
+    if (signal) signal.addEventListener("abort", onAbort, { once: true });
+    xhr.send(body);
+  });
+}
 /* Sequential /frame POSTs, batched. Concurrent bodies can still race on ffmpeg
    stdin if they complete out of order, so the client starts each fetch only
    after the previous one settles; rendering runs ahead under backpressure.
@@ -17056,10 +17063,7 @@ function createExportUploader(sessId, { batchItems, batchBytes, signal, getError
       if (cancelled()) throw new Error("cancelled");
       const err = getError();
       if (err) throw err;
-      const r = await fetch("/api/export/frame?id=" + sessId, {
-        method: "POST", body, signal,
-      });
-      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "frame upload failed");
+      await postFrames("/api/export/frame?id=" + sessId, body, signal);
     });
     uploadTail = p.catch((err) => {
       if (!getError()) setError(err);
@@ -17734,7 +17738,9 @@ async function fastExport(opts = {}) {
     if (!begin.id) throw new Error(begin.error || "export begin failed");
     sessId = begin.id;
     const jpegQ = delivery ? begin.jpegQuality ?? 0.95 : exportProfileMeta(profileId).jpegQuality ?? 0.95;
-    const rgba = begin.input === "rgba";
+    // lossless PNG frames for outputs that keep more than JPEG's 4:2:0: the canvas is 8-bit RGB,
+    // so PNG carries exactly its pixels, at about a tenth of raw RGBA's upload (#165)
+    const frameType = begin.input === "png" ? "image/png" : "image/jpeg";
     exportFullCanvas = !!delivery;
     if (wav) {
       const r = await fetch("/api/export/audio?id=" + sessId, { method: "POST", body: wav, signal });
@@ -17778,12 +17784,11 @@ async function fastExport(opts = {}) {
       await seekVideosTo(t, { queueBusy });
       await prepareFrameAssets(t);
       drawFrame(t);
-      const snap = rgba ? { kind: "raw", px: snapshotExportRgba() } : snapshotExportFrame();
+      const snap = snapshotExportFrame();
       pixelsInflight++;
       let jpegP;
-      if (snap.kind === "raw") jpegP = Promise.resolve(snap.px);
-      else if (snap.kind === "bmp") {
-        jpegP = workers ? workers.encode(snap.bmp, jpegQ) : jpegFromBitmap(snap.bmp, jpegQ);
+      if (snap.kind === "bmp") {
+        jpegP = workers ? workers.encode(snap.bmp, jpegQ, frameType) : jpegFromBitmap(snap.bmp, jpegQ, frameType);
       } else {
         const c = document.createElement("canvas");
         c.width = snap.w; c.height = snap.h;
@@ -17793,7 +17798,7 @@ async function fastExport(opts = {}) {
             c.toBlob((b) => {
               if (!b) return rej(new Error("frame encode failed"));
               b.arrayBuffer().then(res, rej);
-            }, "image/jpeg", jpegQ);
+            }, frameType, jpegQ);
           } catch (e) { rej(canvasTaintError(e)); }
         });
       }
