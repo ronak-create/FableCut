@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.20.0] - 2026-11-20
+
 ### Added
 - **Workflows.** Save a routine you want repeated, such as a podcast clean-up
   or the weekly reel, as steps in plain words plus the tool calls that did
@@ -1070,7 +1072,8 @@ the report in [#1](https://github.com/ronak-create/FableCut/issues/1) — thanks
 - Three control surfaces for AI agents: **MCP server**, direct `project.json`
   editing, and a **REST API** with live-reload over server-sent events.
 
-[Unreleased]: https://github.com/ronak-create/FableCut/compare/v1.19.0...HEAD
+[Unreleased]: https://github.com/ronak-create/FableCut/compare/v1.20.0...HEAD
+[1.20.0]: https://github.com/ronak-create/FableCut/compare/v1.19.0...v1.20.0
 [1.19.0]: https://github.com/ronak-create/FableCut/compare/v1.18.0...v1.19.0
 [1.18.0]: https://github.com/ronak-create/FableCut/compare/v1.17.0...v1.18.0
 [1.17.0]: https://github.com/ronak-create/FableCut/compare/v1.16.0...v1.17.0
