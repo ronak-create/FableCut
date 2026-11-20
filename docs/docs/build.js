@@ -119,6 +119,11 @@ const PAGES = [
     parts: [["project.json schema", "Versions"]],
   },
   {
+    slug: "workflows", nav: "Workflows", title: "Workflows", group: "The timeline",
+    lede: "Save a routine you want repeated — steps in plain words plus the tool calls that did them — and have an agent follow it on the next project.",
+    parts: [["project.json schema", "Workflows"]],
+  },
+  {
     slug: "sequences", nav: "Sequences", title: "Sequences", group: "The timeline",
     lede: "Several timelines in one project — a 16:9 and a 9:16 cut, cut-downs, alternatives — sharing its media and compositions, each with its own canvas, mix and delivery settings.",
     parts: [["project.json schema", "Sequences"]],

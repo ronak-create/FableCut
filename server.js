@@ -43,6 +43,7 @@ const {
   PROJECT_FILE, LIBRARY_SUBDIRS, FRAMES_DIR, PROXIES_DIR, ensureDirs, readSaved, writeSaved,
 } = require("./paths");
 const Templates = require("./templates");
+const Workflows = require("./workflows");
 const { probeFile } = require("./media-probe");
 const MediaLib = require("./media-lib");
 const { createProxies } = require("./proxy");
@@ -384,6 +385,15 @@ function deliveryEncoders() {
   return deliveryEncodersP;
 }
 /** Saved delivery presets: library/delivery/<id>.json, each a spec plus a label. */
+/** Validate and save a workflow; one with the same id keeps its created date. */
+function saveWorkflow(input, all) {
+  const w = Workflows.normalizeWorkflow(input, true);
+  const prev = all.find((x) => x.id === w.id);
+  const now = new Date().toISOString();
+  const item = { ...w, created: prev && prev.created || now, updated: now };
+  writeSaved("workflows", item.id, item);
+  return item;
+}
 function savedDeliveryPresets() { return Delivery.savedPresets(readSaved("delivery")); }
 /* One render, several files: `deliveries:[{delivery, name}, …]` (up to 8) or a
    single `delivery` + name. Every output gets its own ffmpeg, fed the same
@@ -867,7 +877,7 @@ const server = http.createServer(async (req, res) => {
         for (const e of list) {
           if (e.name.startsWith(".")) continue;
           const full = path.join(d, e.name);
-          if (e.isDirectory()) { if (depth < 6 && !(root === LIBRARY_DIR && /^(presets|templates|fonts)$/.test(e.name) && depth === 0)) walk(root, prefix, full, depth + 1); continue; }
+          if (e.isDirectory()) { if (depth < 6 && !(root === LIBRARY_DIR && /^(presets|templates|workflows|fonts)$/.test(e.name) && depth === 0)) walk(root, prefix, full, depth + 1); continue; }
           let size = 0;
           try { size = fs.statSync(full).size; } catch { continue; }
           const rel = path.relative(root, full).split(path.sep).map(encodeURIComponent).join("/");
@@ -1110,6 +1120,36 @@ const server = http.createServer(async (req, res) => {
       const item = Templates.asSaved(norm(kind === "presets" ? body.preset : body.template, true), kind);
       const file = writeSaved(kind, item.id, item);
       sendJSON(res, 200, { id: item.id, name: item.name, file: path.relative(DATA_DIR, file).split(path.sep).join("/") });
+    } catch (e) { sendJSON(res, 400, { error: String(e.message || e) }); }
+    return;
+  }
+
+  /* API: saved workflows (library/workflows) — recipes an agent repeats on another project.
+       GET  /api/workflows            → [ …validated workflows… ] (bad files skipped)
+       GET  /api/workflows?id=        → one, or 404
+       POST /api/workflows {workflow} → saved as library/workflows/<id>.json (same id: updated)
+       POST /api/workflows/delete {id} */
+  if (p === "/api/workflows" || p === "/api/workflows/delete") {
+    try {
+      const all = readSaved("workflows").map((x) => Workflows.normalizeWorkflow(x.data)).filter(Boolean);
+      if (req.method === "GET" && p === "/api/workflows") {
+        const id = url.searchParams.get("id");
+        if (id == null) { sendJSON(res, 200, all); return; }
+        const w = Workflows.findWorkflow(all, id);
+        if (w) sendJSON(res, 200, w); else sendJSON(res, 404, { error: `no workflow "${id}"` });
+        return;
+      }
+      if (req.method !== "POST") { sendJSON(res, 405, { error: "GET or POST" }); return; }
+      const body = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+      if (p === "/api/workflows/delete") {
+        const w = Workflows.findWorkflow(all, body.id);
+        if (!w) { sendJSON(res, 404, { error: `no workflow "${body.id}"` }); return; }
+        fs.rmSync(path.join(LIBRARY_DIR, "workflows", w.id + ".json"), { force: true });
+        sendJSON(res, 200, { deleted: w.id });
+        return;
+      }
+      const item = saveWorkflow(body.workflow, all);
+      sendJSON(res, 200, item);
     } catch (e) { sendJSON(res, 400, { error: String(e.message || e) }); }
     return;
   }

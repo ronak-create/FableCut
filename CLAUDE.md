@@ -74,6 +74,9 @@ Every Claude Code session then has these tools:
   always the open one. See "Projects" below.
 - `fablecut_versions` — a project's saved versions: save one before big edits, compare
   a version with now, restore one (never destructive), mark the final cut. See "Versions" below.
+- `fablecut_workflows` — saved workflows: recipes of steps (and the tool calls that did
+  them) the user wants repeated on other projects. Save one, list them, show one and follow
+  it. See "Workflows" below.
 
 ### Token-efficient editing (important for agents)
 
@@ -219,8 +222,9 @@ Reusable assets, visible in the editor's left-panel tabs and never copied:
 | `library/fonts/`    | font editor  | `.ttf/.otf/.woff/.woff2`, auto-registered, family name = file name; a variable font draws every `weight` |
 | `library/presets/`  | Inspector → Motion → Presets | saved animation presets, one `.json` each (see "Presets and templates") |
 | `library/templates/`| **Templates** | saved templates, one `.json` each, listed after the built-in ones |
+| `library/workflows/`| — | saved workflows, one `.json` each (see "Workflows") |
 
-- List via `GET /api/library?dir=sfx|elements|svg|fonts|presets|templates` (recursive; subfolders OK).
+- List via `GET /api/library?dir=sfx|elements|svg|fonts|presets|templates|workflows` (recursive; subfolders OK).
 - To use one in the timeline, add a media entry whose `src` is its library path,
   e.g. `{ "id":"m_x", "name":"whoosh.mp3", "kind":"audio", "src":"/library/sfx/whoosh.mp3" }`
   — then reference it from clips like any other media.
@@ -1892,6 +1896,55 @@ and restore if the user prefers the old one; **client rounds** — save "Round 1
 "Round 2", … with the feedback in the note, mark the approved one final;
 **what did the agent do?** — `diff` against the "Before agent edits" version.
 
+### Workflows
+
+A **workflow** is a recipe the user wants repeated on other projects: "my podcast
+clean-up", "the weekly reel", "client delivery". It is a name, what it is for, and
+its steps in order. Each step says in plain words what to do, and may carry the
+tool call that did it last time. Workflows are shared by every project, one JSON
+file each in `library/workflows/<id>.json`:
+
+```jsonc
+{ "id": "podcast-clean-up", "name": "Podcast clean-up",
+  "description": "Voice level, no dead air, captions, a Shorts cut.", "tags": ["podcast"],
+  "steps": [
+    { "text": "Reduce the room noise on the voice clips.",
+      "call": { "tool": "fablecut_denoise", "args": { "clipIds": ["c_vo"], "amount": "medium" } } },
+    { "text": "Normalize the voice to -16 LUFS.",
+      "call": { "tool": "fablecut_normalize_audio", "args": { "clipIds": ["c_vo"], "target": -16 } } },
+    { "text": "Cut the pauses longer than half a second, keeping the music bed running." },
+    { "text": "Export for YouTube Shorts.", "call": { "tool": "fablecut_export", "args": { "preset": "youtube-shorts" } } } ],
+  "created": "…", "updated": "…" }
+```
+
+| key | does |
+|---|---|
+| `name` · `id` | up to 80 characters; the id is made from the name, and saving the same name again updates that workflow (it keeps its `created`) |
+| `description` · `tags` | what it is for (up to 600 characters) · up to 12 labels |
+| `steps` | 1–50, each `{text, call?}` (a plain string is a step with only text); `text` up to 1000 characters |
+| `call` | `{tool, args}`: a FableCut tool (not `fablecut_workflows`) and the arguments it was given, up to 20 000 characters |
+
+**Following one is a job for judgement, not a replay.** The new project has other
+clips, ids and times, so a step's call is a worked example: read what the step says,
+look at the project (`fablecut_get_project {compact:true}`, `fablecut_frame`), and
+make the call that does that here. A step with no call is one only the agent's
+judgement can do ("pick the three strongest shots").
+
+**Agents** use `fablecut_workflows` (or the REST endpoints below):
+
+- `{}` lists them (id, name, steps, tags, description); `{action:"show", id}` gives
+  the steps to follow (id or name).
+- `{action:"save", workflow:{name, description?, tags?, steps}}` keeps one. Save when
+  the user asks to keep or repeat what was just done: write each step the way you would
+  explain it to another editor, and attach the calls that worked. A call to a tool that
+  doesn't exist refuses the save.
+- `{action:"delete", id}` removes one: only when the user asks.
+
+Recipes: **"do what you did last week"** — `{}`, then `show` the one that matches and do
+its steps; **a house style for every episode** — after the first episode is right, save
+its loudness, captions, grade and export steps as one workflow; **hand a routine to another
+agent** — the file in `library/workflows/` is plain JSON any agent can read.
+
 ### Sequences
 
 A project can hold several **sequences**: timelines of their own that share
@@ -2261,6 +2314,9 @@ obvious cuts were missed, raise it if motion is being misread as cuts.
 - `GET  /api/presets` · `GET /api/templates` — the saved presets / templates, validated (bad files skipped);
   `POST /api/presets {preset}` · `POST /api/templates {template}` — validate one and save it as
   `library/presets/<id>.json` / `library/templates/<id>.json`, returning `{id, name, file}`
+- `GET  /api/workflows[?id=]` — the saved workflows, validated (bad files skipped), or one by id or name (404 if none) ·
+  `POST /api/workflows {workflow}` — validate and save it as `library/workflows/<id>.json`, returning it with
+  `created` / `updated` · `POST /api/workflows/delete {id}` → `{deleted}`. See "Workflows".
 - `POST /api/upload?name=foo.mp4` — raw body saved into ./media, returns `{src}`.
   MP4/MOV/M4V uploads are auto-remuxed with `+faststart` (needs ffmpeg on PATH).
   Files copied straight into ./media by external tools skip this — remux big ones

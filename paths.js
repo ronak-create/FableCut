@@ -40,7 +40,7 @@ const FRAMES_DIR = path.join(ANALYSIS_DIR, "frames");
    A regenerable cache too, so also inside analysis/. */
 const PROXIES_DIR = path.join(ANALYSIS_DIR, "proxies");
 const PROJECT_FILE = path.join(DATA_DIR, "project.json");
-const LIBRARY_SUBDIRS = ["sfx", "elements", "svg", "fonts", "presets", "templates"];
+const LIBRARY_SUBDIRS = ["sfx", "elements", "svg", "fonts", "presets", "templates", "workflows"];
 
 /* The asset library ships with the repo but users also drop their own files in
    (library/sfx is gitignored precisely for that). When the data dir is split
@@ -106,8 +106,9 @@ function ensureDirs() {
   seedLibrary();
 }
 
-/* Saved animation presets and templates: one JSON file each in library/presets/
-   and library/templates/ (templates.js validates them). Unreadable files are skipped. */
+/* Saved animation presets, templates and workflows: one JSON file each in library/presets/,
+   library/templates/ and library/workflows/ (templates.js / workflows.js validate them).
+   Unreadable files are skipped. */
 function readSaved(kind) {
   const dir = path.join(LIBRARY_DIR, kind);
   let names = [];
