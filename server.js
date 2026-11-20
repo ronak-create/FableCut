@@ -418,7 +418,7 @@ async function beginDeliveryExport(rate, name, hasAudio, extra) {
   // one render has one frame rate: an output asking for another needs a render of its own
   const off = outs.map((o, i) => [o, i]).filter(([o]) => o.spec.fps != null && Math.abs(o.spec.fps - rate) > 0.01);
   if (off.length) throw new Error(off.map(([o, i]) => `output ${i + 1} asks for ${o.spec.fps} fps but this render is ${rate} fps`).join("; ") + " — render each frame rate separately");
-  const input = outs.some((o) => Delivery.frameInput(o.spec) === "rgba") ? "rgba" : "jpeg";
+  const input = outs.some((o) => Delivery.frameInput(o.spec) === "png") ? "png" : "jpeg";
   // check every output on a 0.1 s synthetic canvas before the browser renders anything
   const dryDir = fs.mkdtempSync(path.join(os.tmpdir(), "fablecut-dry-"));
   try {
@@ -621,17 +621,32 @@ function startAnnexbEncoder(sess) {
   attachProc(sess, spawn("ffmpeg", args, { stdio: ["pipe", "ignore", "pipe"] }));
   return sess.proc;
 }
+/** Stop an export's ffmpeg. An ffmpeg waiting on an input pipe that gets no more
+ *  bytes ignores SIGTERM until some arrive (#165), so close its stdin first:
+ *  that ends the input and it exits by itself. */
+function stopExportProc(proc) {
+  if (!proc) return;
+  try { proc.stdin?.destroy(); } catch {}
+  try { proc.kill(); } catch {}
+}
+/** Remove a path now, and again once `proc` has exited (Windows won't delete a file ffmpeg still holds open). */
+function removeAfter(proc, p, opts) {
+  if (!p) return;
+  const rm = () => { try { fs.rmSync(p, { force: true, ...opts }); } catch {} };
+  rm();
+  if (proc && proc.exitCode == null && proc.signalCode == null && fs.existsSync(p)) proc.once("exit", rm);
+}
 function cleanupExport(id) {
   const s = exportSessions.get(id);
   if (!s) return;
   exportSessions.delete(id);
-  try { s.proc?.kill(); } catch {}
+  stopExportProc(s.proc);
   for (const o of s.outputs || []) {
-    try { o.proc?.kill(); } catch {}
-    if (o.partPath) try { fs.rmSync(o.partPath, { force: true }); } catch {}
+    stopExportProc(o.proc);
+    removeAfter(o.proc, o.partPath);
   }
-  try { fs.rmSync(s.dir, { recursive: true, force: true }); } catch {}
-  if (s.partPath) try { fs.rmSync(s.partPath, { force: true }); } catch {}
+  removeAfter(s.proc || (s.outputs || []).find((o) => o.proc)?.proc, s.dir, { recursive: true });
+  removeAfter(s.proc, s.partPath);
 }
 function sweepIdleExports() {
   const now = Date.now();
