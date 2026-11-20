@@ -174,7 +174,7 @@ test("stale-file cleanup: never the file just written (any case), never a file t
   const left = fs.readdirSync(dir).sort();
   assert.ok(left.includes("swapped.json"), "a file now holding another workflow stays");
   assert.ok(!left.includes("renamed.json"));
-  const podcasts = left.filter((f) => /^podcast.json$/i.test(f));
+  const podcasts = left.filter((f) => /^podcast\.json$/i.test(f));
   assert.equal(podcasts.length, 1, "one podcast file: a distinct PODCAST.JSON is removed, an alias of the new one kept");
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, podcasts[0]), "utf8")).steps, ["new"]);
 });
