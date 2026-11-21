@@ -232,3 +232,16 @@ test("hardSeekVideo: an export's Cancel stops a seek still waiting in a hidden t
     assert.ok(Date.now() - t0 < 1000, "rejected on Cancel, not after the 10 s wait");
   } finally { delete globalThis.document; delete globalThis.exportAbort; }
 });
+
+test("hardSeekVideo: retries keep the export's cancel signal after it is cleared", async () => {
+  const { hardSeekVideo } = loadHard();
+  const el = seekingVideo({ currentTime: 0, presented: 0, frameDur: 0 });   // seeks land, no frame callback
+  const ctl = new AbortController();
+  globalThis.exportAbort = ctl;
+  try {
+    const p = hardSeekVideo(el, 2.0);
+    globalThis.exportAbort = null;   // export cleanup after a sibling seek was cancelled
+    ctl.abort();
+    await assert.rejects(p, /cancelled/);
+  } finally { delete globalThis.exportAbort; }
+});

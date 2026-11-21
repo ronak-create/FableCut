@@ -17212,11 +17212,13 @@ function sameSourceFrame(el, mt, shown) {
 }
 /** A hidden tab renders nothing, so it presents no frames and runs no frame callbacks. */
 function tabHidden() { return typeof document !== "undefined" && document.hidden === true; }
-function hardSeekVideo(el, mt, attempt = 0, shown = el._fcPresentedTime) {
+/** The running export's cancel signal, if any. */
+function exportSignal() { return typeof exportAbort !== "undefined" && exportAbort ? exportAbort.signal : null; }
+function hardSeekVideo(el, mt, attempt = 0, shown = el._fcPresentedTime, signal = exportSignal()) {
   const hasRvfc = typeof el.requestVideoFrameCallback === "function";
   const maxAttempts = 3;
-  // an export's Cancel stops a seek that is still waiting (a hidden tab waits up to 10 s)
-  const signal = typeof exportAbort !== "undefined" && exportAbort ? exportAbort.signal : null;
+  // an export's Cancel stops a seek that is still waiting (a hidden tab waits up to 10 s);
+  // retries keep the signal of the export that started them, even once it is cleared
   if (signal && signal.aborted) return Promise.reject(new Error("cancelled"));
   return new Promise((res, rej) => {
     // a busy frame (grades, masks, blur) can present late: each retry waits longer
@@ -17238,7 +17240,8 @@ function hardSeekVideo(el, mt, attempt = 0, shown = el._fcPresentedTime) {
           // The seek finished on mt and the frame shown just before is within one source frame
           // of it (≥ 20 fps footage): that frame is the right picture.
           if (sameSourceFrame(el, mt, shown)) { notePresented(el, shown); res(); return; }
-          if (attempt + 1 < maxAttempts) { hardSeekVideo(el, mt, attempt + 1, shown).then(res, rej); return; }
+          if (signal && signal.aborted) { rej(new Error("cancelled")); return; }
+          if (attempt + 1 < maxAttempts) { hardSeekVideo(el, mt, attempt + 1, shown, signal).then(res, rej); return; }
           // Last try: the seek finished on mt with the frame's data loaded, so the element holds
           // that frame even though no callback reported it. Better than failing the whole export.
           if (el.readyState >= 2 && !el.seeking && Math.abs(el.currentTime - mt) < 0.002) { notePresented(el, mt); res(); return; }
