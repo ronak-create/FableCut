@@ -192,3 +192,18 @@ test("hardSeekVideo: a seek that never lands still fails", async () => {
   const el = seekingVideo({ currentTime: 0, presented: 0, completes: false });
   await assert.rejects(hardSeekVideo(el, 2.0), /presented frame timeout/);
 });
+
+/* A hidden tab (the user switched away while an agent works) runs no frame
+   callbacks: a finished seek must resolve at once, not wait out every retry. */
+test("hardSeekVideo: in a hidden tab a finished seek resolves without a frame callback", async () => {
+  const { hardSeekVideo } = loadHard();
+  const el = seekingVideo({ currentTime: 0, presented: 0, frameDur: 0 });
+  globalThis.document = { hidden: true };
+  try {
+    const t0 = Date.now();
+    await hardSeekVideo(el, 2.0);
+    assert.ok(Date.now() - t0 < 500, "resolved without the frame-callback retries");
+    assert.equal(el._fcPresentedTime, 2.0);
+    assert.equal(el.rvfcCalls, 0);
+  } finally { delete globalThis.document; }
+});
