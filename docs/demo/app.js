@@ -17215,11 +17215,21 @@ function tabHidden() { return typeof document !== "undefined" && document.hidden
 function hardSeekVideo(el, mt, attempt = 0, shown = el._fcPresentedTime) {
   const hasRvfc = typeof el.requestVideoFrameCallback === "function";
   const maxAttempts = 3;
+  // an export's Cancel stops a seek that is still waiting (a hidden tab waits up to 10 s)
+  const signal = typeof exportAbort !== "undefined" && exportAbort ? exportAbort.signal : null;
+  if (signal && signal.aborted) return Promise.reject(new Error("cancelled"));
   return new Promise((res, rej) => {
     // a busy frame (grades, masks, blur) can present late: each retry waits longer
     const after = () => {
-      // a hidden tab renders nothing, so no frame callback comes: a finished seek is the signal
-      if (tabHidden() && el.readyState >= 2 && !el.seeking) { notePresented(el, el.currentTime); res(); return; }
+      if (signal && signal.aborted) { rej(new Error("cancelled")); return; }
+      // a hidden tab renders nothing, so no frame callback comes: a seek that finished on mt
+      // is the signal. It is no presented frame, so it teaches nothing about frame durations.
+      if (tabHidden() && el.readyState >= 2 && !el.seeking && Math.abs(el.currentTime - mt) < 0.002) {
+        el._fcPresentedTime = el.currentTime;
+        el._fcLastShown = null;
+        res();
+        return;
+      }
       waitForPresentedFrame(el, [80, 250, 600][attempt] || 600)
         .then(res)
         .catch((err) => {
@@ -17250,12 +17260,14 @@ function hardSeekVideo(el, mt, attempt = 0, shown = el._fcPresentedTime) {
     const done = () => {
       clearTimeout(tm);
       el.removeEventListener("seeked", done);
+      if (signal) signal.removeEventListener("abort", done);
       after();
     };
     // Chrome slows a hidden tab's decoding: re-seeking on a short timeout would restart a seek
     // that is still on its way, so wait longer for it there
     const tm = setTimeout(done, tabHidden() ? 10000 : 1500);
     el.addEventListener("seeked", done);
+    if (signal) signal.addEventListener("abort", done);
     try {
       if (!el.paused) el.pause();
       // Same currentTime does not fire seeked — nudge so the decoder must present mt.

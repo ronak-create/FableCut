@@ -207,3 +207,28 @@ test("hardSeekVideo: in a hidden tab a finished seek resolves without a frame ca
     assert.equal(el.rvfcCalls, 0);
   } finally { delete globalThis.document; }
 });
+
+test("hardSeekVideo: a hidden-tab seek teaches nothing about frame durations", async () => {
+  const { hardSeekVideo } = loadHard();
+  const el = seekingVideo({ currentTime: 0, presented: 1.0, frameDur: 1 / 30 });
+  globalThis.document = { hidden: true };
+  try {
+    await hardSeekVideo(el, 1.01);
+    assert.equal(el._fcFrameDur, 1 / 30);
+    assert.equal(el._fcLastShown, null);
+  } finally { delete globalThis.document; }
+});
+
+test("hardSeekVideo: an export's Cancel stops a seek still waiting in a hidden tab", async () => {
+  const { hardSeekVideo } = loadHard();
+  const el = seekingVideo({ currentTime: 0, presented: 0, completes: false });
+  globalThis.document = { hidden: true };
+  globalThis.exportAbort = new AbortController();
+  try {
+    const t0 = Date.now();
+    const p = hardSeekVideo(el, 2.0);
+    setTimeout(() => globalThis.exportAbort.abort(), 20);
+    await assert.rejects(p, /cancelled/);
+    assert.ok(Date.now() - t0 < 1000, "rejected on Cancel, not after the 10 s wait");
+  } finally { delete globalThis.document; delete globalThis.exportAbort; }
+});
