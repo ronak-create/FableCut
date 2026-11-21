@@ -17210,25 +17210,44 @@ function sameSourceFrame(el, mt, shown) {
   return el.readyState >= 2 && !el.seeking && Math.abs(el.currentTime - mt) < 0.002 &&
     mt >= shown - 1e-4 && mt < shown + dur - 1e-4;
 }
-function hardSeekVideo(el, mt, attempt = 0, shown = el._fcPresentedTime) {
+/** A hidden tab renders nothing, so it presents no frames and runs no frame callbacks. */
+function tabHidden() { return typeof document !== "undefined" && document.hidden === true; }
+/** The running export's cancel signal, if any. */
+function exportSignal() { return typeof exportAbort !== "undefined" && exportAbort ? exportAbort.signal : null; }
+function hardSeekVideo(el, mt, attempt = 0, shown = el._fcPresentedTime, signal = exportSignal()) {
   const hasRvfc = typeof el.requestVideoFrameCallback === "function";
   const maxAttempts = 3;
+  // an export's Cancel stops a seek that is still waiting (a hidden tab waits up to 10 s);
+  // retries keep the signal of the export that started them, even once it is cleared
+  if (signal && signal.aborted) return Promise.reject(new Error("cancelled"));
   return new Promise((res, rej) => {
     // a busy frame (grades, masks, blur) can present late: each retry waits longer
-    const after = () => waitForPresentedFrame(el, [80, 250, 600][attempt] || 600)
-      .then(res)
-      .catch((err) => {
-        // Slow motion lands several output frames on one source frame: seeking within the
-        // frame already on screen presents nothing new, so no frame callback ever comes.
-        // The seek finished on mt and the frame shown just before is within one source frame
-        // of it (≥ 20 fps footage): that frame is the right picture.
-        if (sameSourceFrame(el, mt, shown)) { notePresented(el, shown); res(); return; }
-        if (attempt + 1 < maxAttempts) { hardSeekVideo(el, mt, attempt + 1, shown).then(res, rej); return; }
-        // Last try: the seek finished on mt with the frame's data loaded, so the element holds
-        // that frame even though no callback reported it. Better than failing the whole export.
-        if (el.readyState >= 2 && !el.seeking && Math.abs(el.currentTime - mt) < 0.002) { notePresented(el, mt); res(); return; }
-        rej(err);
-      });
+    const after = () => {
+      if (signal && signal.aborted) { rej(new Error("cancelled")); return; }
+      // a hidden tab renders nothing, so no frame callback comes: a seek that finished on mt
+      // is the signal. It is no presented frame, so it teaches nothing about frame durations.
+      if (tabHidden() && el.readyState >= 2 && !el.seeking && Math.abs(el.currentTime - mt) < 0.002) {
+        el._fcPresentedTime = el.currentTime;
+        el._fcLastShown = null;
+        res();
+        return;
+      }
+      waitForPresentedFrame(el, [80, 250, 600][attempt] || 600)
+        .then(res)
+        .catch((err) => {
+          // Slow motion lands several output frames on one source frame: seeking within the
+          // frame already on screen presents nothing new, so no frame callback ever comes.
+          // The seek finished on mt and the frame shown just before is within one source frame
+          // of it (≥ 20 fps footage): that frame is the right picture.
+          if (sameSourceFrame(el, mt, shown)) { notePresented(el, shown); res(); return; }
+          if (signal && signal.aborted) { rej(new Error("cancelled")); return; }
+          if (attempt + 1 < maxAttempts) { hardSeekVideo(el, mt, attempt + 1, shown, signal).then(res, rej); return; }
+          // Last try: the seek finished on mt with the frame's data loaded, so the element holds
+          // that frame even though no callback reported it. Better than failing the whole export.
+          if (el.readyState >= 2 && !el.seeking && Math.abs(el.currentTime - mt) < 0.002) { notePresented(el, mt); res(); return; }
+          rej(err);
+        });
+    };
     if (presentedClose(el, mt, 0.002) && el.readyState >= 2) {
       res();
       return;
@@ -17244,10 +17263,14 @@ function hardSeekVideo(el, mt, attempt = 0, shown = el._fcPresentedTime) {
     const done = () => {
       clearTimeout(tm);
       el.removeEventListener("seeked", done);
+      if (signal) signal.removeEventListener("abort", done);
       after();
     };
-    const tm = setTimeout(done, 1500);
+    // Chrome slows a hidden tab's decoding: re-seeking on a short timeout would restart a seek
+    // that is still on its way, so wait longer for it there
+    const tm = setTimeout(done, tabHidden() ? 10000 : 1500);
     el.addEventListener("seeked", done);
+    if (signal) signal.addEventListener("abort", done);
     try {
       if (!el.paused) el.pause();
       // Same currentTime does not fire seeked — nudge so the decoder must present mt.

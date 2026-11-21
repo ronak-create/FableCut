@@ -192,3 +192,56 @@ test("hardSeekVideo: a seek that never lands still fails", async () => {
   const el = seekingVideo({ currentTime: 0, presented: 0, completes: false });
   await assert.rejects(hardSeekVideo(el, 2.0), /presented frame timeout/);
 });
+
+/* A hidden tab (the user switched away while an agent works) runs no frame
+   callbacks: a finished seek must resolve at once, not wait out every retry. */
+test("hardSeekVideo: in a hidden tab a finished seek resolves without a frame callback", async () => {
+  const { hardSeekVideo } = loadHard();
+  const el = seekingVideo({ currentTime: 0, presented: 0, frameDur: 0 });
+  globalThis.document = { hidden: true };
+  try {
+    const t0 = Date.now();
+    await hardSeekVideo(el, 2.0);
+    assert.ok(Date.now() - t0 < 500, "resolved without the frame-callback retries");
+    assert.equal(el._fcPresentedTime, 2.0);
+    assert.equal(el.rvfcCalls, 0);
+  } finally { delete globalThis.document; }
+});
+
+test("hardSeekVideo: a hidden-tab seek teaches nothing about frame durations", async () => {
+  const { hardSeekVideo } = loadHard();
+  const el = seekingVideo({ currentTime: 0, presented: 1.0, frameDur: 1 / 30 });
+  globalThis.document = { hidden: true };
+  try {
+    await hardSeekVideo(el, 1.01);
+    assert.equal(el._fcFrameDur, 1 / 30);
+    assert.equal(el._fcLastShown, null);
+  } finally { delete globalThis.document; }
+});
+
+test("hardSeekVideo: an export's Cancel stops a seek still waiting in a hidden tab", async () => {
+  const { hardSeekVideo } = loadHard();
+  const el = seekingVideo({ currentTime: 0, presented: 0, completes: false });
+  globalThis.document = { hidden: true };
+  globalThis.exportAbort = new AbortController();
+  try {
+    const t0 = Date.now();
+    const p = hardSeekVideo(el, 2.0);
+    setTimeout(() => globalThis.exportAbort.abort(), 20);
+    await assert.rejects(p, /cancelled/);
+    assert.ok(Date.now() - t0 < 1000, "rejected on Cancel, not after the 10 s wait");
+  } finally { delete globalThis.document; delete globalThis.exportAbort; }
+});
+
+test("hardSeekVideo: retries keep the export's cancel signal after it is cleared", async () => {
+  const { hardSeekVideo } = loadHard();
+  const el = seekingVideo({ currentTime: 0, presented: 0, frameDur: 0 });   // seeks land, no frame callback
+  const ctl = new AbortController();
+  globalThis.exportAbort = ctl;
+  try {
+    const p = hardSeekVideo(el, 2.0);
+    globalThis.exportAbort = null;   // export cleanup after a sibling seek was cancelled
+    ctl.abort();
+    await assert.rejects(p, /cancelled/);
+  } finally { delete globalThis.exportAbort; }
+});

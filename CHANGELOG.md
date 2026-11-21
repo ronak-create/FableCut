@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Frames and exports from a background tab.** When the editor tab was in the
+  background, every seek waited about 3 s for a frame the browser never shows
+  there, and a slow seek could be restarted until it failed, so
+  `fablecut_frame {time}`, scopes and exports from that tab were slow or
+  failed. A finished seek now counts at once in a background tab.
+
 ## [1.20.0] - 2026-11-20
 
 ### Added
