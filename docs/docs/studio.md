@@ -33,6 +33,18 @@ A Studio project is a plain folder with the same layout as a local FableCut data
 
 Clips already in the folder are used where they are, and new files you drop into it show up in the media bin. The same folder opens in the local editor too: `FABLECUT_DATA_DIR=<folder> npx -y fablecut`.
 
+### Map
+
+**Map** in Studio's sidebar shows every project on the Projects page as a tree: folders on your disk, and projects in the browser's own storage (Firefox, Safari, the demo project):
+
+- **Sequences** with their size, clip count and length (the open one is marked), and the compositions each one places.
+- **Compositions**, each with where it is used, including inside other compositions.
+- **Bin**: the bin's folders, nested, with their clips.
+- **Collections** and **Exports** (the files in `exports/`).
+- **Versions**: the saved versions as a line, newest first. Autosaves, versions you named, the copy made before an agent's first edit and restores each have their own color, and a final version has a star.
+
+The Map reads each project's `project.json`, `history/` and `exports/` from its folder, which is the folder on your disk or, for a browser-storage project, its folder in that storage. It writes nothing and sends nothing. To go back to a version, open the project and use **Versions** in the editor. If Chrome has paused access to a folder, the Map shows **Allow to look inside** for it.
+
 ### Connect an agent
 
 The home page shows **Connect your agent** until one connects; it is also under **Agent** in Studio's sidebar and behind the **Agent** button in the editor. Pick your agent and **Copy setup** copies everything it needs, with your connection link in it:
