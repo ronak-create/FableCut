@@ -7,12 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.21.0] - 2026-11-23
+
 ### Added
 - **Music.** The bin's new **Music** tab searches openly licensed music from
   Openverse (Jamendo, ccMixter, Wikimedia Commons and more) by mood, genre or
   instrument, with a length filter and **OK to monetize**; the **SFX** tab now
-  searches sound effects (Freesound) the same way, above your library files. Every result shows its licence and what it allows: free to use,
-  credit the artist, non-commercial, share alike, or no edits. Preview a track,
+  searches sound effects (Freesound) the same way, above your library files.
+  Every result shows its licence and what it allows: free to use, credit the
+  artist, non-commercial, share alike, samples only, or no edits. Preview a track,
   import it, or add it at the playhead. An imported track keeps its licence, its
   **Media info** has **Copy credit**, and the Export dialog lists the edit's
   music credits for the video's description. Agents use the new
@@ -1096,7 +1099,8 @@ the report in [#1](https://github.com/ronak-create/FableCut/issues/1) — thanks
 - Three control surfaces for AI agents: **MCP server**, direct `project.json`
   editing, and a **REST API** with live-reload over server-sent events.
 
-[Unreleased]: https://github.com/ronak-create/FableCut/compare/v1.20.0...HEAD
+[Unreleased]: https://github.com/ronak-create/FableCut/compare/v1.21.0...HEAD
+[1.21.0]: https://github.com/ronak-create/FableCut/compare/v1.20.0...v1.21.0
 [1.20.0]: https://github.com/ronak-create/FableCut/compare/v1.19.0...v1.20.0
 [1.19.0]: https://github.com/ronak-create/FableCut/compare/v1.18.0...v1.19.0
 [1.18.0]: https://github.com/ronak-create/FableCut/compare/v1.17.0...v1.18.0
