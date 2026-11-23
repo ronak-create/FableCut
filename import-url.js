@@ -175,13 +175,20 @@ function requestOnce(u, { signal, timeoutMs }) {
   });
 }
 
-function saveResponse(res, u, destDir, { signal, maxBytes }) {
+function saveResponse(res, u, destDir, { signal, maxBytes, name: wanted }) {
   const mime = (res.headers["content-type"] || "").split(";")[0].trim().toLowerCase();
   if (mime === "text/html" || mime === "application/json") {
     res.resume();
     return Promise.reject(new Error("URL did not return a media file"));
   }
-  const name = filenameFrom(u, res.headers);
+  let name = filenameFrom(u, res.headers);
+  // a caller's name (e.g. "Title - Artist.mp3") keeps the served file's extension when it has a known one
+  if (wanted) {
+    const ext = kindFromName(name) ? path.extname(name) : path.extname(String(wanted));
+    // no dotfile, and the stem is cut (not the extension) so the type is still known
+    const stem = safeName(path.basename(String(wanted), path.extname(String(wanted))).trim().replace(/^\.+/, "")).replace(/^\.+/, "").slice(0, 100);
+    name = (stem || "download") + ext.slice(0, 10);
+  }
   const kind = kindFromName(name);
   // /media/*.svg is served same-origin as image/svg+xml. A remote file with
   // <script> opened as a document would run on the editor origin.
@@ -260,7 +267,7 @@ async function downloadImportUrl(raw, destDir, opts = {}) {
       res.resume();
       throw new Error("download failed: HTTP " + res.statusCode);
     }
-    return saveResponse(res, current, destDir, { signal, maxBytes });
+    return saveResponse(res, current, destDir, { signal, maxBytes, name: opts.name });
   }
   throw new Error("too many redirects");
 }

@@ -54,6 +54,9 @@ Every Claude Code session then has these tools:
   on that canvas whose shots follow the subject. See "Sequences" below.
 - `fablecut_highlights` — the best moments of long footage cut into a short edit, in a new
   sequence. See "Sequences" below.
+- `fablecut_music` — find openly licensed music and sound effects (Openverse), each with
+  its licence, import one into the project, and list the credits the edit needs. See
+  "Music" below.
 - `fablecut_transcribe` — turn speech into words with times (Whisper, in the browser),
   read them on the timeline, find a phrase and cut it out. See "Transcripts and
   text-based editing" below.
@@ -212,11 +215,13 @@ Rules:
 
 ## The asset library (`./library/`) — default media
 
-Reusable assets, visible in the editor's left-panel tabs and never copied:
+Reusable assets, visible in the editor's left-panel tabs and never copied. The
+bin's tabs are **Project**, **Audio** (Music, SFX) and **Graphics** (Elements,
+SVG, Shapes, Templates); a group remembers the tab last open in it.
 
 | Folder      | Editor tab   | Purpose |
 | ----------- | ------------ | ------- |
-| `library/sfx/`      | **Sound FX** | whooshes, impacts, risers, UI clicks |
+| `library/sfx/`      | **SFX** | whooshes, impacts, risers, UI clicks (the tab also searches sound effects online — see "Music") |
 | `library/elements/` | **Elements** | overlay art: alpha PNGs, light leaks, textures, stickers |
 | `library/svg/`      | **SVG**      | animated vector graphics **you author** (convention below) |
 | `library/fonts/`    | font editor  | `.ttf/.otf/.woff/.woff2`, auto-registered, family name = file name; a variable font draws every `weight` |
@@ -694,6 +699,93 @@ edits the key under the playhead. Agents:
   shaping, **duck** for dipping under dialogue, the **track fader** to
   balance whole lanes (dialogue against the music bed), and a **bus** when
   several lanes need the same processing or one fader.
+
+### Music
+
+The bin's **Music** tab and `fablecut_music` find music and sound effects that
+may be used in a video: openly licensed tracks from **Openverse**
+(openverse.org), which indexes Jamendo, Freesound, ccMixter, Wikimedia Commons
+and more. Results show every licence, not only the free ones, and each result
+says what its licence allows. FableCut is made with Openverse but isn't endorsed
+or certified by it. The licence is the artist's, and Openverse doesn't check it,
+so the person publishing the video is the one who must respect it.
+
+| licence | label | may it go in a video? |
+|---|---|---|
+| `cc0` · `pdm` | free to use | yes, any use; no credit needed |
+| `by` | credit | yes, any use; credit the artist |
+| `by-sa` | credit · share alike | yes; credit, and the video is shared under CC BY-SA too |
+| `by-nc` · `by-nc-sa` | credit · non-commercial | not in ads, sponsored or monetized videos; credit (NC-SA: share alike too) |
+| `by-nd` · `by-nc-nd` | no edits | **no**: Creative Commons counts music set to video as a derivative |
+| `sampling+` | credit · non-commercial · samples only | parts may be sampled and transformed, also commercially (not in ads); the whole track as it is can't be set under a video |
+| `nc-sampling+` | credit · non-commercial · samples only | parts may be sampled and transformed, non-commercially only; the whole track as it is can't be set under a video |
+
+Search with words about the music (mood, genre, instrument: "chill lo-fi
+piano"); leave the words out to see the newest tracks. Music comes from the
+`music` category, sound effects from Freesound. Lengths are Openverse's: under
+30 s, 30 s – 2 min, 2 – 10 min, over 10 min. Without an account Openverse
+answers 20 results a page, 240 per search and about 20 searches a minute and 200
+a day per address. The search runs from the editor tab (or the MCP server)
+straight to Openverse, and the file goes through the editor server's URL import
+into `media/`.
+
+**An imported track keeps its licence** on its media entry, so the credits can
+be listed later:
+
+```jsonc
+{ "id": "m_x", "name": "Cinematic — Jahzzar", "kind": "audio", "src": "/media/Cinematic%20-%20Jahzzar.mp3",
+  "license": { "code": "by-sa", "label": "CC BY-SA 3.0", "url": "https://creativecommons.org/licenses/by-sa/3.0/",
+    "title": "Cinematic", "creator": "Jahzzar", "page": "https://www.jamendo.com/track/918921",
+    "source": "jamendo", "openverse": "c14c7353-…", "attribution": "\"Cinematic\" by Jahzzar is licensed under …" } }
+```
+
+The **credits** are every licensed file the edit uses (the open sequence and
+the compositions placed in it; a denoised copy counts as its original), one line each:
+`"Cinematic" by Jahzzar (jamendo) — CC BY-SA 3.0 (https://…) — https://www.jamendo.com/track/918921`,
+with a warning for a licence that limits the video (non-commercial, share
+alike, no derivatives, samples only), and `— changed: noise reduced` when the
+edit plays a denoised copy. They go in the video's description. Replacing a
+file (**Replace file…**, `replaceMedia`) drops the old licence and takes the new
+file's, when another entry imported that file with one; a relink keeps it.
+
+In the editor: the bin's **Music** tab has the search box, a length, **OK to
+monetize** (only licences that allow commercial use and edits), and mood chips
+to start from. The **SFX** tab has the same search for sound effects (with
+chips such as whoosh, impact, riser) above the files in `library/sfx/`. Each result shows its artist,
+length, genres, source, a licence badge (green: free to use, blue: credit,
+amber: non-commercial, red: no edits; hover for what it allows, click for the
+licence) and a link to its page. **▶** previews it, **⬇** imports it into the
+Project bin, **＋** (or a double-click) imports it and adds it at the playhead.
+**More results** loads the next page. A file's **Media info** shows its licence
+and credit with **Copy credit**, and the **Export** dialog lists the edit's
+music credits with **Copy**. Importing needs the editor server (or Studio).
+
+**Agents** use `fablecut_music`:
+
+- `{query, kind?:"music"|"sfx", length?:"shortest"|"short"|"medium"|"long", commercial?, edits?, licenses?:[…], page?}`
+  searches: 20 tracks a page, each `id "title" — artist · m:ss · licence [flags] · genres · source`.
+  `commercial:true` keeps licences that allow commercial use (CC0, public domain, BY,
+  BY-SA, BY-ND), `edits:true` those that let a track go under a video as it is (it
+  leaves out ND and the Sampling licences); pass both when the video will be
+  monetized. With `licenses`, only the ones among them that pass.
+- `{import:"<track id>"}` downloads it into `media/` (named "Title - Artist") and
+  registers it with its `license`; the reply gives the licence, the credit, any
+  limits, and an `addClip` to place it (not for an ND or Sampling track, which
+  can't go under a video as it is). Then `fablecut_beats {clipId}` finds its tempo,
+  `retime` cuts to it, and `fablecut_auto_duck` dips it under speech.
+- `{credits:true}` lists the edit's credits and licence warnings. `fablecut_export`
+  adds them to its reply when the edit uses licensed music, and says so if the
+  timeline's licensed music changed while it exported.
+- Say which licence a track has before the user publishes. Search with `edits:true`
+  for music to put under a video, plus `commercial:true` when they plan to monetize. Import what the user
+  picked, or the best fit when they asked you to choose. The compact view shows
+  an imported file's `licence:"CC BY 3.0"`.
+
+Recipes: **music under a reel** — search the mood with `length:"short"`,
+import one, place it on A1, `fablecut_beats {clipId, retime:{every:2}}`;
+**a whoosh on every cut** — `kind:"sfx", query:"whoosh"`, import a CC0 one,
+place it just before each cut; **music for a sponsored video** —
+`commercial:true, edits:true`, and give the user the credits from the reply.
 
 ### Transcripts and text-based editing
 
@@ -2321,8 +2413,9 @@ obvious cuts were missed, raise it if motion is being misread as cuts.
   MP4/MOV/M4V uploads are auto-remuxed with `+faststart` (needs ffmpeg on PATH).
   Files copied straight into ./media by external tools skip this — remux big ones
   yourself (`ffmpeg -i in.mp4 -c copy -movflags +faststart out.mp4`) or playback stalls.
-- `POST /api/import-url` — body `{url:"https://…"}` downloads the file into
+- `POST /api/import-url` — body `{url:"https://…", name?}` downloads the file into
   `./media/` and returns `{src,name}` (same-origin `/media/…`, like upload).
+  `name` is the file name to save as (its extension follows the download).
   HTTPS only; rejects localhost, private/link-local/CGNAT addresses, and
   redirects to those. Remote SVG is refused (`/media/*.svg` is served
   same-origin as `image/svg+xml` — a scripted SVG opened as a document would

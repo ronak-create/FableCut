@@ -38,7 +38,15 @@ as cuts, raise it.
    a whip transition on the way in.
 5. Pace to taste: shots under ~0.6 s read as beat-flashes. `avgShotLen` tells
    you the reference's overall rhythm.
-6. With the user's own music instead of the reference's, `fablecut_beats
+6. No music of their own? `fablecut_music {query:"<mood>", length:"short", edits:true}`
+   finds openly licensed tracks that may go under a video (`edits:true` leaves out
+   ND and Sampling tracks; add `commercial:true` when the reel will be monetized),
+   and `{import:"<id>"}` brings one in with its credit. Say its licence. Only when
+   the import reply gives a placement (`Place it`), place it: if the reference's
+   extracted music is on A1, `removeClip` it first; then place the new track on A1 at 0.
+   A clip can't run past its track's length: pick one at least as long as the edit
+   (`length` filter), or place it again right after itself to cover the rest.
+   With the user's own music instead of the reference's, `fablecut_beats
    {clipId}` finds its tempo, beat and drop; `snap:true` rolls the cuts onto
    the beat, `retime:{every:2}` re-cuts V1 so each shot lasts 2 beats.
 7. Posting it vertically: `fablecut_reframe {aspect:"9:16"}` makes a copy whose

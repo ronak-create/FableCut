@@ -1200,7 +1200,8 @@ const server = http.createServer(async (req, res) => {
   }
 
   /* API: download an HTTPS URL into ./media (same-origin src after import).
-     Body {url}. Rejects http/file/local/private targets. Does not register
+     Body {url, name?} (name: the file name to save as; its extension follows
+     the download). Rejects http/file/local/private targets. Does not register
      project media — the client / MCP tool does that, matching /api/upload. */
   if (p === "/api/import-url" && req.method === "POST") {
     try {
@@ -1212,6 +1213,7 @@ const server = http.createServer(async (req, res) => {
       res.on("close", () => { if (!res.writableEnded) ac.abort(); });
       const { target, name } = await downloadImportUrl(opts.url, MEDIA_DIR, {
         signal: ac.signal,
+        name: typeof opts.name === "string" && opts.name.trim() ? opts.name : undefined,
         // test/rest-api.test.js: HTTP to 127.0.0.1 only (loopback fixture).
         // Does not disable SSRF for LAN / metadata / other private ranges.
         allowLoopback: process.env.FABLECUT_TEST_IMPORT_ALLOW_PRIVATE === "1",

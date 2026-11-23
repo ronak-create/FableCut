@@ -54,6 +54,11 @@ const PAGES = [
     parts: [["project.json schema", "Audio mix"]],
   },
   {
+    slug: "music", nav: "Music", title: "Music", group: "Picture and sound",
+    lede: "Openly licensed music and sound effects from Openverse, each with its licence spelled out; import a track and FableCut keeps its credit for the video's description.",
+    parts: [["project.json schema", "Music"]],
+  },
+  {
     slug: "transcripts", nav: "Transcripts", title: "Transcripts and text-based editing", group: "Picture and sound",
     lede: "Turn speech into words with times, in the browser, then read, search and cut the edit like text: in the Transcript tab, or from an agent with fablecut_transcribe.",
     parts: [["project.json schema", "Transcripts"]],

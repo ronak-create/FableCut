@@ -93,6 +93,10 @@ about 150 ms. A human and an agent can work the same timeline at once.
   changes, and before an agent edits); compare one with now, restore it (the
   current state is kept as a version first), mark the final cut; backups carry
   every version. Agents use `fablecut_versions`.
+- Music: search openly licensed music and sound effects (Openverse), every
+  result labelled with its licence (free to use, credit, non-commercial, share
+  alike, no edits); an imported track keeps its licence, and the export lists
+  the credits for the video's description. Agents use `fablecut_music`.
 - Workflows: save a routine you want repeated (a podcast clean-up, the weekly
   reel) as steps plus the tool calls that did them; an agent lists them and
   follows one on the next project. Agents use `fablecut_workflows`.

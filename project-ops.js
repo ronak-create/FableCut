@@ -449,12 +449,20 @@
           const kindOf = MediaLib.kindFromName(src);
           if (kindOf && kindOf !== m.kind && !(m.kind === "audio" && kindOf === "video"))   // an audio entry may sit in a video container
             throw new Error(`${name}: ${src} is ${kindOf === "audio" || kindOf === "image" ? "an" : "a"} ${kindOf} file, but ${m.id} is ${m.kind}`);
-          const was = { duration: m.duration };
+          const was = { duration: m.duration }, sameFile = m.src === src;
           m.src = src;
           for (const k of MediaLib.INFO_KEYS) delete m[k];
           if (name === "replaceMedia") {
             m.name = op.name ? String(op.name).trim().slice(0, 200) : MediaLib.srcName(src);
             delete m.duration; delete m.width; delete m.height;
+            // another file: the old track's licence doesn't apply (relinkMedia keeps it); the new
+            // file's does, when another entry imported it with one (fablecut_music). The same file
+            // keeps its licence. A replaced copy is no longer derived from its old original.
+            if (!sameFile) {
+              const same = proj.media.find((x) => x !== m && x.license && x.src === src);
+              if (same) m.license = { ...same.license }; else delete m.license;
+              delete m.derivedFrom; delete m.denoise;
+            }
           } else if (op.name) m.name = String(op.name).trim().slice(0, 200);
           if (info) {
             for (const k of MediaLib.INFO_KEYS) if (info[k] != null) m[k] = info[k];
@@ -1216,6 +1224,7 @@
             (opts.proxy && m.kind === "video" && opts.proxy(m) ? ` proxy:${opts.proxy(m)}p` : "") +
             (m.favorite ? " ★" : "") + (m.tags && m.tags.length ? " " + m.tags.map((t) => "#" + t.replace(/\s+/g, "_")).join(" ") : "") +
             (m.folderId ? ` folder:${m.folderId}` : "") + ` uses:${uses.get(m.id) || 0}` +
+            (m.license && m.license.label ? ` licence:"${m.license.label}"` : "") +
             (m.derivedFrom ? ` (${m.denoise ? "denoised " + m.denoise : "derived"} from ${m.derivedFrom})` : "");
         });
       })(),
