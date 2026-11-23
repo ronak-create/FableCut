@@ -58,12 +58,16 @@
       </div>
       <div class="bin-tabs" id="binTabs">
         <button type="button" data-tab="project" class="on" title="Media used by this project — right-click for New folder">Project</button>
-        <button type="button" data-tab="elements" title="Overlay art from library/elements">Elements</button>
-        <button type="button" data-tab="sfx" title="Sound effects from library/sfx">SFX</button>
-        <button type="button" data-tab="music" title="Find openly licensed music and sound effects (Openverse), each with its licence">Music</button>
-        <button type="button" data-tab="svg" title="Vector animations from library/svg">SVG</button>
-        <button type="button" data-tab="shapes" title="Shape layers and null objects">Shapes</button>
-        <button type="button" data-tab="templates" title="Lower thirds, logo animations and social layouts — with fields you edit in the Inspector">Templates</button>
+        <button type="button" data-group="audio" title="Music and sound effects">Audio</button>
+        <button type="button" data-group="graphics" title="Overlay art, vector animations, shapes and templates">Graphics</button>
+      </div>
+      <div class="bin-subtabs hidden" id="binSubTabs">
+        <button type="button" data-tab="music" data-group="audio" title="Find openly licensed music (Openverse), each track with its licence">Music</button>
+        <button type="button" data-tab="sfx" data-group="audio" title="Sound effects: search online (Freesound, each with its licence) and your library/sfx files">SFX</button>
+        <button type="button" data-tab="elements" data-group="graphics" title="Overlay art from library/elements">Elements</button>
+        <button type="button" data-tab="svg" data-group="graphics" title="Vector animations from library/svg">SVG</button>
+        <button type="button" data-tab="shapes" data-group="graphics" title="Shape layers and null objects">Shapes</button>
+        <button type="button" data-tab="templates" data-group="graphics" title="Lower thirds, logo animations and social layouts — with fields you edit in the Inspector">Templates</button>
       </div>
       <div class="bin-tools" id="binTools">
         <input type="search" id="binSearch" class="bin-search" placeholder="Search name, #tag, codec, 4k…" aria-label="Search the Project bin" spellcheck="false" autocomplete="off">

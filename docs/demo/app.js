@@ -795,7 +795,7 @@ const runtime = {
 const $ = (id) => document.getElementById(id);
 const els = {
   binList: $("binList"), binEmpty: $("binEmpty"), fileInput: $("fileInput"),
-  binTabs: $("binTabs"), libList: $("libList"), toast: $("toast"),
+  binTabs: $("binTabs"), binSubTabs: $("binSubTabs"), libList: $("libList"), toast: $("toast"),
   binTools: $("binTools"), binSearch: $("binSearch"), binFilter: $("binFilter"), binSort: $("binSort"),
   binSortDir: $("binSortDir"), binViewBtn: $("binViewBtn"), btnProxy: $("btnProxy"),
   preview: $("preview"), tcCurrent: $("tcCurrent"), tcTotal: $("tcTotal"),
@@ -3184,6 +3184,8 @@ function toggleSfxPreview(f, btn) {
     return;
   }
   if (cur) { cur.pause(); }
+  musicPreviewStop();
+  els.libList.querySelectorAll(".music-play").forEach((b) => (b.textContent = "▶"));
   els.libList.querySelectorAll(".lib-play").forEach((b) => (b.textContent = "▶"));
   const a = new Audio(f.src);
   a.dataset.src = f.src;
@@ -3197,7 +3199,14 @@ function renderLibrary() {
   if (dir === "project") return;
   const files = runtime.library[dir] || [];
   els.libList.innerHTML = "";
-  if (!files.length) {
+  if (dir === "sfx") {
+    // online sound effects (Openverse) first, then the library's own files
+    appendOnlineSearch("sfx");
+    const head = document.createElement("div");
+    head.className = "music-status lib-head";
+    head.textContent = files.length ? `Your library — library/sfx (${files.length})` : "Your library — drop files into library/sfx/ to keep them here.";
+    els.libList.appendChild(head);
+  } else if (!files.length) {
     els.libList.innerHTML = `<div class="bin-empty">
       <div class="bin-empty-icon">${dir === "sfx" ? "🔊" : dir === "svg" ? "✨" : "🧩"}</div>
       <p>No assets yet.</p>
@@ -3238,11 +3247,25 @@ function renderLibrary() {
     els.libList.appendChild(item);
   }
 }
+/* The bin's tabs: Project, Audio (Music, SFX) and Graphics (Elements, SVG,
+   Shapes, Templates); a group shows its own row of tabs and reopens the one
+   last used in it. */
+const binGroupTab = { audio: "music", graphics: "elements" };
 function setBinTab(tab) {
-  if (tab !== "music") musicPreviewStop();
+  if (tab !== state.binTab) musicPreviewStop();
   state.binTab = tab;
-  for (const b of els.binTabs.querySelectorAll("[data-tab]"))
-    b.classList.toggle("on", b.dataset.tab === tab);
+  const sub = els.binSubTabs && els.binSubTabs.querySelector(`[data-tab="${tab}"]`);
+  const group = sub ? sub.dataset.group : null;
+  if (group) binGroupTab[group] = tab;
+  for (const b of els.binTabs.querySelectorAll("[data-tab], [data-group]"))
+    b.classList.toggle("on", b.dataset.tab ? b.dataset.tab === tab : b.dataset.group === group);
+  if (els.binSubTabs) {
+    els.binSubTabs.classList.toggle("hidden", !group);
+    for (const b of els.binSubTabs.querySelectorAll("[data-tab]")) {
+      b.classList.toggle("hidden", b.dataset.group !== group);
+      b.classList.toggle("on", b.dataset.tab === tab);
+    }
+  }
   const isProj = tab === "project";
   els.binList.classList.toggle("hidden", !isProj);
   els.libList.classList.toggle("hidden", isProj);
@@ -3254,62 +3277,75 @@ function setBinTab(tab) {
 }
 
 /* ═══════════════════════════ MUSIC (Openverse) ═══════════════════════════ */
-/* The bin's Music tab: openly licensed music and sound effects from Openverse
-   (music.js builds the search and reads the licences). The browser asks
-   Openverse directly; importing downloads the file through /api/import-url,
-   and the media entry keeps the track's licence (m.license) for the credits. */
-const music = { query: "", kind: "music", length: "", commercial: false, tracks: [], page: 0, pages: 0, count: 0,
-  busy: false, error: "", seq: 0, preview: null, importing: new Set() };
+/* Online search in two bin tabs: Music (openly licensed music) and SFX (sound
+   effects from Freesound, above the library/sfx files). Both come from
+   Openverse (music.js builds the search and reads the licences). The browser
+   asks Openverse directly; importing downloads the file through
+   /api/import-url, and the media entry keeps the track's licence (m.license)
+   for the credits. */
+const onlineSearch = {
+  music: { query: "", length: "", commercial: false, tracks: [], page: 0, pages: 0, count: 0, busy: false, error: "", seq: 0 },
+  sfx: { query: "", length: "", commercial: false, tracks: [], page: 0, pages: 0, count: 0, busy: false, error: "", seq: 0 },
+};
+const musicImporting = new Set();
+let musicPreview = null;   // {id, audio}
 function musicPreviewStop() {
-  if (music.preview) { music.preview.audio.pause(); music.preview = null; }
+  if (musicPreview) { musicPreview.audio.pause(); musicPreview = null; }
 }
-async function musicSearch(more) {
-  const seq = ++music.seq;
-  const page = more ? music.page + 1 : 1;
-  music.busy = true; music.error = "";
-  if (!more) { music.tracks = []; music.page = 0; musicPreviewStop(); }
-  renderMusicTab();
+/** Redraw whichever tab shows that search (the SFX tab also lists the library). */
+function renderOnlineTab(kind) {
+  if (state.binTab !== kind) return;
+  if (kind === "sfx") renderLibrary(); else renderMusicTab();
+}
+async function musicSearch(kind, more) {
+  const s = onlineSearch[kind];
+  const seq = ++s.seq;
+  const page = more ? s.page + 1 : 1;
+  s.busy = true; s.error = "";
+  if (!more) { s.tracks = []; s.page = 0; musicPreviewStop(); }
+  renderOnlineTab(kind);
   try {
-    const res = await fetch(FableCutMusic.searchUrl({ query: music.query, kind: music.kind, length: music.length, commercial: music.commercial, edits: music.commercial, page }),
+    const res = await fetch(FableCutMusic.searchUrl({ query: s.query, kind, length: s.length, commercial: s.commercial, edits: s.commercial, page }),
       { headers: { Accept: "application/json" } });
     const body = await res.json().catch(() => null);
-    if (seq !== music.seq) return;
+    if (seq !== s.seq) return;
     if (res.status === 429) throw new Error("Openverse's limit for searches is used up for now — try again in a while");
     if (!res.ok) throw new Error("Openverse answered " + res.status + (body && body.detail ? ": " + body.detail : ""));
     const r = FableCutMusic.results(body, page);
-    music.tracks = more ? music.tracks.concat(r.tracks) : r.tracks;
-    music.page = page; music.pages = r.pages; music.count = r.count;
+    s.tracks = more ? s.tracks.concat(r.tracks) : r.tracks;
+    s.page = page; s.pages = r.pages; s.count = r.count;
   } catch (e) {
-    if (seq !== music.seq) return;
-    music.error = e instanceof TypeError ? "Couldn't reach Openverse — are you online?" : e.message;
+    if (seq !== s.seq) return;
+    s.error = e instanceof TypeError ? "Couldn't reach Openverse — are you online?" : e.message;
   }
-  music.busy = false;
-  if (state.binTab === "music") renderMusicTab();
+  s.busy = false;
+  renderOnlineTab(kind);
 }
 function musicTogglePreview(t, btn) {
-  if (music.preview && music.preview.id === t.id) {
+  if (musicPreview && musicPreview.id === t.id) {
     musicPreviewStop(); btn.textContent = "▶"; return;
   }
   musicPreviewStop();
-  els.libList.querySelectorAll(".music-play").forEach((b) => (b.textContent = "▶"));
+  if (runtime.sfxPreview) runtime.sfxPreview.pause();
+  els.libList.querySelectorAll(".music-play, .lib-play").forEach((b) => (b.textContent = "▶"));
   const a = new Audio(t.url);
-  a.onended = () => { if (music.preview && music.preview.audio === a) { music.preview = null; btn.textContent = "▶"; } };
+  a.onended = () => { if (musicPreview && musicPreview.audio === a) { musicPreview = null; btn.textContent = "▶"; } };
   a.play().catch(() => { toast("Couldn't play " + t.title); btn.textContent = "▶"; });
   btn.textContent = "⏸";
-  music.preview = { id: t.id, audio: a };
+  musicPreview = { id: t.id, audio: a };
 }
 /** Download a track into media/ and register it with its licence; place = add at the playhead too. */
-async function musicImport(t, place) {
-  if (!state.connected) { toast("Importing music needs the editor server"); return; }
-  if (music.importing.has(t.id)) return;
+async function musicImport(t, place, kind) {
+  if (!state.connected) { toast("Importing needs the editor server"); return; }
+  if (musicImporting.has(t.id)) return;
   const have = project.media.find((m) => m.license && m.license.openverse === t.id);
   if (have) {
     if (place) addClipFromMedia(have, null, state.time);
     else toast(`“${have.name}” is already in the project`);
     return;
   }
-  music.importing.add(t.id);
-  renderMusicTab();
+  musicImporting.add(t.id);
+  renderOnlineTab(kind);
   const gen = runtime.projectGen;
   try {
     const res = await fetch("/api/import-url", {
@@ -3318,9 +3354,9 @@ async function musicImport(t, place) {
     });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(body.error || "import failed (" + res.status + ")");
-    const kind = libKind(body.name);
-    if (kind !== "audio" && kind !== "video") throw new Error("the track's file isn't audio: " + (body.name || ""));
-    const m = { id: "m_" + uid(), name: `${t.title} — ${t.creator}`, kind, src: body.src, folderId: null,
+    const fileKind = libKind(body.name);
+    if (fileKind !== "audio" && fileKind !== "video") throw new Error("the file isn't audio: " + (body.name || ""));
+    const m = { id: "m_" + uid(), name: `${t.title} — ${t.creator}`, kind: fileKind, src: body.src, folderId: null,
       license: FableCutMusic.mediaLicense(t) };
     try { await loadMediaMetadata(m); ensureWave(m); } catch { /* probeMissingMeta retries */ }
     if (gen !== runtime.projectGen) throw new Error("another project was opened — the file is in media/");
@@ -3329,10 +3365,10 @@ async function musicImport(t, place) {
     if (place) addClipFromMedia(m, null, state.time);
     toast(`Imported “${t.title}” — ${t.license.label}: ${t.flags.join(", ")}`);
   } catch (e) {
-    toast(e && e.message ? e.message : "Couldn't import the track");
+    toast(e && e.message ? e.message : "Couldn't import it");
   } finally {
-    music.importing.delete(t.id);
-    if (state.binTab === "music") renderMusicTab();
+    musicImporting.delete(t.id);
+    renderOnlineTab(kind);
   }
 }
 function copyCredits(lines) {
@@ -3364,44 +3400,43 @@ function syncExportCredits() {
     }
   }
 }
-function renderMusicTab() {
-  if (state.binTab !== "music") return;
-  const list = els.libList;
-  const focused = document.activeElement && document.activeElement.id === "musicQuery";
-  list.innerHTML = "";
+/** The online search (box, filters, chips, results) for one kind, appended to the bin's list. */
+function appendOnlineSearch(kind) {
+  const s = onlineSearch[kind], list = els.libList, sfx = kind === "sfx";
+  const qid = sfx ? "sfxQuery" : "musicQuery";
+  const focused = document.activeElement && document.activeElement.id === qid;
   const form = document.createElement("form");
   form.className = "music-search";
   form.innerHTML = `
-    <input type="search" id="musicQuery" placeholder="Mood, genre, instrument…" aria-label="Search music" spellcheck="false" autocomplete="off">
+    <input type="search" id="${qid}" placeholder="${sfx ? "Search sound effects online — whoosh, impact…" : "Mood, genre, instrument…"}" aria-label="${sfx ? "Search sound effects" : "Search music"}" spellcheck="false" autocomplete="off">
     <div class="music-filters">
-      <select id="musicKind" aria-label="Kind"><option value="music">Music</option><option value="sfx">Sound effects</option></select>
-      <select id="musicLength" aria-label="Length"><option value="">Any length</option>${Object.entries(FableCutMusic.LENGTHS).map(([k, v]) => `<option value="${k}">${escapeHtml(v)}</option>`).join("")}</select>
-      <label class="music-commercial" title="Only licences that allow commercial use (ads, sponsored or monetized videos) and edits"><input type="checkbox" id="musicCommercial"> OK to monetize</label>
+      ${sfx ? "" : `<select data-f="length" aria-label="Length"><option value="">Any length</option>${Object.entries(FableCutMusic.LENGTHS).map(([k, v]) => `<option value="${k}">${escapeHtml(v)}</option>`).join("")}</select>`}
+      <label class="music-commercial" title="Only licences that allow commercial use (ads, sponsored or monetized videos) and edits"><input type="checkbox" data-f="commercial"> OK to monetize</label>
     </div>`;
-  const q = form.querySelector("#musicQuery");
-  q.value = music.query;
-  form.querySelector("#musicKind").value = music.kind;
-  form.querySelector("#musicLength").value = music.length;
-  form.querySelector("#musicCommercial").checked = music.commercial;
-  form.addEventListener("submit", (e) => { e.preventDefault(); music.query = q.value.trim(); musicSearch(false); });
+  const q = form.querySelector("input[type=search]");
+  q.value = s.query;
+  const len = form.querySelector('[data-f="length"]');
+  if (len) len.value = s.length;
+  form.querySelector('[data-f="commercial"]').checked = s.commercial;
+  form.addEventListener("submit", (e) => { e.preventDefault(); s.query = q.value.trim(); musicSearch(kind, false); });
   form.addEventListener("change", (e) => {
-    if (e.target.id === "musicKind") music.kind = e.target.value;
-    else if (e.target.id === "musicLength") music.length = e.target.value;
-    else if (e.target.id === "musicCommercial") music.commercial = e.target.checked;
+    const f = e.target.dataset.f;
+    if (f === "length") s.length = e.target.value;
+    else if (f === "commercial") s.commercial = e.target.checked;
     else return;
-    music.query = q.value.trim();
-    musicSearch(false);
+    s.query = q.value.trim();
+    musicSearch(kind, false);
   });
   list.appendChild(form);
   if (focused) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); }
 
-  if (!music.tracks.length && !music.busy) {
+  if (!s.tracks.length && !s.busy) {
     const moods = document.createElement("div");
     moods.className = "music-moods";
-    for (const w of FableCutMusic.MOODS) {
+    for (const w of sfx ? FableCutMusic.SFX_WORDS : FableCutMusic.MOODS) {
       const b = document.createElement("button");
       b.type = "button"; b.className = "bin-tag chip"; b.textContent = w;
-      b.addEventListener("click", () => { music.query = w; musicSearch(false); });
+      b.addEventListener("click", () => { s.query = w; musicSearch(kind, false); });
       moods.appendChild(b);
     }
     list.appendChild(moods);
@@ -3412,17 +3447,17 @@ function renderMusicTab() {
     p.textContent = text;
     list.appendChild(p);
   };
-  if (music.error) status(music.error, "err");
-  else if (!music.busy && music.page && !music.tracks.length) status("Nothing found — try other words or another length.");
-  else if (music.page) status(`${music.count >= 240 ? "240+" : music.count} result${music.count === 1 ? "" : "s"}${music.query ? ` for “${music.query}”` : " — newest first"}`);
-  else if (!music.busy) status("Search openly licensed music, or pick a mood. Every track shows its licence.");
+  if (s.error) status(s.error, "err");
+  else if (!s.busy && s.page && !s.tracks.length) status("Nothing found — try other words" + (sfx ? "." : " or another length."));
+  else if (s.page) status(`${s.count >= 240 ? "240+" : s.count} result${s.count === 1 ? "" : "s"}${s.query ? ` for “${s.query}”` : " — newest first"}`);
+  else if (!s.busy && !sfx) status("Search openly licensed music, or pick a mood. Every track shows its licence.");
 
-  for (const t of music.tracks) {
+  for (const t of s.tracks) {
     const item = document.createElement("div");
     item.className = "bin-item lib-item music-item";
-    const busy = music.importing.has(t.id);
+    const busy = musicImporting.has(t.id);
     item.innerHTML = `
-      <button type="button" class="btn tiny music-play" title="Preview">${music.preview && music.preview.id === t.id ? "⏸" : "▶"}</button>
+      <button type="button" class="btn tiny music-play" title="Preview">${musicPreview && musicPreview.id === t.id ? "⏸" : "▶"}</button>
       <div class="bin-meta">
         <div class="bin-name"></div>
         <div class="bin-sub"></div>
@@ -3448,27 +3483,34 @@ function renderMusicTab() {
     if (t.page) {
       const a = document.createElement("a");
       a.className = "music-page"; a.href = t.page; a.target = "_blank"; a.rel = "noopener"; a.textContent = "page ↗";
-      a.title = "The track's page at " + (t.source || "its source");
+      a.title = "Its page at " + (t.source || "its source");
       lic.appendChild(a);
     }
     const play = item.querySelector(".music-play");
     play.addEventListener("click", () => musicTogglePreview(t, play));
-    item.querySelector(".music-get").addEventListener("click", () => musicImport(t, false));
-    item.querySelector(".lib-add").addEventListener("click", () => musicImport(t, true));
-    item.addEventListener("dblclick", (e) => { if (!e.target.closest("button, a")) musicImport(t, true); });
+    item.querySelector(".music-get").addEventListener("click", () => musicImport(t, false, kind));
+    item.querySelector(".lib-add").addEventListener("click", () => musicImport(t, true, kind));
+    item.addEventListener("dblclick", (e) => { if (!e.target.closest("button, a")) musicImport(t, true, kind); });
     list.appendChild(item);
   }
-  if (music.busy) status("Searching…");
-  else if (music.page && music.page < music.pages) {
+  if (s.busy) status("Searching…");
+  else if (s.page && s.page < s.pages) {
     const more = document.createElement("button");
     more.type = "button"; more.className = "btn tiny music-more"; more.textContent = "More results";
-    more.addEventListener("click", () => musicSearch(true));
+    more.addEventListener("click", () => musicSearch(kind, true));
     list.appendChild(more);
   }
-  const about = document.createElement("p");
-  about.className = "music-about";
-  about.innerHTML = `Made with <a href="https://openverse.org" target="_blank" rel="noopener">Openverse</a>, not endorsed or certified by it. Licences are the artists' — check one before you publish, and credit where it says so (the Export dialog lists the credits).`;
-  list.appendChild(about);
+  if (s.page || !sfx) {
+    const about = document.createElement("p");
+    about.className = "music-about";
+    about.innerHTML = `Made with <a href="https://openverse.org" target="_blank" rel="noopener">Openverse</a>, not endorsed or certified by it. Licences are the artists' — check one before you publish, and credit where it says so (the Export dialog lists the credits).`;
+    list.appendChild(about);
+  }
+}
+function renderMusicTab() {
+  if (state.binTab !== "music") return;
+  els.libList.innerHTML = "";
+  appendOnlineSearch("music");
 }
 
 /* ═══════════════════════════ PROJECTS (dashboard) ═══════════════════════════ */
@@ -19147,16 +19189,16 @@ function cmdkCollect() {
   };
   // panels and tabs
   // (the Color workspace and the Color side tab share a name: where each lives tells them apart)
-  const panelWhere = { sideTabs: "Side panel", binTabs: "Bin", wsSwitch: "Workspace" };
-  for (const b of document.querySelectorAll("#sideTabs [data-side], #binTabs [data-tab], #wsSwitch [data-ws]")) {
+  const panelWhere = { sideTabs: "Side panel", binTabs: "Bin", binSubTabs: "Bin", wsSwitch: "Workspace" };
+  for (const b of document.querySelectorAll("#sideTabs [data-side], #binTabs [data-tab], #binSubTabs [data-tab], #wsSwitch [data-ws]")) {
     const where = panelWhere[b.parentElement.id] || "", title = (b.title || "").split(/ — |: /)[0] === cmdkName(b) ? "" : b.title;
     add({ key: "Panel|" + b.parentElement.id + "|" + cmdkName(b), label: cmdkName(b), group: "Panel", hint: [where, title].filter(Boolean).join(" · "),
-      keywords: ["tab", "show", "open", where], run: () => { if (b.closest("#binTabs")) cmdkShowBin(); b.click(); } });
+      keywords: ["tab", "show", "open", where], run: () => { if (b.closest("#binTabs, #binSubTabs")) cmdkShowBin(); b.click(); } });
   }
   // toolbar actions: every named button outside dialogs, menus and the Inspector (and the timeline's edit tools)
   const actions = [];
   for (const b of document.querySelectorAll("button[id], button[data-edit-tool]")) {
-    if (b.closest(".overlay, .ctx-menu, .style-menu, #inspector, #sideTabs, #binTabs, #wsSwitch") || b.id === "btnSearch") continue;
+    if (b.closest(".overlay, .ctx-menu, .style-menu, #inspector, #sideTabs, #binTabs, #binSubTabs, #wsSwitch") || b.id === "btnSearch") continue;
     if (!cmdkShown(b)) continue;
     actions.push(b);
   }
@@ -19400,6 +19442,10 @@ $("trackSizeGroup").addEventListener("click", (e) => {
   if (b) setTrackSize(b.dataset.trackSize);
 });
 els.binTabs.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-tab], [data-group]");
+  if (b) setBinTab(b.dataset.tab || binGroupTab[b.dataset.group]);
+});
+els.binSubTabs?.addEventListener("click", (e) => {
   const b = e.target.closest("[data-tab]");
   if (b) setBinTab(b.dataset.tab);
 });

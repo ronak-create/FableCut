@@ -32,6 +32,8 @@
   const KINDS = { music: { category: "music" }, sfx: { source: "freesound" } };
   const MOODS = ["upbeat", "chill", "cinematic", "epic", "lo-fi", "acoustic", "electronic",
     "happy", "sad", "ambient", "piano", "corporate", "hip hop", "rock"];
+  const SFX_WORDS = ["whoosh", "impact", "riser", "swoosh", "pop", "click", "ding", "glitch",
+    "boom", "camera shutter", "typing", "applause", "footsteps", "crowd"];
 
   /* What each licence lets a video editor do. edits: may it be cut, looped and
      put under picture? Creative Commons counts music synced to moving images as
@@ -124,9 +126,10 @@
       tracks: (json.results || []).filter((r) => r && r.url).map(track) };
   }
 
-  /** 125.4 → "2:05". */
+  /** 125.4 → "2:05"; under 10 s with a tenth (a 0.4 s swipe reads "0.4 s", not "0:00"). */
   function fmtLen(sec) {
-    const s = Math.round(+sec || 0);
+    if (+sec < 10) return (Math.round((+sec || 0) * 10) / 10) + " s";
+    const s = Math.round(+sec);
     return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
   }
 
@@ -190,6 +193,6 @@
 
   const ABOUT = "Music from Openverse (openverse.org) — made with Openverse, not endorsed or certified by it. Each track's licence is the artist's: check it before you publish.";
 
-  return { API, PAGE_SIZE, MAX_PAGE, LENGTHS, KINDS, MOODS, LICENSES, ABOUT,
+  return { API, PAGE_SIZE, MAX_PAGE, LENGTHS, KINDS, MOODS, SFX_WORDS, LICENSES, ABOUT,
     licence, flags, searchUrl, trackUrl, track, results, fmtLen, fileName, mediaLicense, cleanLicense, creditLine, credits };
 });

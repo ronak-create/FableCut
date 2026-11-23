@@ -66,6 +66,7 @@ test("results become plain tracks", () => {
   assert.equal(M.fileName(t), "Night Day - Jahzzar.mp3", "mp32 is an mp3");
   assert.equal(M.fileName({ ...t, filetype: "oga" }), "Night Day - Jahzzar.ogg");
   assert.equal(M.fmtLen(59.7), "1:00");
+  assert.equal(M.fmtLen(0.43), "0.4 s");
   const r = M.results({ result_count: 999, page_count: 50, results: [result(), result({ url: "" })] }, 2);
   assert.equal(r.tracks.length, 1, "a result without a file is dropped");
   assert.equal(r.pages, 12);
@@ -135,7 +136,7 @@ test("fablecut_music searches, imports a track with its licence, and lists the c
 
   const found = await text({ query: "calm night", commercial: true });
   assert.match(found, /^1 result\(s\), page 1\/1 for "calm night"/);
-  assert.match(found, /1\. c14c7353-1688-4204-9af0-64c0a5e8ccc3 "Night & Day" — Jahzzar · 0:01 · CC BY-SA 3\.0 \[credit, share alike\] · ambient · jamendo/);
+  assert.match(found, /1\. c14c7353-1688-4204-9af0-64c0a5e8ccc3 "Night & Day" — Jahzzar · 1 s · CC BY-SA 3\.0 \[credit, share alike\] · ambient · jamendo/);
   assert.match(found, /made with Openverse, not endorsed/);
   assert.match(ov.seen[0], /q=calm\+night&category=music&license_type=commercial/);
   assert.match(await text({ page: 0 }), /ERROR .*page is 1–12/);

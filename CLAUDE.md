@@ -215,11 +215,13 @@ Rules:
 
 ## The asset library (`./library/`) — default media
 
-Reusable assets, visible in the editor's left-panel tabs and never copied:
+Reusable assets, visible in the editor's left-panel tabs and never copied. The
+bin's tabs are **Project**, **Audio** (Music, SFX) and **Graphics** (Elements,
+SVG, Shapes, Templates); a group remembers the tab last open in it.
 
 | Folder      | Editor tab   | Purpose |
 | ----------- | ------------ | ------- |
-| `library/sfx/`      | **Sound FX** | whooshes, impacts, risers, UI clicks |
+| `library/sfx/`      | **SFX** | whooshes, impacts, risers, UI clicks (the tab also searches sound effects online — see "Music") |
 | `library/elements/` | **Elements** | overlay art: alpha PNGs, light leaks, textures, stickers |
 | `library/svg/`      | **SVG**      | animated vector graphics **you author** (convention below) |
 | `library/fonts/`    | font editor  | `.ttf/.otf/.woff/.woff2`, auto-registered, family name = file name; a variable font draws every `weight` |
@@ -742,9 +744,10 @@ and other sequences; a denoised copy counts as its original), one line each:
 with a warning for a licence that limits the video (non-commercial, share
 alike, no derivatives). They go in the video's description.
 
-In the editor: the bin's **Music** tab has the search box, **Music / Sound
-effects**, a length, **OK to monetize** (only licences that allow commercial
-use and edits), and mood chips to start from. Each result shows its artist,
+In the editor: the bin's **Music** tab has the search box, a length, **OK to
+monetize** (only licences that allow commercial use and edits), and mood chips
+to start from. The **SFX** tab has the same search for sound effects (with
+chips such as whoosh, impact, riser) above the files in `library/sfx/`. Each result shows its artist,
 length, genres, source, a licence badge (green: free to use, blue: credit,
 amber: non-commercial, red: no edits; hover for what it allows, click for the
 licence) and a link to its page. **▶** previews it, **⬇** imports it into the

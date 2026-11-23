@@ -486,6 +486,26 @@ body.track-size-s .clip.selected {
   border-bottom-color: var(--accent);
 }
 
+/* the open group's own tabs (Audio: Music, SFX · Graphics: Elements…Templates) */
+.bin-subtabs {
+  display: flex;
+  gap: 4px;
+  padding: 6px 8px 0;
+}
+.bin-subtabs.hidden, .bin-subtabs button.hidden { display: none; }
+.bin-subtabs button {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--dim);
+  font: 600 11px/1.2 "Segoe UI", sans-serif;
+  padding: 4px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.bin-subtabs button:hover { color: var(--text); }
+.bin-subtabs button.on { color: #cfc8ff; background: #7b6cff22; border-color: #7b6cff55; }
+
 .bin-list {
   flex: 1;
   overflow-y: auto;
@@ -4850,6 +4870,7 @@ input[type=number]:hover::-webkit-inner-spin-button { opacity: .8; }
 .music-more { align-self: center; margin: 4px 0; }
 .music-about { font-size: 10px; line-height: 1.45; color: var(--dim); margin: 8px 2px 2px; }
 .music-about a { color: inherit; }
+.music-status.lib-head { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
 .bin-info .bin-copy-credit { margin: 6px 0 2px; }
 .export-credits { margin: 0 0 12px; padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-sub); font-size: 12px; line-height: 1.4; }
 .export-credits-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 4px; }
