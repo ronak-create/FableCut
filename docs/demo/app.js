@@ -9055,7 +9055,7 @@ async function denoiseClips(clips, level) {
     for (const id of bases) {
       const base = getMedia(id);
       // the licence of the file being cleaned, read now: the entry may point at another file by the time it's done
-      const lic = base.license ? { ...base.license } : null;
+      const lic = base && base.license ? { ...base.license } : null;   // base: gone if removed meanwhile (caught below)
       try {
         const r = await fetch("/api/denoise", { method: "POST", body: JSON.stringify({ src: base.src, amount: level }) })
           .then(async (x) => { const j = await x.json(); if (!x.ok) throw new Error(j.error || x.status); return j; });
@@ -9066,7 +9066,7 @@ async function denoiseClips(clips, level) {
           if (lic) m.license = lic;   // the credit stays with the sound
           if (r.channels) m.channels = r.channels;
           project.media.push(m);
-        }
+        } else if (lic && !m.license) m.license = lic;   // a copy made before the file had a licence
         swap.set(id, m.id);
       } catch (err) {
         toast(`Noise reduction failed: ${err.message || err}`);

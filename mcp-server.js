@@ -1244,7 +1244,7 @@ async function denoiseTool(args) {
         derivedFrom: base.id, denoise: amount };
       if (base.license) m.license = { ...base.license };   // the credit stays with the sound
       proj.media.push(m);
-    }
+    } else if (base.license && !m.license) m.license = { ...base.license };   // a copy made before the file had a licence
     swap.set(id, m.id);
     report.push(`${id} → ${m.id} "${r.name}"${r.cached ? " (already rendered)" : ""}`);
   }
