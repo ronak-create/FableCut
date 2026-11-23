@@ -1482,6 +1482,8 @@ function syncExportFrameSel() {
   els.exportFrameSel.innerHTML = html;
 }
 function applyProject(data, opts = {}) {
+  // the Export dialog's music credits follow the timeline while it is open
+  queueMicrotask(() => { if (!$("exportSetup")?.classList.contains("hidden")) syncExportCredits(); });
   if (state.compCtx && !opts.ctx && SeqLib.activeId(data) !== SeqLib.activeId(state.compCtx.root)) {
     // another sequence was opened (an agent, another tab): the comp was opened from the old one
     state.compCtx = null;
@@ -2767,9 +2769,13 @@ async function setMediaSource(m, src, mode, name) {
     m.name = name || MediaLib.srcName(src);
     delete m.duration; delete m.width; delete m.height;
     // another file: the old track's licence doesn't apply (a relink keeps it); the new file's
-    // does, when another entry imported it with one (Music / SFX tab)
-    const same = project.media.find((x) => x !== m && x.license && x.src === src);
-    if (same) m.license = { ...same.license }; else delete m.license;
+    // does, when another entry imported it with one (Music / SFX tab). The same file keeps its
+    // licence. A replaced copy is no longer derived from its old original.
+    if (src !== oldSrc) {
+      const same = project.media.find((x) => x !== m && x.license && x.src === src);
+      if (same) m.license = { ...same.license }; else delete m.license;
+      delete m.derivedFrom; delete m.denoise;
+    }
   }
   mediaOffline.delete(m.id);
   reloadMediaSource(m, oldSrc);
@@ -3357,7 +3363,9 @@ function placeImported(m, at) {
   if (!(m.duration > 0 && isFinite(m.duration))) return "its length couldn't be read, so it's in the Project bin but not on the timeline";
   if ((project.sequence || null) !== at.seq || compCtxId() !== at.comp) return "another timeline is open now, so it's in the Project bin but not placed";
   if (exportBusy()) return "an export is running, so it's in the Project bin but not placed";
-  if (!addClipFromMedia(m, null, at.t)) return "it's in the Project bin, but the audio track is locked, so it wasn't placed";
+  const lane = TRACKS.find((t) => t.kind === "audio");   // the top audio track there is (A1 may have been removed)
+  if (!lane) return "there's no audio track, so it's in the Project bin but not placed";
+  if (!addClipFromMedia(m, lane.id, at.t)) return "it's in the Project bin, but " + lane.id + " is locked, so it wasn't placed";
   return "";
 }
 async function musicImport(t, place, kind) {

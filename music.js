@@ -195,11 +195,17 @@
    *  A linked group counts once. → Map(media id → placements) for `credits`. */
   function editUsage(doc) {
     const n = new Map(), comps = new Map(((doc && doc.comps) || []).map((c) => [c.id, c]));
-    const scan = (clips, depth, inComps) => {
+    // lo / hi: the stretch of these clips' timeline that is shown (a comp instance shows its comp
+    // from `in` for `duration`, as the renderer flattens it); clips outside it aren't in the edit
+    const scan = (clips, depth, inComps, lo, hi) => {
       const seen = new Set();
       for (const c of clips || []) {
-        if (c.kind === "comp" && comps.has(c.compId) && depth < 8 && !inComps.has(c.compId))
-          scan(comps.get(c.compId).clips, depth + 1, new Set([...inComps, c.compId]));
+        const start = +c.start || 0, end = start + (+c.duration || 0);
+        if (end <= lo || start >= hi) continue;
+        if (c.kind === "comp" && comps.has(c.compId) && depth < 8 && !inComps.has(c.compId)) {
+          const off = (+c.in || 0) - start;   // parent time → comp time
+          scan(comps.get(c.compId).clips, depth + 1, new Set([...inComps, c.compId]), Math.max(lo, start) + off, Math.min(hi, end) + off);
+        }
         if (!c.mediaId) continue;
         const key = (c.linkGroup ? "g:" + c.linkGroup : "c:" + c.id) + "|" + c.mediaId;
         if (seen.has(key)) continue;
@@ -207,7 +213,7 @@
         n.set(c.mediaId, (n.get(c.mediaId) || 0) + 1);
       }
     };
-    scan(doc && doc.clips, 0, new Set());
+    scan(doc && doc.clips, 0, new Set(), -Infinity, Infinity);
     return n;
   }
 

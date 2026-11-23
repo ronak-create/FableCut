@@ -134,6 +134,13 @@ test("a media entry keeps its licence, and the edit lists its credits", () => {
     sequence: "main", sequences: [{ id: "main", name: "Main" }, { id: "s2", name: "Other", clips: [{ id: "oc", mediaId: "m_o", kind: "audio", track: "A1", start: 0, in: 0, duration: 2 }] }],
   });
   assert.deepEqual([...M.editUsage(scoped)], [["m_s", 1]]);
+  // an instance showing seconds 0–2 of a comp doesn't credit audio the comp has at 8–10
+  const windowed = JSON.parse(JSON.stringify(scoped));
+  windowed.comps[0].duration = 10;
+  windowed.comps[0].clips.push({ id: "late", mediaId: "m_u", kind: "audio", track: "A2", start: 8, in: 0, duration: 2 });
+  assert.deepEqual([...M.editUsage(windowed)], [["m_s", 1]]);
+  windowed.clips[0].in = 7;   // now it shows 7–9: the late clip is in, the first (0–2) is not
+  assert.deepEqual([...M.editUsage(windowed)], [["m_u", 1]]);
   assert.deepEqual(M.credits(scoped, M.editUsage(scoped)).map((c) => c.mediaId), ["m_s"]);
 });
 
@@ -209,6 +216,8 @@ test("fablecut_music searches, imports a track with its licence, and lists the c
   const ndEntry = readProject(dir).media.find((x) => x.license && x.license.title === "Golden Peaks");
   await mcp.callTool("fablecut_patch_project", { ops: [{ op: "replaceMedia", id: m.id, src: ndEntry.src }] });
   assert.equal(readProject(dir).media.find((x) => x.id === m.id).license.title, "Golden Peaks", "the replacement's own licence comes along");
+  await mcp.callTool("fablecut_patch_project", { ops: [{ op: "replaceMedia", id: ndEntry.id, src: ndEntry.src }] });
+  assert.equal(readProject(dir).media.find((x) => x.id === ndEntry.id).license.title, "Golden Peaks", "the same file keeps its licence");
 });
 
 test("a requested file name keeps its extension and never makes a dotfile", async (t) => {

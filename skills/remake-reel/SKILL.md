@@ -42,8 +42,8 @@ as cuts, raise it.
    finds openly licensed tracks that may go under a video (`edits:true` leaves out
    ND and Sampling tracks; add `commercial:true` when the reel will be monetized),
    and `{import:"<id>"}` brings one in with its credit. Say its licence. Only when
-   the import reply gives a placement (`Place it`), replace the reference's music:
-   `removeClip` the extracted track on A1, then place the new one there at 0.
+   the import reply gives a placement (`Place it`), place it: if the reference's
+   extracted music is on A1, `removeClip` it first; then place the new track on A1 at 0.
    With the user's own music instead of the reference's, `fablecut_beats
    {clipId}` finds its tempo, beat and drop; `snap:true` rolls the cuts onto
    the beat, `retime:{every:2}` re-cuts V1 so each shot lasts 2 beats.
