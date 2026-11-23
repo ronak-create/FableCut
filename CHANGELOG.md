@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Music.** The bin's new **Music** tab searches openly licensed music and
+  sound effects from Openverse (Jamendo, Freesound, ccMixter, Wikimedia Commons
+  and more), by mood, genre or instrument, with a length filter and **OK to
+  monetize**. Every result shows its licence and what it allows: free to use,
+  credit the artist, non-commercial, share alike, or no edits. Preview a track,
+  import it, or add it at the playhead. An imported track keeps its licence, its
+  **Media info** has **Copy credit**, and the Export dialog lists the edit's
+  music credits for the video's description. Agents use the new
+  `fablecut_music` tool to search, import a track and list the credits, and
+  `fablecut_export` adds the credits to its reply.
+
 ### Fixed
 - **Frames and exports from a background tab.** When the editor tab was in the
   background, every seek waited about 3 s for a frame the browser never shows

@@ -39,6 +39,8 @@ const CompLib = require("./comp");
 const SeqLib = require("./sequences");
 const Templates = require("./templates");
 const Workflows = require("./workflows");
+const Music = require("./music");
+const MediaLib = require("./media-lib");
 const Delivery = require("./delivery");
 const { probeFile, infoForEntry } = require("./media-probe");
 const { findProxies } = require("./proxy");
@@ -468,6 +470,24 @@ const TOOLS = [
             steps: { type: "array", items: { anyOf: [{ type: "string" }, { type: "object" }] } },
           },
         },
+      },
+    },
+  },
+  {
+    name: "fablecut_music",
+    description: "Find music (or sound effects) the user may use, and import a track: openly licensed audio from Openverse (Jamendo, Freesound, ccMixter, Wikimedia Commons…). Every result carries its licence and what it allows: free to use (CC0, public domain), credit the artist (BY), non-commercial only (NC), share alike (SA), or no edits (ND — music set to video counts as an edit, so it can't go into one). Search: {query:'upbeat acoustic', kind?:'music'|'sfx', length?:'shortest'|'short'|'medium'|'long' (under 30 s · 30 s–2 min · 2–10 min · over 10 min), commercial?:true (only licences that allow commercial use), edits?:true, licenses?:['by','cc0',…], page?} → 20 tracks a page (id, title, artist, length, licence). Import: {import:'<track id>'} downloads it into media/ and registers it with its licence (m.license); place it with addClip on an audio track, then fablecut_beats {clipId} finds its tempo. Credits: {credits:true} → the credit lines the edit's licensed music needs (for the video's description) and any licence warnings. Tell the user which licence a track has before they publish; when they plan to monetize, search with commercial:true. Search when the user asks for music or a song; import the one they pick (or the best fit, when they asked you to choose). Anonymous Openverse use allows about 20 searches a minute and 200 a day.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "search: words about the music — mood, genre, instrument (e.g. 'chill lo-fi piano'); leave out for the newest tracks" },
+        kind: { type: "string", enum: ["music", "sfx"], description: "search: music (default) or sound effects" },
+        length: { type: "string", enum: ["shortest", "short", "medium", "long"], description: "search: under 30 s · 30 s–2 min · 2–10 min · over 10 min" },
+        commercial: { type: "boolean", description: "search: only licences that allow commercial use" },
+        edits: { type: "boolean", description: "search: only licences that allow edits (leaves out ND)" },
+        licenses: { type: "array", items: { type: "string", enum: ["cc0", "pdm", "by", "by-sa", "by-nc", "by-nc-sa", "by-nd", "by-nc-nd", "sampling+", "nc-sampling+"] }, description: "search: only these licences" },
+        page: { type: "integer", description: "search: page 1–12 of the results" },
+        import: { type: "string", description: "a track id from a search: download it into media/ and register it" },
+        credits: { type: "boolean", description: "the credit lines for the licensed music the edit uses" },
       },
     },
   },
@@ -1298,6 +1318,80 @@ async function projectsTool(args) {
   if (out.from) return `Opened ${describeProject(out.project)}\nThe editor switched to it (${out.from} was saved first). Read it with fablecut_get_project {compact:true} before editing.`;
   return describeProject(out.project);
 }
+/** Register a file already in media/ as project media (probed) → the entry. extra: more keys (license). */
+async function registerFile(target, kind, extra = {}) {
+  const entry = {
+    id: "m_" + uid(),
+    name: extra.name || path.basename(target),
+    kind,
+    src: "/media/" + encodeURIComponent(path.basename(target)),
+    duration: kind === "image" || kind === "svg" ? undefined : ffprobeDuration(target),
+  };
+  Object.assign(entry, infoForEntry(await probeFile(target), entry));
+  if (extra.license) entry.license = extra.license;
+  const proj = readProject();
+  // import only appends a media entry (never touches clips), so it merges
+  // into the live document; keep lastReadRevision in step only if it
+  // already was — otherwise a later set_project must still re-read
+  const wasCurrent = lastReadRevision === (proj.revision || 0);
+  proj.media.push(entry);
+  proj.revision = (proj.revision || 0) + 1;
+  writeProject(proj);
+  if (wasCurrent) lastReadRevision = proj.revision;
+  return entry;
+}
+
+/* fablecut_music: Openverse search (music.js builds the URLs and reads the licences). */
+async function openverse(url) {
+  // tests only: a local stand-in for the Openverse API (its files are then on 127.0.0.1 too)
+  if (process.env.FABLECUT_TEST_OPENVERSE) url = url.replace(Music.API, process.env.FABLECUT_TEST_OPENVERSE);
+  let r;
+  try {
+    r = await fetch(url, { headers: { Accept: "application/json", "User-Agent": "FableCut (+https://fablecut.space)" }, signal: AbortSignal.timeout(20_000) });
+  } catch (e) {
+    throw new Error("couldn't reach Openverse (" + (e && e.name === "TimeoutError" ? "no answer in 20 s" : e.message) + ")");
+  }
+  if (r.status === 429) throw new Error("Openverse's limit for anonymous searches is used up for now (about 20 a minute, 200 a day) — try again later");
+  if (r.status === 404) throw new Error("Openverse has no such track");
+  const body = await r.json().catch(() => null);
+  if (!r.ok) throw new Error("Openverse answered " + r.status + (body && body.detail ? ": " + body.detail : ""));
+  return body;
+}
+const fmtLen = (s) => s == null ? "?:??" : Music.fmtLen(s);
+function creditsText(proj) {
+  const list = Music.credits(proj, MediaLib.usageCounts(proj));
+  if (!list.length) return "";
+  return [`CREDITS — licensed music in this edit (put these in the video's description):`,
+    ...list.map((c) => `  ${c.needsCredit ? c.line : c.line + " (no credit required)"}`),
+    ...list.flatMap((c) => c.warnings.map((w) => `  ⚠ ${w}`))].join("\n");
+}
+async function musicTool(args) {
+  if (args.credits) {
+    const text = creditsText(readProject());
+    return text || "The edit uses no music imported with its licence (fablecut_music import) — no credits to list.";
+  }
+  if (args.import) {
+    const t = Music.track(await openverse(Music.trackUrl(args.import)));
+    if (!t.url) throw new Error("Openverse lists no file for this track");
+    const got = await downloadImportUrl(t.url, MEDIA_DIR, { name: Music.fileName(t), allowLoopback: !!process.env.FABLECUT_TEST_OPENVERSE });
+    const kind = kindFromName(got.name);
+    if (kind !== "audio" && kind !== "video") throw new Error("the track's file isn't audio: " + got.name);
+    const entry = await registerFile(got.target, kind, { name: `${t.title} — ${t.creator}`, license: Music.mediaLicense(t) });
+    return [`Imported "${t.title}" by ${t.creator} → ${entry.id} (${fmtLen(entry.duration)}, ${entry.src})`,
+      `Licence: ${t.license.label} — ${t.license.note}.`,
+      t.license.credit ? `Credit: ${Music.creditLine(entry.license)}` : "",
+      `Place it: {op:"addClip", clip:{mediaId:"${entry.id}", kind:"audio", track:"A1", start:0, in:0, duration:<≤ ${entry.duration || "its length"}>}} — then fablecut_beats {clipId} for its tempo.`,
+    ].filter(Boolean).join("\n");
+  }
+  if (args.page != null && !(Number.isInteger(args.page) && args.page >= 1 && args.page <= Music.MAX_PAGE)) throw new Error(`page is 1–${Music.MAX_PAGE}`);
+  const res = Music.results(await openverse(Music.searchUrl(args)), args.page || 1);
+  if (!res.tracks.length) return `No ${args.kind === "sfx" ? "sound effects" : "music"} found${args.query ? ` for "${args.query}"` : ""} — try other words, or drop a filter.`;
+  return [`${res.count >= 240 ? "240+" : res.count} result(s), page ${res.page}/${res.pages || 1}${args.query ? ` for "${args.query}"` : " (newest)"}. {import:"<id>"} downloads one.`,
+    ...res.tracks.map((t, i) => `${i + 1}. ${t.id} "${t.title}" — ${t.creator} · ${fmtLen(t.duration)} · ${t.license.label} [${t.flags.join(", ")}]` +
+      (t.genres.length ? ` · ${t.genres.join("/")}` : "") + (t.source ? ` · ${t.source}` : "")),
+    Music.ABOUT].join("\n");
+}
+
 /* fablecut_workflows: saved recipes in library/workflows/, read and written here directly
    (like saved presets), so it works without the editor server. */
 function savedWorkflows() {
@@ -1490,7 +1584,9 @@ async function exportTool(args) {
     if (r.status !== 200) throw new Error(r.body?.error || "lost track of the export job");
     job = r.body;
   }
-  return startNote + describeExportJob(job);
+  // licensed music the edit uses: the credits belong in the video's description
+  const credits = job.status === "done" ? creditsText(readProject()) : "";
+  return startNote + describeExportJob(job) + (credits ? "\n" + credits : "");
 }
 
 /* ── Frames (fablecut_frame) ──
@@ -1718,6 +1814,8 @@ async function callTool(name, args, attempt = 0) {
       return versionsTool(args);
     case "fablecut_workflows":
       return workflowsTool(args);
+    case "fablecut_music":
+      return musicTool(args);
     case "fablecut_status": {
       const up = await ensureUIServer();
       const proj = readProject();
@@ -2056,23 +2154,7 @@ async function callTool(name, args, attempt = 0) {
         fs.copyFileSync(src, target);
       }
       if (!kind) throw new Error("Unsupported media type");
-      const entry = {
-        id: "m_" + uid(),
-        name: path.basename(target),
-        kind,
-        src: "/media/" + encodeURIComponent(path.basename(target)),
-        duration: kind === "image" || kind === "svg" ? undefined : ffprobeDuration(target),
-      };
-      Object.assign(entry, infoForEntry(await probeFile(target), entry));
-      const proj = readProject();
-      // import only appends a media entry (never touches clips), so it merges
-      // into the live document; keep lastReadRevision in step only if it
-      // already was — otherwise a later set_project must still re-read
-      const wasCurrent = lastReadRevision === (proj.revision || 0);
-      proj.media.push(entry);
-      proj.revision = (proj.revision || 0) + 1;
-      writeProject(proj);
-      if (wasCurrent) lastReadRevision = proj.revision;
+      const entry = await registerFile(target, kind);
       return `Imported → ${JSON.stringify(entry)}\n` +
         (entry.duration == null && kind !== "image"
           ? "Note: duration unknown (no ffprobe). The browser UI will probe and fill it in; re-read the project before trimming this media."

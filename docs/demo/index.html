@@ -60,6 +60,7 @@
         <button type="button" data-tab="project" class="on" title="Media used by this project — right-click for New folder">Project</button>
         <button type="button" data-tab="elements" title="Overlay art from library/elements">Elements</button>
         <button type="button" data-tab="sfx" title="Sound effects from library/sfx">SFX</button>
+        <button type="button" data-tab="music" title="Find openly licensed music and sound effects (Openverse), each with its licence">Music</button>
         <button type="button" data-tab="svg" title="Vector animations from library/svg">SVG</button>
         <button type="button" data-tab="shapes" title="Shape layers and null objects">Shapes</button>
         <button type="button" data-tab="templates" title="Lower thirds, logo animations and social layouts — with fields you edit in the Inspector">Templates</button>
@@ -449,6 +450,7 @@
     </div>
     <div class="export-track-warn hidden" id="dlvWarn" role="status"></div>
     <div class="export-track-warn hidden" id="exportTrackWarn" role="status"></div>
+    <div class="export-credits hidden" id="exportCredits"></div>
     </div>
     <div class="dialog-actions">
       <label class="export-skip" title="The Export button then renders straight away with these settings. Settings brings this dialog back."><input type="checkbox" id="exportSkipAsk"> Don't ask again</label>
@@ -721,6 +723,7 @@
 <script src="sequences.js"></script>
 <script src="templates.js"></script>
 <script src="media-lib.js"></script>
+<script src="music.js"></script>
 <script src="command-search.js"></script>
 <script src="delivery.js"></script>
 <script src="mp4-demux.js"></script>

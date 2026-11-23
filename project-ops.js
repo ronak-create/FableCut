@@ -1216,6 +1216,7 @@
             (opts.proxy && m.kind === "video" && opts.proxy(m) ? ` proxy:${opts.proxy(m)}p` : "") +
             (m.favorite ? " ★" : "") + (m.tags && m.tags.length ? " " + m.tags.map((t) => "#" + t.replace(/\s+/g, "_")).join(" ") : "") +
             (m.folderId ? ` folder:${m.folderId}` : "") + ` uses:${uses.get(m.id) || 0}` +
+            (m.license && m.license.label ? ` licence:"${m.license.label}"` : "") +
             (m.derivedFrom ? ` (${m.denoise ? "denoised " + m.denoise : "derived"} from ${m.derivedFrom})` : "");
         });
       })(),
