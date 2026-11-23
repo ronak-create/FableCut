@@ -2766,7 +2766,10 @@ async function setMediaSource(m, src, mode, name) {
   if (mode === "replace") {
     m.name = name || MediaLib.srcName(src);
     delete m.duration; delete m.width; delete m.height;
-    delete m.license;   // another file: the old track's licence and credit don't apply (a relink keeps it)
+    // another file: the old track's licence doesn't apply (a relink keeps it); the new file's
+    // does, when another entry imported it with one (Music / SFX tab)
+    const same = project.media.find((x) => x !== m && x.license && x.src === src);
+    if (same) m.license = { ...same.license }; else delete m.license;
   }
   mediaOffline.delete(m.id);
   reloadMediaSource(m, oldSrc);
@@ -3200,10 +3203,11 @@ function renderLibrary() {
   // a library listing that arrives after the user moved to a tab drawn elsewhere must not replace it
   if (dir === "project" || dir === "music" || dir === "shapes" || dir === "templates") return;
   const files = runtime.library[dir] || [];
+  const focus = searchFocus();
   els.libList.innerHTML = "";
   if (dir === "sfx") {
     // online sound effects (Openverse) first, then the library's own files
-    appendOnlineSearch("sfx");
+    appendOnlineSearch("sfx", focus);
     const head = document.createElement("div");
     head.className = "music-status lib-head";
     head.textContent = files.length ? `Your library — library/sfx (${files.length})` : "Your library — drop files into library/sfx/ to keep them here.";
@@ -3347,19 +3351,29 @@ function musicTogglePreview(t, btn) {
   musicPreview = { id: t.id, audio: a };
 }
 /** Download a track into media/ and register it with its licence; place = add at the playhead too. */
+/** Put an imported track at `at` (the timeline and playhead of the click) → "" when placed,
+ *  else why not. Never on another timeline, during an export, without a known length or on a locked track. */
+function placeImported(m, at) {
+  if (!(m.duration > 0 && isFinite(m.duration))) return "its length couldn't be read, so it's in the Project bin but not on the timeline";
+  if ((project.sequence || null) !== at.seq || compCtxId() !== at.comp) return "another timeline is open now, so it's in the Project bin but not placed";
+  if (exportBusy()) return "an export is running, so it's in the Project bin but not placed";
+  if (!addClipFromMedia(m, null, at.t)) return "it's in the Project bin, but the audio track is locked, so it wasn't placed";
+  return "";
+}
 async function musicImport(t, place, kind) {
   if (!state.connected) { toast("Importing needs the editor server"); return; }
   if (musicImporting.has(t.id)) return;
+  // ＋ places it where the user clicked: that timeline (sequence / comp) and playhead
+  const at = { seq: project.sequence || null, comp: compCtxId(), t: state.time };
   const have = project.media.find((m) => m.license && m.license.openverse === t.id);
   if (have) {
-    if (place) addClipFromMedia(have, null, state.time);
-    else toast(`“${have.name}” is already in the project`);
+    const why = place ? placeImported(have, at) : "";
+    toast(`“${have.name}” is already in the project` + (why ? " — " + why : ""));
     return;
   }
   musicImporting.add(t.id);
   renderOnlineTab(kind);
-  // ＋ places it where the user clicked: that timeline (sequence / comp) and playhead
-  const gen = runtime.projectGen, at = { seq: project.sequence || null, comp: compCtxId(), t: state.time };
+  const gen = runtime.projectGen;
   try {
     const res = await fetch("/api/import-url", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -3369,7 +3383,8 @@ async function musicImport(t, place, kind) {
     if (!res.ok) throw new Error(body.error || "import failed (" + res.status + ")");
     const fileKind = libKind(body.name);
     if (fileKind !== "audio" && fileKind !== "video") throw new Error("the file isn't audio: " + (body.name || ""));
-    const m = { id: "m_" + uid(), name: `${t.title} — ${t.creator}`, kind: fileKind, src: body.src, folderId: null,
+    // always an audio entry, even in a video container: a music track goes on an A track, with no linked stems
+    const m = { id: "m_" + uid(), name: `${t.title} — ${t.creator}`, kind: "audio", src: body.src, folderId: null,
       license: FableCutMusic.mediaLicense(t) };
     try { await loadMediaMetadata(m); ensureWave(m); } catch { /* probeMissingMeta retries */ }
     if (gen !== runtime.projectGen) throw new Error("another project was opened — the file is in media/");
@@ -3377,13 +3392,7 @@ async function musicImport(t, place, kind) {
     renderBin(); scheduleSave();
     const what = `Imported “${t.title}” — ${t.license.label}: ${t.flags.join(", ")}`;
     const limit = FableCutMusic.warnings(t.license).find((w) => /derivatives|sampled/.test(w));
-    let unplaced = "";
-    if (place) {
-      if (!(m.duration > 0 && isFinite(m.duration))) unplaced = "its length couldn't be read, so it's in the Project bin but not on the timeline";
-      else if ((project.sequence || null) !== at.seq || compCtxId() !== at.comp) unplaced = "another timeline is open now, so it's in the Project bin but not placed";
-      else if (exportBusy()) unplaced = "an export is running, so it's in the Project bin but not placed";
-      else if (!addClipFromMedia(m, null, at.t)) unplaced = "it's in the Project bin, but the audio track is locked, so it wasn't placed";
-    }
+    const unplaced = place ? placeImported(m, at) : "";
     toast(what + (unplaced ? " — " + unplaced : "") + (limit ? " ⚠ " + limit : ""));
   } catch (e) {
     toast(e && e.message ? e.message : "Couldn't import it");
@@ -3402,7 +3411,8 @@ function copyCredits(lines) {
 function syncExportCredits() {
   const box = $("exportCredits");
   if (!box) return;
-  const list = FableCutMusic.credits(usageDoc(), MediaLib.usageCounts(usageDoc()));
+  // the edit being exported: the open sequence and the comps it places, not other sequences
+  const list = FableCutMusic.credits(project, FableCutMusic.editUsage(project));
   box.classList.toggle("hidden", !list.length);
   box.innerHTML = "";
   if (!list.length) return;
@@ -3425,10 +3435,14 @@ function syncExportCredits() {
   }
 }
 /** The online search (box, filters, chips, results) for one kind, appended to the bin's list. */
-function appendOnlineSearch(kind) {
+/** The online search box's focus and selection, read before the list is cleared. */
+function searchFocus() {
+  const a = document.activeElement;
+  return a && (a.id === "musicQuery" || a.id === "sfxQuery") ? { start: a.selectionStart, end: a.selectionEnd } : null;
+}
+function appendOnlineSearch(kind, focus) {
   const s = onlineSearch[kind], list = els.libList, sfx = kind === "sfx";
   const qid = sfx ? "sfxQuery" : "musicQuery";
-  const focused = document.activeElement && document.activeElement.id === qid;
   const form = document.createElement("form");
   form.className = "music-search";
   form.innerHTML = `
@@ -3453,7 +3467,7 @@ function appendOnlineSearch(kind) {
     musicSearch(kind, false);
   });
   list.appendChild(form);
-  if (focused) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); }
+  if (focus) { q.focus(); try { q.setSelectionRange(focus.start ?? q.value.length, focus.end ?? q.value.length); } catch { } }
 
   if (!s.tracks.length && !s.busy) {
     const moods = document.createElement("div");
@@ -3534,8 +3548,9 @@ function appendOnlineSearch(kind) {
 }
 function renderMusicTab() {
   if (state.binTab !== "music") return;
+  const focus = searchFocus();
   els.libList.innerHTML = "";
-  appendOnlineSearch("music");
+  appendOnlineSearch("music", focus);
 }
 
 /* ═══════════════════════════ PROJECTS (dashboard) ═══════════════════════════ */

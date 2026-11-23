@@ -101,10 +101,11 @@
     for (const k of Object.keys(kind)) p.set(k, kind[k]);
     if (opts.length && LENGTHS[opts.length]) p.set("length", opts.length);
     // commercial / edits pick licence codes by FableCut's own table: Openverse's "commercial" group
-    // includes Sampling+, which FableCut labels non-commercial for a whole track
+    // includes Sampling+, which FableCut labels non-commercial for a whole track. edits means "may
+    // go under a video as it is", so it leaves out ND and the Sampling licences.
     let lic = (opts.licenses || []).map((l) => String(l).toLowerCase()).filter((l) => LICENSES[l]);
     if (opts.commercial || opts.edits) {
-      const ok = (c) => (!opts.commercial || LICENSES[c].commercial) && (!opts.edits || LICENSES[c].edits);
+      const ok = (c) => (!opts.commercial || LICENSES[c].commercial) && (!opts.edits || (LICENSES[c].edits && !LICENSES[c].sampling));
       const picked = (lic.length ? lic : Object.keys(LICENSES)).filter(ok);
       if (!picked.length) throw new Error("none of those licences allow " + [opts.commercial && "commercial use", opts.edits && "edits"].filter(Boolean).join(" and "));
       lic = picked;
@@ -189,6 +190,27 @@
       (l.url ? ` (${l.url})` : "") + (l.page ? ` — ${l.page}` : "");
   }
 
+  /** How often each media file is placed in the edit itself: the open sequence's clips and the
+   *  compositions placed in it (nested ones too) — not other sequences or comps nothing places.
+   *  A linked group counts once. → Map(media id → placements) for `credits`. */
+  function editUsage(doc) {
+    const n = new Map(), comps = new Map(((doc && doc.comps) || []).map((c) => [c.id, c]));
+    const scan = (clips, depth, inComps) => {
+      const seen = new Set();
+      for (const c of clips || []) {
+        if (c.kind === "comp" && comps.has(c.compId) && depth < 8 && !inComps.has(c.compId))
+          scan(comps.get(c.compId).clips, depth + 1, new Set([...inComps, c.compId]));
+        if (!c.mediaId) continue;
+        const key = (c.linkGroup ? "g:" + c.linkGroup : "c:" + c.id) + "|" + c.mediaId;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        n.set(c.mediaId, (n.get(c.mediaId) || 0) + 1);
+      }
+    };
+    scan(doc && doc.clips, 0, new Set());
+    return n;
+  }
+
   /** The credits an edit needs: every licensed file the edit uses (a denoised
    *  copy counts as its original, and its credit says the sound was changed).
    *  uses: media id → placements (MediaLib.usageCounts).
@@ -220,5 +242,5 @@
   const ABOUT = "Music from Openverse (openverse.org) — made with Openverse, not endorsed or certified by it. Each track's licence is the artist's: check it before you publish.";
 
   return { API, PAGE_SIZE, MAX_PAGE, LENGTHS, KINDS, MOODS, SFX_WORDS, LICENSES, ABOUT,
-    licence, flags, warnings, webUrl, searchUrl, trackUrl, track, results, fmtLen, fileName, mediaLicense, cleanLicense, creditLine, credits };
+    licence, flags, warnings, webUrl, searchUrl, trackUrl, track, results, fmtLen, fileName, mediaLicense, cleanLicense, creditLine, editUsage, credits };
 });

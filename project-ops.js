@@ -455,7 +455,10 @@
           if (name === "replaceMedia") {
             m.name = op.name ? String(op.name).trim().slice(0, 200) : MediaLib.srcName(src);
             delete m.duration; delete m.width; delete m.height;
-            delete m.license;   // another file: the old track's licence and credit don't apply (relinkMedia keeps it)
+            // another file: the old track's licence doesn't apply (relinkMedia keeps it); the new
+            // file's does, when another entry imported it with one (fablecut_music)
+            const same = proj.media.find((x) => x !== m && x.license && x.src === src);
+            if (same) m.license = { ...same.license }; else delete m.license;
           } else if (op.name) m.name = String(op.name).trim().slice(0, 200);
           if (info) {
             for (const k of MediaLib.INFO_KEYS) if (info[k] != null) m[k] = info[k];

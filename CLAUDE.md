@@ -739,13 +739,14 @@ be listed later:
     "source": "jamendo", "openverse": "c14c7353-…", "attribution": "\"Cinematic\" by Jahzzar is licensed under …" } }
 ```
 
-The **credits** are every licensed file the edit uses (main timeline, comps
-and other sequences; a denoised copy counts as its original), one line each:
+The **credits** are every licensed file the edit uses (the open sequence and
+the compositions placed in it; a denoised copy counts as its original), one line each:
 `"Cinematic" by Jahzzar (jamendo) — CC BY-SA 3.0 (https://…) — https://www.jamendo.com/track/918921`,
 with a warning for a licence that limits the video (non-commercial, share
 alike, no derivatives, samples only), and `— changed: noise reduced` when the
 edit plays a denoised copy. They go in the video's description. Replacing a
-file (**Replace file…**, `replaceMedia`) drops its licence; a relink keeps it.
+file (**Replace file…**, `replaceMedia`) drops the old licence and takes the new
+file's, when another entry imported that file with one; a relink keeps it.
 
 In the editor: the bin's **Music** tab has the search box, a length, **OK to
 monetize** (only licences that allow commercial use and edits), and mood chips
@@ -764,17 +765,19 @@ music credits with **Copy**. Importing needs the editor server (or Studio).
 - `{query, kind?:"music"|"sfx", length?:"shortest"|"short"|"medium"|"long", commercial?, edits?, licenses?:[…], page?}`
   searches: 20 tracks a page, each `id "title" — artist · m:ss · licence [flags] · genres · source`.
   `commercial:true` keeps licences that allow commercial use (CC0, public domain, BY,
-  BY-SA, BY-ND), `edits:true` those that allow edits (it leaves out ND); pass both when
-  the video will be monetized. With `licenses`, only the ones among them that pass.
+  BY-SA, BY-ND), `edits:true` those that let a track go under a video as it is (it
+  leaves out ND and the Sampling licences); pass both when the video will be
+  monetized. With `licenses`, only the ones among them that pass.
 - `{import:"<track id>"}` downloads it into `media/` (named "Title - Artist") and
   registers it with its `license`; the reply gives the licence, the credit, any
   limits, and an `addClip` to place it (not for an ND or Sampling track, which
   can't go under a video as it is). Then `fablecut_beats {clipId}` finds its tempo,
   `retime` cuts to it, and `fablecut_auto_duck` dips it under speech.
 - `{credits:true}` lists the edit's credits and licence warnings. `fablecut_export`
-  adds them to its reply when the edit uses licensed music.
-- Say which licence a track has before the user publishes, and search with
-  `commercial:true, edits:true` when they plan to monetize. Import what the user
+  adds them to its reply when the edit uses licensed music, and says so if the
+  timeline's licensed music changed while it exported.
+- Say which licence a track has before the user publishes. Search with `edits:true`
+  for music to put under a video, plus `commercial:true` when they plan to monetize. Import what the user
   picked, or the best fit when they asked you to choose. The compact view shows
   an imported file's `licence:"CC BY 3.0"`.
 

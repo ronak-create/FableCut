@@ -46,6 +46,8 @@ test("searchUrl builds the Openverse query", () => {
   assert.equal(u.searchParams.get("license"), "cc0,pdm,by,by-sa", "FableCut's own table, never Openverse's commercial group (it has Sampling+)");
   assert.equal(u.searchParams.get("license_type"), null);
   assert.equal(new URL(M.searchUrl({ commercial: true })).searchParams.get("license"), "cc0,pdm,by,by-sa,by-nd");
+  assert.equal(new URL(M.searchUrl({ edits: true })).searchParams.get("license"), "cc0,pdm,by,by-sa,by-nc,by-nc-sa",
+    "edits = may go under a video: no ND, no Sampling");
   assert.equal(new URL(M.searchUrl({ commercial: true, licenses: ["by-nc", "by", "sampling+"] })).searchParams.get("license"), "by", "a choice is narrowed, never widened");
   assert.throws(() => M.searchUrl({ commercial: true, licenses: ["by-nc", "sampling+"] }), /none of those licences allow commercial use/);
   assert.equal(u.searchParams.get("page_size"), "20");
@@ -121,6 +123,18 @@ test("a media entry keeps its licence, and the edit lists its credits", () => {
   const nd = M.credits(doc, MediaLib.usageCounts(doc)).find((c) => c.mediaId === "m_nd");
   assert.deepEqual(nd.warnings, ["CC BY-NC-ND allows no derivatives — music set to video counts as one", "CC BY-NC-ND is non-commercial only"]);
   assert.match(ProjectOps.compactView(doc), /m_song audio "song".* licence:"CC BY-SA 3\.0"/);
+
+  // the edit's own usage: the open sequence and the comps it places, not other sequences or unplaced comps
+  const scoped = seedProject({
+    media: [{ id: "m_s", name: "s", kind: "audio", src: "/media/s.mp3", license: lic }, { id: "m_o", name: "o", kind: "audio", src: "/media/o.mp3", license: { ...lic, openverse: "x" } },
+      { id: "m_u", name: "u", kind: "audio", src: "/media/u.mp3", license: { ...lic, openverse: "y" } }],
+    clips: [{ id: "cc", kind: "comp", compId: "k1", track: "V1", start: 0, in: 0, duration: 2 }],
+    comps: [{ id: "k1", name: "K", duration: 2, clips: [{ id: "ka", mediaId: "m_s", kind: "audio", track: "A1", start: 0, in: 0, duration: 2 }] },
+      { id: "k2", name: "unused", duration: 2, clips: [{ id: "kb", mediaId: "m_u", kind: "audio", track: "A1", start: 0, in: 0, duration: 2 }] }],
+    sequence: "main", sequences: [{ id: "main", name: "Main" }, { id: "s2", name: "Other", clips: [{ id: "oc", mediaId: "m_o", kind: "audio", track: "A1", start: 0, in: 0, duration: 2 }] }],
+  });
+  assert.deepEqual([...M.editUsage(scoped)], [["m_s", 1]]);
+  assert.deepEqual(M.credits(scoped, M.editUsage(scoped)).map((c) => c.mediaId), ["m_s"]);
 });
 
 /* A stand-in for the Openverse API on 127.0.0.1, serving one track and its file. */
@@ -191,7 +205,10 @@ test("fablecut_music searches, imports a track with its licence, and lists the c
   await mcp.callTool("fablecut_patch_project", { ops: [{ op: "relinkMedia", id: m.id, src: "/media/other.wav" }] });
   assert.deepEqual(readProject(dir).media.find((x) => x.id === m.id).license, before.license);
   await mcp.callTool("fablecut_patch_project", { ops: [{ op: "replaceMedia", id: m.id, src: "/media/Night%20Day%20-%20Jahzzar.wav" }] });
-  assert.equal(readProject(dir).media.find((x) => x.id === m.id).license, undefined);
+  assert.equal(readProject(dir).media.find((x) => x.id === m.id).license, undefined, "a file no entry has a licence for: none");
+  const ndEntry = readProject(dir).media.find((x) => x.license && x.license.title === "Golden Peaks");
+  await mcp.callTool("fablecut_patch_project", { ops: [{ op: "replaceMedia", id: m.id, src: ndEntry.src }] });
+  assert.equal(readProject(dir).media.find((x) => x.id === m.id).license.title, "Golden Peaks", "the replacement's own licence comes along");
 });
 
 test("a requested file name keeps its extension and never makes a dotfile", async (t) => {

@@ -103,10 +103,10 @@ them: look at those with `fablecut_frame` on the new canvas and move them.
   Lock the music lane before either cut. Caption it last:
   `fablecut_captions {style:"highlight", clipIds:[…the speech clips]}` (or subtitle,
   karaoke, pop), then look at a frame mid-sentence.
-- **Music and sound effects** the user may use: `fablecut_music {query:"upbeat acoustic"}`
-  (or `kind:"sfx"`) lists openly licensed tracks with their licences; tell the
-  user the licence before they publish (ND tracks can't go under video; NC ones
-  not in monetized videos). `{import:"<id>"}` brings one in, `{credits:true}`
+- **Music and sound effects** the user may use: `fablecut_music {query:"upbeat acoustic", edits:true}`
+  (or `kind:"sfx"`) lists openly licensed tracks that may go under a video, with their
+  licences; tell the user the licence before they publish (NC ones not in monetized
+  videos: add `commercial:true` then). `{import:"<id>"}` brings one in, `{credits:true}`
   gives the lines for the video's description.
 - Vary the font per title. Reusing one typeface across a whole edit is the
   single clearest tell of a machine-made cut; `fablecut_docs {section:"Text"}`

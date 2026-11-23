@@ -40,7 +40,6 @@ const SeqLib = require("./sequences");
 const Templates = require("./templates");
 const Workflows = require("./workflows");
 const Music = require("./music");
-const MediaLib = require("./media-lib");
 const Delivery = require("./delivery");
 const { probeFile, infoForEntry } = require("./media-probe");
 const { findProxies } = require("./proxy");
@@ -1362,7 +1361,7 @@ async function openverse(url) {
 }
 const fmtLen = (s) => s == null ? "?:??" : Music.fmtLen(s);
 function creditsText(proj) {
-  const list = Music.credits(proj, MediaLib.usageCounts(proj));
+  const list = Music.credits(proj, Music.editUsage(proj));   // the open sequence and the comps it places
   if (!list.length) return "";
   return [`CREDITS — licensed music in this edit (put these in the video's description):`,
     ...list.map((c) => `  ${c.needsCredit ? c.line : c.line + " (no credit required)"}`),
@@ -1382,7 +1381,8 @@ async function musicTool(args) {
     try {
       const kind = kindFromName(got.name);
       if (kind !== "audio" && kind !== "video") throw new Error("the track's file isn't audio: " + got.name);
-      entry = await registerFile(got.target, kind, { name: `${t.title} — ${t.creator}`, license: Music.mediaLicense(t), keepRead: true });
+      // always an audio entry, even in a video container: it's a music track, placed on an A track
+      entry = await registerFile(got.target, "audio", { name: `${t.title} — ${t.creator}`, license: Music.mediaLicense(t), keepRead: true });
     } catch (e) {
       try { fs.rmSync(got.target, { force: true }); } catch {}
       throw e;
@@ -1587,7 +1587,7 @@ async function exportTool(args) {
     if (r.status !== 200) throw new Error(r.body?.error || `export request failed (${r.status})`);
     job = r.body;
     // the credits of the timeline this job renders, kept with the job for later polls
-    try { const cr = creditsText(readProject()); if (cr) jobCredits.set(job.id, cr); } catch {}
+    try { const p = readProject(); jobCredits.set(job.id, { revision: p.revision || 0, text: creditsText(p) }); } catch {}
     if (job.notes && job.notes.length) startNote = `Settings adjusted: ${job.notes.join("; ")}\n`;
     if (args.wait === false) return (job.delivery ? `Output: ${job.delivery}\n` : "") + startNote + describeExportJob(job);
   }
@@ -1601,7 +1601,19 @@ async function exportTool(args) {
     job = r.body;
   }
   // licensed music the edit uses: the credits belong in the video's description
-  const credits = job.status === "done" ? jobCredits.get(job.id) : "";
+  let credits = "";
+  if (job.status === "done" && jobCredits.has(job.id)) {
+    // the editor renders the live timeline: the credits taken at the request match it unless it changed meanwhile
+    const kept = jobCredits.get(job.id);
+    let now = null;
+    try { now = readProject(); } catch {}
+    if (now && (now.revision || 0) !== kept.revision) {
+      const text = creditsText(now);
+      credits = text !== kept.text
+        ? "The timeline changed while it exported, and so did its licensed music — check which version the file has before using these credits.\n" + (text || kept.text)
+        : text;
+    } else credits = kept.text;
+  }
   return startNote + describeExportJob(job) + (credits ? "\n" + credits : "");
 }
 const jobCredits = new Map();   // export job id → the credits of the timeline it rendered
