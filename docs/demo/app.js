@@ -9054,6 +9054,8 @@ async function denoiseClips(clips, level) {
     toast(`Reducing noise (${level})…`);
     for (const id of bases) {
       const base = getMedia(id);
+      // the licence of the file being cleaned, read now: the entry may point at another file by the time it's done
+      const lic = base.license ? { ...base.license } : null;
       try {
         const r = await fetch("/api/denoise", { method: "POST", body: JSON.stringify({ src: base.src, amount: level }) })
           .then(async (x) => { const j = await x.json(); if (!x.ok) throw new Error(j.error || x.status); return j; });
@@ -9061,7 +9063,7 @@ async function denoiseClips(clips, level) {
         if (!m) {
           m = { id: "m_" + uid(), name: r.name, kind: "audio", src: r.src, duration: r.duration, folderId: base.folderId || null,
             derivedFrom: base.id, denoise: level };
-          if (base.license) m.license = { ...base.license };   // the credit stays with the sound
+          if (lic) m.license = lic;   // the credit stays with the sound
           if (r.channels) m.channels = r.channels;
           project.media.push(m);
         }
