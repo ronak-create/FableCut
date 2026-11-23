@@ -717,7 +717,8 @@ so the person publishing the video is the one who must respect it.
 | `by-sa` | credit · share alike | yes; credit, and the video is shared under CC BY-SA too |
 | `by-nc` · `by-nc-sa` | credit · non-commercial | not in ads, sponsored or monetized videos; credit (NC-SA: share alike too) |
 | `by-nd` · `by-nc-nd` | no edits | **no**: Creative Commons counts music set to video as a derivative |
-| `sampling+` · `nc-sampling+` | credit · non-commercial | parts may be sampled and remixed; the whole track only non-commercially |
+| `sampling+` | credit · non-commercial · samples only | parts may be sampled and transformed, also commercially (not in ads); the whole track as it is can't be set under a video |
+| `nc-sampling+` | credit · non-commercial · samples only | parts may be sampled and transformed, non-commercially only; the whole track as it is can't be set under a video |
 
 Search with words about the music (mood, genre, instrument: "chill lo-fi
 piano"); leave the words out to see the newest tracks. Music comes from the
@@ -742,7 +743,9 @@ The **credits** are every licensed file the edit uses (main timeline, comps
 and other sequences; a denoised copy counts as its original), one line each:
 `"Cinematic" by Jahzzar (jamendo) — CC BY-SA 3.0 (https://…) — https://www.jamendo.com/track/918921`,
 with a warning for a licence that limits the video (non-commercial, share
-alike, no derivatives). They go in the video's description.
+alike, no derivatives, samples only), and `— changed: noise reduced` when the
+edit plays a denoised copy. They go in the video's description. Replacing a
+file (**Replace file…**, `replaceMedia`) drops its licence; a relink keeps it.
 
 In the editor: the bin's **Music** tab has the search box, a length, **OK to
 monetize** (only licences that allow commercial use and edits), and mood chips
@@ -760,11 +763,13 @@ music credits with **Copy**. Importing needs the editor server (or Studio).
 
 - `{query, kind?:"music"|"sfx", length?:"shortest"|"short"|"medium"|"long", commercial?, edits?, licenses?:[…], page?}`
   searches: 20 tracks a page, each `id "title" — artist · m:ss · licence [flags] · genres · source`.
-  `commercial:true` keeps licences that allow commercial use, `edits:true` leaves out
-  ND; pass both when the video will be monetized.
+  `commercial:true` keeps licences that allow commercial use (CC0, public domain, BY,
+  BY-SA, BY-ND), `edits:true` those that allow edits (it leaves out ND); pass both when
+  the video will be monetized. With `licenses`, only the ones among them that pass.
 - `{import:"<track id>"}` downloads it into `media/` (named "Title - Artist") and
-  registers it with its `license`; the reply gives the licence, the credit and
-  an `addClip` to place it. Then `fablecut_beats {clipId}` finds its tempo,
+  registers it with its `license`; the reply gives the licence, the credit, any
+  limits, and an `addClip` to place it (not for an ND or Sampling track, which
+  can't go under a video as it is). Then `fablecut_beats {clipId}` finds its tempo,
   `retime` cuts to it, and `fablecut_auto_duck` dips it under speech.
 - `{credits:true}` lists the edit's credits and licence warnings. `fablecut_export`
   adds them to its reply when the edit uses licensed music.

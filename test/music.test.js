@@ -29,6 +29,9 @@ test("licences say what a video editor may do with a track", () => {
   assert.deepEqual(M.flags(M.licence("by-nc-nd")), ["credit", "non-commercial", "no edits"]);
   assert.deepEqual(M.flags(M.licence("by-sa")), ["credit", "share alike"]);
   assert.equal(M.licence("by-nd").edits, false, "music set to video is a derivative");
+  assert.deepEqual(M.flags(M.licence("sampling+", "1.0")), ["credit", "non-commercial", "samples only"]);
+  assert.deepEqual(M.warnings(M.licence("nc-sampling+", "1.0")),
+    ["NC Sampling+ 1.0 allows only sampled, transformed parts — not the whole track under a video", "NC Sampling+ 1.0 is non-commercial only"]);
   const odd = M.licence("mystery");
   assert.equal(odd.commercial, false);
   assert.match(odd.note, /unknown licence/);
@@ -40,7 +43,11 @@ test("searchUrl builds the Openverse query", () => {
   assert.equal(u.searchParams.get("q"), "chill lo-fi");
   assert.equal(u.searchParams.get("category"), "music");
   assert.equal(u.searchParams.get("length"), "short");
-  assert.equal(u.searchParams.get("license_type"), "commercial,modification");
+  assert.equal(u.searchParams.get("license"), "cc0,pdm,by,by-sa", "FableCut's own table, never Openverse's commercial group (it has Sampling+)");
+  assert.equal(u.searchParams.get("license_type"), null);
+  assert.equal(new URL(M.searchUrl({ commercial: true })).searchParams.get("license"), "cc0,pdm,by,by-sa,by-nd");
+  assert.equal(new URL(M.searchUrl({ commercial: true, licenses: ["by-nc", "by", "sampling+"] })).searchParams.get("license"), "by", "a choice is narrowed, never widened");
+  assert.throws(() => M.searchUrl({ commercial: true, licenses: ["by-nc", "sampling+"] }), /none of those licences allow commercial use/);
   assert.equal(u.searchParams.get("page_size"), "20");
   assert.equal(u.searchParams.get("page"), "3");
   assert.equal(u.searchParams.get("mature"), "false");
@@ -69,6 +76,10 @@ test("results become plain tracks", () => {
   assert.equal(M.fmtLen(0.43), "0.4 s");
   const r = M.results({ result_count: 999, page_count: 50, results: [result(), result({ url: "" })] }, 2);
   assert.equal(r.tracks.length, 1, "a result without a file is dropped");
+  const bad = M.track(result({ foreign_landing_url: "javascript:alert(1)", license_url: "data:text/html,x", url: "file:///etc/passwd" }));
+  assert.equal(bad.page, "", "only http(s) links reach an href");
+  assert.equal(bad.license.url, "");
+  assert.equal(bad.url, "");
   assert.equal(r.pages, 12);
   assert.equal(r.page, 2);
 });
@@ -80,11 +91,15 @@ test("a media entry keeps its licence, and the edit lists its credits", () => {
   assert.equal(kept.title, undefined, "only text fields are kept");
   assert.equal(kept.extra, undefined, "unknown keys are dropped");
   assert.equal(M.cleanLicense({ label: "x" }), null, "no code, no licence");
+  const long = "https://example.com/" + "a".repeat(600);
+  assert.equal(M.cleanLicense({ ...lic, page: long }).page, long, "a link is kept whole");
+  assert.equal(M.cleanLicense({ ...lic, page: "https://e.com/" + "a".repeat(2100) }).page, undefined, "or not at all");
+  assert.equal(M.cleanLicense({ ...lic, url: "javascript:x" }).url, undefined);
   assert.equal(M.cleanLicense("CC BY"), null);
   const doc = seedProject({
     media: [
       { id: "m_song", name: "song", kind: "audio", src: "/media/s.mp3", license: lic },
-      { id: "m_den", name: "song (denoised)", kind: "audio", src: "/media/s.flac", derivedFrom: "m_song" },
+      { id: "m_den", name: "song (denoised)", kind: "audio", src: "/media/s.flac", derivedFrom: "m_song", denoise: "medium" },
       { id: "m_fx", name: "fx", kind: "audio", src: "/media/fx.mp3", license: M.mediaLicense(M.track(result({ id: "eab8a6e2-0ac8-4615-9e0d-ebde30523783", license: "cc0", license_version: "1.0", title: "Whoosh" }))) },
       { id: "m_nd", name: "nd", kind: "audio", src: "/media/nd.mp3", license: M.mediaLicense(M.track(result({ id: "bb6de945-d963-4f8e-9c60-3a786fa9aab2", license: "by-nc-nd" }))) },
     ],
@@ -97,7 +112,9 @@ test("a media entry keeps its licence, and the edit lists its credits", () => {
   const list = M.credits(doc, MediaLib.usageCounts(doc));
   assert.equal(list.length, 2, "the denoised copy is the same song; the unused ND track isn't listed");
   assert.equal(list[0].mediaId, "m_song");
-  assert.match(list[0].line, /^"Night & Day" by Jahzzar \(jamendo\) — CC BY-SA 3\.0 \(https:\/\/creativecommons\.org\/licenses\/by-sa\/3\.0\/\) — https:\/\/www\.jamendo\.com\/track\/918921$/);
+  assert.match(list[0].line, /^"Night & Day" by Jahzzar \(jamendo\) — CC BY-SA 3\.0 \(https:\/\/creativecommons\.org\/licenses\/by-sa\/3\.0\/\) — https:\/\/www\.jamendo\.com\/track\/918921 — changed: noise reduced$/,
+    "the edit plays a denoised copy, so the credit says it was changed");
+  assert.deepEqual(list[0].changes, ["noise reduced"]);
   assert.deepEqual(list[0].warnings, ["CC BY-SA: share the video under the same licence"]);
   assert.equal(list[1].needsCredit, false, "CC0 needs no credit");
   doc.clips.push({ id: "c4", mediaId: "m_nd", kind: "audio", track: "A4", start: 0, in: 0, duration: 2 });
@@ -121,6 +138,10 @@ async function fakeOpenverse(t, { limited = false } = {}) {
     if (req.url === "/file.wav") { res.writeHead(200, { "Content-Type": "audio/wav" }); return res.end(wav); }
     if (req.url.startsWith("/v1/audio/?")) { res.writeHead(200, { "Content-Type": "application/json" }); return res.end(JSON.stringify({ result_count: 1, page_count: 1, results: [track] })); }
     if (req.url === `/v1/audio/${track.id}/`) { res.writeHead(200, { "Content-Type": "application/json" }); return res.end(JSON.stringify(track)); }
+    if (req.url === "/v1/audio/bb6de945-d963-4f8e-9c60-3a786fa9aab2/") {   // a no-derivatives track
+      res.writeHead(200, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ ...track, id: "bb6de945-d963-4f8e-9c60-3a786fa9aab2", title: "Golden Peaks", license: "by-nc-nd" }));
+    }
     res.writeHead(404, { "Content-Type": "application/json" }); res.end("{}");
   });
   await new Promise((r) => srv.listen(0, "127.0.0.1", r));
@@ -138,7 +159,7 @@ test("fablecut_music searches, imports a track with its licence, and lists the c
   assert.match(found, /^1 result\(s\), page 1\/1 for "calm night"/);
   assert.match(found, /1\. c14c7353-1688-4204-9af0-64c0a5e8ccc3 "Night & Day" — Jahzzar · 1 s · CC BY-SA 3\.0 \[credit, share alike\] · ambient · jamendo/);
   assert.match(found, /made with Openverse, not endorsed/);
-  assert.match(ov.seen[0], /q=calm\+night&category=music&license_type=commercial/);
+  assert.match(ov.seen[0], /q=calm\+night&category=music&license=cc0%2Cpdm%2Cby%2Cby-sa%2Cby-nd/);
   assert.match(await text({ page: 0 }), /ERROR .*page is 1–12/);
 
   const got = await text({ import: "c14c7353-1688-4204-9af0-64c0a5e8ccc3" });
@@ -157,6 +178,34 @@ test("fablecut_music searches, imports a track with its licence, and lists the c
   assert.match(credits, /^CREDITS — licensed music in this edit/);
   assert.match(credits, /"Night & Day" by Jahzzar \(jamendo\) — CC BY-SA 3\.0/);
   assert.match(credits, /⚠ CC BY-SA: share the video under the same licence/);
+
+  const nd = await text({ import: "bb6de945-d963-4f8e-9c60-3a786fa9aab2" });
+  assert.match(nd, /^Imported "Golden Peaks"/);
+  assert.match(nd, /⚠ CC BY-NC-ND 3\.0 allows no derivatives/);
+  assert.match(nd, /Don't set this track under the video as it is/);
+  assert.doesNotMatch(nd, /Place it/, "no placement recipe for a track that can't go under video");
+
+  // a file replaced by another one loses the old track's licence; a relink keeps it
+  const before = readProject(dir).media.find((x) => x.id === m.id);
+  fs.copyFileSync(path.join(dir, "media", "Night Day - Jahzzar.wav"), path.join(dir, "media", "other.wav"));
+  await mcp.callTool("fablecut_patch_project", { ops: [{ op: "relinkMedia", id: m.id, src: "/media/other.wav" }] });
+  assert.deepEqual(readProject(dir).media.find((x) => x.id === m.id).license, before.license);
+  await mcp.callTool("fablecut_patch_project", { ops: [{ op: "replaceMedia", id: m.id, src: "/media/Night%20Day%20-%20Jahzzar.wav" }] });
+  assert.equal(readProject(dir).media.find((x) => x.id === m.id).license, undefined);
+});
+
+test("a requested file name keeps its extension and never makes a dotfile", async (t) => {
+  const http2 = require("node:http");
+  const srv = http2.createServer((req, res) => { res.writeHead(200, { "Content-Type": "audio/mpeg" }); res.end(Buffer.alloc(64)); });
+  await new Promise((r) => srv.listen(0, "127.0.0.1", r));
+  t.after(() => srv.close());
+  const { downloadImportUrl } = require("../import-url");
+  const dir = makeDataDir(t);
+  const url = `http://127.0.0.1:${srv.address().port}/`;
+  const a = await downloadImportUrl(url, dir, { name: "...hidden.mp3", allowLoopback: true });
+  assert.equal(a.name, "hidden.mp3");
+  const b = await downloadImportUrl(url, dir, { name: "x".repeat(300) + ".mp3", allowLoopback: true });
+  assert.match(b.name, /^x{100}\.mp3$/, "the stem is cut, not the extension");
 });
 
 test("fablecut_music explains Openverse's rate limit", async (t) => {
@@ -172,6 +221,7 @@ test("the editor keeps a media entry's licence when it saves", () => {
   const src = fs.readFileSync(path.join(__dirname, "..", "app.js"), "utf8");
   assert.match(src, /const lic = FableCutMusic\.cleanLicense\(m\.license\);\s*if \(lic\) mo\.license = lic;/);
   const html = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
-  assert.ok(html.indexOf('src="music.js"') < html.indexOf('src="app.js"'), "music.js loads before app.js");
+  const mi = html.indexOf('src="music.js"'), ai = html.indexOf('src="app.js"');
+  assert.ok(mi !== -1 && ai !== -1 && mi < ai, "music.js loads, before app.js");
   assert.match(html, /data-tab="music"/);
 });

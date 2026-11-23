@@ -185,7 +185,9 @@ function saveResponse(res, u, destDir, { signal, maxBytes, name: wanted }) {
   // a caller's name (e.g. "Title - Artist.mp3") keeps the served file's extension when it has a known one
   if (wanted) {
     const ext = kindFromName(name) ? path.extname(name) : path.extname(String(wanted));
-    name = safeName(path.basename(String(wanted), path.extname(String(wanted))).trim() + ext);
+    // no dotfile, and the stem is cut (not the extension) so the type is still known
+    const stem = safeName(path.basename(String(wanted), path.extname(String(wanted))).trim().replace(/^\.+/, "")).replace(/^\.+/, "").slice(0, 100);
+    name = (stem || "download") + ext.slice(0, 10);
   }
   const kind = kindFromName(name);
   // /media/*.svg is served same-origin as image/svg+xml. A remote file with

@@ -47,8 +47,9 @@
     "by-nc-sa": { label: "CC BY-NC-SA", commercial: false, edits: true, credit: true, note: "non-commercial only, credit the artist; the video must be shared under CC BY-NC-SA too" },
     "by-nd": { label: "CC BY-ND", commercial: true, edits: false, credit: true, note: "no derivatives: music set to video counts as one, so it can't go into an edit" },
     "by-nc-nd": { label: "CC BY-NC-ND", commercial: false, edits: false, credit: true, note: "non-commercial and no derivatives: music set to video counts as one, so it can't go into an edit" },
-    "sampling+": { label: "Sampling+", commercial: false, edits: true, credit: true, note: "parts may be sampled and remixed, also commercially (not for ads); the whole track only non-commercially; credit the artist" },
-    "nc-sampling+": { label: "NC Sampling+", commercial: false, edits: true, credit: true, note: "parts may be sampled and remixed non-commercially; credit the artist" },
+    // Sampling licences allow transforming parts of a track, not setting the whole track to video as it is
+    "sampling+": { label: "Sampling+", commercial: false, edits: true, sampling: true, credit: true, note: "parts may be sampled and transformed, also commercially (not in ads); the whole track as it is only shared non-commercially, not set to video; credit the artist" },
+    "nc-sampling+": { label: "NC Sampling+", commercial: false, edits: true, sampling: true, credit: true, note: "parts may be sampled and transformed, non-commercially only; the whole track as it is can't be set to video; credit the artist" },
   };
 
   /** What a licence allows: {code, label ("CC BY 4.0"), commercial, edits, credit, note, url}. */
@@ -57,18 +58,35 @@
     const base = LICENSES[c] || { label: c ? c.toUpperCase() : "Unknown licence", commercial: false, edits: false, credit: true, note: "unknown licence — check the track's page before using it" };
     const v = version && !/^(cc0|pdm)$/.test(c) ? String(version) : "";
     return { code: c, label: base.label + (v ? " " + v : ""), commercial: base.commercial, edits: base.edits,
-      credit: base.credit, note: base.note, url: url || "" };
+      sampling: !!base.sampling, credit: base.credit, note: base.note, url: url || "" };
   }
 
-  /** The words that sum a licence up for a badge: "free to use", "credit", "non-commercial", "no edits", "share alike". */
+  /** The words that sum a licence up for a badge: "free to use", "credit", "non-commercial", "no edits", "samples only", "share alike". */
   function flags(lic) {
     const out = [];
     if (!lic.credit && lic.commercial && lic.edits) out.push("free to use");
     if (lic.credit) out.push("credit");
     if (!lic.commercial) out.push("non-commercial");
     if (!lic.edits) out.push("no edits");
+    if (lic.sampling) out.push("samples only");
     if (/-sa$/.test(lic.code)) out.push("share alike");
     return out;
+  }
+
+  /** Why a licence limits a video, one line each (credits and the import reply). */
+  function warnings(lic) {
+    const out = [];
+    if (!lic.edits) out.push(lic.label + " allows no derivatives — music set to video counts as one");
+    if (lic.sampling) out.push(lic.label + " allows only sampled, transformed parts — not the whole track under a video");
+    if (!lic.commercial) out.push(lic.label + " is non-commercial only");
+    if (/-sa$/.test(lic.code)) out.push(lic.label + ": share the video under the same licence");
+    return out;
+  }
+
+  /** Only http(s) links reach a page's href; anything else becomes "". */
+  function webUrl(u) {
+    try { const x = new URL(String(u || "")); return x.protocol === "https:" || x.protocol === "http:" ? x.href : ""; }
+    catch (_) { return ""; }
   }
 
   /** The Openverse search URL. opts: {query, kind:'music'|'sfx', length:'shortest'|'short'|'medium'|'long',
@@ -82,11 +100,15 @@
     const kind = KINDS[opts.kind] || KINDS.music;
     for (const k of Object.keys(kind)) p.set(k, kind[k]);
     if (opts.length && LENGTHS[opts.length]) p.set("length", opts.length);
-    const types = [];
-    if (opts.commercial) types.push("commercial");
-    if (opts.edits) types.push("modification");
-    if (types.length) p.set("license_type", types.join(","));
-    const lic = (opts.licenses || []).map((l) => String(l).toLowerCase()).filter((l) => LICENSES[l]);
+    // commercial / edits pick licence codes by FableCut's own table: Openverse's "commercial" group
+    // includes Sampling+, which FableCut labels non-commercial for a whole track
+    let lic = (opts.licenses || []).map((l) => String(l).toLowerCase()).filter((l) => LICENSES[l]);
+    if (opts.commercial || opts.edits) {
+      const ok = (c) => (!opts.commercial || LICENSES[c].commercial) && (!opts.edits || LICENSES[c].edits);
+      const picked = (lic.length ? lic : Object.keys(LICENSES)).filter(ok);
+      if (!picked.length) throw new Error("none of those licences allow " + [opts.commercial && "commercial use", opts.edits && "edits"].filter(Boolean).join(" and "));
+      lic = picked;
+    }
     if (lic.length) p.set("license", lic.join(","));
     p.set("mature", "false");
     p.set("page_size", String(PAGE_SIZE));
@@ -108,12 +130,12 @@
   /** An Openverse result as a plain track. */
   function track(r) {
     r = r || {};
-    const lic = licence(r.license, r.license_version, r.license_url);
+    const lic = licence(r.license, r.license_version, webUrl(r.license_url));
     return {
       id: r.id, title: unescape(r.title || "Untitled"), creator: unescape(r.creator || "Unknown artist"),
-      creatorUrl: r.creator_url || "", duration: r.duration ? Math.round(r.duration / 100) / 10 : null,
+      creatorUrl: webUrl(r.creator_url), duration: r.duration ? Math.round(r.duration / 100) / 10 : null,
       license: lic, flags: flags(lic),
-      url: r.url || "", page: r.foreign_landing_url || "", source: r.source || r.provider || "",
+      url: webUrl(r.url), page: webUrl(r.foreign_landing_url), source: r.source || r.provider || "",
       genres: (r.genres || []).slice(0, 6), tags: (r.tags || []).map((t) => t && t.name).filter(Boolean).slice(0, 10),
       filetype: r.filetype || "", attribution: r.attribution || "",
     };
@@ -150,8 +172,12 @@
   function cleanLicense(l) {
     if (!l || typeof l !== "object" || Array.isArray(l) || !l.code) return null;
     const out = {};
-    for (const k of ["code", "label", "url", "title", "creator", "page", "source", "openverse", "attribution"])
-      if (typeof l[k] === "string" && l[k]) out[k] = l[k].slice(0, k === "attribution" ? 1000 : 300);
+    for (const k of ["code", "label", "url", "title", "creator", "page", "source", "openverse", "attribution"]) {
+      if (typeof l[k] !== "string" || !l[k]) continue;
+      // links are kept whole or not at all: a cut URL would point somewhere else
+      if (k === "url" || k === "page") { const u = webUrl(l[k]); if (u && u.length <= 2000) out[k] = u; }
+      else out[k] = l[k].slice(0, k === "attribution" ? 1000 : 300);
+    }
     if (!out.label) out.label = licence(out.code).label;
     return out;
   }
@@ -164,8 +190,9 @@
   }
 
   /** The credits an edit needs: every licensed file the edit uses (a denoised
-   *  copy counts as its original). uses: media id → placements (MediaLib.usageCounts).
-   *  → [{mediaId, name, license, line, warnings}] */
+   *  copy counts as its original, and its credit says the sound was changed).
+   *  uses: media id → placements (MediaLib.usageCounts).
+   *  → [{mediaId, name, license, line, needsCredit, changes, warnings}] */
   function credits(doc, uses) {
     const media = (doc && doc.media) || [];
     const byId = new Map(media.map((m) => [m.id, m]));
@@ -173,26 +200,25 @@
       for (let i = 0; m && !m.license && m.derivedFrom && i < 8; i++) m = byId.get(m.derivedFrom);
       return m && m.license ? m : null;
     };
-    const out = [], seen = new Set();
+    const byWork = new Map();
     for (const m of media) {
       if (!(uses && uses.get ? uses.get(m.id) : 0)) continue;
       const o = origin(m);
       if (!o) continue;
       const key = o.license.openverse || o.id;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      const lic = licence(o.license.code);
-      const warnings = [];
-      if (!lic.edits) warnings.push(lic.label + " allows no derivatives — music set to video counts as one");
-      if (!lic.commercial) warnings.push(lic.label + " is non-commercial only");
-      if (/-sa$/.test(lic.code)) warnings.push(lic.label + ": share the video under the same licence");
-      out.push({ mediaId: o.id, name: o.name, license: o.license, needsCredit: lic.credit, line: creditLine(o.license), warnings });
+      if (!byWork.has(key)) byWork.set(key, { o, changes: new Set() });
+      if (m !== o && m.denoise) byWork.get(key).changes.add("noise reduced");
+      else if (m !== o) byWork.get(key).changes.add("processed");
     }
-    return out;
+    return [...byWork.values()].map(({ o, changes }) => {
+      const lic = licence(o.license.code), ch = [...changes];
+      return { mediaId: o.id, name: o.name, license: o.license, needsCredit: lic.credit, changes: ch,
+        line: creditLine(o.license) + (ch.length ? ` — changed: ${ch.join(", ")}` : ""), warnings: warnings(lic) };
+    });
   }
 
   const ABOUT = "Music from Openverse (openverse.org) — made with Openverse, not endorsed or certified by it. Each track's licence is the artist's: check it before you publish.";
 
   return { API, PAGE_SIZE, MAX_PAGE, LENGTHS, KINDS, MOODS, SFX_WORDS, LICENSES, ABOUT,
-    licence, flags, searchUrl, trackUrl, track, results, fmtLen, fileName, mediaLicense, cleanLicense, creditLine, credits };
+    licence, flags, warnings, webUrl, searchUrl, trackUrl, track, results, fmtLen, fileName, mediaLicense, cleanLicense, creditLine, credits };
 });

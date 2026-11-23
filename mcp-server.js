@@ -1318,7 +1318,9 @@ async function projectsTool(args) {
   if (out.from) return `Opened ${describeProject(out.project)}\nThe editor switched to it (${out.from} was saved first). Read it with fablecut_get_project {compact:true} before editing.`;
   return describeProject(out.project);
 }
-/** Register a file already in media/ as project media (probed) → the entry. extra: more keys (license). */
+/** Register a file already in media/ as project media (probed) → the entry. extra: more keys
+ *  (license, name); extra.keepRead: leave lastReadRevision alone, so a set_project after this
+ *  needs a fresh read (the caller never handed the new document back). */
 async function registerFile(target, kind, extra = {}) {
   const entry = {
     id: "m_" + uid(),
@@ -1337,7 +1339,7 @@ async function registerFile(target, kind, extra = {}) {
   proj.media.push(entry);
   proj.revision = (proj.revision || 0) + 1;
   writeProject(proj);
-  if (wasCurrent) lastReadRevision = proj.revision;
+  if (wasCurrent && !extra.keepRead) lastReadRevision = proj.revision;
   return entry;
 }
 
@@ -1355,6 +1357,7 @@ async function openverse(url) {
   if (r.status === 404) throw new Error("Openverse has no such track");
   const body = await r.json().catch(() => null);
   if (!r.ok) throw new Error("Openverse answered " + r.status + (body && body.detail ? ": " + body.detail : ""));
+  if (!body || typeof body !== "object") throw new Error("Openverse's answer couldn't be read — try again");
   return body;
 }
 const fmtLen = (s) => s == null ? "?:??" : Music.fmtLen(s);
@@ -1373,14 +1376,25 @@ async function musicTool(args) {
   if (args.import) {
     const t = Music.track(await openverse(Music.trackUrl(args.import)));
     if (!t.url) throw new Error("Openverse lists no file for this track");
+    // a new file every time (the downloader never reuses a name), so a failed registration removes it
     const got = await downloadImportUrl(t.url, MEDIA_DIR, { name: Music.fileName(t), allowLoopback: !!process.env.FABLECUT_TEST_OPENVERSE });
-    const kind = kindFromName(got.name);
-    if (kind !== "audio" && kind !== "video") throw new Error("the track's file isn't audio: " + got.name);
-    const entry = await registerFile(got.target, kind, { name: `${t.title} — ${t.creator}`, license: Music.mediaLicense(t) });
+    let entry;
+    try {
+      const kind = kindFromName(got.name);
+      if (kind !== "audio" && kind !== "video") throw new Error("the track's file isn't audio: " + got.name);
+      entry = await registerFile(got.target, kind, { name: `${t.title} — ${t.creator}`, license: Music.mediaLicense(t), keepRead: true });
+    } catch (e) {
+      try { fs.rmSync(got.target, { force: true }); } catch {}
+      throw e;
+    }
+    const lic = t.license, limits = Music.warnings(lic);
     return [`Imported "${t.title}" by ${t.creator} → ${entry.id} (${fmtLen(entry.duration)}, ${entry.src})`,
-      `Licence: ${t.license.label} — ${t.license.note}.`,
-      t.license.credit ? `Credit: ${Music.creditLine(entry.license)}` : "",
-      `Place it: {op:"addClip", clip:{mediaId:"${entry.id}", kind:"audio", track:"A1", start:0, in:0, duration:<≤ ${entry.duration || "its length"}>}} — then fablecut_beats {clipId} for its tempo.`,
+      `Licence: ${lic.label} — ${lic.note}.`,
+      lic.credit ? `Credit: ${Music.creditLine(entry.license)}` : "",
+      ...limits.map((w) => `⚠ ${w}`),
+      !lic.edits || lic.sampling
+        ? `Don't set this track under the video as it is: its licence doesn't allow that. Search again for one whose licence allows edits (edits:true).`
+        : `Place it: {op:"addClip", clip:{mediaId:"${entry.id}", kind:"audio", track:"A1", start:0, in:0, duration:<≤ ${entry.duration || "its length"}>}} — then fablecut_beats {clipId} for its tempo.`,
     ].filter(Boolean).join("\n");
   }
   if (args.page != null && !(Number.isInteger(args.page) && args.page >= 1 && args.page <= Music.MAX_PAGE)) throw new Error(`page is 1–${Music.MAX_PAGE}`);
@@ -1572,6 +1586,8 @@ async function exportTool(args) {
     const r = await apiJSON("POST", "/api/export/request", { range: args.range, profile: args.profile, preset: args.preset, delivery: args.delivery, outputs: args.outputs, name, where: args.where || "auto" });
     if (r.status !== 200) throw new Error(r.body?.error || `export request failed (${r.status})`);
     job = r.body;
+    // the credits of the timeline this job renders, kept with the job for later polls
+    try { const cr = creditsText(readProject()); if (cr) jobCredits.set(job.id, cr); } catch {}
     if (job.notes && job.notes.length) startNote = `Settings adjusted: ${job.notes.join("; ")}\n`;
     if (args.wait === false) return (job.delivery ? `Output: ${job.delivery}\n` : "") + startNote + describeExportJob(job);
   }
@@ -1585,9 +1601,10 @@ async function exportTool(args) {
     job = r.body;
   }
   // licensed music the edit uses: the credits belong in the video's description
-  const credits = job.status === "done" ? creditsText(readProject()) : "";
+  const credits = job.status === "done" ? jobCredits.get(job.id) : "";
   return startNote + describeExportJob(job) + (credits ? "\n" + credits : "");
 }
+const jobCredits = new Map();   // export job id → the credits of the timeline it rendered
 
 /* ── Frames (fablecut_frame) ──
    The tool is the only one that answers with an image, so it returns content

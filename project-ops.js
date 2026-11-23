@@ -455,6 +455,7 @@
           if (name === "replaceMedia") {
             m.name = op.name ? String(op.name).trim().slice(0, 200) : MediaLib.srcName(src);
             delete m.duration; delete m.width; delete m.height;
+            delete m.license;   // another file: the old track's licence and credit don't apply (relinkMedia keeps it)
           } else if (op.name) m.name = String(op.name).trim().slice(0, 200);
           if (info) {
             for (const k of MediaLib.INFO_KEYS) if (info[k] != null) m[k] = info[k];

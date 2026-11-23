@@ -41,7 +41,8 @@ as cuts, raise it.
 6. No music of their own? `fablecut_music {query:"<mood>", length:"short"}`
    finds openly licensed tracks (say each one's licence; add
    `commercial:true, edits:true` when the reel will be monetized), and
-   `{import:"<id>"}` brings one in with its credit.
+   `{import:"<id>"}` brings one in with its credit. It replaces the reference's
+   music: `removeClip` the extracted track on A1, then place the new one there at 0.
    With the user's own music instead of the reference's, `fablecut_beats
    {clipId}` finds its tempo, beat and drop; `snap:true` rolls the cuts onto
    the beat, `retime:{every:2}` re-cuts V1 so each shot lasts 2 beats.

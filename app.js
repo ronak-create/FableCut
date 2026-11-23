@@ -2766,6 +2766,7 @@ async function setMediaSource(m, src, mode, name) {
   if (mode === "replace") {
     m.name = name || MediaLib.srcName(src);
     delete m.duration; delete m.width; delete m.height;
+    delete m.license;   // another file: the old track's licence and credit don't apply (a relink keeps it)
   }
   mediaOffline.delete(m.id);
   reloadMediaSource(m, oldSrc);
@@ -3196,7 +3197,8 @@ function toggleSfxPreview(f, btn) {
 }
 function renderLibrary() {
   const dir = state.binTab;
-  if (dir === "project") return;
+  // a library listing that arrives after the user moved to a tab drawn elsewhere must not replace it
+  if (dir === "project" || dir === "music" || dir === "shapes" || dir === "templates") return;
   const files = runtime.library[dir] || [];
   els.libList.innerHTML = "";
   if (dir === "sfx") {
@@ -3329,8 +3331,18 @@ function musicTogglePreview(t, btn) {
   if (runtime.sfxPreview) runtime.sfxPreview.pause();
   els.libList.querySelectorAll(".music-play, .lib-play").forEach((b) => (b.textContent = "▶"));
   const a = new Audio(t.url);
-  a.onended = () => { if (musicPreview && musicPreview.audio === a) { musicPreview = null; btn.textContent = "▶"; } };
-  a.play().catch(() => { toast("Couldn't play " + t.title); btn.textContent = "▶"; });
+  // the list may have been redrawn since: reset whichever ▶ buttons are on screen now
+  const done = () => {
+    if (!musicPreview || musicPreview.audio !== a) return;   // stopped or replaced meanwhile
+    musicPreview = null;
+    els.libList.querySelectorAll(".music-play").forEach((b) => (b.textContent = "▶"));
+  };
+  a.onended = done;
+  a.play().catch((e) => {
+    if (!musicPreview || musicPreview.audio !== a || (e && e.name === "AbortError")) return;
+    done();
+    toast("Couldn't play " + t.title);
+  });
   btn.textContent = "⏸";
   musicPreview = { id: t.id, audio: a };
 }
@@ -3346,7 +3358,8 @@ async function musicImport(t, place, kind) {
   }
   musicImporting.add(t.id);
   renderOnlineTab(kind);
-  const gen = runtime.projectGen;
+  // ＋ places it where the user clicked: that timeline (sequence / comp) and playhead
+  const gen = runtime.projectGen, at = { seq: project.sequence || null, comp: compCtxId(), t: state.time };
   try {
     const res = await fetch("/api/import-url", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -3362,8 +3375,16 @@ async function musicImport(t, place, kind) {
     if (gen !== runtime.projectGen) throw new Error("another project was opened — the file is in media/");
     project.media.push(m);
     renderBin(); scheduleSave();
-    if (place) addClipFromMedia(m, null, state.time);
-    toast(`Imported “${t.title}” — ${t.license.label}: ${t.flags.join(", ")}`);
+    const what = `Imported “${t.title}” — ${t.license.label}: ${t.flags.join(", ")}`;
+    const limit = FableCutMusic.warnings(t.license).find((w) => /derivatives|sampled/.test(w));
+    let unplaced = "";
+    if (place) {
+      if (!(m.duration > 0 && isFinite(m.duration))) unplaced = "its length couldn't be read, so it's in the Project bin but not on the timeline";
+      else if ((project.sequence || null) !== at.seq || compCtxId() !== at.comp) unplaced = "another timeline is open now, so it's in the Project bin but not placed";
+      else if (exportBusy()) unplaced = "an export is running, so it's in the Project bin but not placed";
+      else if (!addClipFromMedia(m, null, at.t)) unplaced = "it's in the Project bin, but the audio track is locked, so it wasn't placed";
+    }
+    toast(what + (unplaced ? " — " + unplaced : "") + (limit ? " ⚠ " + limit : ""));
   } catch (e) {
     toast(e && e.message ? e.message : "Couldn't import it");
   } finally {
@@ -3372,7 +3393,10 @@ async function musicImport(t, place, kind) {
   }
 }
 function copyCredits(lines) {
-  navigator.clipboard.writeText(lines.join("\n")).then(() => toast(lines.length === 1 ? "Copied the credit" : `Copied ${lines.length} credits`), () => toast("Couldn't copy — the browser refused"));
+  const refused = () => toast("Couldn't copy — select the credit text and copy it yourself");
+  try {
+    navigator.clipboard.writeText(lines.join("\n")).then(() => toast(lines.length === 1 ? "Copied the credit" : `Copied ${lines.length} credits`), refused);
+  } catch { refused(); }   // no clipboard access (an insecure page, an old browser)
 }
 /** The Export dialog's note: the licensed music the edit uses, its credits and any licence warnings. */
 function syncExportCredits() {
@@ -3414,17 +3438,18 @@ function appendOnlineSearch(kind) {
       <label class="music-commercial" title="Only licences that allow commercial use (ads, sponsored or monetized videos) and edits"><input type="checkbox" data-f="commercial"> OK to monetize</label>
     </div>`;
   const q = form.querySelector("input[type=search]");
-  q.value = s.query;
+  q.value = s.draft != null ? s.draft : s.query;   // what the user is typing survives a redraw
+  q.addEventListener("input", () => { s.draft = q.value; });
   const len = form.querySelector('[data-f="length"]');
   if (len) len.value = s.length;
   form.querySelector('[data-f="commercial"]').checked = s.commercial;
-  form.addEventListener("submit", (e) => { e.preventDefault(); s.query = q.value.trim(); musicSearch(kind, false); });
+  form.addEventListener("submit", (e) => { e.preventDefault(); s.query = q.value.trim(); s.draft = null; musicSearch(kind, false); });
   form.addEventListener("change", (e) => {
     const f = e.target.dataset.f;
     if (f === "length") s.length = e.target.value;
     else if (f === "commercial") s.commercial = e.target.checked;
     else return;
-    s.query = q.value.trim();
+    s.query = q.value.trim(); s.draft = null;
     musicSearch(kind, false);
   });
   list.appendChild(form);
@@ -3436,7 +3461,7 @@ function appendOnlineSearch(kind) {
     for (const w of sfx ? FableCutMusic.SFX_WORDS : FableCutMusic.MOODS) {
       const b = document.createElement("button");
       b.type = "button"; b.className = "bin-tag chip"; b.textContent = w;
-      b.addEventListener("click", () => { s.query = w; musicSearch(kind, false); });
+      b.addEventListener("click", () => { s.query = w; s.draft = null; musicSearch(kind, false); });
       moods.appendChild(b);
     }
     list.appendChild(moods);
