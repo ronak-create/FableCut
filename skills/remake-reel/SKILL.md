@@ -44,6 +44,8 @@ as cuts, raise it.
    and `{import:"<id>"}` brings one in with its credit. Say its licence. Only when
    the import reply gives a placement (`Place it`), place it: if the reference's
    extracted music is on A1, `removeClip` it first; then place the new track on A1 at 0.
+   A clip can't run past its track's length: pick one at least as long as the edit
+   (`length` filter), or place it again right after itself to cover the rest.
    With the user's own music instead of the reference's, `fablecut_beats
    {clipId}` finds its tempo, beat and drop; `snap:true` rolls the cuts onto
    the beat, `retime:{every:2}` re-cuts V1 so each shot lasts 2 beats.

@@ -9061,6 +9061,7 @@ async function denoiseClips(clips, level) {
         if (!m) {
           m = { id: "m_" + uid(), name: r.name, kind: "audio", src: r.src, duration: r.duration, folderId: base.folderId || null,
             derivedFrom: base.id, denoise: level };
+          if (base.license) m.license = { ...base.license };   // the credit stays with the sound
           if (r.channels) m.channels = r.channels;
           project.media.push(m);
         }
@@ -17056,6 +17057,7 @@ async function openExportSetup() {
       toast(exportRange(outFps).frames < 1 ? "The export range is empty — pick one"
         : !choiceOk ? "The last export's preset isn't there any more — pick one" : "The last export's engine isn't available — pick one");
     }
+    syncExportCredits();   // the timeline may have changed while its settings loaded
     els.exportSetup.classList.remove("hidden");
     // aria-modal hides what is behind — focus has to come inside
     if (!els.exportSetup.contains(document.activeElement)) $("exportRangeSel")?.focus();

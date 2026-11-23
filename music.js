@@ -235,7 +235,8 @@
       if (!o) continue;
       const key = o.license.openverse || o.id;
       if (!byWork.has(key)) byWork.set(key, { o, changes: new Set() });
-      if (m !== o && m.denoise) byWork.get(key).changes.add("noise reduced");
+      // a denoised copy may carry the licence itself (and so be its own origin here)
+      if (m.denoise) byWork.get(key).changes.add("noise reduced");
       else if (m !== o) byWork.get(key).changes.add("processed");
     }
     return [...byWork.values()].map(({ o, changes }) => {

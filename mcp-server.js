@@ -1242,6 +1242,7 @@ async function denoiseTool(args) {
     if (!m) {
       m = { id: "m_" + uid(), name: r.name, kind: "audio", src, duration: r.duration, folderId: base.folderId || null,
         derivedFrom: base.id, denoise: amount };
+      if (base.license) m.license = { ...base.license };   // the credit stays with the sound
       proj.media.push(m);
     }
     swap.set(id, m.id);

@@ -117,6 +117,14 @@ test("a media entry keeps its licence, and the edit lists its credits", () => {
   assert.match(list[0].line, /^"Night & Day" by Jahzzar \(jamendo\) — CC BY-SA 3\.0 \(https:\/\/creativecommons\.org\/licenses\/by-sa\/3\.0\/\) — https:\/\/www\.jamendo\.com\/track\/918921 — changed: noise reduced$/,
     "the edit plays a denoised copy, so the credit says it was changed");
   assert.deepEqual(list[0].changes, ["noise reduced"]);
+  // a denoised copy that carries the licence itself still credits it, once, as changed
+  const own = JSON.parse(JSON.stringify(doc));
+  own.media = own.media.filter((x) => x.id !== "m_song");
+  own.media.find((x) => x.id === "m_den").license = lic;
+  own.clips = own.clips.filter((c) => c.mediaId !== "m_song");
+  const ownList = M.credits(own, MediaLib.usageCounts(own));
+  assert.equal(ownList.filter((c) => c.license.openverse === lic.openverse).length, 1);
+  assert.match(ownList[0].line, /— changed: noise reduced$/);
   assert.deepEqual(list[0].warnings, ["CC BY-SA: share the video under the same licence"]);
   assert.equal(list[1].needsCredit, false, "CC0 needs no credit");
   doc.clips.push({ id: "c4", mediaId: "m_nd", kind: "audio", track: "A4", start: 0, in: 0, duration: 2 });
