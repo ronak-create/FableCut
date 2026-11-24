@@ -487,11 +487,11 @@ function shell(pg, main, desc) {
 <meta property="og:url" content="${url}">
 <meta property="og:title" content="${attr(title)}">
 <meta property="og:description" content="${attr(desc)}">
-<meta property="og:image" content="${SITE}/screenshot.png">
-<meta property="og:image:width" content="1600">
-<meta property="og:image:height" content="900">
+<meta property="og:image" content="${SITE}/share.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:image" content="${SITE}/screenshot.png">
+<meta name="twitter:image" content="${SITE}/share.png">
 <script type="application/ld+json">${JSON.stringify(ld)}</script>
 <script>document.documentElement.classList.add("js");try{var t=localStorage.getItem("fc-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
 <link rel="preload" href="${base}fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin>
