@@ -6,7 +6,8 @@
    `FableCutClips`) and required by the MCP server, so fablecut_clips and Studio
    run the same steps. The steps themselves are the editor's own tools, passed in
    as `env`: read() the project, patch(ops), reframe(args), captions(args),
-   exportClip(args) — each answering text, or throwing. */
+   exportClip(args) — each answering text, or throwing — and, optionally, progress(text)
+   as each clip and step starts. */
 (function (root, factory) {
   const api = factory();
   if (typeof module === "object" && module.exports) module.exports = api;
@@ -83,8 +84,10 @@
     let source = doc0.sequence || null;
     const taken = new Set((doc0.sequences || []).map((s) => s.id));
     const made = [], lines = [];
+    const step = (i, what) => { if (typeof env.progress === "function") env.progress(`clip ${i + 1} of ${o.clips.length}, ${what}`, made.length); };
     for (let i = 0; i < o.clips.length; i++) {
       const c = o.clips[i];
+      step(i, "cutting");
       let id = "seq_clip" + (i + 1);
       for (let n = 2; taken.has(id); n++) id = "seq_clip" + (i + 1) + "_" + n;
       taken.add(id);
@@ -102,8 +105,14 @@
       if (!source) source = ((await env.read()).sequences || []).find((s) => s.id !== id)?.id || "main";
       const len = Math.round((c.to - c.from) * 1000) / 1000, notes = [];
       if (o.reframe && reshaped) {
-        try { await env.reframe({}); notes.push("framed on the subject"); }
-        catch (e) { notes.push("not reframed (" + first(e.message) + ")"); }
+        step(i, "framing");
+        // the editor may save while the footage is read (just after opening, probing media): try once more
+        let err = null;
+        for (let k = 0; k < 2; k++) {
+          try { await env.reframe({}); err = null; break; }
+          catch (e) { err = e; if (!/changed/i.test(e.message)) break; }
+        }
+        notes.push(err ? "not reframed (" + first(err.message) + ")" : "framed on the subject");
       }
       if (o.title && c.title) {
         const now = await env.read(), lane = freeTopLane(now, Math.min(TITLE_SECS, len));
@@ -113,6 +122,7 @@
         } else notes.push("no title (the top video lane is busy or locked — add a lane, then a title)");
       }
       if (o.captions) {
+        step(i, "captions");
         try {
           const r = String(await env.captions({ style: o.captions }));
           // still transcribing (Studio answers before a long first transcription is done): say so, don't claim them
@@ -123,10 +133,13 @@
       }
       let file = "";
       if (o.exportPreset) {
+        step(i, "exporting");
         try {
-          const r = await env.exportClip({ preset: o.exportPreset, name: fileName(c.name) });
-          file = (String(r).match(/exports\/[^\s"'),]+/) || [""])[0];
-          notes.push(file ? "exported → " + file : "exported");
+          const r = String(await env.exportClip({ preset: o.exportPreset, name: fileName(c.name) }));
+          file = (r.match(/exports\/[^\s"'),]+/) || [""])[0];
+          // only a finished export counts: one still running (or stopped) is reported as it is
+          if (file && !/ (running|queued|failed|cancelled)\b|check again/i.test(r)) notes.push("exported → " + file);
+          else { file = ""; notes.push("not exported (" + first(r) + ")"); }
         } catch (e) { notes.push("not exported (" + first(e.message) + ")"); }
       }
       made.push({ id, name: c.name, file });

@@ -14,6 +14,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   word-timed captions and, with `export`, a file in `exports/`. The source
   timeline is left as it was.
 
+### Fixed
+- **An export no longer sits at 0% for good.** Fast export hands its frames
+  only to encoder workers that have started. A worker that never ran (one held
+  at its first line by a debugger attached to the tab, as test tools do) kept
+  the frames it was sent, and the export waited on them forever; until a
+  worker is running, frames are now encoded on the page. An export where
+  nothing moves on for a minute (longer for a long export, or in a background
+  tab) now fails with a reason, and so does an audio mix that never finishes. The mix loads its
+  gate / limiter / pitch effects only when the edit uses one.
+
 ## [1.21.0] - 2026-11-23
 
 ### Added

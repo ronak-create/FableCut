@@ -17201,6 +17201,7 @@ function snapshotExportFrame() {
   } catch (e) { throw canvasTaintError(e); }
 }
 const JPEG_WORKER_SRC = `"use strict";
+self.postMessage({ ready: true });
 self.onmessage = async (e) => {
   const { id, bmp, quality, type } = e.data;
   try {
@@ -17217,46 +17218,63 @@ self.onmessage = async (e) => {
   }
 };
 `;
-function createJpegWorkers(n) {
+/* Frame encoders off the main thread. A worker gets frames only once it has
+   said it is running: one that never starts (its script didn't load, or a
+   debugger attached to the tab holds new workers at their first line) would
+   keep every frame sent to it, and the export, which takes the frames back in
+   order, would wait on it for good. Until a worker is ready, and when none is
+   left, frames are encoded here. A worker that fails, or keeps a frame past
+   answerMs, is dropped, and the frames it held fail the export with a reason. */
+const JPEG_ANSWER_MS = 60000;
+function createJpegWorkers(n, { answerMs = JPEG_ANSWER_MS } = {}) {
   if (typeof Worker !== "function" || typeof OffscreenCanvas !== "function") return null;
   let url;
   try { url = URL.createObjectURL(new Blob([JPEG_WORKER_SRC], { type: "text/javascript" })); }
   catch { return null; }
-  const workers = [];
+  const pool = [];
   try {
-    for (let i = 0; i < n; i++) workers.push(new Worker(url));
+    for (let i = 0; i < n; i++) pool.push({ w: new Worker(url), ready: false, dead: false, jobs: new Map() });
   } catch {
-    for (const w of workers) try { w.terminate(); } catch { }
+    for (const x of pool) try { x.w.terminate(); } catch { }
     URL.revokeObjectURL(url);
     return null;
   }
   URL.revokeObjectURL(url);
-  const pending = new Map();
   let nextId = 0, rr = 0;
-  for (const w of workers) {
-    w.onmessage = (e) => {
-      const rec = pending.get(e.data.id);
-      if (!rec) return;
-      pending.delete(e.data.id);
-      if (e.data.error) rec.reject(new Error(e.data.error));
-      else rec.resolve(e.data.buf);
+  const drop = (x, why) => {
+    if (x.dead) return;
+    x.dead = true;
+    try { x.w.terminate(); } catch { }
+    for (const job of x.jobs.values()) { clearTimeout(job.timer); job.reject(new Error(why)); }
+    x.jobs.clear();
+  };
+  for (const x of pool) {
+    x.w.onmessage = (e) => {
+      const d = e.data || {};
+      if (d.ready) { x.ready = true; return; }
+      const job = x.jobs.get(d.id);
+      if (!job) return;
+      x.jobs.delete(d.id);
+      clearTimeout(job.timer);
+      if (d.error) job.reject(new Error(d.error));
+      else job.resolve(d.buf);
     };
-    w.onerror = () => {};
+    x.w.onerror = (e) => drop(x, "a frame encoder stopped" + (e && e.message ? ": " + e.message : ""));
   }
   return {
     encode(bmp, quality, type) {
-      const id = nextId++;
-      const w = workers[rr++ % workers.length];
+      const live = pool.filter((x) => x.ready && !x.dead);
+      if (!live.length) return jpegFromBitmap(bmp, quality, type);
+      const x = live[rr++ % live.length], id = nextId++;
       return new Promise((resolve, reject) => {
-        pending.set(id, { resolve, reject });
-        try { w.postMessage({ id, bmp, quality, type }, [bmp]); }
-        catch (e) { pending.delete(id); reject(e); }
+        const timer = setTimeout(() => drop(x, `a frame encoder didn't answer in ${Math.round(answerMs / 1000)} s`), answerMs);
+        x.jobs.set(id, { resolve, reject, timer });
+        try { x.w.postMessage({ id, bmp, quality, type }, [bmp]); }
+        catch (e) { x.jobs.delete(id); clearTimeout(timer); reject(e); }
       });
     },
     terminate() {
-      for (const rec of pending.values()) rec.reject(new Error("cancelled"));
-      pending.clear();
-      for (const w of workers) try { w.terminate(); } catch { }
+      for (const x of pool) drop(x, "cancelled");
     },
   };
 }
@@ -17363,11 +17381,41 @@ function postFrames(url, body, signal) {
     xhr.send(body);
   });
 }
+/* An export's stall watchdog. A step that never finishes (a decoder, a frame
+   encoder, or the encoder behind the uploads that stopped answering) fails the
+   export with a reason instead of holding it where it is for good. Each step
+   that moves the export on calls moved(); guard(p) races p against the stall.
+   The limit grows with the export's length, since a single step can scale
+   with it: an in-browser encoder encodes the whole sound track at the first
+   upload. In a hidden tab it is at least hiddenMs: after a few minutes there
+   the browser runs the export's timers about once a minute, so a healthy
+   export can go that long without moving. onStall(err) runs first, so
+   polling waits see the error too. */
+function exportWatchdog(seconds, onStall, { minMs = 60000, msPerSecond = 100, hiddenMs = 300000 } = {}) {
+  const limit = Math.max(minMs, seconds * msPerSecond);
+  let movedAt = performance.now(), fail = null;
+  const stalled = new Promise((_, rej) => { fail = rej; });
+  stalled.catch(() => { });
+  let timer = setInterval(() => {
+    const lim = typeof document !== "undefined" && document.hidden ? Math.max(limit, hiddenMs) : limit;
+    if (performance.now() - movedAt < lim) return;
+    clearInterval(timer); timer = 0;
+    const err = new Error(`the export stalled: nothing moved on for ${Math.round(lim / 1000)} s (a decoder or encoder stopped answering) — try it again`);
+    if (onStall) onStall(err);
+    fail(err);
+  }, Math.min(1000, limit / 4));
+  return {
+    moved() { movedAt = performance.now(); },
+    guard(p) { return Promise.race([p, stalled]); },
+    stop() { if (timer) clearInterval(timer); timer = 0; },
+  };
+}
 /* Sequential /frame POSTs, batched. Concurrent bodies can still race on ffmpeg
    stdin if they complete out of order, so the client starts each fetch only
    after the previous one settles; rendering runs ahead under backpressure.
-   JPEG Fast and WebCodecs Annex-B both concatenate on this path. */
-function createExportUploader(sessId, { batchItems, batchBytes, signal, getError, setError }) {
+   JPEG Fast and WebCodecs Annex-B both concatenate on this path.
+   onSent() runs after each POST the server took (the stall watchdog's moved). */
+function createExportUploader(sessId, { batchItems, batchBytes, signal, getError, setError, onSent }) {
   let batch = [];
   let packed = 0;
   let sentFirst = false;
@@ -17391,6 +17439,7 @@ function createExportUploader(sessId, { batchItems, batchBytes, signal, getError
       const err = getError();
       if (err) throw err;
       await postFrames("/api/export/frame?id=" + sessId, body, signal);
+      if (onSent) onSent();
     });
     uploadTail = p.catch((err) => {
       if (!getError()) setError(err);
@@ -17960,9 +18009,16 @@ async function renderAudioMix(t0, t1) {
   if (dur <= 0) return null;
   const sr = 48000;
   const off = new OfflineAudioContext(2, Math.ceil(dur * sr) + 1, sr);
-  // gate / limiter / pitch render in the export too — loaded only when the mix uses one: an offline
-  // render started while its worklet module is still loading can hang (seen in Chrome on AV1 files)
-  if (mixUsesFxWorklet()) await loadFxWorklet(off);
+  // A step that never finishes would hold the export at 0% for good (a debugger attached to the tab
+  // can hold a worklet's thread at its start, for one): the effects' module and the render race a
+  // deadline that fails the mix with a reason instead.
+  let timer = null;
+  const stalled = new Promise((_, rej) => {
+    timer = setTimeout(() => rej(new Error("the audio mix didn't finish (the browser's audio renderer stalled) — try the export again")), Math.max(60, dur * 2) * 1000);
+  });
+  stalled.catch(() => { });
+  // gate / limiter / pitch render in the export too; their worklet loads only when the mix uses one
+  if (mixUsesFxWorklet()) await Promise.race([loadFxWorklet(off), stalled]);
   const mix = buildMixBuses(off, audioTrackIds(), busIdsNow());
   applyMixLevels(mix);
   mix.masterOut.connect(off.destination);
@@ -18008,7 +18064,7 @@ async function renderAudioMix(t0, t1) {
     }
     scheduled = true;
   }
-  if (!scheduled) return null;
+  if (!scheduled) { clearTimeout(timer); return null; }
   // Effect automation: step the offline render and glide each keyed
   // parameter, the same way preview drives it every frame.
   const animated = [];
@@ -18027,12 +18083,7 @@ async function renderAudioMix(t0, t1) {
       off.suspend(when).then(() => { for (const run of animated) run(t0 + when); off.resume(); });
     }
   }
-  // a render that never finishes would hold the export at 0% for good: fail it with a reason instead
-  const limit = Math.max(60, dur * 2) * 1000;
-  let timer = null;
-  const rendered = await Promise.race([off.startRendering(),
-    new Promise((_, rej) => { timer = setTimeout(() => rej(new Error("the audio mix didn't finish (the browser's audio renderer stalled) — try the export again")), limit); })])
-    .finally(() => clearTimeout(timer));
+  const rendered = await Promise.race([off.startRendering(), stalled]).finally(() => clearTimeout(timer));
   return encodeWAV(rendered);
 }
 /* Frame-exact asset prep for the fast exporter: rasterize the SVG frame for
@@ -18073,13 +18124,15 @@ async function fastExport(opts = {}) {
   let sessId = null;
   let uploadError = null;
   const setError = (err) => { if (!uploadError) uploadError = err; };
+  let watch = null;
   try {
     els.exportTitle.textContent = "Mixing audio…";
-    const wav = await renderAudioMix(t0, t1);
+    const wav = await renderAudioMix(t0, t1);   // has its own watchdog
     if (renderCancelled) throw new Error("cancelled");
+    watch = exportWatchdog(frames / fps, setError);
     const profileId = opts.profile || effectiveEncodeProfileId();
     const cv = deliveryCanvas();
-    const begin = await fetch("/api/export/begin", {
+    const begin = await watch.guard(fetch("/api/export/begin", {
       method: "POST",
       body: JSON.stringify(delivery ? {
         fps, duration: frames / fps,
@@ -18092,7 +18145,7 @@ async function fastExport(opts = {}) {
         hasAudio: !!wav,
       }),
       signal,
-    }).then((r) => r.json());
+    }).then((r) => r.json()));
     if (!begin.id) throw new Error(begin.error || "export begin failed");
     sessId = begin.id;
     const jpegQ = delivery ? begin.jpegQuality ?? 0.95 : exportProfileMeta(profileId).jpegQuality ?? 0.95;
@@ -18101,19 +18154,19 @@ async function fastExport(opts = {}) {
     const frameType = begin.input === "png" ? "image/png" : "image/jpeg";
     exportFullCanvas = !!delivery;
     if (wav) {
-      const r = await fetch("/api/export/audio?id=" + sessId, { method: "POST", body: wav, signal });
+      const r = await watch.guard(fetch("/api/export/audio?id=" + sessId, { method: "POST", body: wav, signal }));
       if (!r.ok) throw new Error("audio upload failed");
     }
-    await loadProjectFonts();
+    await watch.guard(loadProjectFonts());
     resetExportCanvases();
-    await armExportCors();
-    await useOriginalPlayers();   // proxies are for editing — export reads the originals
+    await watch.guard(armExportCors());
+    await watch.guard(useOriginalPlayers());   // proxies are for editing — export reads the originals
     exportDecodeBegin();
     // JPEG off the compositor thread: snapshot is sync, encode/upload run ahead
     // under backpressure. Awaiting toBlob every frame was slower than ffmpeg.
     const up = createExportUploader(sessId, {
       batchItems: 8, batchBytes: 512 * 1024, signal,
-      getError: () => uploadError, setError,
+      getError: () => uploadError, setError, onSent: watch.moved,
     });
     const workers = createJpegWorkers(Math.min(3, Math.max(1, (navigator.hardwareConcurrency || 2) - 1)));
     let pixelChain = Promise.resolve();
@@ -18135,14 +18188,15 @@ async function fastExport(opts = {}) {
       // enough that play-ahead would overrun during the wait (not on every blip).
       const queueBusy = pixelsInflight > 6 || up.inFlight() > 4;
       if (pixelsInflight > 4) pauseExportVideos();
-      await waitPixels(6);
+      await waitPixels(6);   // the polling waits see the watchdog's error themselves
       await up.waitBackpressure(4);
       const t = t0 + f / fps;
       state.time = t;
-      await seekVideosTo(t, { queueBusy });
-      await prepareFrameAssets(t);
+      await watch.guard(seekVideosTo(t, { queueBusy }));
+      await watch.guard(prepareFrameAssets(t));
       drawFrame(t);
       const snap = snapshotExportFrame();
+      watch.moved();
       pixelsInflight++;
       let jpegP;
       if (snap.kind === "bmp") {
@@ -18166,6 +18220,7 @@ async function fastExport(opts = {}) {
         const buf = await jpegP;
         if (!buf || !(buf.byteLength || buf.size || buf.length)) throw new Error("frame encode failed");
         up.push(buf instanceof ArrayBuffer ? new Uint8Array(buf) : buf);
+        watch.moved();
       }).catch((err) => { setError(err); throw err; }).finally(() => { pixelsInflight--; });
       const pct = ((f + 1) / frames) * 100;
       els.exportProgress.style.width = pct.toFixed(1) + "%";
@@ -18173,14 +18228,15 @@ async function fastExport(opts = {}) {
       if (opts.onProgress) opts.onProgress(0.97 * (f + 1) / frames);
       if (job) reportExportJob(job, { progress: 0.97 * (f + 1) / frames });
     }
-    await pixelChain;
+    await watch.guard(pixelChain);
     if (uploadError) throw uploadError;
     els.exportTitle.textContent = "Encoding…";
-    await up.done();
+    await watch.guard(up.done());
     if (uploadError) throw uploadError;
     } finally {
       try { workers?.terminate(); } catch { }
     }
+    watch.stop();   // finishing (the encoder's last frames, the checks) can take a while on its own
     const end = await fetch("/api/export/end?id=" + sessId, { method: "POST", signal }).then((r) => r.json());
     if (!end.src) throw new Error(end.error || "encode failed");
     const outs = end.outputs || [{ file: decodeURIComponent(end.src.split("/").pop()), ok: true, src: end.src }];
@@ -18213,6 +18269,7 @@ async function fastExport(opts = {}) {
     if (job) await reportExportJob(job, { status: "failed", error: msg }, true);
     else if (msg !== "cancelled" && !opts.silent) alert("Export failed: " + msg);
   } finally {
+    watch?.stop();
     exportAbort = null;
     exportFullCanvas = false;
     exportDecodeEnd();
@@ -18806,13 +18863,14 @@ async function webCodecsExport(name) {
   let encoder = null;
   let uploadError = null;
   const setError = (err) => { if (!uploadError) uploadError = err; };
-  let up = null;
+  let up = null, watch = null;
   try {
     els.exportTitle.textContent = "Mixing audio…";
-    const wav = await renderAudioMix(t0, t1);
+    const wav = await renderAudioMix(t0, t1);   // has its own watchdog
     if (renderCancelled) throw new Error("cancelled");
+    watch = exportWatchdog(frames / fps, setError);
 
-    const begin = await fetch("/api/export/begin", {
+    const begin = await watch.guard(fetch("/api/export/begin", {
       method: "POST",
       body: JSON.stringify({
         fps,
@@ -18821,16 +18879,16 @@ async function webCodecsExport(name) {
         hasAudio: !!wav,
       }),
       signal,
-    }).then((r) => r.json());
+    }).then((r) => r.json()));
     if (!begin.id) throw new Error(begin.error || "export begin failed");
     sessId = begin.id;
     if (wav) {
-      const r = await fetch("/api/export/audio?id=" + sessId, { method: "POST", body: wav, signal });
+      const r = await watch.guard(fetch("/api/export/audio?id=" + sessId, { method: "POST", body: wav, signal }));
       if (!r.ok) throw new Error("audio upload failed");
     }
     up = createExportUploader(sessId, {
       batchItems: 12, batchBytes: 128 * 1024, signal,
-      getError: () => uploadError, setError,
+      getError: () => uploadError, setError, onSent: watch.moved,
     });
 
     // Always encode at project/frame resolution (not display CSS size).
@@ -18857,10 +18915,10 @@ async function webCodecsExport(name) {
       avc: { format: "annexb" },
       latencyMode: "quality",
     });
-    await loadProjectFonts();
+    await watch.guard(loadProjectFonts());
     resetExportCanvases();
-    await armExportCors();
-    await useOriginalPlayers();   // proxies are for editing — export reads the originals
+    await watch.guard(armExportCors());
+    await watch.guard(useOriginalPlayers());   // proxies are for editing — export reads the originals
     exportDecodeBegin();
 
     for (let f = 0; f < frames; f++) {
@@ -18868,12 +18926,12 @@ async function webCodecsExport(name) {
       if (uploadError) throw uploadError;
       const queueBusy = up.inFlight() > 4 || encoder.encodeQueueSize > 4;
       if (up.inFlight() > 3 || encoder.encodeQueueSize > 3) pauseExportVideos();
-      await up.waitBackpressure(4);
+      await up.waitBackpressure(4);   // the polling waits see the watchdog's error themselves
       await waitEncodeQueue(encoder, 4, { signal, getError: () => uploadError });
       const t = t0 + f / fps;
       state.time = t;
-      await seekVideosTo(t, { queueBusy });
-      await prepareFrameAssets(t);
+      await watch.guard(seekVideosTo(t, { queueBusy }));
+      await watch.guard(prepareFrameAssets(t));
       drawFrame(t);
       // Absolute µs timestamps; duration = delta so average rate stays exact
       // (constant Math.round(1e6/fps) drifts, e.g. 33333µs → avg 1000000/33333).
@@ -18894,14 +18952,16 @@ async function webCodecsExport(name) {
       } finally {
         frame.close();
       }
+      watch.moved();
       const pct = ((f + 1) / frames) * 100;
       els.exportProgress.style.width = pct.toFixed(1) + "%";
       els.exportTitle.textContent = `Encoding… ${pct.toFixed(0)}%`;
     }
     els.exportTitle.textContent = "Finishing…";
-    await encoder.flush();
-    await up.done();
+    await watch.guard(encoder.flush());
+    await watch.guard(up.done());
     if (uploadError) throw uploadError;
+    watch.stop();
     encoder.close();
     encoder = null;
     const end = await fetch("/api/export/end?id=" + sessId, { method: "POST", signal }).then((r) => r.json());
@@ -18916,6 +18976,7 @@ async function webCodecsExport(name) {
     const msg = e?.name === "AbortError" ? "cancelled" : String(e.message || e);
     if (msg !== "cancelled") alert("Export failed: " + msg);
   } finally {
+    watch?.stop();
     exportAbort = null;
     exportDecodeEnd();
     restoreExportVideoState();
