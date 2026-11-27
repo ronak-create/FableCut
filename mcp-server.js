@@ -2290,7 +2290,7 @@ async function handle(msg) {
         result: {
           protocolVersion: negotiateProtocolVersion(params?.protocolVersion),
           capabilities: { tools: {} },
-          serverInfo: { name: "fablecut", version: "1.21.0" },
+          serverInfo: { name: "fablecut", version: "1.22.0" },
         },
       });
     }

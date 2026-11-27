@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.22.0] - 2026-11-27
+
 ### Added
 - **Clips.** `fablecut_clips` turns a long video (a podcast, an interview, a talk)
   into short clips in one call: each part the agent picks becomes its own 9:16
@@ -21,8 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the frames it was sent, and the export waited on them forever; until a
   worker is running, frames are now encoded on the page. An export where
   nothing moves on for a minute (longer for a long export, or in a background
-  tab) now fails with a reason, and so does an audio mix that never finishes. The mix loads its
-  gate / limiter / pitch effects only when the edit uses one.
+  tab) now fails with a reason, and so does an audio mix that never finishes.
+  The mix loads its gate / limiter / pitch effects only when the edit uses one.
 
 ## [1.21.0] - 2026-11-23
 
@@ -1116,7 +1118,8 @@ the report in [#1](https://github.com/ronak-create/FableCut/issues/1) — thanks
 - Three control surfaces for AI agents: **MCP server**, direct `project.json`
   editing, and a **REST API** with live-reload over server-sent events.
 
-[Unreleased]: https://github.com/ronak-create/FableCut/compare/v1.21.0...HEAD
+[Unreleased]: https://github.com/ronak-create/FableCut/compare/v1.22.0...HEAD
+[1.22.0]: https://github.com/ronak-create/FableCut/compare/v1.21.0...v1.22.0
 [1.21.0]: https://github.com/ronak-create/FableCut/compare/v1.20.0...v1.21.0
 [1.20.0]: https://github.com/ronak-create/FableCut/compare/v1.19.0...v1.20.0
 [1.19.0]: https://github.com/ronak-create/FableCut/compare/v1.18.0...v1.19.0
