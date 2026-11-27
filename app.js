@@ -17909,6 +17909,9 @@ async function seekVideosTo(t, { queueBusy } = {}) {
   const restoreGain = [];
   const decoded = new Set();
   const dec = runtime.exportDecode;
+  // the export this seek is for: it can end while the seek waits (its watchdog gave up), and the
+  // players may be the next export's by then, so a stale seek stops instead of moving them
+  const win = exportWindow;
   if (dec) {
     const jobs = [];
     for (const c of mediaClips()) {
@@ -17922,6 +17925,7 @@ async function seekVideosTo(t, { queueBusy } = {}) {
       jobs.push(exportDecodeFrame(c, t).then((ok) => { if (ok) decoded.add(c.id); }));
     }
     await Promise.all(jobs);
+    if (exportWindow !== win) return;
   }
   for (const c of mediaClips()) {
     if (c.kind !== "video") continue;
@@ -17975,6 +17979,7 @@ async function seekVideosTo(t, { queueBusy } = {}) {
     }
   }
   await Promise.all(waits);
+  if (exportWindow !== win) return;
   for (const c of restoreGain) {
     const chain = runtime.clipGain.get(c.id);
     if (chain?.vol) driveClipChain(chain, c, evalProps(c, t), t);

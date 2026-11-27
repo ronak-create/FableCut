@@ -86,6 +86,29 @@
     return (doc.clips || []).some((c) => c.track === top && c.start < until && c.start + c.duration > 0) ? null : top;
   }
   const first = (s) => String(s || "").split("\n")[0].slice(0, 200);
+  /** An export answer that says it hasn't ended ("Export x_1 running — 40% …"). */
+  const RUNNING = /\bExport (?:\S+ )?(?:pending|running|queued)\b/;
+
+  /** exportClip for a host whose exports run as jobs it can poll and cancel: start one, wait up to
+   *  a.timeout for its end, cancel it past that, and answer once its status says it ended — else
+   *  "Export <id> running: …", which stops the batch. io: start(a) → text naming the job (throws only
+   *  when nothing was accepted), status(id, waitSecs) → text, cancel(id), sleep(ms). */
+  async function exportUntilEnded(io, a) {
+    const started = String(await io.start(a));
+    const id = (/\bExport (\S+) /.exec(started) || [])[1];
+    if (!id || !RUNNING.test(started)) return started;
+    let r;
+    try { r = String(await io.status(id, a.timeout)); }
+    catch (e) { r = `Export ${id} running (its status couldn't be read: ${first(e && e.message)})`; }
+    if (!RUNNING.test(r)) return r;
+    try { await io.cancel(id); } catch { }
+    await io.sleep(2000);   // a running tab hears the cancel in the answer to its next progress report, once a second
+    let now = "";
+    try { now = String(await io.status(id, 0)); } catch { }
+    if (/\bExport \S+ done\b/.test(now)) return now;
+    if (/\bExport \S+ (?:cancelled|failed)\b/.test(now)) return `Export ${id} stopped: it didn't finish in ${a.timeout} s`;
+    return `Export ${id} running: it couldn't be confirmed stopped${now ? " (" + first(now) + ")" : ""}`;
+  }
 
   /** Make the clips. Returns the reply text. */
   async function run(args, env) {
@@ -154,7 +177,7 @@
           const r = String(await env.exportClip({ preset: o.exportPreset, name: fileName(c.name), timeout: Math.max(EXPORT_MIN_S, Math.ceil(len * EXPORT_PER_S)) }));
           file = (r.match(/exports\/[^\s"'),]+/) || [""])[0];
           // an export that hasn't ended still renders the open sequence: opening another one would change its frames
-          if (/\bExport \S+ (pending|running|queued)\b/.test(r)) { file = ""; halted = c.name; notes.push("not exported (" + first(r) + ")"); }
+          if (RUNNING.test(r)) { file = ""; halted = c.name; notes.push("not exported (" + first(r) + ")"); }
           // only a finished export counts: a stopped one is reported as it is
           else if (file && !/ (failed|cancelled)\b|check again/i.test(r)) notes.push("exported → " + file);
           else { file = ""; notes.push("not exported (" + first(r) + ")"); }
@@ -175,5 +198,5 @@
       (o.exportPreset ? "the files are in exports/." : "export one with openSequence then fablecut_export {preset, name}, or call again with export:\"tiktok\".");
   }
 
-  return { ASPECTS, CAPTION_STYLES, MAX_CLIPS, MIN_LEN, MAX_LEN, canvasFor, options, titleClip, freeTopLane, run };
+  return { ASPECTS, CAPTION_STYLES, MAX_CLIPS, MIN_LEN, MAX_LEN, canvasFor, options, titleClip, freeTopLane, exportUntilEnded, run };
 });

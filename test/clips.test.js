@@ -177,3 +177,45 @@ test("run: an export that hasn't ended stops the batch before another sequence o
   assert.match(ok, /not exported \(Export x_2 stopped: it didn't finish in 180 s\)/);
   assert.match(ok, /Made 2 clips/, "a stopped export has ended: the next clip goes on");
 });
+
+/* exportUntilEnded: a host's job-based export, ended before it answers (a stand-in for the MCP server) */
+function jobHost(script) {
+  const log = [];
+  const io = {
+    start: async () => { log.push("start"); return "Settings adjusted: none\nExport x_9 pending (in the open editor tab). Check again with fablecut_export {job:\"x_9\"}."; },
+    status: async (id, secs) => { log.push(secs ? `wait ${secs}` : "status"); return script.status(id, secs, log); },
+    cancel: async (id) => { log.push("cancel"); if (script.cancel) return script.cancel(id); },
+    sleep: async () => { log.push("sleep"); },
+  };
+  return { io, log };
+}
+
+test("exportUntilEnded: a finished export answers as it is, with no cancel", async () => {
+  const { io, log } = jobHost({ status: () => "Export x_9 done → exports/tip-1.mp4 (4.0 MB)" });
+  assert.match(await C.exportUntilEnded(io, { preset: "tiktok", name: "tip-1", timeout: 180 }), /Export x_9 done → exports\/tip-1\.mp4/);
+  assert.deepEqual(log, ["start", "wait 180"]);
+});
+
+test("exportUntilEnded: one still running at its time is cancelled, and answers stopped once its status says so", async () => {
+  const { io, log } = jobHost({ status: (id, secs) => secs ? "Export x_9 running — 60% (in the open editor tab)." : "Export x_9 cancelled: cancelled" });
+  assert.equal(await C.exportUntilEnded(io, { timeout: 180 }), "Export x_9 stopped: it didn't finish in 180 s");
+  assert.deepEqual(log, ["start", "wait 180", "cancel", "sleep", "status"]);
+});
+
+test("exportUntilEnded: a status check that fails still cancels the job; one it can't confirm stopped stops the batch", async () => {
+  const lost = jobHost({ status: (id, secs) => { if (secs) throw new Error("lost track of the export job"); return "Export x_9 cancelled: cancelled"; } });
+  assert.equal(await C.exportUntilEnded(lost.io, { timeout: 180 }), "Export x_9 stopped: it didn't finish in 180 s");
+  assert.ok(lost.log.includes("cancel"), "the accepted job is cancelled although its poll failed");
+  const stuck = jobHost({ status: () => "Export x_9 running — 60% (in the open editor tab).", cancel: () => { throw new Error("cancel failed"); } });
+  const r = await C.exportUntilEnded(stuck.io, { timeout: 180 });
+  assert.match(r, /^Export x_9 running: it couldn't be confirmed stopped/);
+  const silent = jobHost({ status: (id, secs) => { if (!secs) throw new Error("server gone"); return "Export x_9 running — 60%."; } });
+  assert.match(await C.exportUntilEnded(silent.io, { timeout: 180 }), /^Export x_9 running: it couldn't be confirmed stopped$/);
+  // and run() stops the batch on those answers, also on one without a job id
+  for (const answer of [r, "Export running: it is still going in the tab\nExport failed: an export is already running in the editor"]) {
+    const { env, patches } = fakeEnv(talk(), { exportClip: async () => answer });
+    const reply = await C.run({ clips: [{ from: 10, to: 40, name: "Tip 1" }, { from: 60, to: 90, name: "Tip 2" }], captions: false, export: "tiktok" }, env);
+    assert.match(reply, /The clips after "Tip 1" weren't made/, answer);
+    assert.equal(patches.length, 1, "nothing more was patched while it may still render");
+  }
+});

@@ -245,3 +245,41 @@ test("hardSeekVideo: retries keep the export's cancel signal after it is cleared
     await assert.rejects(p, /cancelled/);
   } finally { delete globalThis.exportAbort; }
 });
+
+/* seekVideosTo whose export ended while it waited (the stall watchdog gave up on it): the players
+   may be the next export's by then, so the stale seek must not move them. */
+const SEEK = slice("async function seekVideosTo(", "function encodeWAV(");
+function loadSeek(over = {}) {
+  let finishDecode = null;
+  const moved = [];
+  const deps = {
+    exportWindow: { export: "A" }, exportSeekClock: 0,
+    runtime: { exportDecode: { sources: new Map(), opening: new Map() }, exportFrames: new Map(), clipGain: new Map() },
+    projectFps: () => 30, exportLoopLag: () => ({ fast: true, behind: false }),
+    mediaClips: () => [{ id: "v", kind: "video", start: 0, duration: 10, in: 0 }],
+    clipRenders: () => true, activeAt: () => true,
+    exportDecodeFrame: () => new Promise((r) => { finishDecode = r; }),
+    getClipEl: () => ({ readyState: 4, paused: true, currentTime: 0, pause() { } }),
+    mediaTimeAt: (c, t) => t, clamp: (v, a, b) => Math.min(b, Math.max(a, v)), kfChannel: (c, k, l, d) => d, clipSpeed: () => 1,
+    presentedClose: () => false, muteClipChain() { }, videoRangeBuffered: () => false,
+    playAdvanceVideo: async () => { moved.push("play"); }, hardSeekVideo: async () => { moved.push("seek"); },
+    driveClipChain() { }, evalProps: () => ({}), prefetchExportVideos: () => { moved.push("prefetch"); },
+    ...over,
+  };
+  const seekVideosTo = new Function("deps", `with (deps) { ${SEEK}; return seekVideosTo; }`)(deps);
+  return { deps, moved, seekVideosTo, finish: (v) => finishDecode(v) };
+}
+
+test("export seek: a seek whose export ended while it decoded leaves the players alone", async () => {
+  const s = loadSeek();
+  const p = s.seekVideosTo(1);
+  s.deps.exportWindow = { export: "B" };   // A ended, B began
+  s.finish(false);                          // A's decode lands late: its clip would fall back to the element
+  await p;
+  assert.deepEqual(s.moved, [], "no seek, play or prefetch for the export that is gone");
+  const live = loadSeek();
+  const q = live.seekVideosTo(1);
+  live.finish(false);
+  await q;
+  assert.deepEqual(live.moved, ["seek", "prefetch"], "the export still running seeks its element as before");
+});
