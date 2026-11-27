@@ -997,7 +997,18 @@ async function clipsTool(args) {
     patch: async (ops) => text(await callTool("fablecut_patch_project", { ops }, 0)),
     reframe: (a) => reframeTool(a),
     captions: (a) => captionsTool(a),
-    exportClip: async (a) => text(await exportTool(a)),
+    // answers once its export has ended (clips.js): one still running at a.timeout is cancelled, and the
+    // tab stops at its next progress report (once a second), before the next clip opens another sequence
+    exportClip: async (a) => {
+      const r = text(await exportTool(a));
+      const id = (/\bExport (\S+) (?:pending|running)\b/.exec(r) || [])[1];
+      if (!id) return r;
+      try { await exportTool({ cancel: id }); } catch { }
+      await sleep(2000);
+      let now = "";
+      try { now = text(await exportTool({ job: id })); } catch { }
+      return / done\b/.test(now) ? now : `Export ${id} stopped: it didn't finish in ${a.timeout} s`;
+    },
   });
   return reply + (verWarn || "\nThe project as it was is kept as a version (fablecut_versions; restore undoes it).");
 }

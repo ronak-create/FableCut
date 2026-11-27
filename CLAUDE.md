@@ -2188,7 +2188,11 @@ For each one, in order:
 5. with `export:"tiktok"` (or any delivery preset), rendered to `exports/`,
    named after the clip (`Tip 1` → `tip-1.mp4`).
 
-A step that fails is reported on its clip, and the rest go on. The reply
+A step that fails is reported on its clip, and the rest go on. Each export
+gets 3 minutes, or 6 s per second of the clip if longer: one still running
+then is stopped and reported as not exported. A timeline with locked clips or
+lanes refuses the call (each clip is cut out of a copy, and locked material
+can't be cut): unlock them only if the user agrees. The reply
 lists each clip (its sequence id, length, what was done, the file); the first
 clip is opened. A version is kept first. Check a clip with
 `openSequence` and `fablecut_frame {time}`; its title and captions are

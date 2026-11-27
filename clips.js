@@ -7,7 +7,10 @@
    run the same steps. The steps themselves are the editor's own tools, passed in
    as `env`: read() the project, patch(ops), reframe(args), captions(args),
    exportClip(args) — each answering text, or throwing — and, optionally, progress(text)
-   as each clip and step starts. */
+   as each clip and step starts. exportClip gets a `timeout` (seconds) for that clip and
+   answers once its export has ended (done, failed, or stopped when its time was up): the
+   next clip opens another sequence, and the editor renders the open one live. An answer
+   that says it is still running stops the batch there. */
 (function (root, factory) {
   const api = factory();
   if (typeof module === "object" && module.exports) module.exports = api;
@@ -18,6 +21,9 @@
   const ASPECTS = { "9:16": [9, 16], "1:1": [1, 1], "4:5": [4, 5], "16:9": [16, 9] };
   const CAPTION_STYLES = ["pop", "highlight", "karaoke", "subtitle"];
   const MAX_CLIPS = 10, MIN_LEN = 3, MAX_LEN = 180, TITLE_SECS = 3;
+  // each clip's export gets this long (3 min, or 6 s per second of the clip): one stuck past it is stopped
+  // and reported, so it can't hold up the clips after it
+  const EXPORT_MIN_S = 180, EXPORT_PER_S = 6;
 
   /** The canvas for a shape, keeping the project's shorter side (1920×1080 → 1080×1920 for 9:16), even sizes. */
   function canvasFor(aspect, W, H) {
@@ -39,6 +45,12 @@
     if (list.length > MAX_CLIPS) throw new Error(`up to ${MAX_CLIPS} clips at a time`);
     const len = end(doc);
     if (!(len > 0)) throw new Error("the open timeline is empty — put the long video on it first");
+    // each clip is cut out of a copy by extracting the rest, and an extract leaves locked material as it is:
+    // the copy would keep it whole and out of step with the rest, so the call is refused before anything changes
+    const lockedLanes = new Set(Array.isArray(doc.lockedTracks) ? doc.lockedTracks : []);
+    const locked = (doc.clips || []).filter((c) => c && (c.locked || lockedLanes.has(c.track)));
+    if (locked.length) throw new Error(`the timeline has locked material (${locked.slice(0, 4).map((c) => c.id + " on " + c.track).join(", ")}${locked.length > 4 ? ", …" : ""}): ` +
+      "clips are cut out of a copy by extracting the rest, and locked clips can't be cut — unlock them (updateClip set:{locked:null}, or the lane's lock) only if the user agrees, then call again");
     const clips = list.map((c, i) => {
       const from = +(c && c.from), to = +(c && c.to);
       if (!Number.isFinite(from) || !Number.isFinite(to)) throw new Error(`clip ${i + 1}: from and to must be numbers (timeline seconds)`);
@@ -81,10 +93,14 @@
     const o = options(args, doc0);
     const canvas = canvasFor(o.aspect, doc0.width, doc0.height);
     const reshaped = canvas.width * (doc0.height || 1080) !== canvas.height * (doc0.width || 1920);
-    let source = doc0.sequence || null;
+    let source = doc0.sequence || null, opened = false, halted = "";
     const taken = new Set((doc0.sequences || []).map((s) => s.id));
     const made = [], lines = [];
     const step = (i, what) => { if (typeof env.progress === "function") env.progress(`clip ${i + 1} of ${o.clips.length}, ${what}`, made.length); };
+    // measured on the source as it was (the open sequence may be the last clip by now); every lane named,
+    // since an extract given none skips the untargeted ones, and those must be cut too
+    const total = end(doc0);
+    const lanes = doc0.tracks && doc0.tracks.length ? doc0.tracks.map((t) => t.id) : [...new Set((doc0.clips || []).map((x) => x.track).filter(Boolean))];
     for (let i = 0; i < o.clips.length; i++) {
       const c = o.clips[i];
       step(i, "cutting");
@@ -92,16 +108,16 @@
       for (let n = 2; taken.has(id); n++) id = "seq_clip" + (i + 1) + "_" + n;
       taken.add(id);
       // the copy: the source timeline on the clip's canvas, cut down to from → to
-      // measured on the source as it was (the open sequence may be the last clip by now)
-      const total = end(doc0), all = (doc0.tracks && doc0.tracks.length ? doc0.tracks : null);
-      const tracks = all ? all.map((t) => t.id) : undefined;
       const ops = [];
-      if (i > 0) ops.push({ op: "openSequence", id: source });
+      if (opened) ops.push({ op: "openSequence", id: source });   // the last clip's sequence is open
       ops.push({ op: "addSequence", id, name: c.name, from: "open", width: canvas.width, height: canvas.height, open: true });
-      if (c.to < total - 0.001) ops.push({ op: "extract", from: c.to, to: total + 1, ...(tracks ? { tracks } : {}) });
-      if (c.from > 0.001) ops.push({ op: "extract", from: 0, to: c.from, ...(tracks ? { tracks } : {}) });
+      if (c.to < total - 0.001) ops.push({ op: "extract", from: c.to, to: total + 1, tracks: lanes });
+      if (c.from > 0.001) ops.push({ op: "extract", from: 0, to: c.from, tracks: lanes });
       ops.push({ op: "setProject", set: { inPoint: null, outPoint: null } });
-      await env.patch(ops);
+      // a patch saves all of it or nothing: a clip that can't be cut is reported, and the next one goes on
+      try { await env.patch(ops); }
+      catch (e) { lines.push(`  ${i + 1}. "${c.name}": not made (${first(e.message)})`); continue; }
+      opened = true;
       if (!source) source = ((await env.read()).sequences || []).find((s) => s.id !== id)?.id || "main";
       const len = Math.round((c.to - c.from) * 1000) / 1000, notes = [];
       if (o.reframe && reshaped) {
@@ -135,19 +151,27 @@
       if (o.exportPreset) {
         step(i, "exporting");
         try {
-          const r = String(await env.exportClip({ preset: o.exportPreset, name: fileName(c.name) }));
+          const r = String(await env.exportClip({ preset: o.exportPreset, name: fileName(c.name), timeout: Math.max(EXPORT_MIN_S, Math.ceil(len * EXPORT_PER_S)) }));
           file = (r.match(/exports\/[^\s"'),]+/) || [""])[0];
-          // only a finished export counts: one still running (or stopped) is reported as it is
-          if (file && !/ (running|queued|failed|cancelled)\b|check again/i.test(r)) notes.push("exported → " + file);
+          // an export that hasn't ended still renders the open sequence: opening another one would change its frames
+          if (/\bExport \S+ (pending|running|queued)\b/.test(r)) { file = ""; halted = c.name; notes.push("not exported (" + first(r) + ")"); }
+          // only a finished export counts: a stopped one is reported as it is
+          else if (file && !/ (failed|cancelled)\b|check again/i.test(r)) notes.push("exported → " + file);
           else { file = ""; notes.push("not exported (" + first(r) + ")"); }
         } catch (e) { notes.push("not exported (" + first(e.message) + ")"); }
       }
       made.push({ id, name: c.name, file });
       lines.push(`  ${i + 1}. "${c.name}" (${id}, ${len.toFixed(1)} s from ${c.from.toFixed(2)}–${c.to.toFixed(2)} s): ${notes.join(", ") || "made"}`);
+      if (halted) {
+        if (i + 1 < o.clips.length) lines.push(`  The clips after "${halted}" weren't made: its export is still running, and opening another sequence would change what it renders. ` +
+          "Once it has ended (fablecut_export {job}), call again with those parts.");
+        break;
+      }
     }
-    if (made.length > 1) { try { await env.patch([{ op: "openSequence", id: made[0].id }]); } catch { } }
+    if (!made.length) throw new Error("no clip was made:\n" + lines.join("\n"));
+    if (made.length > 1 && !halted) { try { await env.patch([{ op: "openSequence", id: made[0].id }]); } catch { } }
     return `Made ${made.length} clip${made.length === 1 ? "" : "s"} on ${canvas.width}×${canvas.height} (${o.aspect}), each its own sequence; the source timeline is left as it was:\n` +
-      lines.join("\n") + `\nOpened "${made[0].name}". Check each with fablecut_frame {time} after openSequence; ` +
+      lines.join("\n") + (halted ? `\n"${halted}" stays open while its export runs. ` : `\nOpened "${made[0].name}". `) + "Check each with fablecut_frame {time} after openSequence; " +
       (o.exportPreset ? "the files are in exports/." : "export one with openSequence then fablecut_export {preset, name}, or call again with export:\"tiktok\".");
   }
 

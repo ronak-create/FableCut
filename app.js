@@ -17384,10 +17384,11 @@ function postFrames(url, body, signal) {
 /* An export's stall watchdog. A step that never finishes (a decoder, a frame
    encoder, or the encoder behind the uploads that stopped answering) fails the
    export with a reason instead of holding it where it is for good. Each step
-   that moves the export on calls moved(); guard(p) races p against the stall.
-   The limit grows with the export's length, since a single step can scale
-   with it: an in-browser encoder encodes the whole sound track at the first
-   upload. In a hidden tab it is at least hiddenMs: after a few minutes there
+   that moves the export on calls moved(); guard(p) races p against the stall,
+   and p finishing counts as moving on. The limit grows with the export's
+   length, since a single step can scale with it: an in-browser encoder
+   encodes the whole sound track at the first upload. In a hidden tab it is
+   at least hiddenMs: after a few minutes there
    the browser runs the export's timers about once a minute, so a healthy
    export can go that long without moving. onStall(err) runs first, so
    polling waits see the error too. */
@@ -17404,9 +17405,10 @@ function exportWatchdog(seconds, onStall, { minMs = 60000, msPerSecond = 100, hi
     if (onStall) onStall(err);
     fail(err);
   }, Math.min(1000, limit / 4));
+  const moved = () => { movedAt = performance.now(); };
   return {
-    moved() { movedAt = performance.now(); },
-    guard(p) { return Promise.race([p, stalled]); },
+    moved,
+    guard(p) { return Promise.race([Promise.resolve(p).then((v) => { moved(); return v; }), stalled]); },
     stop() { if (timer) clearInterval(timer); timer = 0; },
   };
 }
@@ -17876,13 +17878,19 @@ async function exportDecodeFrame(c, t) {
     if (!m || !m.src) { d.sources.set(c.id, null); return false; }
     if (!d.opening.has(c.id)) d.opening.set(c.id, ExportFrameSource.open(m.src));
     src = await d.opening.get(c.id);
+    // the export may have ended while this opened (its watchdog gave up, a cancel): the source is
+    // nobody's then, and the frame map may be the next export's
+    if (runtime.exportDecode !== d) { src?.close(); return false; }
     d.sources.set(c.id, src);
   }
   if (!src) return false;
   try {
-    runtime.exportFrames.set(c.id, await src.frameAt(mediaTimeAt(c, t)));
+    const frame = await src.frameAt(mediaTimeAt(c, t));
+    if (runtime.exportDecode !== d) return false;   // ended meanwhile; its end closed this source
+    runtime.exportFrames.set(c.id, frame);
     return true;
   } catch (e) {   // a decode error: this clip falls back to its element for the rest of the export
+    if (runtime.exportDecode !== d) return false;
     console.warn("[FableCut] export decode failed, using the video element:", e && e.message);
     src.close(); d.sources.set(c.id, null); runtime.exportFrames.delete(c.id);
     return false;

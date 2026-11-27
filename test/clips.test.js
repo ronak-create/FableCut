@@ -33,6 +33,14 @@ test("options: defaults, and every bad argument refused with a reason", () => {
   assert.throws(() => C.options({ clips: [{ from: 0, to: 5 }] }, talk({ clips: [] })), /timeline is empty/);
 });
 
+test("options: locked material is refused before anything changes (an extract can't cut it, so the copy would keep it whole)", () => {
+  const one = { clips: [{ from: 10, to: 40 }] };
+  const lockedClip = talk(); lockedClip.clips.push({ id: "bed", mediaId: "m", kind: "audio", track: "A1", start: 0, in: 0, duration: 120, locked: true });
+  assert.throws(() => C.options(one, lockedClip), /locked material \(bed on A1\).*unlock them .* only if the user agrees/);
+  assert.throws(() => C.options(one, talk({ lockedTracks: ["V1"] })), /locked material \(c on V1\)/);
+  assert.doesNotThrow(() => C.options(one, talk({ lockedTracks: ["V2"] })), "a locked lane with nothing on it is no obstacle");
+});
+
 test("canvasFor keeps the shorter side, even sizes", () => {
   assert.deepEqual(C.canvasFor("9:16", 1920, 1080), { width: 1080, height: 1920 });
   assert.deepEqual(C.canvasFor("1:1", 1920, 1080), { width: 1080, height: 1080 });
@@ -78,7 +86,7 @@ test("run: one sequence per clip, cut to its part, then reframe, title, captions
   assert.deepEqual(calls.map((c) => c[0]), ["patch", "reframe", "patch", "captions", "export", "patch", "reframe", "captions", "export", "patch"]);
   assert.equal(calls[2][1][0].clip.props.text, "Start small");
   assert.deepEqual(calls[3][1], { style: "pop" });
-  assert.deepEqual(calls[4][1], { preset: "tiktok", name: "tip-1" });
+  assert.deepEqual(calls[4][1], { preset: "tiktok", name: "tip-1", timeout: 180 }, "each export gets its own time (at least 3 min)");
   assert.deepEqual(calls[5][1][0], { op: "openSequence", id: "main" }, "the second clip is copied from the source again");
   assert.deepEqual(calls.at(-1)[1], [{ op: "openSequence", id: "seq_clip1" }], "the first clip is opened at the end");
   assert.match(reply, /Made 2 clips on 1080×1920/);
@@ -112,4 +120,60 @@ test("run: a failed step is reported on its clip, the rest carry on", async () =
   const later = await C.run({ clips: [{ from: 0, to: 10 }], aspect: "16:9" }, { ...env, captions: async () => "Transcribing 1 file in the user's tab. It carries on there: call fablecut_captions again in a minute." });
   assert.match(later, /captions not added yet/);
   assert.doesNotMatch(later, /pop captions/);
+});
+
+/* a stand-in editor for run(): sequences, open/add, and the patches it was sent */
+function fakeEnv(doc, over = {}) {
+  const patches = [];
+  const env = {
+    read: async () => JSON.parse(JSON.stringify(doc)),
+    patch: async (ops) => {
+      patches.push(ops);
+      if (over.refuse && over.refuse(ops)) throw new Error("CONFLICT — not saved");
+      for (const op of ops) {
+        if (op.op === "addSequence") { doc.sequences = doc.sequences || [{ id: "main", name: "Main" }]; doc.sequences.push({ id: op.id, name: op.name }); doc.sequence = op.id; }
+        if (op.op === "openSequence") doc.sequence = op.id;
+      }
+      return "Patched";
+    },
+    reframe: async () => "Reframed", captions: async () => "Added captions",
+    exportClip: over.exportClip || (async (a) => `Export x done → exports/${a.name}.mp4`),
+  };
+  return { env, patches };
+}
+
+test("run: a timeline without a tracks list still cuts every lane, untargeted ones too", async () => {
+  const doc = talk({ untargetedTracks: ["A1"] });
+  delete doc.tracks;
+  doc.clips.push({ id: "a", mediaId: "m", kind: "audio", track: "A1", start: 0, in: 0, duration: 120 });
+  const { env, patches } = fakeEnv(doc);
+  await C.run({ clips: [{ from: 10, to: 40 }], captions: false }, env);
+  const cuts = patches[0].filter((o) => o.op === "extract");
+  assert.equal(cuts.length, 2);
+  assert.ok(cuts.every((o) => JSON.stringify(o.tracks) === JSON.stringify(["V1", "A1"])), JSON.stringify(cuts));
+});
+
+test("run: a clip that can't be cut is reported and the next is still made; none made is an error", async () => {
+  const { env, patches } = fakeEnv(talk(), { refuse: (ops) => ops.some((o) => o.op === "addSequence" && o.name === "Tip 1") });
+  const reply = await C.run({ clips: [{ from: 10, to: 40, name: "Tip 1" }, { from: 60, to: 90, name: "Tip 2" }], captions: false }, env);
+  assert.match(reply, /1\. "Tip 1": not made \(CONFLICT — not saved\)/);
+  assert.match(reply, /Made 1 clip on 1080×1920/);
+  assert.match(reply, /2\. "Tip 2" \(seq_clip2,/);
+  assert.equal(patches[1][0].op, "addSequence", "nothing was opened by the failed clip: the source is still the open sequence");
+  assert.match(reply, /Opened "Tip 2"/);
+  const none = fakeEnv(talk(), { refuse: () => true });
+  await assert.rejects(C.run({ clips: [{ from: 10, to: 40, name: "Tip 1" }], captions: false }, none.env), /no clip was made:[\s\S]*"Tip 1": not made/);
+});
+
+test("run: an export that hasn't ended stops the batch before another sequence opens under it", async () => {
+  const { env, patches } = fakeEnv(talk(), { exportClip: async () => "Export x_1 running — 40% (in the open editor tab). Check again with fablecut_export {job:\"x_1\"}." });
+  const reply = await C.run({ clips: [{ from: 10, to: 40, name: "Tip 1" }, { from: 60, to: 90, name: "Tip 2" }], captions: false, export: "tiktok" }, env);
+  assert.match(reply, /not exported \(Export x_1 running/);
+  assert.match(reply, /The clips after "Tip 1" weren't made: its export is still running/);
+  assert.match(reply, /Made 1 clip /);
+  assert.ok(!patches.some((ops) => ops.some((o) => o.op === "openSequence")), "no sequence opened while it runs");
+  const stopped = fakeEnv(talk(), { exportClip: async (a) => `Export x_2 stopped: it didn't finish in ${a.timeout} s` });
+  const ok = await C.run({ clips: [{ from: 10, to: 40, name: "Tip 1" }, { from: 60, to: 90, name: "Tip 2" }], captions: false, export: "tiktok" }, stopped.env);
+  assert.match(ok, /not exported \(Export x_2 stopped: it didn't finish in 180 s\)/);
+  assert.match(ok, /Made 2 clips/, "a stopped export has ended: the next clip goes on");
 });

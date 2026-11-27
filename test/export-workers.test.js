@@ -134,6 +134,22 @@ test("export watchdog: steps that move the export on keep it alive; stop() ends 
   assert.equal(told, null, "a stopped watchdog never fires");
 });
 
+test("export watchdog: a guarded step that finishes counts as moving on", async () => {
+  const { exportWatchdog, advance } = loadWatchdog();
+  let told = null, done = null;
+  const w = exportWatchdog(45, (e) => { told = e; });
+  advance(40000);
+  const g = w.guard(new Promise((r) => { done = r; }));
+  advance(15000);
+  done("ok");
+  assert.equal(await g, "ok");   // the step ended 55 s in
+  advance(40000);
+  assert.equal(told, null, "95 s since the start, but only 40 s since the step finished");
+  advance(20000);
+  assert.match(String(told), /for 60 s/);
+  w.stop();
+});
+
 test("export watchdog: a hidden tab, whose timers the browser runs about once a minute, gets five minutes", () => {
   const doc = { hidden: true };
   const { exportWatchdog, advance } = loadWatchdog(doc);
