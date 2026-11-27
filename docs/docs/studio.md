@@ -8,7 +8,7 @@ On your first visit, a welcome window offers **Connect your agent**, which opens
 
 Studio opens the folder in the editor. Clips are read from the folder where they are, and the files are never uploaded. Your edits are saved to `project.json` in the same folder. Projects you have opened before are listed on the home page; opening one again only asks for the browser's permission.
 
-To try Studio without your own footage, pick a demo under **Try a demo project** on the home page: **Podcast clips** (a three-minute talk to cut into short clips) or **Skate reel** (six skate clips, a music track and a first cut). Each is kept in the browser's own storage (no folder to pick, nothing saved to your disk). It opens as you left it next time; exports from it download. Removing its card removes it, and its button brings a fresh copy back.
+To try Studio without your own footage, pick a demo under **Try a demo project** on the home page: **Podcast clips** (a three-minute talk to cut into short clips) or **Skate reel** (six skate clips, a music track and a first cut). No folder to pick: each is kept in the browser's own storage. It opens as you left it next time; exports from it download. Removing its card removes it, and its button brings a fresh copy back.
 
 ### Firefox and Safari
 
@@ -55,7 +55,7 @@ The home page shows **Connect your agent** until one connects; it is also under 
 - **claude.ai:** Settings, Connectors, **Add custom connector**, then paste the link.
 - **Cursor:** **Add to Cursor** adds it in one click, or paste the copied setup into `~/.cursor/mcp.json`.
 - **opencode:** paste the copied setup into `opencode.json`.
-- **ChatGPT:** Settings, **Apps & Connectors**, **Advanced**, turn on **Developer mode**, then **Create** a connector with the link and **No authentication**.
+- **ChatGPT:** **Plugins**, **+**, **Add custom MCP server**: paste the link, choose **No authentication**, accept the warning and click **Create as a plugin**. Which ChatGPT plans can add one is up to OpenAI ([their help article](https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt)).
 - **Gemini CLI, Codex, VS Code and Windsurf:** follow the steps for each on the Agent page.
 - **Other:** any client with remote (Streamable HTTP) MCP servers; add the same link, with no key or login.
 
