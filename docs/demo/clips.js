@@ -116,7 +116,7 @@
     const o = options(args, doc0);
     const canvas = canvasFor(o.aspect, doc0.width, doc0.height);
     const reshaped = canvas.width * (doc0.height || 1080) !== canvas.height * (doc0.width || 1920);
-    let source = doc0.sequence || null, opened = false, halted = "";
+    let source = doc0.sequence || null, opened = false, halted = null;
     const taken = new Set((doc0.sequences || []).map((s) => s.id));
     const made = [], lines = [];
     const step = (i, what) => { if (typeof env.progress === "function") env.progress(`clip ${i + 1} of ${o.clips.length}, ${what}`, made.length); };
@@ -170,31 +170,36 @@
         }
         catch (e) { notes.push("no captions (" + first(e.message) + ")"); }
       }
-      let file = "";
+      let file = "", haltWhy = "";
       if (o.exportPreset) {
         step(i, "exporting");
         try {
           const r = String(await env.exportClip({ preset: o.exportPreset, name: fileName(c.name), timeout: Math.max(EXPORT_MIN_S, Math.ceil(len * EXPORT_PER_S)) }));
           file = (r.match(/exports\/[^\s"'),]+/) || [""])[0];
           // an export that hasn't ended still renders the open sequence: opening another one would change its frames
-          if (RUNNING.test(r)) { file = ""; halted = c.name; notes.push("not exported (" + first(r) + ")"); }
+          if (RUNNING.test(r)) { file = ""; haltWhy = "its export is still running"; notes.push("not exported (" + first(r) + ")"); }
           // only a finished export counts: a stopped one is reported as it is
           else if (file && !/ (failed|cancelled)\b|check again/i.test(r)) notes.push("exported → " + file);
           else { file = ""; notes.push("not exported (" + first(r) + ")"); }
-        } catch (e) { notes.push("not exported (" + first(e.message) + ")"); }
+        } catch (e) {
+          // the request failed: whether the export started isn't known, and one that did renders the open sequence
+          notes.push("not exported (" + first(e.message) + ")");
+          haltWhy = "its export request failed, so whether it started isn't known";
+        }
       }
       made.push({ id, name: c.name, file });
       lines.push(`  ${i + 1}. "${c.name}" (${id}, ${len.toFixed(1)} s from ${c.from.toFixed(2)}–${c.to.toFixed(2)} s): ${notes.join(", ") || "made"}`);
-      if (halted) {
-        if (i + 1 < o.clips.length) lines.push(`  The clips after "${halted}" weren't made: its export is still running, and opening another sequence would change what it renders. ` +
-          "Once it has ended (fablecut_export {job}), call again with those parts.");
+      if (haltWhy) {
+        halted = { clip: c.name, why: haltWhy };
+        if (i + 1 < o.clips.length) lines.push(`  The clips after "${c.name}" weren't made: ${halted.why}, and opening another sequence would change what a running export renders. ` +
+          "Check fablecut_export (its job, or the export queue), then call again with those parts.");
         break;
       }
     }
     if (!made.length) throw new Error("no clip was made:\n" + lines.join("\n"));
     if (made.length > 1 && !halted) { try { await env.patch([{ op: "openSequence", id: made[0].id }]); } catch { } }
     return `Made ${made.length} clip${made.length === 1 ? "" : "s"} on ${canvas.width}×${canvas.height} (${o.aspect}), each its own sequence; the source timeline is left as it was:\n` +
-      lines.join("\n") + (halted ? `\n"${halted}" stays open while its export runs. ` : `\nOpened "${made[0].name}". `) + "Check each with fablecut_frame {time} after openSequence; " +
+      lines.join("\n") + (halted ? `\n"${halted.clip}" stays open (${halted.why}). ` : `\nOpened "${made[0].name}". `) + "Check each with fablecut_frame {time} after openSequence; " +
       (o.exportPreset ? "the files are in exports/." : "export one with openSequence then fablecut_export {preset, name}, or call again with export:\"tiktok\".");
   }
 

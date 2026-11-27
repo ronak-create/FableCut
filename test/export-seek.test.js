@@ -25,13 +25,13 @@ function loadWait() {
     return { notePresented, presentedClose, waitForPresentedFrame };`)();
 }
 
-function loadPlay(hardSeekVideo = () => Promise.resolve()) {
+function loadPlay(hardSeekVideo = () => Promise.resolve(), exportSignal = () => null) {
   return new Function(
-    "hardSeekVideo",
+    "hardSeekVideo", "exportSignal",
     `${WAIT_HELPERS}
      ${PLAY}
      return { notePresented, presentedClose, playAdvanceVideo };`
-  )(hardSeekVideo);
+  )(hardSeekVideo, exportSignal);
 }
 
 function mockVideo({
@@ -282,4 +282,21 @@ test("export seek: a seek whose export ended while it decoded leaves the players
   live.finish(false);
   await q;
   assert.deepEqual(live.moved, ["seek", "prefetch"], "the export still running seeks its element as before");
+});
+
+test("playAdvanceVideo: once its export has ended, its callbacks neither pause nor seek the player", async () => {
+  let seeks = 0, pauses = 0;
+  const { playAdvanceVideo } = loadPlay(() => { seeks++; return Promise.resolve(); });
+  const el = mockVideo({ currentTime: 1, paused: true, noRvfcFire: true });
+  const pause = el.pause; el.pause = () => { pauses++; pause(); };
+  const ctl = new AbortController();
+  const p = playAdvanceVideo(el, 1.05, 0.02, 1, { keepPlaying: false }, ctl.signal);
+  ctl.abort();   // the export ended (its watchdog gave up) before this player got there
+  await assert.rejects(p, /cancelled/);
+  assert.equal(seeks, 0, "no seek: the player may be the next export's by now");
+  assert.equal(pauses, 0, "and no pause");
+  // the export still running: the same timeout seeks as before
+  const live = new AbortController(), el2 = mockVideo({ currentTime: 1, paused: true, noRvfcFire: true });
+  await playAdvanceVideo(el2, 1.05, 0.02, 1, { keepPlaying: false }, live.signal);
+  assert.equal(seeks, 1);
 });

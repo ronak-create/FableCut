@@ -219,3 +219,12 @@ test("exportUntilEnded: a status check that fails still cancels the job; one it 
     assert.equal(patches.length, 1, "nothing more was patched while it may still render");
   }
 });
+
+test("run: an export whose request failed stops the batch (it may have started, and renders the open sequence)", async () => {
+  const { env, patches } = fakeEnv(talk(), { exportClip: async () => { throw new Error("export request failed (502)"); } });
+  const reply = await C.run({ clips: [{ from: 10, to: 40, name: "Tip 1" }, { from: 60, to: 90, name: "Tip 2" }], captions: false, export: "tiktok" }, env);
+  assert.match(reply, /not exported \(export request failed \(502\)\)/);
+  assert.match(reply, /The clips after "Tip 1" weren't made: its export request failed, so whether it started isn't known/);
+  assert.match(reply, /"Tip 1" stays open \(its export request failed/);
+  assert.equal(patches.length, 1, "no other sequence opened");
+});

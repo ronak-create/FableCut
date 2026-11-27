@@ -17661,8 +17661,10 @@ function hardSeekVideo(el, mt, attempt = 0, shown = el._fcPresentedTime, signal 
   });
 }
 /** Play forward until a *presented* frame reaches mt. Pause afterwards unless
-    keepPlaying — a free-running element overruns while JPEG encode/HTTP stalls. */
-function playAdvanceVideo(el, mt, eps, rate, { keepPlaying } = {}) {
+    keepPlaying — a free-running element overruns while JPEG encode/HTTP stalls.
+    signal: the export's, kept for its callbacks: once that export has ended they
+    neither pause nor seek the player, which may be the next export's by then. */
+function playAdvanceVideo(el, mt, eps, rate, { keepPlaying } = {}, signal = exportSignal()) {
   return new Promise((res, rej) => {
     let settled = false;
     let rvfcId = null;
@@ -17670,6 +17672,7 @@ function playAdvanceVideo(el, mt, eps, rate, { keepPlaying } = {}) {
     if (el._fcPrevMuted == null) el._fcPrevMuted = el.muted;
     const wasPlaying = !el.paused;
     const slop = Math.min(eps, 0.002);
+    const ended = () => !!(signal && signal.aborted);
     const cleanup = () => {
       clearTimeout(tm);
       if (poll) { clearInterval(poll); poll = null; }
@@ -17677,9 +17680,13 @@ function playAdvanceVideo(el, mt, eps, rate, { keepPlaying } = {}) {
         try { el.cancelVideoFrameCallback(rvfcId); } catch { }
         rvfcId = null;
       }
-      if (!keepPlaying) {
+      if (!keepPlaying && !ended()) {
         try { el.pause(); } catch { }
       }
+    };
+    const reseek = () => {
+      if (ended()) rej(new Error("cancelled"));
+      else hardSeekVideo(el, mt, 0, undefined, signal).then(res, rej);
     };
     const finish = (presented) => {
       if (settled) return;
@@ -17694,7 +17701,7 @@ function playAdvanceVideo(el, mt, eps, rate, { keepPlaying } = {}) {
       const pictureOvershoot = presented > mt;
       if (pictureOvershoot
         || (pictureShort && Math.abs(el.currentTime - mt) > Math.max(eps * 2, 0.008)))
-        hardSeekVideo(el, mt).then(res, rej);
+        reseek();
       else res();
     };
     if (presentedClose(el, mt, slop) && el.readyState >= 2) {
@@ -17707,7 +17714,7 @@ function playAdvanceVideo(el, mt, eps, rate, { keepPlaying } = {}) {
       if (settled) return;
       settled = true;
       cleanup();
-      hardSeekVideo(el, mt).then(res, rej);
+      reseek();
     }, Math.min(3000, 400 + (remain * 1000) / Math.max(0.1, rate) * 2.5));
     const check = (mediaTime) => {
       // Presented frame only — currentTime finishes half a frame early and
@@ -17734,7 +17741,7 @@ function playAdvanceVideo(el, mt, eps, rate, { keepPlaying } = {}) {
         if (settled) return;
         settled = true;
         cleanup();
-        hardSeekVideo(el, mt).then(res, rej);
+        reseek();
       });
     }
   });
@@ -18283,6 +18290,8 @@ async function fastExport(opts = {}) {
     else if (msg !== "cancelled" && !opts.silent) alert("Export failed: " + msg);
   } finally {
     watch?.stop();
+    // over, however it ended: steps still waiting on this export (a seek, an upload) stop too
+    try { exportAbort?.abort(); } catch { }
     exportAbort = null;
     exportFullCanvas = false;
     exportDecodeEnd();
@@ -18990,6 +18999,7 @@ async function webCodecsExport(name) {
     if (msg !== "cancelled") alert("Export failed: " + msg);
   } finally {
     watch?.stop();
+    try { exportAbort?.abort(); } catch { }   // over: steps still waiting on this export stop too
     exportAbort = null;
     exportDecodeEnd();
     restoreExportVideoState();
