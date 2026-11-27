@@ -72,3 +72,48 @@ test("export decode: an output past the requested frame still restarts at its sy
   assert.equal(await source.frameAt(1), target);
   assert.equal(restarted, true);
 });
+
+/* exportDecodeFrame after its export ended: the watchdog (or a cancel) can end an export while a
+   source is still opening or a frame still decoding, and the next export may have begun by then. */
+const frameStart = src.indexOf("async function exportDecodeFrame(");
+const frameEnd = src.indexOf("async function seekVideosTo(", frameStart);
+assert.ok(frameStart >= 0 && frameEnd > frameStart, "exportDecodeFrame markers exist");
+function loadFrame(runtime, open) {
+  return new Function("runtime", "evalProps", "getMedia", "ExportFrameSource", "mediaTimeAt", "console",
+    `${src.slice(frameStart, frameEnd)}; return exportDecodeFrame;`)(runtime, () => ({}), () => ({ src: "/media/a.mp4" }),
+    { open }, (c, t) => t, { warn() { } });
+}
+const session = () => ({ sources: new Map(), opening: new Map() });
+const clip = { id: "c1", kind: "video", mediaId: "m" };
+
+test("export decode: a source that opens after its export ended is closed, and the next export's frames are left alone", async () => {
+  const runtime = { exportDecode: session(), exportFrames: new Map() };
+  let opened = null;
+  const source = { closed: false, close() { this.closed = true; }, frameAt: async () => "stale" };
+  const decodeFrame = loadFrame(runtime, () => new Promise((r) => { opened = r; }));
+  const pending = decodeFrame(clip, 1);
+  const next = session();
+  runtime.exportDecode = next; runtime.exportFrames = new Map([["c1", "fresh"]]);   // a new export began meanwhile
+  opened(source);
+  assert.equal(await pending, false);
+  assert.equal(source.closed, true, "nobody else would close it");
+  assert.equal(runtime.exportFrames.get("c1"), "fresh");
+  assert.equal(next.sources.size, 0);
+});
+
+test("export decode: a frame (or a decode error) that lands after its export ended touches nothing", async () => {
+  for (const fails of [false, true]) {
+    const runtime = { exportDecode: session(), exportFrames: new Map() };
+    let decoded = null;
+    const source = { close() { }, frameAt: () => new Promise((res, rej) => { decoded = fails ? () => rej(new Error("closed")) : () => res("stale"); }) };
+    runtime.exportDecode.sources.set("c1", source);
+    const decodeFrame = loadFrame(runtime, () => { throw new Error("not opened again"); });
+    const pending = decodeFrame(clip, 1);
+    await Promise.resolve();
+    runtime.exportDecode = null; runtime.exportFrames = null;   // the export ended: its frame map is gone
+    decoded();
+    assert.equal(await pending, false, "no TypeError on the map that is gone");
+    runtime.exportDecode = session(); runtime.exportFrames = new Map([["c1", "fresh"]]);
+    assert.equal(runtime.exportFrames.get("c1"), "fresh");
+  }
+});

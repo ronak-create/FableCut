@@ -25,13 +25,13 @@ function loadWait() {
     return { notePresented, presentedClose, waitForPresentedFrame };`)();
 }
 
-function loadPlay(hardSeekVideo = () => Promise.resolve()) {
+function loadPlay(hardSeekVideo = () => Promise.resolve(), exportSignal = () => null) {
   return new Function(
-    "hardSeekVideo",
+    "hardSeekVideo", "exportSignal",
     `${WAIT_HELPERS}
      ${PLAY}
      return { notePresented, presentedClose, playAdvanceVideo };`
-  )(hardSeekVideo);
+  )(hardSeekVideo, exportSignal);
 }
 
 function mockVideo({
@@ -244,4 +244,59 @@ test("hardSeekVideo: retries keep the export's cancel signal after it is cleared
     ctl.abort();
     await assert.rejects(p, /cancelled/);
   } finally { delete globalThis.exportAbort; }
+});
+
+/* seekVideosTo whose export ended while it waited (the stall watchdog gave up on it): the players
+   may be the next export's by then, so the stale seek must not move them. */
+const SEEK = slice("async function seekVideosTo(", "function encodeWAV(");
+function loadSeek(over = {}) {
+  let finishDecode = null;
+  const moved = [];
+  const deps = {
+    exportWindow: { export: "A" }, exportSeekClock: 0,
+    runtime: { exportDecode: { sources: new Map(), opening: new Map() }, exportFrames: new Map(), clipGain: new Map() },
+    projectFps: () => 30, exportLoopLag: () => ({ fast: true, behind: false }),
+    mediaClips: () => [{ id: "v", kind: "video", start: 0, duration: 10, in: 0 }],
+    clipRenders: () => true, activeAt: () => true,
+    exportDecodeFrame: () => new Promise((r) => { finishDecode = r; }),
+    getClipEl: () => ({ readyState: 4, paused: true, currentTime: 0, pause() { } }),
+    mediaTimeAt: (c, t) => t, clamp: (v, a, b) => Math.min(b, Math.max(a, v)), kfChannel: (c, k, l, d) => d, clipSpeed: () => 1,
+    presentedClose: () => false, muteClipChain() { }, videoRangeBuffered: () => false,
+    playAdvanceVideo: async () => { moved.push("play"); }, hardSeekVideo: async () => { moved.push("seek"); },
+    driveClipChain() { }, evalProps: () => ({}), prefetchExportVideos: () => { moved.push("prefetch"); },
+    ...over,
+  };
+  const seekVideosTo = new Function("deps", `with (deps) { ${SEEK}; return seekVideosTo; }`)(deps);
+  return { deps, moved, seekVideosTo, finish: (v) => finishDecode(v) };
+}
+
+test("export seek: a seek whose export ended while it decoded leaves the players alone", async () => {
+  const s = loadSeek();
+  const p = s.seekVideosTo(1);
+  s.deps.exportWindow = { export: "B" };   // A ended, B began
+  s.finish(false);                          // A's decode lands late: its clip would fall back to the element
+  await p;
+  assert.deepEqual(s.moved, [], "no seek, play or prefetch for the export that is gone");
+  const live = loadSeek();
+  const q = live.seekVideosTo(1);
+  live.finish(false);
+  await q;
+  assert.deepEqual(live.moved, ["seek", "prefetch"], "the export still running seeks its element as before");
+});
+
+test("playAdvanceVideo: once its export has ended, its callbacks neither pause nor seek the player", async () => {
+  let seeks = 0, pauses = 0;
+  const { playAdvanceVideo } = loadPlay(() => { seeks++; return Promise.resolve(); });
+  const el = mockVideo({ currentTime: 1, paused: true, noRvfcFire: true });
+  const pause = el.pause; el.pause = () => { pauses++; pause(); };
+  const ctl = new AbortController();
+  const p = playAdvanceVideo(el, 1.05, 0.02, 1, { keepPlaying: false }, ctl.signal);
+  ctl.abort();   // the export ended (its watchdog gave up) before this player got there
+  await assert.rejects(p, /cancelled/);
+  assert.equal(seeks, 0, "no seek: the player may be the next export's by now");
+  assert.equal(pauses, 0, "and no pause");
+  // the export still running: the same timeout seeks as before
+  const live = new AbortController(), el2 = mockVideo({ currentTime: 1, paused: true, noRvfcFire: true });
+  await playAdvanceVideo(el2, 1.05, 0.02, 1, { keepPlaying: false }, live.signal);
+  assert.equal(seeks, 1);
 });

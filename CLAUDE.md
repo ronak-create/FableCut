@@ -54,6 +54,9 @@ Every Claude Code session then has these tools:
   on that canvas whose shots follow the subject. See "Sequences" below.
 - `fablecut_highlights` — the best moments of long footage cut into a short edit, in a new
   sequence. See "Sequences" below.
+- `fablecut_clips` — a long video (podcast, interview, talk, stream) into short clips in one
+  call: each part you pick becomes its own 9:16 sequence, framed on the subject, with a hook
+  title and captions, and can be exported. See "Sequences" below.
 - `fablecut_music` — find openly licensed music and sound effects (Openverse), each with
   its licence, import one into the project, and list the credits the edit needs. See
   "Music" below.
@@ -2161,7 +2164,44 @@ is kept first. In the editor: the sequence menu's **Highlights…** (15, 30, 60 
 reads the selected video clips, else every video clip on the timeline, with
 progress and **Cancel**.
 
-Recipes: **vertical cut of a finished edit** — `fablecut_reframe {aspect:"9:16"}`,
+**Clips** — `fablecut_clips {clips:[{from, to, name?, title?}], aspect?, captions?, reframe?, title?, export?}`
+turns a long video into short clips in one call: the clipper's job. The agent
+picks the parts (read the talk with `fablecut_transcribe` first: a tip, an
+answer, a story, each usually 20–60 s, starting and ending on a full sentence)
+as timeline seconds of the open sequence, up to 10 at a time, each 3–180 s.
+For each one, in order:
+
+1. a new sequence named after it, on the clip's canvas (`aspect`, default
+   `9:16`; the project's shorter side is kept, so 1920×1080 → 1080×1920),
+   holding only `from` → `to` of the open timeline: a copy of it with the rest
+   extracted on every lane, so linked sound stays in step and the source
+   sequence is left as it was;
+2. on another shape, each shot framed on the subject, as `fablecut_reframe {}`
+   does (`reframe:false` only letterboxes);
+3. when the clip has a `title`, a hook title for its first 3 s: big outlined
+   words in the top third that pop in word by word, on the top video lane
+   when it is free (else left out, and the reply says so; `title:false`
+   leaves every title out);
+4. captions timed to the words, as `fablecut_captions {style}` does (`captions`:
+   `pop` by default, `highlight`, `karaoke`, `subtitle`, or `false`); the
+   speech is transcribed the first time, once per file;
+5. with `export:"tiktok"` (or any delivery preset), rendered to `exports/`,
+   named after the clip (`Tip 1` → `tip-1.mp4`).
+
+A step that fails is reported on its clip, and the rest go on. Each export
+gets 3 minutes, or 6 s per second of the clip if longer: one still running
+then is stopped and reported as not exported. A timeline with locked clips or
+lanes refuses the call (each clip is cut out of a copy, and locked material
+can't be cut): unlock them only if the user agrees. The reply
+lists each clip (its sequence id, length, what was done, the file); the first
+clip is opened. A version is kept first. Check a clip with
+`openSequence` and `fablecut_frame {time}`; its title and captions are
+ordinary text clips, restyled with `updateClip` inside `inSequence`.
+
+Recipes: **clips from a talk or podcast** — `fablecut_transcribe {}`, pick the
+3–5 parts that stand on their own, then `fablecut_clips {clips:[{from:43.2, to:88.0,
+name:"Tip 1 - comfort zone", title:"Start a little out of your comfort zone"}, …],
+export:"tiktok"}`; **vertical cut of a finished edit** — `fablecut_reframe {aspect:"9:16"}`,
 then check the titles with `fablecut_frame`; by hand, `addSequence {name:"Reel 9:16",
 from:"open", width:1080, height:1920}`, then `inSequence` ops to re-position
 or re-scale the shots and `setProject {delivery:"instagram-reels"}` in it;

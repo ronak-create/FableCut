@@ -356,6 +356,26 @@ const TOOLS = [
     },
   },
   {
+    name: "fablecut_clips",
+    description: "A long video into short clips, in one call: the clipper's job (a podcast, an interview, a talk, a stream into Shorts / Reels / TikToks). First read what is said with fablecut_transcribe and pick the parts that stand on their own (a tip, an answer, a story, a strong opinion; usually 20–60 s each, starting and ending on a full sentence), then pass them here as timeline seconds. For each one it makes a new sequence on the clip's canvas (default 9:16) holding only that part of the open timeline — the source is left as it was — frames each shot on the subject (as fablecut_reframe), adds a hook title in the top third for the first 3 s (when you give `title`), makes captions timed to the words (as fablecut_captions, default style pop), and with export:\"tiktok\" (or any delivery preset) renders each one to exports/, named after the clip. The reply lists each clip and what was done; the first clip is opened. A version is saved first.",
+    inputSchema: {
+      type: "object",
+      required: ["clips"],
+      properties: {
+        clips: { type: "array", minItems: 1, maxItems: 10, description: "The clips to make, up to 10", items: { type: "object", required: ["from", "to"], properties: {
+          from: { type: "number", description: "Start, timeline seconds (start on a sentence)" },
+          to: { type: "number", description: "End, timeline seconds (3…180 s after from; end after a sentence)" },
+          name: { type: "string", description: "The clip's sequence (and file) name, e.g. \"Tip 1 - comfort zone\"" },
+          title: { type: "string", description: "The hook title shown for its first 3 s, a few punchy words (left out: no title)" } } } },
+        aspect: { type: "string", enum: ["9:16", "1:1", "4:5", "16:9"], description: "The clips' shape (default 9:16)" },
+        captions: { anyOf: [{ type: "string", enum: ["pop", "highlight", "karaoke", "subtitle"] }, { type: "boolean", enum: [false] }], description: "Caption style (default pop), or false for none" },
+        reframe: { type: "boolean", description: "Follow the subject on the new canvas (default true)" },
+        title: { type: "boolean", description: "false leaves the hook titles out even where clips give one" },
+        export: { type: "string", description: "Render each clip with this delivery preset (tiktok, youtube-shorts, instagram-reels, …; see fablecut_encode_profiles). Left out: no export" },
+      },
+    },
+  },
+  {
     name: "fablecut_transcribe",
     description: "What is said, word by word, with times — and text-based editing. Transcribes the clips' speech with Whisper in the editor (an open tab, else headless Chrome / Edge; the speech model downloads once, the audio never leaves the machine), keeps one transcript per file (analysis/transcripts/), and answers with the timeline's words as timed lines (timeline seconds), so you can read an interview, pick the good takes, or find where something is said. find:\"phrase\" (or a list) reports every place it is said — case, punctuation and spacing ignored, whole words only — with the exact span; cut:true then extracts each of them on the targeted tracks (or `tracks`), the words and the pause after them, last first, in one revision: later material moves up, linked stems stay in sync, locked clips stay put (lock the music bed first). A version is saved before a cut. Files already transcribed aren't done again unless again:true. Default clips: every video / audio clip with sound on the open timeline. mediaIds reads whole files instead (file seconds; no cut). The same as the editor's Transcript tab.",
     inputSchema: {
@@ -963,6 +983,29 @@ async function highlightsTool(args) {
     (reshaped ? "\nThe shots are letterboxed on the new canvas: fablecut_reframe {} fits them and follows the subject." : "") +
     "\nCheck a moment with fablecut_frame {time}; with music under it, fablecut_beats {clipId, retime:{every:2}} cuts it on the beat." +
     (verWarn || "\nThe project as it was is kept as a version (fablecut_versions; restore undoes it).");
+}
+/* fablecut_clips: clips.js runs the steps, each through the tool that does it here. */
+async function clipsTool(args) {
+  const Clips = require("./clips.js");
+  Clips.options(args, readProject());   // refuse bad arguments before anything changes
+  let verWarn = "";
+  try { createHistory({ projects: createProjects({ dataDir: DATA_DIR, projectFile: PROJECT_FILE, libraryDir: LIBRARY_DIR }) }).beforeAgent("Before making clips"); }
+  catch (e) { verWarn = ` Warning: no version was saved first (${e.message}).`; }
+  const text = (r) => (typeof r === "string" ? r : (r?.content || []).map((c) => c.text || "").join("\n"));
+  const reply = await Clips.run(args, {
+    read: () => readProject(),
+    patch: async (ops) => text(await callTool("fablecut_patch_project", { ops }, 0)),
+    reframe: (a) => reframeTool(a),
+    captions: (a) => captionsTool(a),
+    // answers once its export has ended, before the next clip opens another sequence (clips.js)
+    exportClip: (a) => Clips.exportUntilEnded({
+      start: async (x) => text(await exportTool({ ...x, wait: false })),
+      status: async (id, secs) => text(await exportTool(secs ? { job: id, wait: true, timeout: secs } : { job: id })),
+      cancel: (id) => exportTool({ cancel: id }),
+      sleep,
+    }, a),
+  });
+  return reply + (verWarn || "\nThe project as it was is kept as a version (fablecut_versions; restore undoes it).");
 }
 /** What words are placed by and cuts land on: where each clip sits and plays from, the track
  *  switches and the frame rate. An editor saving probed media details while a transcription runs
@@ -1830,6 +1873,8 @@ async function callTool(name, args, attempt = 0) {
       return reframeTool(args);
     case "fablecut_highlights":
       return highlightsTool(args);
+    case "fablecut_clips":
+      return clipsTool(args);
     case "fablecut_transcribe":
       return transcribeTool(args);
     case "fablecut_captions":
