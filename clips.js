@@ -6,7 +6,8 @@
    `FableCutClips`) and required by the MCP server, so fablecut_clips and Studio
    run the same steps. The steps themselves are the editor's own tools, passed in
    as `env`: read() the project, patch(ops), reframe(args), captions(args),
-   exportClip(args) — each answering text, or throwing. */
+   exportClip(args) — each answering text, or throwing — and, optionally, progress(text)
+   as each clip and step starts. */
 (function (root, factory) {
   const api = factory();
   if (typeof module === "object" && module.exports) module.exports = api;
@@ -83,8 +84,10 @@
     let source = doc0.sequence || null;
     const taken = new Set((doc0.sequences || []).map((s) => s.id));
     const made = [], lines = [];
+    const step = (i, what) => { if (typeof env.progress === "function") env.progress(`clip ${i + 1} of ${o.clips.length}, ${what}`, made.length); };
     for (let i = 0; i < o.clips.length; i++) {
       const c = o.clips[i];
+      step(i, "cutting");
       let id = "seq_clip" + (i + 1);
       for (let n = 2; taken.has(id); n++) id = "seq_clip" + (i + 1) + "_" + n;
       taken.add(id);
@@ -102,6 +105,7 @@
       if (!source) source = ((await env.read()).sequences || []).find((s) => s.id !== id)?.id || "main";
       const len = Math.round((c.to - c.from) * 1000) / 1000, notes = [];
       if (o.reframe && reshaped) {
+        step(i, "framing");
         try { await env.reframe({}); notes.push("framed on the subject"); }
         catch (e) { notes.push("not reframed (" + first(e.message) + ")"); }
       }
@@ -113,6 +117,7 @@
         } else notes.push("no title (the top video lane is busy or locked — add a lane, then a title)");
       }
       if (o.captions) {
+        step(i, "captions");
         try {
           const r = String(await env.captions({ style: o.captions }));
           // still transcribing (Studio answers before a long first transcription is done): say so, don't claim them
@@ -123,6 +128,7 @@
       }
       let file = "";
       if (o.exportPreset) {
+        step(i, "exporting");
         try {
           const r = await env.exportClip({ preset: o.exportPreset, name: fileName(c.name) });
           file = (String(r).match(/exports\/[^\s"'),]+/) || [""])[0];
