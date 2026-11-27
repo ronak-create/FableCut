@@ -778,3 +778,51 @@ test("fablecut_highlights picks the busy and the loud moments into a new sequenc
   assert.ok(none.isError);
   assert.match(none.text, /no video to make highlights from/);
 });
+
+test("fablecut_clips makes one framed sequence per part of a long video, the source untouched", async (t) => {
+  const { spawnSync } = require("node:child_process");
+  const has = (b) => { try { return spawnSync(b, ["-version"], { stdio: "ignore" }).status === 0; } catch { return false; } };
+  if (!has("ffmpeg") || !has("ffprobe")) { t.skip("ffmpeg / ffprobe not installed"); return; }
+  const project = seedProject({
+    width: 1920, height: 1080, fps: 30,
+    tracks: [{ id: "V2", kind: "video" }, { id: "V1", kind: "video" }, { id: "A1", kind: "audio" }],
+    media: [{ id: "m_t", name: "talk.mp4", kind: "video", src: "/media/talk.mp4", duration: 20, width: 320, height: 180 }],
+    clips: [{ id: "c_t", mediaId: "m_t", kind: "video", track: "V1", start: 0, in: 0, duration: 20, props: {} }],
+  });
+  const { dir, mcp } = await boot(t, project);
+  fs.mkdirSync(path.join(dir, "media"), { recursive: true });
+  // a "speaker": a bright square moving slowly on the right of a grey frame
+  const r = spawnSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=320x180:r=30:d=20", "-f", "lavfi", "-i", "color=c=white:s=60x90:r=30:d=20",
+    "-filter_complex", "[0][1]overlay=x='220+10*sin(t)':y=45,drawgrid=w=16:h=16:t=1:c=black@0.3[v]", "-map", "[v]",
+    "-c:v", "libx264", "-pix_fmt", "yuv420p", path.join(dir, "media", "talk.mp4")]);
+  assert.equal(r.status, 0, String(r.stderr));
+
+  const res = await mcp.callTool("fablecut_clips", { captions: false, clips: [
+    { from: 2, to: 8, name: "Tip 1", title: "Start small" }, { from: 11, to: 17.5, name: "Tip 2" }] });
+  assert.equal(res.isError, false, res.text);
+  assert.match(res.text, /Made 2 clips on 1080×1920/);
+  assert.match(res.text, /hook title "Start small"/);
+  assert.match(res.text, /kept as a version/);
+  const doc = readProject(dir);
+  assert.equal(doc.sequence, "seq_clip1", "the first clip is opened");
+  assert.deepEqual([doc.width, doc.height], [1080, 1920]);
+  const v = doc.clips.filter((c) => c.kind === "video");
+  assert.equal(v.length, 1);
+  assert.ok(Math.abs(v[0].start) < 1e-3 && Math.abs(v[0].duration - 6) < 0.05 && Math.abs(v[0].in - 2) < 0.05, JSON.stringify(v[0]));
+  assert.equal(v[0].props.fit, "cover", "framed on the subject");
+  assert.ok(v[0].props.reframe);
+  const title = doc.clips.find((c) => c.kind === "text");
+  assert.equal(title.track, "V2");
+  assert.equal(title.props.text, "Start small");
+  const two = doc.sequences.find((s) => s.id === "seq_clip2");
+  assert.equal(two.name, "Tip 2");
+  const v2 = two.clips.filter((c) => c.kind === "video");
+  assert.ok(Math.abs(v2[0].duration - 6.5) < 0.05 && Math.abs(v2[0].in - 11) < 0.05, JSON.stringify(v2));
+  assert.ok(!two.clips.some((c) => c.kind === "text"), "no title asked for");
+  const main = doc.sequences.find((s) => s.id !== "seq_clip1" && s.id !== "seq_clip2");
+  assert.deepEqual(main.clips.map((c) => [c.id, c.start, c.duration]), [["c_t", 0, 20]], "the source is untouched");
+
+  const bad = await mcp.callTool("fablecut_clips", { clips: [{ from: 18, to: 30 }] });
+  assert.ok(bad.isError);
+  assert.match(bad.text, /outside the timeline/);
+});

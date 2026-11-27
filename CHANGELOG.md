@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Clips.** `fablecut_clips` turns a long video (a podcast, an interview, a talk)
+  into short clips in one call: each part the agent picks becomes its own 9:16
+  sequence holding only that part, framed on the subject, with a hook title,
+  word-timed captions and, with `export`, a file in `exports/`. The source
+  timeline is left as it was.
+
 ## [1.21.0] - 2026-11-23
 
 ### Added

@@ -41,6 +41,8 @@ about 150 ms. A human and an agent can work the same timeline at once.
   re-cut a track so each shot lasts N beats).
 - Highlights: the best moments of long footage (movement, sound, a clear picture)
   cut into a short edit in a new sequence.
+- Clips: a long video (podcast, interview, talk) into short vertical clips in one
+  call, each framed on the speaker with a hook title and word-timed captions.
 - Reframe: a 9:16, 1:1 or 4:5 copy of an edit whose shots follow the subject
   (a virtual camera, written as ordinary position keys).
 - Transcripts: speech to words with times in the browser (Whisper), read on
