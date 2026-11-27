@@ -106,8 +106,13 @@
       const len = Math.round((c.to - c.from) * 1000) / 1000, notes = [];
       if (o.reframe && reshaped) {
         step(i, "framing");
-        try { await env.reframe({}); notes.push("framed on the subject"); }
-        catch (e) { notes.push("not reframed (" + first(e.message) + ")"); }
+        // the editor may save while the footage is read (just after opening, probing media): try once more
+        let err = null;
+        for (let k = 0; k < 2; k++) {
+          try { await env.reframe({}); err = null; break; }
+          catch (e) { err = e; if (!/changed/i.test(e.message)) break; }
+        }
+        notes.push(err ? "not reframed (" + first(err.message) + ")" : "framed on the subject");
       }
       if (o.title && c.title) {
         const now = await env.read(), lane = freeTopLane(now, Math.min(TITLE_SECS, len));
@@ -130,9 +135,11 @@
       if (o.exportPreset) {
         step(i, "exporting");
         try {
-          const r = await env.exportClip({ preset: o.exportPreset, name: fileName(c.name) });
-          file = (String(r).match(/exports\/[^\s"'),]+/) || [""])[0];
-          notes.push(file ? "exported → " + file : "exported");
+          const r = String(await env.exportClip({ preset: o.exportPreset, name: fileName(c.name) }));
+          file = (r.match(/exports\/[^\s"'),]+/) || [""])[0];
+          // only a finished export counts: one still running (or stopped) is reported as it is
+          if (file && !/ (running|queued|failed|cancelled)\b|check again/i.test(r)) notes.push("exported → " + file);
+          else { file = ""; notes.push("not exported (" + first(r) + ")"); }
         } catch (e) { notes.push("not exported (" + first(e.message) + ")"); }
       }
       made.push({ id, name: c.name, file });

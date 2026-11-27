@@ -100,6 +100,15 @@ test("run: a failed step is reported on its clip, the rest carry on", async () =
   assert.match(reply, /no captions \(no speech found\)/);
   const same = await C.run({ clips: [{ from: 0, to: 10 }], aspect: "16:9", captions: false }, { ...env, reframe: async () => { throw new Error("should not run"); } });
   assert.doesNotMatch(same, /reframe/i, "same shape: nothing to reframe");
+  const slow = await C.run({ clips: [{ from: 0, to: 10 }], aspect: "16:9", captions: false, export: "tiktok" },
+    { ...env, exportClip: async () => "Export x_1 running — 40% (in the user's Studio tab). Check again with fablecut_export {job:\"x_1\"}." });
+  assert.match(slow, /not exported \(Export x_1 running/);
+  assert.doesNotMatch(slow, /exported →/);
+  let tries = 0;
+  const retried = await C.run({ clips: [{ from: 0, to: 10 }], aspect: "9:16", captions: false },
+    { ...env, reframe: async () => { if (++tries === 1) throw new Error("the project changed while looking at the footage"); return "ok"; } });
+  assert.equal(tries, 2);
+  assert.match(retried, /framed on the subject/);
   const later = await C.run({ clips: [{ from: 0, to: 10 }], aspect: "16:9" }, { ...env, captions: async () => "Transcribing 1 file in the user's tab. It carries on there: call fablecut_captions again in a minute." });
   assert.match(later, /captions not added yet/);
   assert.doesNotMatch(later, /pop captions/);

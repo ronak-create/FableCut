@@ -8565,6 +8565,12 @@ function loadFxWorklet(ctx) {
   return p;
 }
 const FX_WORKLET_TYPES = { limiter: "fablecut-limiter", gate: "fablecut-gate", pitch: "fablecut-pitch" };
+/** Does the open sequence's mix use an effect from fx-worklet.js (on a clip, track, bus or the master)? */
+function mixUsesFxWorklet() {
+  const uses = (list) => Array.isArray(list) && list.some((e) => e && e.on !== false && FX_WORKLET_TYPES[e.type]);
+  return uses(project.master?.fx) || (project.tracks || []).some((t) => uses(t.fx)) || (project.buses || []).some((x) => uses(x.fx)) ||
+    mediaClips().some((c) => uses(c.fx));
+}
 function normFx(list) {
   if (!Array.isArray(list) || !list.length) return undefined;
   const out = typeof FableCutFx !== "undefined" ? FableCutFx.normalizeFx(list) : list;
@@ -17954,7 +17960,9 @@ async function renderAudioMix(t0, t1) {
   if (dur <= 0) return null;
   const sr = 48000;
   const off = new OfflineAudioContext(2, Math.ceil(dur * sr) + 1, sr);
-  await loadFxWorklet(off); // gate / limiter render in the export too
+  // gate / limiter / pitch render in the export too — loaded only when the mix uses one: an offline
+  // render started while its worklet module is still loading can hang (seen in Chrome on AV1 files)
+  if (mixUsesFxWorklet()) await loadFxWorklet(off);
   const mix = buildMixBuses(off, audioTrackIds(), busIdsNow());
   applyMixLevels(mix);
   mix.masterOut.connect(off.destination);
@@ -18019,7 +18027,13 @@ async function renderAudioMix(t0, t1) {
       off.suspend(when).then(() => { for (const run of animated) run(t0 + when); off.resume(); });
     }
   }
-  return encodeWAV(await off.startRendering());
+  // a render that never finishes would hold the export at 0% for good: fail it with a reason instead
+  const limit = Math.max(60, dur * 2) * 1000;
+  let timer = null;
+  const rendered = await Promise.race([off.startRendering(),
+    new Promise((_, rej) => { timer = setTimeout(() => rej(new Error("the audio mix didn't finish (the browser's audio renderer stalled) — try the export again")), limit); })])
+    .finally(() => clearTimeout(timer));
+  return encodeWAV(rendered);
 }
 /* Frame-exact asset prep for the fast exporter: rasterize the SVG frame for
    this exact time, and refresh AI person masks synchronously. */
