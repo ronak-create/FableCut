@@ -55,13 +55,13 @@ The home page shows **Connect your agent** until one connects; it is also under 
 - **claude.ai:** Settings, Connectors, **Add custom connector**, then paste the link.
 - **Cursor:** **Add to Cursor** adds it in one click, or paste the copied setup into `~/.cursor/mcp.json`.
 - **opencode:** paste the copied setup into `opencode.json`.
-- **ChatGPT:** add a custom connector (a remote MCP server) with the same link.
+- **ChatGPT:** Settings, **Apps & Connectors**, **Advanced**, turn on **Developer mode**, then **Create** a connector with the link and **No authentication**.
 - **Gemini CLI, Codex, VS Code and Windsurf:** follow the steps for each on the Agent page.
-- **Other:** any other MCP client; add the same link as a remote MCP server.
+- **Other:** any client with remote (Streamable HTTP) MCP servers; add the same link, with no key or login.
 
 Once an agent connects, Studio suggests a few things to ask it (make a reel, give it a look, tighten it, export it); **Copy** puts one on your clipboard to paste into the agent's chat.
 
-The agent's tools run in your Studio tab, so keep it open while the agent works. Its edit commands, and any frames it asks to see, pass through Studio's relay (see below). If the agent calls while no project is open, Studio asks you to open one and the call carries on once you do. Every edit shows up live in the editor, and the Agent panel lists each call.
+The agent's tools run in your Studio tab, so keep it open while the agent works. Its edit commands, and any frames or transcripts it asks for, pass through Studio's relay (see below). If the agent calls while no project is open, Studio asks you to open one and the call carries on once you do. Every edit shows up live in the editor, and the Agent panel lists each call.
 
 The link stays the same for every project in that browser. Anyone who has it can edit the project you have open, so keep it private. **New link** replaces it and cuts off every agent holding the old one; **Pause agent** stops calls until you resume.
 
