@@ -4,6 +4,8 @@
 2. Click **New project** and pick where to save it, or **Open a folder** that already has your footage.
 3. When the browser asks to let Studio read and save in that folder, choose **Allow on every visit**.
 
+On your first visit, a welcome window offers **Connect your agent**, which opens the Agent page, or **Just look around** (Esc also closes it). It shows once per browser.
+
 Studio opens the folder in the editor. Clips are read from the folder where they are, and the files are never uploaded. Your edits are saved to `project.json` in the same folder. Projects you have opened before are listed on the home page; opening one again only asks for the browser's permission.
 
 To try Studio without your own footage, click **Open the demo** on the home page: six skate clips, a music track and a first cut, kept in the browser's own storage (no folder to pick, nothing saved to your disk). It opens as you left it next time; exports from it download. Removing its card removes it, and the button brings a fresh copy back.
@@ -47,13 +49,15 @@ The Map reads each project's `project.json`, `history/` and `exports/` from its 
 
 ### Connect an agent
 
-The home page shows **Connect your agent** until one connects; it is also under **Agent** in Studio's sidebar and behind the **Agent** button in the editor. Pick your agent and **Copy setup** copies everything it needs, with your connection link in it:
+The home page shows **Connect your agent** until one connects; it is also under **Agent** in Studio's sidebar and behind the **Agent** button in the editor. The Agent page gives numbered steps for each agent. Pick yours; **Copy setup** copies everything it needs, with your connection link in it. The last step turns green when the agent connects (ask it "Check FableCut status"), and a **Not connecting?** list sits under it.
 
 - **Claude Code:** `claude mcp add --transport http fablecut-studio <your link>`
 - **claude.ai:** Settings, Connectors, **Add custom connector**, then paste the link.
 - **Cursor:** **Add to Cursor** adds it in one click, or paste the copied setup into `~/.cursor/mcp.json`.
 - **opencode:** paste the copied setup into `opencode.json`.
-- **ChatGPT and other MCP clients:** add a custom connector (a remote MCP server) with the same link.
+- **ChatGPT:** add a custom connector (a remote MCP server) with the same link.
+- **Gemini CLI, Codex, VS Code and Windsurf:** follow the steps for each on the Agent page.
+- **Other:** any other MCP client; add the same link as a remote MCP server.
 
 Once an agent connects, Studio suggests a few things to ask it (make a reel, give it a look, tighten it, export it); **Copy** puts one on your clipboard to paste into the agent's chat.
 
@@ -63,7 +67,9 @@ The link stays the same for every project in that browser. Anyone who has it can
 
 ### What passes through the server
 
-The connection link points at a small relay on studio.fablecut.space. It forwards the agent's tool calls to your tab and the results back to the agent and doesn't store either. Your clip files never go through it. What does: the edit commands, the project text the agent reads, and the frames or scope readings the agent asks for with `fablecut_frame` and `fablecut_scopes`.
+The connection link points at a small relay on studio.fablecut.space. It forwards the agent's tool calls to your tab and the results back to the agent. Your clip files never go through it. What does: the edit commands, the project text and transcripts the agent reads, and the frames or scope readings the agent asks for with `fablecut_frame` and `fablecut_scopes`. What the agent reads (project text, frames, transcripts) goes to your own AI provider, under that provider's terms.
+
+If the connection drops before an answer can be sent, the relay keeps up to 10 answers, each cut to 600 characters, and deletes them on the agent's next call or after 30 minutes, whichever comes first. Answers to read-only calls (status, get_project, docs, frame, scopes, encode_profiles) are never kept, so frames are never stored. Transcribe and captions answers can be kept, so transcript text can be held for up to 30 minutes.
 
 For usage numbers, the relay logs each call: which tool, whether it worked, how long it took and, when it failed, what kind of error it was (a fixed category such as "file not found" or "invalid arguments", never the message), plus your country and a one-way hash of your IP address. The page also reports a few things you do in it, by name only: a project opened (a folder, browser storage or the demo), media imported, an export finished, an agent setup or a starter prompt copied, and, once per browser session, where the visit came from: a channel such as reddit, taken from a `?ref=` tag on the link or, without one, from the site that linked to Studio. It never logs the arguments, results, file or project names, or frames.
 
